@@ -8,14 +8,22 @@ interface Props {
   source: string;
   filePath: string | null;
   theme: "light" | "dark";
+  /** Editor's current top line — preview will scroll to match. */
   scrollLine?: number;
+  /** Called when user scrolls preview; reports the source line at the top. */
+  onScroll?: (line: number) => void;
 }
 
-export default function Preview({ source, filePath, theme, scrollLine }: Props) {
+export default function Preview({ source, filePath, theme, scrollLine, onScroll }: Props) {
   const [html, setHtml] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
   const isMd = isMarkdown(filePath);
   const { previewMaximized, togglePreviewMaximized } = useEditorStore();
+  // Suppress outgoing scroll events for this many ms after a programmatic scroll
+  // (set when applying incoming scrollLine from editor).
+  const suppressOutgoingUntil = useRef(0);
+  const onScrollRef = useRef(onScroll);
+  onScrollRef.current = onScroll;
 
   useEffect(() => {
     let cancelled = false;
@@ -31,6 +39,7 @@ export default function Preview({ source, filePath, theme, scrollLine }: Props) 
     };
   }, [source, filePath, theme, isMd]);
 
+  // Apply incoming scrollLine from editor (programmatic scroll).
   useEffect(() => {
     if (scrollLine == null) return;
     const root = containerRef.current;
@@ -43,9 +52,41 @@ export default function Preview({ source, filePath, theme, scrollLine }: Props) 
       if (ln <= scrollLine) target = el;
       else break;
     }
-    const top = target.offsetTop - 16;
+    const top = Math.max(0, target.offsetTop - 16);
+    suppressOutgoingUntil.current = Date.now() + 200;
     root.scrollTo({ top, behavior: "auto" });
   }, [scrollLine, html]);
+
+  // Outgoing: report which source line is at the top when user scrolls preview.
+  useEffect(() => {
+    const root = containerRef.current;
+    if (!root) return;
+    let rafId = 0;
+    const handler = () => {
+      if (Date.now() < suppressOutgoingUntil.current) return;
+      if (!onScrollRef.current) return;
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        const all = root.querySelectorAll<HTMLElement>("[data-line]");
+        if (all.length === 0) return;
+        const top = root.scrollTop;
+        let chosen: HTMLElement | null = null;
+        for (const el of all) {
+          if (el.offsetTop > top + 1) break;
+          chosen = el;
+        }
+        if (!chosen) chosen = all[0];
+        const line = Number(chosen.dataset.line);
+        if (Number.isFinite(line) && line > 0) onScrollRef.current?.(line);
+      });
+    };
+    root.addEventListener("scroll", handler, { passive: true });
+    return () => {
+      root.removeEventListener("scroll", handler);
+      if (rafId) cancelAnimationFrame(rafId);
+    };
+  }, []);
 
   return (
     <div className="flex flex-col h-full">

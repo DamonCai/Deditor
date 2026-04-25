@@ -22,17 +22,30 @@ interface Props {
   filePath: string | null;
   theme: "light" | "dark";
   fontSize: number;
+  /** External scroll line (driven by preview); will scroll editor to that line. */
+  externalScrollLine?: number;
   onChange: (value: string) => void;
   onScroll?: (firstVisibleLine: number) => void;
 }
 
-export default function Editor({ value, filePath, theme, fontSize, onChange, onScroll }: Props) {
+export default function Editor({
+  value,
+  filePath,
+  theme,
+  fontSize,
+  externalScrollLine,
+  onChange,
+  onScroll,
+}: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const themeCompartment = useRef(new Compartment());
   const langCompartment = useRef(new Compartment());
   const onChangeRef = useRef(onChange);
   const onScrollRef = useRef(onScroll);
+  // Suppress outgoing scroll events for this many ms after a programmatic scroll,
+  // to prevent the editor⇄preview sync from echoing back and forth.
+  const suppressOutgoingUntil = useRef(0);
   onChangeRef.current = onChange;
   onScrollRef.current = onScroll;
 
@@ -53,12 +66,6 @@ export default function Editor({ value, filePath, theme, fontSize, onChange, onS
         EditorView.lineWrapping,
         EditorView.updateListener.of((u) => {
           if (u.docChanged) onChangeRef.current(u.state.doc.toString());
-          if (u.geometryChanged || u.viewportChanged) {
-            const top = u.view.scrollDOM.scrollTop;
-            const blockInfo = u.view.lineBlockAtHeight(top);
-            const line = u.view.state.doc.lineAt(blockInfo.from).number;
-            onScrollRef.current?.(line);
-          }
         }),
         themeCompartment.current.of(theme === "dark" ? oneDark : []),
         langCompartment.current.of([]),
@@ -84,13 +91,53 @@ export default function Editor({ value, filePath, theme, fontSize, onChange, onS
     const view = new EditorView({ state, parent: hostRef.current });
     viewRef.current = view;
     setActiveView(view);
+
+    // Direct scroll-event listener for smooth, every-frame outgoing sync.
+    let scrollRafId = 0;
+    const onScrollEvt = () => {
+      if (Date.now() < suppressOutgoingUntil.current) return;
+      if (!onScrollRef.current) return;
+      if (scrollRafId) return;
+      scrollRafId = requestAnimationFrame(() => {
+        scrollRafId = 0;
+        const top = view.scrollDOM.scrollTop;
+        try {
+          const block = view.lineBlockAtHeight(top);
+          const line = view.state.doc.lineAt(block.from).number;
+          onScrollRef.current?.(line);
+        } catch {
+          /* during destroy / odd states; ignore */
+        }
+      });
+    };
+    view.scrollDOM.addEventListener("scroll", onScrollEvt, { passive: true });
+
     return () => {
+      view.scrollDOM.removeEventListener("scroll", onScrollEvt);
+      if (scrollRafId) cancelAnimationFrame(scrollRafId);
       view.destroy();
       viewRef.current = null;
       setActiveView(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Apply external scroll requests (e.g. from preview).
+  useEffect(() => {
+    if (externalScrollLine == null) return;
+    const view = viewRef.current;
+    if (!view) return;
+    const total = view.state.doc.lines;
+    const lineNum = Math.min(Math.max(1, Math.round(externalScrollLine)), total);
+    try {
+      const line = view.state.doc.line(lineNum);
+      const block = view.lineBlockAt(line.from);
+      suppressOutgoingUntil.current = Date.now() + 200;
+      view.scrollDOM.scrollTop = block.top;
+    } catch {
+      /* doc shorter than expected */
+    }
+  }, [externalScrollLine]);
 
   useEffect(() => {
     const view = viewRef.current;

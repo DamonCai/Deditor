@@ -34,7 +34,11 @@ export default function App() {
 
   const [sidebarPx, setSidebarPx] = useState(240);
   const [previewPct, setPreviewPct] = useState(50);
-  const [scrollLine, setScrollLine] = useState<number | undefined>();
+  // Editor↔Preview scroll sync. We track the latest line + which side originated
+  // the scroll so each side only reacts to scrolls coming from the OTHER side.
+  const [scrollSync, setScrollSync] = useState<
+    { line: number; from: "editor" | "preview" } | null
+  >(null);
   const [hydrated, setHydrated] = useState(false);
   const dragRef = useRef<DragKind>(null);
   const uiRef = useRef({ sidebarPx, previewPct });
@@ -221,7 +225,10 @@ export default function App() {
                   source={content}
                   filePath={filePath}
                   theme={theme}
-                  scrollLine={scrollLine}
+                  scrollLine={
+                    scrollSync?.from === "editor" ? scrollSync.line : undefined
+                  }
+                  onScroll={(line) => setScrollSync({ line, from: "preview" })}
                 />
               </div>
             ) : (
@@ -238,8 +245,11 @@ export default function App() {
                       filePath={filePath}
                       theme={theme}
                       fontSize={editorFontSize}
+                      externalScrollLine={
+                        scrollSync?.from === "preview" ? scrollSync.line : undefined
+                      }
                       onChange={setContent}
-                      onScroll={setScrollLine}
+                      onScroll={(line) => setScrollSync({ line, from: "editor" })}
                     />
                   </div>
                 </div>
@@ -260,7 +270,12 @@ export default function App() {
                         source={content}
                         filePath={filePath}
                         theme={theme}
-                        scrollLine={scrollLine}
+                        scrollLine={
+                          scrollSync?.from === "editor" ? scrollSync.line : undefined
+                        }
+                        onScroll={(line) =>
+                          setScrollSync({ line, from: "preview" })
+                        }
                       />
                     </div>
                   </>
