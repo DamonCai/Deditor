@@ -1,0 +1,267 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #ffffff;
+  --bg-soft: #f6f7f9;
+  --bg-mute: #eceef1;
+  --border: #e3e5e8;
+  --text: #1f2328;
+  --text-soft: #57606a;
+  --accent: #2563eb;
+}
+
+.dark {
+  --bg: #0d1117;
+  --bg-soft: #161b22;
+  --bg-mute: #21262d;
+  --border: #30363d;
+  --text: #e6edf3;
+  --text-soft: #8b949e;
+  --accent: #58a6ff;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* CodeMirror fills its container */
+.cm-editor {
+  height: 100%;
+}
+.cm-scroller {
+  font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  font-size: var(--editor-font-size, 14px);
+  line-height: 1.6;
+}
+
+/* Preview typography */
+.preview {
+  padding: 24px 32px;
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--text);
+  overflow-y: auto;
+  height: 100%;
+  box-sizing: border-box;
+}
+.preview h1,
+.preview h2,
+.preview h3,
+.preview h4 {
+  font-weight: 600;
+  margin: 1.4em 0 0.6em;
+  line-height: 1.3;
+}
+.preview h1 {
+  font-size: 1.9em;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.3em;
+}
+.preview h2 {
+  font-size: 1.5em;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.3em;
+}
+.preview h3 {
+  font-size: 1.25em;
+}
+.preview p {
+  margin: 0.8em 0;
+}
+.preview a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.preview a:hover {
+  text-decoration: underline;
+}
+.preview code {
+  background: var(--bg-mute);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
+}
+.preview pre {
+  margin: 1em 0;
+  padding: 0;
+  border-radius: 8px;
+  overflow: auto;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+}
+.preview pre code {
+  background: transparent;
+  padding: 16px;
+  display: block;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.preview pre.shiki {
+  padding: 16px;
+}
+.preview pre.shiki code {
+  padding: 0;
+}
+.preview blockquote {
+  margin: 1em 0;
+  padding: 0.4em 1em;
+  color: var(--text-soft);
+  border-left: 4px solid var(--border);
+  background: var(--bg-soft);
+}
+.preview ul,
+.preview ol {
+  padding-left: 1.6em;
+  margin: 0.6em 0;
+}
+.preview li {
+  margin: 0.25em 0;
+}
+.preview table {
+  border-collapse: collapse;
+  margin: 1em 0;
+}
+.preview th,
+.preview td {
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+}
+.preview th {
+  background: var(--bg-soft);
+}
+.preview hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1.6em 0;
+}
+.preview img {
+  max-width: 100%;
+}
+
+/* PlantUML diagram */
+.preview .plantuml-diagram {
+  display: flex;
+  justify-content: center;
+  margin: 1.2em 0;
+  padding: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-x: auto;
+}
+.preview .plantuml-diagram img {
+  max-width: 100%;
+  height: auto;
+}
+.preview .plantuml-diagram.error {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.05);
+  border-color: rgba(239, 68, 68, 0.3);
+  font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
+  font-size: 13px;
+}
+
+/* Splitter */
+.splitter {
+  width: 4px;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+.splitter:hover,
+.splitter.dragging {
+  background: var(--accent);
+}
+
+/* TabBar scroll strip — hide scrollbar but keep scrollable */
+.tab-strip::-webkit-scrollbar {
+  display: none;
+}
+
+/* CodeMirror search panel */
+.cm-panels {
+  background: var(--bg-soft) !important;
+  color: var(--text) !important;
+  border-top: 1px solid var(--border) !important;
+}
+.cm-panels.cm-panels-bottom {
+  border-top: 1px solid var(--border) !important;
+  border-bottom: none !important;
+}
+.cm-search {
+  display: flex !important;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px !important;
+}
+.cm-search label {
+  font-size: 12px;
+  color: var(--text-soft);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.cm-textfield {
+  background: var(--bg) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 4px !important;
+  padding: 4px 8px !important;
+  font-size: 12px !important;
+  outline: none;
+}
+.cm-textfield:focus {
+  border-color: var(--accent) !important;
+}
+.cm-button {
+  background: var(--bg) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 4px !important;
+  padding: 3px 10px !important;
+  font-size: 12px !important;
+  cursor: pointer;
+  background-image: none !important;
+}
+.cm-button:hover {
+  background: var(--bg-mute) !important;
+}
+
+/* Print-only injected area (hidden in normal layout). */
+#deditor-print-area {
+  display: none;
+}
+
+@media print {
+  /* Hide entire app chrome */
+  body > *:not(#deditor-print-area) {
+    display: none !important;
+  }
+  /* Show only the print area */
+  #deditor-print-area {
+    display: block !important;
+    position: static !important;
+    background: #ffffff !important;
+    color: #1f2328 !important;
+    width: auto !important;
+    height: auto !important;
+  }
+  /* Ensure dark-mode CSS vars don't bleed into print */
+  html,
+  html.dark {
+    background: #ffffff !important;
+    color: #1f2328 !important;
+  }
+}

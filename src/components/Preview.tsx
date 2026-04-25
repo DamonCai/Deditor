@@ -1,0 +1,95 @@
+import { useEffect, useRef, useState } from "react";
+import { FiMaximize2, FiMinimize2 } from "react-icons/fi";
+import { renderMarkdown, renderCode } from "../lib/markdown";
+import { isMarkdown } from "../lib/lang";
+import { useEditorStore } from "../store/editor";
+
+interface Props {
+  source: string;
+  filePath: string | null;
+  theme: "light" | "dark";
+  scrollLine?: number;
+}
+
+export default function Preview({ source, filePath, theme, scrollLine }: Props) {
+  const [html, setHtml] = useState("");
+  const containerRef = useRef<HTMLDivElement>(null);
+  const isMd = isMarkdown(filePath);
+  const { previewMaximized, togglePreviewMaximized } = useEditorStore();
+
+  useEffect(() => {
+    let cancelled = false;
+    const id = setTimeout(async () => {
+      const out = isMd
+        ? await renderMarkdown(source, { theme })
+        : await renderCode(source, filePath, { theme });
+      if (!cancelled) setHtml(out);
+    }, 80);
+    return () => {
+      cancelled = true;
+      clearTimeout(id);
+    };
+  }, [source, filePath, theme, isMd]);
+
+  useEffect(() => {
+    if (scrollLine == null) return;
+    const root = containerRef.current;
+    if (!root) return;
+    const all = Array.from(root.querySelectorAll<HTMLElement>("[data-line]"));
+    if (all.length === 0) return;
+    let target = all[0];
+    for (const el of all) {
+      const ln = Number(el.dataset.line);
+      if (ln <= scrollLine) target = el;
+      else break;
+    }
+    const top = target.offsetTop - 16;
+    root.scrollTo({ top, behavior: "auto" });
+  }, [scrollLine, html]);
+
+  return (
+    <div className="flex flex-col h-full">
+      {isMd && (
+        <div
+          className="flex items-center justify-end px-2 select-none"
+          style={{
+            height: 32,
+            background: "var(--bg-soft)",
+            borderBottom: "1px solid var(--border)",
+            flexShrink: 0,
+          }}
+        >
+          <button
+            onClick={togglePreviewMaximized}
+            title={previewMaximized ? "还原（恢复编辑器）" : "放大预览（隐藏编辑器）"}
+            style={{
+              height: 24,
+              padding: "0 5px",
+              display: "inline-flex",
+              alignItems: "center",
+              borderRadius: 4,
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              color: previewMaximized ? "var(--accent)" : "var(--text)",
+            }}
+            onMouseEnter={(e) =>
+              (e.currentTarget.style.background = "var(--bg-mute)")
+            }
+            onMouseLeave={(e) =>
+              (e.currentTarget.style.background = "transparent")
+            }
+          >
+            {previewMaximized ? <FiMinimize2 size={13} /> : <FiMaximize2 size={13} />}
+          </button>
+        </div>
+      )}
+      <div
+        ref={containerRef}
+        className="preview"
+        style={{ flex: 1 }}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    </div>
+  );
+}

@@ -1,0 +1,145 @@
+# =============================================================================
+# DEditor .gitignore
+# =============================================================================
+
+# -- Dependencies -------------------------------------------------------------
+node_modules/
+.pnp/
+.pnp.js
+.pnp.cjs
+.yarn/cache
+.yarn/install-state.gz
+.yarn/build-state.yml
+.yarn/unplugged
+.pnpm-store/
+
+# -- Build outputs ------------------------------------------------------------
+dist/
+dist-ssr/
+build/
+out/
+*.tsbuildinfo
+dist-tsbuildinfo/
+
+# Vite cache
+.vite/
+.vite-cache/
+
+# -- Rust / Cargo / Tauri -----------------------------------------------------
+src-tauri/target/
+src-tauri/gen/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Don't commit Tauri capability schema (auto-generated)
+src-tauri/gen/schemas/
+
+# -- Distribution bundles (do NOT commit binaries) ----------------------------
+scripts/*.dmg
+scripts/*.app
+scripts/*.msi
+scripts/*.exe
+scripts/*.pkg
+scripts/*.AppImage
+scripts/*.deb
+scripts/*.rpm
+release/
+releases/
+
+# -- Logs ---------------------------------------------------------------------
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# -- Environment / secrets ----------------------------------------------------
+.env
+.env.local
+.env.*.local
+.env.development.local
+.env.production.local
+*.pem
+*.key
+*.crt
+
+# -- Coverage / test ----------------------------------------------------------
+coverage/
+.nyc_output/
+*.lcov
+.jest-cache/
+.vitest-cache/
+
+# -- Caches -------------------------------------------------------------------
+.cache/
+.turbo/
+.parcel-cache/
+.eslintcache
+.stylelintcache
+.npm/
+
+# -- Editors / IDEs -----------------------------------------------------------
+# VSCode (allow shared extension recommendations)
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+!.vscode/launch.json.example
+
+# JetBrains / IntelliJ
+.idea/
+*.iml
+*.iws
+
+# Vim
+*.swp
+*.swo
+*.swn
+*~
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# Sublime
+*.sublime-workspace
+*.sublime-project
+
+# Zed
+.zed/
+
+# -- macOS --------------------------------------------------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+.DocumentRevisions-V100
+.TemporaryItems
+
+# -- Windows ------------------------------------------------------------------
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.lnk
+
+# -- Linux --------------------------------------------------------------------
+*~
+.directory
+.Trash-*
+
+# -- Misc ---------------------------------------------------------------------
+*.local
+*.tmp
+*.temp
+*.bak
+*.orig
+.history/

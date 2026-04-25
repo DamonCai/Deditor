@@ -1,0 +1,194 @@
+import { LanguageSupport, StreamLanguage } from "@codemirror/language";
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { languages as codeLangs } from "@codemirror/language-data";
+// Static imports of legacy stream-mode parsers so Vite bundles them.
+// (Dynamic template-literal imports with @vite-ignore would fail in the browser
+//  because bare specifiers can't be resolved at runtime.)
+import { shell } from "@codemirror/legacy-modes/mode/shell";
+import { toml } from "@codemirror/legacy-modes/mode/toml";
+import { ruby } from "@codemirror/legacy-modes/mode/ruby";
+import { swift } from "@codemirror/legacy-modes/mode/swift";
+import { lua } from "@codemirror/legacy-modes/mode/lua";
+import { dockerFile } from "@codemirror/legacy-modes/mode/dockerfile";
+import { powerShell } from "@codemirror/legacy-modes/mode/powershell";
+import type { IconType } from "react-icons";
+import {
+  SiPython,
+  SiJavascript,
+  SiTypescript,
+  SiReact,
+  SiRust,
+  SiGo,
+  SiOpenjdk,
+  SiKotlin,
+  SiScala,
+  SiC,
+  SiCplusplus,
+  SiSharp,
+  SiHtml5,
+  SiCss,
+  SiSass,
+  SiVuedotjs,
+  SiSvelte,
+  SiJson,
+  SiYaml,
+  SiToml,
+  SiMarkdown,
+  SiPhp,
+  SiRuby,
+  SiSwift,
+  SiLua,
+  SiPerl,
+  SiGnubash,
+  SiDocker,
+  SiSqlite,
+} from "react-icons/si";
+
+export interface LangIcon {
+  short: string;          // letter-badge fallback
+  color: string;          // brand color
+  Logo?: IconType;        // brand SVG (preferred when set)
+}
+
+export interface LangDef {
+  label: string;
+  shiki: string;
+  cm: () => Promise<LanguageSupport>;
+  icon: LangIcon;
+}
+
+const lazyJS = (jsx?: boolean, ts?: boolean) => async () =>
+  (await import("@codemirror/lang-javascript")).javascript({ jsx, typescript: ts });
+
+type Stream = Parameters<typeof StreamLanguage.define>[0];
+const fromStream = (mode: Stream) => async () =>
+  new LanguageSupport(StreamLanguage.define(mode));
+
+const cmShell = fromStream(shell);
+const cmToml = fromStream(toml);
+const cmRuby = fromStream(ruby);
+const cmSwift = fromStream(swift);
+const cmLua = fromStream(lua);
+const cmDocker = fromStream(dockerFile);
+const cmPowerShell = fromStream(powerShell);
+
+const cmMarkdown = async () =>
+  markdown({ base: markdownLanguage, codeLanguages: codeLangs });
+
+const I = (short: string, color: string, Logo?: IconType): LangIcon => ({ short, color, Logo });
+
+const ext: Record<string, LangDef> = {
+  // Markdown
+  md:       { label: "Markdown", shiki: "markdown", cm: cmMarkdown, icon: I("MD",  "#083fa1", SiMarkdown) },
+  markdown: { label: "Markdown", shiki: "markdown", cm: cmMarkdown, icon: I("MD",  "#083fa1", SiMarkdown) },
+  mdx:      { label: "MDX",      shiki: "mdx",      cm: cmMarkdown, icon: I("MDX", "#1a8cff", SiMarkdown) },
+
+  // JS / TS
+  js:  { label: "JavaScript", shiki: "javascript", cm: lazyJS(),            icon: I("JS",  "#f1e05a", SiJavascript) },
+  mjs: { label: "JavaScript", shiki: "javascript", cm: lazyJS(),            icon: I("JS",  "#f1e05a", SiJavascript) },
+  cjs: { label: "JavaScript", shiki: "javascript", cm: lazyJS(),            icon: I("JS",  "#f1e05a", SiJavascript) },
+  jsx: { label: "JSX",        shiki: "jsx",        cm: lazyJS(true),        icon: I("JSX", "#61dafb", SiReact) },
+  ts:  { label: "TypeScript", shiki: "typescript", cm: lazyJS(false, true), icon: I("TS",  "#3178c6", SiTypescript) },
+  tsx: { label: "TSX",        shiki: "tsx",        cm: lazyJS(true,  true), icon: I("TSX", "#61dafb", SiReact) },
+
+  // Python
+  py:  { label: "Python", shiki: "python", cm: async () => (await import("@codemirror/lang-python")).python(), icon: I("PY", "#3776AB", SiPython) },
+  pyi: { label: "Python", shiki: "python", cm: async () => (await import("@codemirror/lang-python")).python(), icon: I("PY", "#3776AB", SiPython) },
+
+  // Rust / Go
+  rs: { label: "Rust", shiki: "rust", cm: async () => (await import("@codemirror/lang-rust")).rust(), icon: I("RS", "#dea584", SiRust) },
+  go: { label: "Go",   shiki: "go",   cm: async () => (await import("@codemirror/lang-go")).go(),     icon: I("GO", "#00ADD8", SiGo) },
+
+  // JVM
+  java: { label: "Java",   shiki: "java",   cm: async () => (await import("@codemirror/lang-java")).java(), icon: I("JV", "#ED8B00", SiOpenjdk) },
+  kt:   { label: "Kotlin", shiki: "kotlin", cm: async () => (await import("@codemirror/lang-java")).java(), icon: I("KT", "#A97BFF", SiKotlin) },
+  kts:  { label: "Kotlin", shiki: "kotlin", cm: async () => (await import("@codemirror/lang-java")).java(), icon: I("KT", "#A97BFF", SiKotlin) },
+  scala:{ label: "Scala",  shiki: "scala",  cm: async () => (await import("@codemirror/lang-java")).java(), icon: I("SC", "#c22d40", SiScala) },
+
+  // C family
+  c:   { label: "C",   shiki: "c",       cm: async () => (await import("@codemirror/lang-cpp")).cpp(), icon: I("C",   "#A8B9CC", SiC) },
+  h:   { label: "C",   shiki: "c",       cm: async () => (await import("@codemirror/lang-cpp")).cpp(), icon: I("H",   "#A8B9CC", SiC) },
+  cpp: { label: "C++", shiki: "cpp",     cm: async () => (await import("@codemirror/lang-cpp")).cpp(), icon: I("C++", "#00599C", SiCplusplus) },
+  cxx: { label: "C++", shiki: "cpp",     cm: async () => (await import("@codemirror/lang-cpp")).cpp(), icon: I("C++", "#00599C", SiCplusplus) },
+  cc:  { label: "C++", shiki: "cpp",     cm: async () => (await import("@codemirror/lang-cpp")).cpp(), icon: I("C++", "#00599C", SiCplusplus) },
+  hpp: { label: "C++", shiki: "cpp",     cm: async () => (await import("@codemirror/lang-cpp")).cpp(), icon: I("HPP", "#00599C", SiCplusplus) },
+  cs:  { label: "C#",  shiki: "csharp",  cm: async () => (await import("@codemirror/lang-cpp")).cpp(), icon: I("C#",  "#239120", SiSharp) },
+
+  // Web
+  html:   { label: "HTML",   shiki: "html",   cm: async () => (await import("@codemirror/lang-html")).html(), icon: I("HTM",  "#e34c26", SiHtml5) },
+  htm:    { label: "HTML",   shiki: "html",   cm: async () => (await import("@codemirror/lang-html")).html(), icon: I("HTM",  "#e34c26", SiHtml5) },
+  css:    { label: "CSS",    shiki: "css",    cm: async () => (await import("@codemirror/lang-css")).css(),   icon: I("CSS",  "#1572B6", SiCss) },
+  scss:   { label: "SCSS",   shiki: "scss",   cm: async () => (await import("@codemirror/lang-css")).css(),   icon: I("SCS",  "#cf649a", SiSass) },
+  sass:   { label: "Sass",   shiki: "sass",   cm: async () => (await import("@codemirror/lang-css")).css(),   icon: I("SAS",  "#cf649a", SiSass) },
+  less:   { label: "Less",   shiki: "less",   cm: async () => (await import("@codemirror/lang-css")).css(),   icon: I("LES",  "#1d365d", SiCss) },
+  vue:    { label: "Vue",    shiki: "vue",    cm: async () => (await import("@codemirror/lang-html")).html(), icon: I("VUE",  "#41b883", SiVuedotjs) },
+  svelte: { label: "Svelte", shiki: "svelte", cm: async () => (await import("@codemirror/lang-html")).html(), icon: I("SVL",  "#ff3e00", SiSvelte) },
+
+  // Data / Config
+  json:  { label: "JSON",  shiki: "json",  cm: async () => (await import("@codemirror/lang-json")).json(), icon: I("{}", "#cbcb41", SiJson) },
+  jsonc: { label: "JSONC", shiki: "jsonc", cm: async () => (await import("@codemirror/lang-json")).json(), icon: I("{}", "#cbcb41", SiJson) },
+  yaml:  { label: "YAML",  shiki: "yaml",  cm: async () => (await import("@codemirror/lang-yaml")).yaml(), icon: I("YML", "#cb171e", SiYaml) },
+  yml:   { label: "YAML",  shiki: "yaml",  cm: async () => (await import("@codemirror/lang-yaml")).yaml(), icon: I("YML", "#cb171e", SiYaml) },
+  toml:  { label: "TOML",  shiki: "toml",  cm: cmToml,                                  icon: I("TOM", "#9c4221", SiToml) },
+  xml:   { label: "XML",   shiki: "xml",   cm: async () => (await import("@codemirror/lang-xml")).xml(),    icon: I("XML", "#0060ac") },
+  ini:   { label: "INI",   shiki: "ini",   cm: cmToml,                                  icon: I("INI", "#6b6b6b") },
+  env:   { label: "Env",   shiki: "shellscript", cm: cmShell,                          icon: I("ENV", "#509941") },
+
+  // SQL / PHP / Ruby
+  sql: { label: "SQL", shiki: "sql", cm: async () => (await import("@codemirror/lang-sql")).sql(), icon: I("SQL", "#003B57", SiSqlite) },
+  php: { label: "PHP", shiki: "php", cm: async () => (await import("@codemirror/lang-php")).php(), icon: I("PHP", "#777BB4", SiPhp) },
+  rb:  { label: "Ruby", shiki: "ruby", cm: cmRuby,                              icon: I("RB",  "#CC342D", SiRuby) },
+
+  // Swift / Lua / Perl
+  swift: { label: "Swift", shiki: "swift", cm: cmSwift, icon: I("SW",  "#FA7343", SiSwift) },
+  lua:   { label: "Lua",   shiki: "lua",   cm: cmLua,     icon: I("LUA", "#000080", SiLua) },
+  pl:    { label: "Perl",  shiki: "perl",  cm: cmShell, icon: I("PL",  "#39457E", SiPerl) },
+
+  // Shell
+  sh:    { label: "Shell",      shiki: "bash",       cm: cmShell,         icon: I("SH",  "#4EAA25", SiGnubash) },
+  bash:  { label: "Bash",       shiki: "bash",       cm: cmShell,         icon: I("SH",  "#4EAA25", SiGnubash) },
+  zsh:   { label: "Zsh",        shiki: "bash",       cm: cmShell,         icon: I("ZSH", "#4EAA25", SiGnubash) },
+  fish:  { label: "Fish",       shiki: "fish",       cm: cmShell,         icon: I("FSH", "#4aae47", SiGnubash) },
+  ps1:   { label: "PowerShell", shiki: "powershell", cm: cmPowerShell, icon: I("PS",  "#012456") },
+
+  // Misc
+  txt:   { label: "Text",  shiki: "text", cm: cmShell, icon: I("TXT", "#888888") },
+  log:   { label: "Log",   shiki: "log",  cm: cmShell, icon: I("LOG", "#888888") },
+  csv:   { label: "CSV",   shiki: "csv",  cm: cmShell, icon: I("CSV", "#237346") },
+  diff:  { label: "Diff",  shiki: "diff", cm: cmShell, icon: I("DIF", "#0a8c0a") },
+  patch: { label: "Patch", shiki: "diff", cm: cmShell, icon: I("PAT", "#0a8c0a") },
+};
+
+const FILENAME_MAP: Record<string, LangDef> = {
+  Dockerfile:      { label: "Dockerfile", shiki: "docker", cm: cmDocker, icon: I("DKR", "#0db7ed", SiDocker) },
+  Makefile:        { label: "Makefile",   shiki: "makefile", cm: cmShell,         icon: I("MK",  "#427819") },
+  ".gitignore":    { label: "Text",       shiki: "text",     cm: cmShell,         icon: I("GIT", "#f05133") },
+  ".dockerignore": { label: "Text",       shiki: "text",     cm: cmShell,         icon: I("DKR", "#0db7ed", SiDocker) },
+  ".editorconfig": { label: "Text",       shiki: "text",     cm: cmShell,         icon: I("CFG", "#888888") },
+  ".env":          { label: "Env",        shiki: "shellscript", cm: cmShell,      icon: I("ENV", "#509941") },
+};
+
+const FALLBACK: LangDef = {
+  label: "Text",
+  shiki: "text",
+  cm: cmShell,
+  icon: I("·", "#9aa0a6"),
+};
+
+export const SUPPORTED_EXTS = Object.keys(ext);
+
+export function detectLang(filePath: string | null): LangDef {
+  if (!filePath) return ext.md;
+  const base = filePath.split(/[\\/]/).pop() || "";
+  if (FILENAME_MAP[base]) return FILENAME_MAP[base];
+  const dot = base.lastIndexOf(".");
+  if (dot < 0) return FALLBACK;
+  const e = base.slice(dot + 1).toLowerCase();
+  return ext[e] ?? { ...FALLBACK, icon: I(e.slice(0, 3).toUpperCase() || "·", FALLBACK.icon.color) };
+}
+
+export function isMarkdown(filePath: string | null): boolean {
+  if (!filePath) return true;
+  const e = filePath.split(".").pop()?.toLowerCase() ?? "";
+  return e === "md" || e === "markdown" || e === "mdx";
+}
