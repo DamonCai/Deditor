@@ -50,6 +50,11 @@ interface EditorState {
   /** Whether the Settings dialog is showing. Lives in the store so the
    *  StatusBar (or anything else) can pop it open without a separate bus. */
   settingsOpen: boolean;
+  /** Whether the Goto Anything palette is showing. Lifted to store so the
+   *  Command Palette can dispatch it as a runnable action. */
+  gotoAnythingOpen: boolean;
+  /** Whether the Command Palette is showing. */
+  commandPaletteOpen: boolean;
   /** Persisted file-tree expansion state, keyed by absolute path.
    *  - `true`  = explicitly expanded
    *  - `false` = explicitly collapsed
@@ -62,6 +67,10 @@ interface EditorState {
    *  the previous hard-coded behavior so nothing visually changes for
    *  existing users. */
   softWrap: boolean;
+  /** Render indent guides (vertical lines per indent level). */
+  showIndentGuides: boolean;
+  /** Show whitespace markers (· for spaces, → for tabs). */
+  showWhitespace: boolean;
 
   setContent: (content: string) => void;
   // Open a new tab (or focus existing one for the same path).
@@ -73,8 +82,12 @@ interface EditorState {
   setShortcuts: (next: Record<string, boolean>) => void;
   resetShortcuts: () => void;
   setSettingsOpen: (open: boolean) => void;
+  setGotoAnythingOpen: (open: boolean) => void;
+  setCommandPaletteOpen: (open: boolean) => void;
   setDirExpanded: (path: string, expanded: boolean) => void;
   setSoftWrap: (on: boolean) => void;
+  setShowIndentGuides: (on: boolean) => void;
+  setShowWhitespace: (on: boolean) => void;
   // Replace active tab's file (used when "Save As" rebinds path).
   rebindActive: (filePath: string, content: string) => void;
   newUntitled: () => string;
@@ -249,8 +262,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   compareMarkPath: null,
   shortcuts: { ...DEFAULT_SHORTCUTS },
   settingsOpen: false,
+  gotoAnythingOpen: false,
+  commandPaletteOpen: false,
   expandedDirs: {},
   softWrap: true,
+  showIndentGuides: true,
+  showWhitespace: false,
 
   setContent: (content) => {
     const { tabs, activeId } = get();
@@ -316,6 +333,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setShortcuts: (next) => set({ shortcuts: { ...next } }),
   resetShortcuts: () => set({ shortcuts: { ...DEFAULT_SHORTCUTS } }),
   setSettingsOpen: (open) => set({ settingsOpen: open }),
+  setGotoAnythingOpen: (open) => set({ gotoAnythingOpen: open }),
+  setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
 
   setDirExpanded: (path, expanded) => {
     const cur = get().expandedDirs;
@@ -323,6 +342,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({ expandedDirs: { ...cur, [path]: expanded } });
   },
   setSoftWrap: (on) => set({ softWrap: on }),
+  setShowIndentGuides: (on) => set({ showIndentGuides: on }),
+  setShowWhitespace: (on) => set({ showWhitespace: on }),
 
   rebindActive: (filePath, content) => {
     const { tabs, activeId } = get();

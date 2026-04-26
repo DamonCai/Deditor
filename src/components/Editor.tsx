@@ -9,9 +9,11 @@ import {
   crosshairCursor,
   drawSelection,
   dropCursor,
+  highlightWhitespace,
 } from "@codemirror/view";
+import { indentationMarkers } from "@replit/codemirror-indentation-markers";
 import type { Command } from "@codemirror/view";
-import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
+import { defaultKeymap, history, historyField, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { searchKeymap, highlightSelectionMatches, selectSelectionMatches, openSearchPanel } from "@codemirror/search";
 import {
   syntaxHighlighting,
@@ -60,6 +62,9 @@ interface Props {
   filePath: string | null;
   theme: "light" | "dark";
   fontSize: number;
+  /** Active tab id. Used to look up / save the per-tab CodeMirror state JSON
+   *  so undo/redo history survives switching to another tab and back. */
+  tabId?: string;
   /** When set, the active tab is a side-by-side file comparison; we short-
    *  circuit and render DiffView, ignoring CodeMirror entirely. */
   diff?: DiffSpec;
@@ -74,11 +79,27 @@ interface Props {
   onPositionChange?: (pos: { cursor: number; scrollTopLine: number }) => void;
 }
 
+/** Per-tab CodeMirror state cache — keyed by the tab id passed in via props.
+ *  Module-scoped so it survives Editor remounts (App.tsx remounts Editor on
+ *  every tab switch via `key={tab.id}`). We serialize the EditorState as
+ *  JSON, including the history field, so undo/redo carries across switches.
+ *
+ *  Lives only for the current process — not persisted to disk. Sublime is
+ *  the same: undo doesn't survive app restart. */
+const editorStateCache = new Map<string, unknown>();
+
+/** Drop the cache entry for a tab that's been closed so the map doesn't
+ *  grow forever as the user opens many short-lived tabs. */
+export function dropEditorStateCache(tabId: string): void {
+  editorStateCache.delete(tabId);
+}
+
 export default function Editor({
   value,
   filePath,
   theme,
   fontSize,
+  tabId,
   diff,
   initialCursor,
   initialScrollLine,
@@ -132,7 +153,11 @@ export default function Editor({
   const themeCompartment = useRef(new Compartment());
   const langCompartment = useRef(new Compartment());
   const wrapCompartment = useRef(new Compartment());
+  const indentCompartment = useRef(new Compartment());
+  const whitespaceCompartment = useRef(new Compartment());
   const softWrap = useEditorStore((s) => s.softWrap);
+  const showIndentGuides = useEditorStore((s) => s.showIndentGuides);
+  const showWhitespace = useEditorStore((s) => s.showWhitespace);
   const onChangeRef = useRef(onChange);
   const onScrollRef = useRef(onScroll);
   const onPositionChangeRef = useRef(onPositionChange);
@@ -164,13 +189,7 @@ export default function Editor({
       initialCursor != null
         ? Math.max(0, Math.min(initialCursor, value.length))
         : undefined;
-    const state = EditorState.create({
-      doc: value,
-      selection:
-        clampedInitialCursor != null
-          ? EditorSelection.cursor(clampedInitialCursor)
-          : undefined,
-      extensions: [
+    const extensions = [
         lineNumbers(),
         foldGutter(),
         highlightActiveLine(),
@@ -222,6 +241,8 @@ export default function Editor({
           indentWithTab,
         ]),
         wrapCompartment.current.of(softWrap ? EditorView.lineWrapping : []),
+        indentCompartment.current.of(showIndentGuides ? indentationMarkers() : []),
+        whitespaceCompartment.current.of(showWhitespace ? highlightWhitespace() : []),
         EditorView.updateListener.of((u) => {
           if (u.docChanged) onChangeRef.current(u.state.doc.toString());
           if (u.selectionSet || u.docChanged) {
@@ -254,8 +275,42 @@ export default function Editor({
             return true;
           },
         }),
-      ],
-    });
+      ];
+
+    // Try to restore from the per-tab JSON cache (preserves undo/redo across
+    // tab switches). If the cached doc no longer matches the current `value`
+    // (e.g. file was reloaded externally), bail and start fresh — restoring
+    // a stale doc would let the user "undo" into content that doesn't exist
+    // on disk anymore.
+    const cachedJSON = tabId ? editorStateCache.get(tabId) : undefined;
+    let state: EditorState;
+    if (cachedJSON && (cachedJSON as { doc?: string }).doc === value) {
+      try {
+        state = EditorState.fromJSON(
+          cachedJSON,
+          { extensions },
+          { history: historyField },
+        );
+      } catch {
+        state = EditorState.create({
+          doc: value,
+          selection:
+            clampedInitialCursor != null
+              ? EditorSelection.cursor(clampedInitialCursor)
+              : undefined,
+          extensions,
+        });
+      }
+    } else {
+      state = EditorState.create({
+        doc: value,
+        selection:
+          clampedInitialCursor != null
+            ? EditorSelection.cursor(clampedInitialCursor)
+            : undefined,
+        extensions,
+      });
+    }
 
     const view = new EditorView({ state, parent: hostRef.current });
     viewRef.current = view;
@@ -313,6 +368,17 @@ export default function Editor({
         positionFlushTimer.current = null;
       }
       onPositionChangeRef.current?.({ ...positionRef.current });
+      // Stash state JSON (incl. undo history) for next mount of the same tab.
+      if (tabId) {
+        try {
+          editorStateCache.set(
+            tabId,
+            view.state.toJSON({ history: historyField }),
+          );
+        } catch {
+          /* defensive: never block unmount on a serialization error */
+        }
+      }
       view.destroy();
       viewRef.current = null;
       setActiveView(null);
@@ -361,6 +427,22 @@ export default function Editor({
       ),
     });
   }, [softWrap]);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: indentCompartment.current.reconfigure(
+        showIndentGuides ? indentationMarkers() : [],
+      ),
+    });
+  }, [showIndentGuides]);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: whitespaceCompartment.current.reconfigure(
+        showWhitespace ? highlightWhitespace() : [],
+      ),
+    });
+  }, [showWhitespace]);
 
   useEffect(() => {
     let cancelled = false;

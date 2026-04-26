@@ -64,32 +64,32 @@ DEditor 项目的协作上下文。Claude Code 在这个目录工作时自动加
 - [ ] **A.2 Cmd+Shift+F Find in Files**：后端 `walkdir` + regex 或 `grep` crate；前端搜索面板 + 结果按文件分组、点跳过去
 - [ ] **A.3 Cmd+G Goto Line**：CodeMirror 默认绑在 `Cmd/Ctrl+Alt+G`，已能用；如要 Cmd+G 加一行 keymap
 - [ ] **A.3 Cmd+R Goto Symbol**：当前文件 outline；MD 抓 `#` 标题 + JS/TS/Py/Go 几门主流走 regex 提取
-- [ ] **A.4 Cmd+Shift+P Command Palette**：复用 GotoAnything 的 UI 框架，命令注册表，模糊搜执行
+- [x] **A.4 Cmd+Shift+P Command Palette**：`lib/commands.ts` 注册表 + `components/CommandPalette.tsx`，复用 fuzzy.ts
 
 **B. 编辑硬伤**
 
-- [ ] **B.1 切 Tab 保留光标 + 撤销栈**：CodeMirror `state.toJSON({history})` 序列化到 store，切回 `EditorState.fromJSON` 恢复，去掉 `key={tab.id}`
+- [x] **B.1 切 Tab 保留撤销栈**：模块级 `editorStateCache` 存 `state.toJSON({history})`，mount 时 fromJSON 恢复
 - [ ] **B.2 文件外部变更检测**：Rust 端 `notify` crate 监听工作区，emit 到前端，弹"已修改，是否重载？"对话框
-- [ ] **B.3 拖目录到窗口 = 加工作区**：drop 处理里区分 dir vs file，dir 走 `addWorkspace`
+- [x] **B.3 拖目录到窗口 = 加工作区**：`path_kind` Rust 命令 + drop 处理分流
 - [ ] **B.4 字体 / 主题 / 语言 进设置面板**：SettingsDialog 加 General 标签页
 
 **C. 编辑器质感**
 
 - [ ] **C.1 Minimap**：用 `@replit/codemirror-minimap`（要新依赖）
 - [ ] **C.2 Split Pane**：App.tsx 布局重构 + store 改造（每个 pane 一个 active tab）
-- [ ] **C.3 Folding**：`@codemirror/language` 自带 `foldGutter()` + `foldKeymap`
+- [x] **C.3 Folding**：`foldGutter()` + `foldKeymap`
 - [ ] **C.4 Bookmarks**：行级标记 + 跳转命令 + StatusBar 显示
 - [ ] **C.5 Distraction-free 模式**：隐藏 TitleBar / TabBar / Sidebar / StatusBar
-- [ ] **C.6 Indent guides / 显示空白 / 显示行尾符**：`highlightWhitespace()` + indent guide
+- [x] **C.6 Indent guides / 显示空白**：`@replit/codemirror-indentation-markers` + `highlightWhitespace()`
 
 **D. StatusBar 增强**
 
-- [ ] **D.1 光标行/列 + EOL（CRLF/LF）**：从 CM state 读行列；EOL 在文件读时探测；编码统一 UTF-8
-- [ ] **D.2 Soft wrap 开关**：当前固定开 `EditorView.lineWrapping`，改成 store 状态 + Settings 一勾
+- [x] **D.1 光标行/列 + EOL（CRLF/LF）+ UTF-8**：StatusBar 读 `tabPositions` + content 检测
+- [x] **D.2 Soft wrap 开关**：Compartment 运行时切，Settings 勾选
 - [ ] **D.3 自动保存 / 失焦自动保存**：window blur + 间隔 timer
 
-**执行顺序**（高价值/低改造优先）：
-C.3 → B.3 → D.1 → D.2 → B.1 → A.4 → C.6 → B.2 → A.2 → A.3 → C.5 → B.4 → C.1 → C.2 → C.4 / D.3
+**剩余执行顺序**（高价值/低改造优先）：
+B.2 → A.2 → A.3 → C.5 → B.4 → C.1 → C.2 → C.4 / D.3
 
 **其它已搁置**（按需再开）：
 

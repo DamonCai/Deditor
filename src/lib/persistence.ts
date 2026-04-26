@@ -42,6 +42,8 @@ interface PersistedV3 {
   expandedDirs?: Record<string, boolean>;
   /** Soft wrap toggle. Optional; default true on load. */
   softWrap?: boolean;
+  showIndentGuides?: boolean;
+  showWhitespace?: boolean;
   // Legacy git fields kept in the type so old snapshots still parse safely;
   // unused since the git feature was removed.
   gitPanelOpen?: boolean;
@@ -255,6 +257,12 @@ export async function loadPersisted(): Promise<UiExtras | null> {
   if (typeof data.softWrap === "boolean") {
     useEditorStore.setState({ softWrap: data.softWrap });
   }
+  if (typeof data.showIndentGuides === "boolean") {
+    useEditorStore.setState({ showIndentGuides: data.showIndentGuides });
+  }
+  if (typeof data.showWhitespace === "boolean") {
+    useEditorStore.setState({ showWhitespace: data.showWhitespace });
+  }
 
   if (restored.length > 0) {
     const idx = Math.max(0, Math.min(data.activeIndex, restored.length - 1));
@@ -315,6 +323,8 @@ function doSave(extras: UiExtras): void {
     shortcuts: s.shortcuts,
     expandedDirs: s.expandedDirs,
     softWrap: s.softWrap,
+    showIndentGuides: s.showIndentGuides,
+    showWhitespace: s.showWhitespace,
   };
   try {
     localStorage.setItem(KEY_V3, JSON.stringify(base));

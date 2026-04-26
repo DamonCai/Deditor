@@ -27,6 +27,7 @@ export type ShortcutId =
   // app-level (frontend window listener)
   | "app_toggle_sidebar"
   | "app_goto_anything"
+  | "app_command_palette"
   | "app_open_settings"
   // editor (CodeMirror custom keymap)
   | "editor_add_cursor_above"
@@ -56,9 +57,10 @@ export const SHORTCUTS: ShortcutMeta[] = [
   { id: "file_close_tab",    display: "Cmd/Ctrl+W",        labelKey: "shortcut.file.closeTab",    layer: "menu",   group: "file" },
 
   // Navigation
-  { id: "app_goto_anything",   display: "Cmd/Ctrl+P",  labelKey: "shortcut.nav.gotoAnything",   layer: "app", group: "nav" },
-  { id: "app_toggle_sidebar",  display: "Cmd/Ctrl+B",  labelKey: "shortcut.nav.toggleSidebar",  layer: "app", group: "nav" },
-  { id: "app_open_settings",   display: "Cmd/Ctrl+,",  labelKey: "shortcut.nav.openSettings",   layer: "app", group: "nav" },
+  { id: "app_goto_anything",   display: "Cmd/Ctrl+P",       labelKey: "shortcut.nav.gotoAnything",   layer: "app", group: "nav" },
+  { id: "app_command_palette", display: "Cmd/Ctrl+Shift+P", labelKey: "shortcut.nav.commandPalette", layer: "app", group: "nav" },
+  { id: "app_toggle_sidebar",  display: "Cmd/Ctrl+B",       labelKey: "shortcut.nav.toggleSidebar",  layer: "app", group: "nav" },
+  { id: "app_open_settings",   display: "Cmd/Ctrl+,",       labelKey: "shortcut.nav.openSettings",   layer: "app", group: "nav" },
 
   // Editor
   { id: "editor_add_cursor_above",    display: "Cmd/Ctrl+Alt+↑",  labelKey: "shortcut.editor.addCursorAbove",    layer: "editor", group: "editor" },

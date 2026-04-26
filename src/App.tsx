@@ -14,6 +14,7 @@ import MarkdownToolbar from "./components/MarkdownToolbar";
 import JsonToolbar from "./components/JsonToolbar";
 import GotoAnything from "./components/GotoAnything";
 import SettingsDialog from "./components/SettingsDialog";
+import CommandPalette from "./components/CommandPalette";
 import { isEnabled, SHORTCUTS } from "./lib/shortcuts";
 import { useEditorStore, useActiveTab } from "./store/editor";
 import { isMarkdown, isJson } from "./lib/lang";
@@ -59,9 +60,12 @@ export default function App() {
     { line: number; from: "editor" | "preview" } | null
   >(null);
   const [hydrated, setHydrated] = useState(false);
-  const [gotoOpen, setGotoOpen] = useState(false);
+  const gotoOpen = useEditorStore((s) => s.gotoAnythingOpen);
+  const setGotoOpen = useEditorStore((s) => s.setGotoAnythingOpen);
   const settingsOpen = useEditorStore((s) => s.settingsOpen);
   const setSettingsOpen = useEditorStore((s) => s.setSettingsOpen);
+  const commandPaletteOpen = useEditorStore((s) => s.commandPaletteOpen);
+  const setCommandPaletteOpen = useEditorStore((s) => s.setCommandPaletteOpen);
   const shortcuts = useEditorStore((s) => s.shortcuts);
   const dragRef = useRef<DragKind>(null);
   const uiRef = useRef({ sidebarPx, previewPct });
@@ -129,6 +133,11 @@ export default function App() {
         if (!isEnabled(prefs, "app_goto_anything")) return;
         e.preventDefault();
         setGotoOpen(true);
+      } else if (k === "p" && e.shiftKey && !e.altKey) {
+        // Cmd/Ctrl+Shift+P → Command Palette.
+        if (!isEnabled(prefs, "app_command_palette")) return;
+        e.preventDefault();
+        setCommandPaletteOpen(true);
       } else if (e.key === "," && !e.shiftKey && !e.altKey) {
         // Cmd/Ctrl+, → Settings. Standard macOS preferences shortcut.
         if (!isEnabled(prefs, "app_open_settings")) return;
@@ -339,6 +348,7 @@ export default function App() {
                   <div className="flex-1 min-h-0">
                     <Editor
                       key={active?.id ?? "no-tab"}
+                      tabId={active?.id}
                       value={content}
                       filePath={filePath}
                       diff={active?.diff}
@@ -395,6 +405,7 @@ export default function App() {
       <ConfirmDialog />
       <PromptDialog />
       <GotoAnything open={gotoOpen} onClose={() => setGotoOpen(false)} />
+      <CommandPalette open={commandPaletteOpen} onClose={() => setCommandPaletteOpen(false)} />
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );

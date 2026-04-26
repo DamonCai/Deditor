@@ -17,6 +17,10 @@ export default function SettingsDialog({ open, onClose }: Props) {
   const resetShortcuts = useEditorStore((s) => s.resetShortcuts);
   const softWrap = useEditorStore((s) => s.softWrap);
   const setSoftWrap = useEditorStore((s) => s.setSoftWrap);
+  const showIndentGuides = useEditorStore((s) => s.showIndentGuides);
+  const setShowIndentGuides = useEditorStore((s) => s.setShowIndentGuides);
+  const showWhitespace = useEditorStore((s) => s.showWhitespace);
+  const setShowWhitespace = useEditorStore((s) => s.setShowWhitespace);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -123,25 +127,19 @@ export default function SettingsDialog({ open, onClose }: Props) {
                 overflow: "hidden",
               }}
             >
-              <label
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12,
-                  padding: "8px 12px",
-                  cursor: "pointer",
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={softWrap}
-                  onChange={(e) => setSoftWrap(e.target.checked)}
-                  style={{ flexShrink: 0 }}
-                />
-                <span style={{ fontSize: 13, color: "var(--text)", flex: 1 }}>
-                  {t("settings.editor.softWrap")}
-                </span>
-              </label>
+              <CheckRow checked={softWrap} onChange={setSoftWrap} label={t("settings.editor.softWrap")} />
+              <CheckRow
+                checked={showIndentGuides}
+                onChange={setShowIndentGuides}
+                label={t("settings.editor.indentGuides")}
+                topBorder
+              />
+              <CheckRow
+                checked={showWhitespace}
+                onChange={setShowWhitespace}
+                label={t("settings.editor.whitespace")}
+                topBorder
+              />
             </div>
           </section>
 
@@ -285,5 +283,38 @@ export default function SettingsDialog({ open, onClose }: Props) {
         </div>
       </div>
     </div>
+  );
+}
+
+function CheckRow({
+  checked,
+  onChange,
+  label,
+  topBorder,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label: string;
+  topBorder?: boolean;
+}) {
+  return (
+    <label
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        padding: "8px 12px",
+        cursor: "pointer",
+        borderTop: topBorder ? "1px solid var(--border)" : undefined,
+      }}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        style={{ flexShrink: 0 }}
+      />
+      <span style={{ fontSize: 13, color: "var(--text)", flex: 1 }}>{label}</span>
+    </label>
   );
 }
