@@ -77,6 +77,20 @@ export const COMMANDS: Command[] = [
       s.setLanguage(s.language === "zh" ? "en" : "zh");
     },
   },
+  {
+    id: "cmd.view.toggleZen",
+    labelKey: "cmd.view.toggleZen",
+    shortcut: "Cmd/Ctrl+K",
+    group: "view",
+    run: () => useEditorStore.getState().toggleZenMode(),
+  },
+  {
+    id: "cmd.view.toggleSplit",
+    labelKey: "cmd.view.toggleSplit",
+    shortcut: "Cmd/Ctrl+\\",
+    group: "view",
+    run: () => useEditorStore.getState().toggleSplitEditor(),
+  },
 
   // Navigation
   {
@@ -85,6 +99,20 @@ export const COMMANDS: Command[] = [
     shortcut: "Cmd/Ctrl+P",
     group: "nav",
     run: () => useEditorStore.getState().setGotoAnythingOpen(true),
+  },
+  {
+    id: "cmd.nav.gotoSymbol",
+    labelKey: "cmd.nav.gotoSymbol",
+    shortcut: "Cmd/Ctrl+R",
+    group: "nav",
+    run: () => useEditorStore.getState().setGotoSymbolOpen(true),
+  },
+  {
+    id: "cmd.nav.findInFiles",
+    labelKey: "cmd.nav.findInFiles",
+    shortcut: "Cmd/Ctrl+Shift+F",
+    group: "nav",
+    run: () => useEditorStore.getState().setFindInFilesOpen(true),
   },
   {
     id: "cmd.nav.openSettings",

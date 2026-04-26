@@ -160,6 +160,37 @@ const MIME_MAP: Record<string, string> = {
   ogv: "video/ogg",
 };
 
+/** Save every dirty tab that has a filePath. Untitled / diff / binary tabs
+ *  are skipped. Used by auto-save (blur / debounce) and the future "save all"
+ *  command. Errors are swallowed per file so one bad disk doesn't block the
+ *  whole batch. */
+export async function saveAllDirty(): Promise<void> {
+  const { tabs, markSaved, activeId } = useEditorStore.getState();
+  for (const t of tabs) {
+    if (!t.filePath) continue;
+    if (t.diff) continue;
+    if (t.content === t.savedContent) continue;
+    try {
+      await invoke("write_text_file", { path: t.filePath, content: t.content });
+      // markSaved only operates on active tab; do it manually for non-active
+      if (t.id === activeId) {
+        markSaved();
+      } else {
+        useEditorStore.setState({
+          tabs: useEditorStore
+            .getState()
+            .tabs.map((x) =>
+              x.id === t.id ? { ...x, savedContent: x.content } : x,
+            ),
+        });
+      }
+      logInfo(`auto-saved: ${t.filePath} (${t.content.length} chars)`);
+    } catch (err) {
+      logError(`auto-save failed for ${t.filePath}`, err);
+    }
+  }
+}
+
 export async function saveFile() {
   const { tabs, activeId, markSaved } = useEditorStore.getState();
   const active = tabs.find((t) => t.id === activeId);

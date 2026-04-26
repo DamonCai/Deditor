@@ -12,6 +12,7 @@ import {
   highlightWhitespace,
 } from "@codemirror/view";
 import { indentationMarkers } from "@replit/codemirror-indentation-markers";
+import { showMinimap as showMinimapFacet } from "@replit/codemirror-minimap";
 import type { Command } from "@codemirror/view";
 import { defaultKeymap, history, historyField, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { searchKeymap, highlightSelectionMatches, selectSelectionMatches, openSearchPanel } from "@codemirror/search";
@@ -29,6 +30,13 @@ import { detectLang, isMarkdown, isImageFile, isPdfFile, isAudioFile, isVideoFil
 import { useEditorStore, type DiffSpec } from "../store/editor";
 import DiffView from "./DiffView";
 import { isEnabled } from "../lib/shortcuts";
+import {
+  bookmarkExtension,
+  toggleBookmark,
+  nextBookmark,
+  prevBookmark,
+  clearBookmarks,
+} from "../lib/bookmarks";
 import { saveImage } from "../lib/fileio";
 import { logError, logInfo } from "../lib/logger";
 import { setActiveView } from "../lib/editorBridge";
@@ -65,6 +73,11 @@ interface Props {
   /** Active tab id. Used to look up / save the per-tab CodeMirror state JSON
    *  so undo/redo history survives switching to another tab and back. */
   tabId?: string;
+  /** When true, skip the per-tab state cache entirely. Used by the secondary
+   *  Editor in split-view so it doesn't collide with the primary on cache
+   *  reads/writes. Trade-off: secondary view's undo doesn't carry across
+   *  tab switches. */
+  noStateCache?: boolean;
   /** When set, the active tab is a side-by-side file comparison; we short-
    *  circuit and render DiffView, ignoring CodeMirror entirely. */
   diff?: DiffSpec;
@@ -100,6 +113,7 @@ export default function Editor({
   theme,
   fontSize,
   tabId,
+  noStateCache,
   diff,
   initialCursor,
   initialScrollLine,
@@ -155,9 +169,11 @@ export default function Editor({
   const wrapCompartment = useRef(new Compartment());
   const indentCompartment = useRef(new Compartment());
   const whitespaceCompartment = useRef(new Compartment());
+  const minimapCompartment = useRef(new Compartment());
   const softWrap = useEditorStore((s) => s.softWrap);
   const showIndentGuides = useEditorStore((s) => s.showIndentGuides);
   const showWhitespace = useEditorStore((s) => s.showWhitespace);
+  const showMinimap = useEditorStore((s) => s.showMinimap);
   const onChangeRef = useRef(onChange);
   const onScrollRef = useRef(onScroll);
   const onPositionChangeRef = useRef(onPositionChange);
@@ -234,6 +250,11 @@ export default function Editor({
                 ? selectSelectionMatches(view)
                 : false,
           },
+          // Bookmarks: F2 toggle / F8 next / Shift+F8 prev / Cmd+Shift+F2 clear.
+          { key: "F2", run: toggleBookmark, preventDefault: true },
+          { key: "F8", run: nextBookmark, preventDefault: true },
+          { key: "Shift-F8", run: prevBookmark, preventDefault: true },
+          { key: "Mod-Shift-F2", run: clearBookmarks, preventDefault: true },
           ...defaultKeymap,
           ...historyKeymap,
           ...searchKeymap,
@@ -243,6 +264,8 @@ export default function Editor({
         wrapCompartment.current.of(softWrap ? EditorView.lineWrapping : []),
         indentCompartment.current.of(showIndentGuides ? indentationMarkers() : []),
         whitespaceCompartment.current.of(showWhitespace ? highlightWhitespace() : []),
+        minimapCompartment.current.of(showMinimap ? buildMinimap() : []),
+        bookmarkExtension(),
         EditorView.updateListener.of((u) => {
           if (u.docChanged) onChangeRef.current(u.state.doc.toString());
           if (u.selectionSet || u.docChanged) {
@@ -282,7 +305,7 @@ export default function Editor({
     // (e.g. file was reloaded externally), bail and start fresh — restoring
     // a stale doc would let the user "undo" into content that doesn't exist
     // on disk anymore.
-    const cachedJSON = tabId ? editorStateCache.get(tabId) : undefined;
+    const cachedJSON = tabId && !noStateCache ? editorStateCache.get(tabId) : undefined;
     let state: EditorState;
     if (cachedJSON && (cachedJSON as { doc?: string }).doc === value) {
       try {
@@ -369,7 +392,7 @@ export default function Editor({
       }
       onPositionChangeRef.current?.({ ...positionRef.current });
       // Stash state JSON (incl. undo history) for next mount of the same tab.
-      if (tabId) {
+      if (tabId && !noStateCache) {
         try {
           editorStateCache.set(
             tabId,
@@ -443,6 +466,14 @@ export default function Editor({
       ),
     });
   }, [showWhitespace]);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: minimapCompartment.current.reconfigure(
+        showMinimap ? buildMinimap() : [],
+      ),
+    });
+  }, [showMinimap]);
 
   useEffect(() => {
     let cancelled = false;
@@ -611,6 +642,16 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
     binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
   }
   return btoa(binary);
+}
+
+/** Configure the minimap with the create() callback. The minimap container
+ *  is a tiny DOM element the package owns; we just hand it a fresh div. */
+function buildMinimap() {
+  return showMinimapFacet.of({
+    create: () => ({ dom: document.createElement("div") }),
+    displayText: "blocks",
+    showOverlay: "always",
+  });
 }
 
 function PdfView({ src, title }: { src: string; title: string }) {

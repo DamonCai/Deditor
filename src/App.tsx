@@ -13,6 +13,8 @@ import TabBar from "./components/TabBar";
 import MarkdownToolbar from "./components/MarkdownToolbar";
 import JsonToolbar from "./components/JsonToolbar";
 import GotoAnything from "./components/GotoAnything";
+import GotoSymbol from "./components/GotoSymbol";
+import FindInFiles from "./components/FindInFiles";
 import SettingsDialog from "./components/SettingsDialog";
 import CommandPalette from "./components/CommandPalette";
 import { isEnabled, SHORTCUTS } from "./lib/shortcuts";
@@ -29,8 +31,10 @@ import {
   closeActiveTab,
   openMany,
   setWorkspaceByPath,
+  saveAllDirty,
 } from "./lib/fileio";
 import { loadPersisted, schedulePersist } from "./lib/persistence";
+import { useFileWatch } from "./lib/fileWatch";
 
 type DragKind = "sidebar" | "preview" | null;
 
@@ -60,12 +64,19 @@ export default function App() {
     { line: number; from: "editor" | "preview" } | null
   >(null);
   const [hydrated, setHydrated] = useState(false);
+  const zenMode = useEditorStore((s) => s.zenMode);
+  const autoSave = useEditorStore((s) => s.autoSave);
+  const splitEditor = useEditorStore((s) => s.splitEditor);
   const gotoOpen = useEditorStore((s) => s.gotoAnythingOpen);
   const setGotoOpen = useEditorStore((s) => s.setGotoAnythingOpen);
   const settingsOpen = useEditorStore((s) => s.settingsOpen);
   const setSettingsOpen = useEditorStore((s) => s.setSettingsOpen);
   const commandPaletteOpen = useEditorStore((s) => s.commandPaletteOpen);
   const setCommandPaletteOpen = useEditorStore((s) => s.setCommandPaletteOpen);
+  const gotoSymbolOpen = useEditorStore((s) => s.gotoSymbolOpen);
+  const setGotoSymbolOpen = useEditorStore((s) => s.setGotoSymbolOpen);
+  const findInFilesOpen = useEditorStore((s) => s.findInFilesOpen);
+  const setFindInFilesOpen = useEditorStore((s) => s.setFindInFilesOpen);
   const shortcuts = useEditorStore((s) => s.shortcuts);
   const dragRef = useRef<DragKind>(null);
   const uiRef = useRef({ sidebarPx, previewPct });
@@ -113,6 +124,40 @@ export default function App() {
     schedulePersist({ sidebarPx, previewPct });
   }, [hydrated, sidebarPx, previewPct]);
 
+  useFileWatch();
+
+  // Auto-save on window blur. Subscribes only when the user opted in via
+  // Settings — avoids spurious writes on every alt-tab.
+  useEffect(() => {
+    if (autoSave !== "onBlur") return;
+    const onBlur = () => void saveAllDirty();
+    window.addEventListener("blur", onBlur);
+    return () => window.removeEventListener("blur", onBlur);
+  }, [autoSave]);
+
+  // Auto-save with a debounce after typing stops. Subscribes to the store
+  // so we re-arm the timer whenever any tab's content changes.
+  useEffect(() => {
+    if (autoSave !== "afterDelay") return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const arm = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        void saveAllDirty();
+      }, 1500);
+    };
+    // Fire once on activation in case there's already dirty content.
+    arm();
+    const unsub = useEditorStore.subscribe((s, prev) => {
+      if (s.tabs !== prev.tabs) arm();
+    });
+    return () => {
+      if (timer) clearTimeout(timer);
+      unsub();
+    };
+  }, [autoSave]);
+
   // File menu lives in the native macOS app menu (built in Rust). Accelerators
   // there (Cmd+N / Cmd+O / Cmd+S / etc.) are intercepted by the OS, so we
   // only handle the shortcuts the menu doesn't own here.
@@ -138,11 +183,32 @@ export default function App() {
         if (!isEnabled(prefs, "app_command_palette")) return;
         e.preventDefault();
         setCommandPaletteOpen(true);
+      } else if (k === "f" && e.shiftKey && !e.altKey) {
+        // Cmd/Ctrl+Shift+F → Find in Files.
+        if (!isEnabled(prefs, "app_find_in_files")) return;
+        e.preventDefault();
+        setFindInFilesOpen(true);
       } else if (e.key === "," && !e.shiftKey && !e.altKey) {
         // Cmd/Ctrl+, → Settings. Standard macOS preferences shortcut.
         if (!isEnabled(prefs, "app_open_settings")) return;
         e.preventDefault();
         setSettingsOpen(true);
+      } else if (k === "r" && !e.shiftKey && !e.altKey) {
+        // Cmd/Ctrl+R → Goto Symbol (current file outline).
+        if (!isEnabled(prefs, "app_goto_symbol")) return;
+        e.preventDefault();
+        setGotoSymbolOpen(true);
+      } else if (k === "k" && !e.shiftKey && !e.altKey) {
+        // Cmd/Ctrl+K → toggle distraction-free (zen) mode. Single keystroke
+        // rather than the VSCode chord — chords are clumsy in WebView.
+        if (!isEnabled(prefs, "app_zen_mode")) return;
+        e.preventDefault();
+        useEditorStore.getState().toggleZenMode();
+      } else if (e.key === "\\" && !e.shiftKey && !e.altKey) {
+        // Cmd/Ctrl+\ → toggle split editor.
+        if (!isEnabled(prefs, "app_split_editor")) return;
+        e.preventDefault();
+        useEditorStore.getState().toggleSplitEditor();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -273,9 +339,9 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-full">
-      <TitleBar />
+      {!zenMode && <TitleBar />}
       <div className="flex flex-1 min-h-0">
-        {showSidebar ? (
+        {!zenMode && showSidebar ? (
           <>
             <div
               style={{ width: sidebarPx, flexShrink: 0 }}
@@ -323,7 +389,7 @@ export default function App() {
           </button>
         )}
         <div className="flex flex-col flex-1 min-w-0">
-          <TabBar />
+          {!zenMode && <TabBar />}
           <div className="flex flex-1 min-h-0">
             {previewEnabled && previewMaximized ? (
               <div className="flex-1 min-w-0">
@@ -345,28 +411,50 @@ export default function App() {
                 >
                   {!isDiffTab && isMarkdown(filePath) && <MarkdownToolbar />}
                   {!isDiffTab && isJson(filePath) && <JsonToolbar />}
-                  <div className="flex-1 min-h-0">
-                    <Editor
-                      key={active?.id ?? "no-tab"}
-                      tabId={active?.id}
-                      value={content}
-                      filePath={filePath}
-                      diff={active?.diff}
-                      theme={theme}
-                      fontSize={editorFontSize}
-                      initialCursor={initialPos?.cursor}
-                      initialScrollLine={initialPos?.scrollTopLine}
-                      externalScrollLine={
-                        scrollSync?.from === "preview" ? scrollSync.line : undefined
-                      }
-                      onChange={setContent}
-                      onScroll={(line) => setScrollSync({ line, from: "editor" })}
-                      onPositionChange={(pos) => {
-                        if (active) {
-                          useEditorStore.getState().setTabPosition(active.id, pos);
+                  {active?.externalChange != null && (
+                    <ExternalChangeBanner tab={active} />
+                  )}
+                  <div className="flex-1 min-h-0 flex">
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <Editor
+                        key={active?.id ?? "no-tab"}
+                        tabId={active?.id}
+                        value={content}
+                        filePath={filePath}
+                        diff={active?.diff}
+                        theme={theme}
+                        fontSize={editorFontSize}
+                        initialCursor={initialPos?.cursor}
+                        initialScrollLine={initialPos?.scrollTopLine}
+                        externalScrollLine={
+                          scrollSync?.from === "preview" ? scrollSync.line : undefined
                         }
-                      }}
-                    />
+                        onChange={setContent}
+                        onScroll={(line) => setScrollSync({ line, from: "editor" })}
+                        onPositionChange={(pos) => {
+                          if (active) {
+                            useEditorStore.getState().setTabPosition(active.id, pos);
+                          }
+                        }}
+                      />
+                    </div>
+                    {splitEditor && !isDiffTab && (
+                      <>
+                        <div style={{ width: 1, background: "var(--border)", flexShrink: 0 }} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <Editor
+                            key={(active?.id ?? "no-tab") + "::split"}
+                            tabId={active?.id}
+                            noStateCache
+                            value={content}
+                            filePath={filePath}
+                            theme={theme}
+                            fontSize={editorFontSize}
+                            onChange={setContent}
+                          />
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
                 {previewEnabled && (
@@ -401,12 +489,77 @@ export default function App() {
           </div>
         </div>
       </div>
-      <StatusBar />
+      {!zenMode && <StatusBar />}
       <ConfirmDialog />
       <PromptDialog />
       <GotoAnything open={gotoOpen} onClose={() => setGotoOpen(false)} />
       <CommandPalette open={commandPaletteOpen} onClose={() => setCommandPaletteOpen(false)} />
+      <GotoSymbol open={gotoSymbolOpen} onClose={() => setGotoSymbolOpen(false)} />
+      <FindInFiles open={findInFilesOpen} onClose={() => setFindInFilesOpen(false)} />
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+    </div>
+  );
+}
+
+function ExternalChangeBanner({ tab }: { tab: { id: string; externalChange?: string } }) {
+  const t = useT();
+  const reload = () => {
+    if (tab.externalChange == null) return;
+    const fresh = tab.externalChange;
+    useEditorStore.setState({
+      tabs: useEditorStore.getState().tabs.map((x) =>
+        x.id === tab.id ? { ...x, content: fresh, savedContent: fresh, externalChange: undefined } : x,
+      ),
+    });
+  };
+  const dismiss = () => {
+    useEditorStore.setState({
+      tabs: useEditorStore.getState().tabs.map((x) =>
+        x.id === tab.id ? { ...x, externalChange: undefined } : x,
+      ),
+    });
+  };
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        padding: "8px 12px",
+        background: "rgba(245, 158, 11, 0.15)",
+        borderBottom: "1px solid var(--border)",
+        fontSize: 12,
+      }}
+    >
+      <span style={{ flex: 1, color: "var(--text)" }}>{t("watch.externalChanged")}</span>
+      <button
+        onClick={reload}
+        style={{
+          padding: "3px 10px",
+          fontSize: 12,
+          border: "1px solid var(--accent)",
+          background: "var(--accent)",
+          color: "#fff",
+          borderRadius: 3,
+          cursor: "pointer",
+        }}
+      >
+        {t("watch.reload")}
+      </button>
+      <button
+        onClick={dismiss}
+        style={{
+          padding: "3px 10px",
+          fontSize: 12,
+          border: "1px solid var(--border)",
+          background: "var(--bg)",
+          color: "var(--text)",
+          borderRadius: 3,
+          cursor: "pointer",
+        }}
+      >
+        {t("watch.keepMine")}
+      </button>
     </div>
   );
 }

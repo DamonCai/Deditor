@@ -2,27 +2,19 @@ import { useActiveTab, isTabDirty } from "../store/editor";
 import { useEditorStore } from "../store/editor";
 import { isMarkdown } from "../lib/lang";
 import { useT } from "../lib/i18n";
-import { FiSun, FiMoon, FiSettings } from "react-icons/fi";
+import { FiSettings } from "react-icons/fi";
 import { exportHtml, exportPdf } from "../lib/export";
 
 export default function TitleBar() {
   const t = useT();
   const active = useActiveTab();
-  const {
-    showPreview,
-    togglePreview,
-    theme,
-    setTheme,
-    language,
-    setLanguage,
-  } = useEditorStore();
+  const { showPreview, togglePreview } = useEditorStore();
   const setSettingsOpen = useEditorStore((s) => s.setSettingsOpen);
   const name = active?.filePath
     ? active.filePath.split(/[\\/]/).pop()
     : t("common.untitled");
   const dirty = active ? isTabDirty(active) : false;
   const isMd = isMarkdown(active?.filePath ?? null);
-  const isDark = theme === "dark";
 
   return (
     <div
@@ -52,35 +44,12 @@ export default function TitleBar() {
           </>
         )}
         <button
-          onClick={() => setLanguage(language === "zh" ? "en" : "zh")}
-          title={
-            language === "zh" ? t("titlebar.toEnglish") : t("titlebar.toChinese")
-          }
-          className="px-2 py-1 rounded hover:bg-[color:var(--bg-mute)]"
-          style={{
-            color: "var(--text)",
-            fontWeight: 600,
-            minWidth: 28,
-            textAlign: "center",
-          }}
-        >
-          {language === "zh" ? "EN" : "中"}
-        </button>
-        <button
           onClick={() => setSettingsOpen(true)}
           title={t("statusbar.settings")}
           className="px-2 py-1 rounded hover:bg-[color:var(--bg-mute)]"
           style={{ color: "var(--text)", display: "inline-flex", alignItems: "center" }}
         >
           <FiSettings size={14} />
-        </button>
-        <button
-          onClick={() => setTheme(isDark ? "light" : "dark")}
-          title={isDark ? t("titlebar.toLight") : t("titlebar.toDark")}
-          className="px-2 py-1 rounded hover:bg-[color:var(--bg-mute)]"
-          style={{ color: "var(--text)", display: "inline-flex", alignItems: "center" }}
-        >
-          {isDark ? <FiSun size={14} /> : <FiMoon size={14} />}
         </button>
       </div>
     </div>

@@ -61,35 +61,34 @@ DEditor 项目的协作上下文。Claude Code 在这个目录工作时自动加
 
 **A. Sublime DNA**
 
-- [ ] **A.2 Cmd+Shift+F Find in Files**：后端 `walkdir` + regex 或 `grep` crate；前端搜索面板 + 结果按文件分组、点跳过去
-- [ ] **A.3 Cmd+G Goto Line**：CodeMirror 默认绑在 `Cmd/Ctrl+Alt+G`，已能用；如要 Cmd+G 加一行 keymap
-- [ ] **A.3 Cmd+R Goto Symbol**：当前文件 outline；MD 抓 `#` 标题 + JS/TS/Py/Go 几门主流走 regex 提取
-- [x] **A.4 Cmd+Shift+P Command Palette**：`lib/commands.ts` 注册表 + `components/CommandPalette.tsx`，复用 fuzzy.ts
+- [x] **A.2 Cmd+Shift+F Find in Files**：Rust `find_in_files` 命令（plain text，1MB/file 上限，5k hits 上限）+ `components/FindInFiles.tsx` 面板，结果按文件分组、点击跳到行列
+- [x] **A.3 Goto Line**：用 CodeMirror 默认绑定 `Cmd/Ctrl+Alt+G`。`Cmd+G` 留给 "find next"（Sublime / VSCode 通用）
+- [x] **A.3 Cmd+R Goto Symbol**：`lib/symbols.ts` 按扩展名做 regex 提取（MD / JS / TS / Py / Rust / Go / Ruby / PHP / Shell），`GotoSymbol` modal 复用 fuzzy.ts
+- [x] **A.4 Cmd+Shift+P Command Palette**：`lib/commands.ts` 注册表 + `components/CommandPalette.tsx`
 
 **B. 编辑硬伤**
 
 - [x] **B.1 切 Tab 保留撤销栈**：模块级 `editorStateCache` 存 `state.toJSON({history})`，mount 时 fromJSON 恢复
-- [ ] **B.2 文件外部变更检测**：Rust 端 `notify` crate 监听工作区，emit 到前端，弹"已修改，是否重载？"对话框
+- [x] **B.2 文件外部变更检测**：`file_mtimes` 批量轮询 + `lib/fileWatch.ts`，clean tab 静默重载、dirty tab 显示横幅让用户选
 - [x] **B.3 拖目录到窗口 = 加工作区**：`path_kind` Rust 命令 + drop 处理分流
-- [ ] **B.4 字体 / 主题 / 语言 进设置面板**：SettingsDialog 加 General 标签页
+- [x] **B.4 字体 / 主题 / 语言 / 自动保存 进设置面板**：SettingsDialog 顶部加"通用"分组（含 RadioRow + SliderRow）
 
 **C. 编辑器质感**
 
-- [ ] **C.1 Minimap**：用 `@replit/codemirror-minimap`（要新依赖）
-- [ ] **C.2 Split Pane**：App.tsx 布局重构 + store 改造（每个 pane 一个 active tab）
+- [x] **C.1 Minimap**：`@replit/codemirror-minimap`，Compartment 切换，设置里"显示右侧迷你地图"
+- [x] **C.2 Split Pane** (scoped v1)：`splitEditor` toggle，同一 active tab 双视图独立光标/滚动；Cmd+\ 切换。多 pane 多 active tab 留作后续重构
 - [x] **C.3 Folding**：`foldGutter()` + `foldKeymap`
-- [ ] **C.4 Bookmarks**：行级标记 + 跳转命令 + StatusBar 显示
-- [ ] **C.5 Distraction-free 模式**：隐藏 TitleBar / TabBar / Sidebar / StatusBar
+- [x] **C.4 Bookmarks**：`lib/bookmarks.ts` StateField + Decoration.line（位置随编辑漂移）；F2 切换 / F8 下一 / Shift+F8 上一 / Cmd+Shift+F2 清空
+- [x] **C.5 Distraction-free 模式**：`zenMode` store + Cmd+K 切换，隐藏 TitleBar / TabBar / Sidebar / StatusBar
 - [x] **C.6 Indent guides / 显示空白**：`@replit/codemirror-indentation-markers` + `highlightWhitespace()`
 
 **D. StatusBar 增强**
 
 - [x] **D.1 光标行/列 + EOL（CRLF/LF）+ UTF-8**：StatusBar 读 `tabPositions` + content 检测
 - [x] **D.2 Soft wrap 开关**：Compartment 运行时切，Settings 勾选
-- [ ] **D.3 自动保存 / 失焦自动保存**：window blur + 间隔 timer
+- [x] **D.3 自动保存 / 失焦自动保存**：`saveAllDirty()` 工具 + App.tsx 监听 blur / 1.5s debounce，三档可选（关 / 失焦 / 停止编辑后）
 
-**剩余执行顺序**（高价值/低改造优先）：
-B.2 → A.2 → A.3 → C.5 → B.4 → C.1 → C.2 → C.4 / D.3
+**全部已完成**。后续如有新需求，从下面的 "其它已搁置" 里挑或者另起。
 
 **其它已搁置**（按需再开）：
 

@@ -20,6 +20,10 @@ export interface Tab {
    *  `content`, and `savedContent` fields are ignored for diff tabs (kept on
    *  the type so the rest of the codebase doesn't have to special-case them). */
   diff?: DiffSpec;
+  /** When the file was changed on disk while the tab was dirty in DEditor,
+   *  we stash the on-disk content here and surface a banner so the user can
+   *  pick "reload from disk" or "keep my edits". Cleared once the user chooses. */
+  externalChange?: string;
 }
 
 export interface TabPosition {
@@ -55,6 +59,8 @@ interface EditorState {
   gotoAnythingOpen: boolean;
   /** Whether the Command Palette is showing. */
   commandPaletteOpen: boolean;
+  gotoSymbolOpen: boolean;
+  findInFilesOpen: boolean;
   /** Persisted file-tree expansion state, keyed by absolute path.
    *  - `true`  = explicitly expanded
    *  - `false` = explicitly collapsed
@@ -71,6 +77,19 @@ interface EditorState {
   showIndentGuides: boolean;
   /** Show whitespace markers (· for spaces, → for tabs). */
   showWhitespace: boolean;
+  /** Render a minimap on the right edge of the editor. */
+  showMinimap: boolean;
+  /** Split the editor area into two side-by-side views of the same active
+   *  tab (independent cursor + scroll). Toggled via the command palette /
+   *  shortcut. Tab list itself is unchanged — both views read the same tab. */
+  splitEditor: boolean;
+  /** Distraction-free mode hides the title bar, tab bar, sidebar, status
+   *  bar — only the editor (and Markdown preview if active) remain. Toggled
+   *  via Cmd+K Z (matches VSCode "Zen Mode") or via the command palette. */
+  zenMode: boolean;
+  /** Auto-save: "off" | "onBlur" | "afterDelay". afterDelay debounces 1.5s
+   *  after the user stops typing. onBlur saves when the window loses focus. */
+  autoSave: "off" | "onBlur" | "afterDelay";
 
   setContent: (content: string) => void;
   // Open a new tab (or focus existing one for the same path).
@@ -84,10 +103,18 @@ interface EditorState {
   setSettingsOpen: (open: boolean) => void;
   setGotoAnythingOpen: (open: boolean) => void;
   setCommandPaletteOpen: (open: boolean) => void;
+  setGotoSymbolOpen: (open: boolean) => void;
+  setFindInFilesOpen: (open: boolean) => void;
   setDirExpanded: (path: string, expanded: boolean) => void;
   setSoftWrap: (on: boolean) => void;
   setShowIndentGuides: (on: boolean) => void;
   setShowWhitespace: (on: boolean) => void;
+  setShowMinimap: (on: boolean) => void;
+  toggleSplitEditor: () => void;
+  setSplitEditor: (on: boolean) => void;
+  toggleZenMode: () => void;
+  setZenMode: (on: boolean) => void;
+  setAutoSave: (mode: "off" | "onBlur" | "afterDelay") => void;
   // Replace active tab's file (used when "Save As" rebinds path).
   rebindActive: (filePath: string, content: string) => void;
   newUntitled: () => string;
@@ -134,9 +161,13 @@ const DEFAULT_CONTENT_ZH = `# 欢迎使用 DEditor
 
 - \`Cmd/Ctrl+P\` 跨工作区模糊搜索文件（Goto Anything）
 - \`Cmd/Ctrl+Shift+P\` 命令面板（搜所有命令并执行）
+- \`Cmd/Ctrl+R\` 当前文件大纲跳转（Goto Symbol）
+- \`Cmd/Ctrl+Shift+F\` 全工作区文本搜索（Find in Files）
+- \`Cmd/Ctrl+Alt+G\` 跳到指定行
 - \`Cmd/Ctrl+,\` 打开设置
 - \`Cmd/Ctrl+B\` 开关左侧文件树
-- \`Cmd/Ctrl+Alt+G\` 跳到指定行
+- \`Cmd/Ctrl+K\` 切换专注模式（隐藏所有 chrome）
+- \`Cmd/Ctrl+\\\` 切换分屏（同一文件双视图）
 - 鼠标点 TabBar 切换标签；鼠标中键点标签 = 关闭
 
 ### 编辑
@@ -153,7 +184,15 @@ const DEFAULT_CONTENT_ZH = `# 欢迎使用 DEditor
 - \`Alt+Drag\` 列选 / 矩形选择
 - \`Tab / Shift+Tab\` 缩进 / 反缩进
 
-> 设置（\`Cmd/Ctrl+,\`）里可以**关闭任何与系统/输入法冲突的快捷键**，菜单条目仍可点击使用。
+### 书签
+
+- \`F2\` 在当前行打 / 取消书签（书签会随编辑漂移）
+- \`F8\` / \`Shift+F8\` 跳到下 / 上一个书签
+- \`Cmd/Ctrl+Shift+F2\` 清空当前文件全部书签
+
+> 设置（\`Cmd/Ctrl+,\`）里可以调主题 / 字号 / 自动保存 / minimap / 缩进引导线 / 显示空白等，
+> 也可以**关闭任何与系统/输入法冲突的快捷键**，菜单条目仍可点击使用。
+> 文件被外部改动时会自动检测：clean tab 静默重载，dirty tab 弹横幅让你选"重载"还是"保留我的修改"。
 
 ### 文件树（右键）
 
@@ -190,9 +229,13 @@ A Markdown / multi-language code editor built on **Tauri + React + CodeMirror**.
 
 - \`Cmd/Ctrl+P\` Fuzzy file search across workspaces (Goto Anything)
 - \`Cmd/Ctrl+Shift+P\` Command Palette (search all commands and run)
+- \`Cmd/Ctrl+R\` Goto Symbol — outline of the current file
+- \`Cmd/Ctrl+Shift+F\` Find in Files (text search across all workspaces)
+- \`Cmd/Ctrl+Alt+G\` Goto line number
 - \`Cmd/Ctrl+,\` Open Settings
 - \`Cmd/Ctrl+B\` Toggle the file tree sidebar
-- \`Cmd/Ctrl+Alt+G\` Goto line number
+- \`Cmd/Ctrl+K\` Toggle Zen mode (hide all chrome)
+- \`Cmd/Ctrl+\\\` Toggle split editor (two views of the same file)
 - Click a tab in the bar to switch; middle-click to close
 
 ### Editing
@@ -209,7 +252,17 @@ A Markdown / multi-language code editor built on **Tauri + React + CodeMirror**.
 - \`Alt+Drag\` Column / rectangular selection
 - \`Tab / Shift+Tab\` Indent / Outdent
 
-> Open Settings (\`Cmd/Ctrl+,\`) to **disable any shortcut that conflicts with your OS, IME, or another app** — menu items remain clickable.
+### Bookmarks
+
+- \`F2\` Toggle a bookmark on the current line (positions track edits)
+- \`F8\` / \`Shift+F8\` Jump to the next / previous bookmark
+- \`Cmd/Ctrl+Shift+F2\` Clear all bookmarks in the current file
+
+> Open Settings (\`Cmd/Ctrl+,\`) to tweak theme / font size / auto-save / minimap /
+> indent guides / whitespace markers, or to **disable any shortcut that conflicts
+> with your OS, IME, or another app** — menu items stay clickable.
+> External file changes are detected automatically: clean tabs reload silently,
+> dirty tabs show a banner so you can pick "reload" or "keep my edits".
 
 ### File Tree (right-click)
 
@@ -274,10 +327,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   settingsOpen: false,
   gotoAnythingOpen: false,
   commandPaletteOpen: false,
+  gotoSymbolOpen: false,
+  findInFilesOpen: false,
   expandedDirs: {},
   softWrap: true,
   showIndentGuides: true,
   showWhitespace: false,
+  showMinimap: false,
+  splitEditor: false,
+  zenMode: false,
+  autoSave: "off",
 
   setContent: (content) => {
     const { tabs, activeId } = get();
@@ -345,6 +404,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setSettingsOpen: (open) => set({ settingsOpen: open }),
   setGotoAnythingOpen: (open) => set({ gotoAnythingOpen: open }),
   setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
+  setGotoSymbolOpen: (open) => set({ gotoSymbolOpen: open }),
+  setFindInFilesOpen: (open) => set({ findInFilesOpen: open }),
 
   setDirExpanded: (path, expanded) => {
     const cur = get().expandedDirs;
@@ -354,6 +415,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setSoftWrap: (on) => set({ softWrap: on }),
   setShowIndentGuides: (on) => set({ showIndentGuides: on }),
   setShowWhitespace: (on) => set({ showWhitespace: on }),
+  setShowMinimap: (on) => set({ showMinimap: on }),
+  toggleSplitEditor: () => set({ splitEditor: !get().splitEditor }),
+  setSplitEditor: (on) => set({ splitEditor: on }),
+  toggleZenMode: () => set({ zenMode: !get().zenMode }),
+  setZenMode: (on) => set({ zenMode: on }),
+  setAutoSave: (mode) => set({ autoSave: mode }),
 
   rebindActive: (filePath, content) => {
     const { tabs, activeId } = get();

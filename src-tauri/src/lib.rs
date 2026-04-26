@@ -341,6 +341,168 @@ fn list_dir(path: String) -> Result<Vec<DirEntry>, String> {
     Ok(out)
 }
 
+#[derive(serde::Serialize)]
+struct SearchHit {
+    path: String,
+    line: u32,
+    col: u32,
+    text: String,
+}
+
+#[derive(serde::Serialize)]
+struct SearchResult {
+    hits: Vec<SearchHit>,
+    truncated: bool,
+    files_scanned: usize,
+}
+
+const SEARCH_FILE_BYTES_CAP: u64 = 1_048_576; // 1 MB
+const SEARCH_HITS_CAP: usize = 5_000;
+const SEARCH_FILES_CAP: usize = MAX_WORKSPACE_FILES;
+
+/// Plain-substring (or case-insensitive) search across every workspace file
+/// `list_workspace_files` would surface. Skips binary-looking content (any
+/// NUL byte in the first 8 KB) and files larger than 1 MB. Plain text only —
+/// no regex for v1; we can layer that on later.
+#[tauri::command]
+fn find_in_files(
+    roots: Vec<String>,
+    query: String,
+    case_sensitive: bool,
+) -> Result<SearchResult, String> {
+    if query.is_empty() {
+        return Ok(SearchResult { hits: vec![], truncated: false, files_scanned: 0 });
+    }
+    let needle = if case_sensitive { query.clone() } else { query.to_lowercase() };
+    let needle_bytes = needle.as_bytes();
+    let mut hits: Vec<SearchHit> = Vec::new();
+    let mut files_scanned = 0usize;
+    let mut truncated = false;
+
+    'outer: for root_str in &roots {
+        let root = expand(root_str);
+        let mut stack: Vec<PathBuf> = vec![root.clone()];
+        while let Some(dir) = stack.pop() {
+            if hits.len() >= SEARCH_HITS_CAP || files_scanned >= SEARCH_FILES_CAP {
+                truncated = true;
+                break 'outer;
+            }
+            let read = match fs::read_dir(&dir) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            for entry in read.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                let ft = match entry.file_type() {
+                    Ok(t) => t,
+                    Err(_) => continue,
+                };
+                if ft.is_symlink() { continue; }
+                if ft.is_dir() {
+                    if name.starts_with('.') { continue; }
+                    if IGNORED_WALK_DIRS.iter().any(|d| d.eq_ignore_ascii_case(&name)) { continue; }
+                    stack.push(entry.path());
+                    continue;
+                }
+                if !ft.is_file() { continue; }
+                if name.starts_with('.')
+                    && !ALLOWED_NAMES.iter().any(|n| n.eq_ignore_ascii_case(&name))
+                {
+                    continue;
+                }
+                let path = entry.path();
+                let meta = match path.metadata() {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+                if meta.len() > SEARCH_FILE_BYTES_CAP { continue; }
+                let bytes = match fs::read(&path) {
+                    Ok(b) => b,
+                    Err(_) => continue,
+                };
+                // Skip binary: any NUL in the first 8 KB.
+                let probe_end = bytes.len().min(8192);
+                if bytes[..probe_end].iter().any(|&b| b == 0) {
+                    continue;
+                }
+                let text = match std::str::from_utf8(&bytes) {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+                files_scanned += 1;
+                let path_str = path.to_string_lossy().to_string();
+                for (lineno, line) in text.lines().enumerate() {
+                    if hits.len() >= SEARCH_HITS_CAP {
+                        truncated = true;
+                        break 'outer;
+                    }
+                    let hay = if case_sensitive { line.as_bytes() } else {
+                        // need to lowercase the line; allocate per match to avoid
+                        // mutating shared state. Most files have very few hits.
+                        let lower = line.to_lowercase();
+                        if let Some(col) = find_subseq(lower.as_bytes(), needle_bytes) {
+                            hits.push(SearchHit {
+                                path: path_str.clone(),
+                                line: (lineno + 1) as u32,
+                                col: (col + 1) as u32,
+                                text: line.to_string(),
+                            });
+                        }
+                        continue;
+                    };
+                    if let Some(col) = find_subseq(hay, needle_bytes) {
+                        hits.push(SearchHit {
+                            path: path_str.clone(),
+                            line: (lineno + 1) as u32,
+                            col: (col + 1) as u32,
+                            text: line.to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    log::info!(
+        "find_in_files: \"{}\" → {} hits in {} files{}",
+        query,
+        hits.len(),
+        files_scanned,
+        if truncated { " (truncated)" } else { "" }
+    );
+    Ok(SearchResult { hits, truncated, files_scanned })
+}
+
+fn find_subseq(hay: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || needle.len() > hay.len() { return None; }
+    let last = hay.len() - needle.len();
+    for i in 0..=last {
+        if &hay[i..i + needle.len()] == needle {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// Batched modification-time query, returned in milliseconds since the Unix
+/// epoch. The frontend polls this every few seconds to detect files that
+/// were edited outside DEditor (git pull, formatter, another editor, …).
+/// Missing / unreadable paths get `null` so a single broken entry doesn't
+/// poison the rest of the response.
+#[tauri::command]
+fn file_mtimes(paths: Vec<String>) -> Vec<Option<u64>> {
+    paths
+        .iter()
+        .map(|p| {
+            fs::metadata(expand(p))
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+        })
+        .collect()
+}
+
 /// Tell the frontend whether a path is a file, a directory, or missing.
 /// Used by the OS-drop handler to route dragged folders to `addWorkspace`
 /// instead of trying to open them as a file.
@@ -799,7 +961,9 @@ pub fn run() {
             update_menu_state,
             read_binary_as_base64,
             list_workspace_files,
-            path_kind
+            path_kind,
+            file_mtimes,
+            find_in_files
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

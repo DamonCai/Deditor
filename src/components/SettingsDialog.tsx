@@ -21,6 +21,16 @@ export default function SettingsDialog({ open, onClose }: Props) {
   const setShowIndentGuides = useEditorStore((s) => s.setShowIndentGuides);
   const showWhitespace = useEditorStore((s) => s.showWhitespace);
   const setShowWhitespace = useEditorStore((s) => s.setShowWhitespace);
+  const showMinimap = useEditorStore((s) => s.showMinimap);
+  const setShowMinimap = useEditorStore((s) => s.setShowMinimap);
+  const fontSize = useEditorStore((s) => s.editorFontSize);
+  const setFontSize = useEditorStore((s) => s.setEditorFontSize);
+  const theme = useEditorStore((s) => s.theme);
+  const setTheme = useEditorStore((s) => s.setTheme);
+  const language = useEditorStore((s) => s.language);
+  const setLanguage = useEditorStore((s) => s.setLanguage);
+  const autoSave = useEditorStore((s) => s.autoSave);
+  const setAutoSave = useEditorStore((s) => s.setAutoSave);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -106,27 +116,55 @@ export default function SettingsDialog({ open, onClose }: Props) {
         </div>
 
         <div style={{ padding: "12px 16px", flex: 1, overflowY: "auto" }}>
+          {/* General section: theme, language, font size, auto-save. */}
+          <section style={{ marginBottom: 16 }}>
+            <h3 style={sectionH3}>{t("settings.general.heading")}</h3>
+            <div style={sectionBox}>
+              <RadioRow
+                label={t("settings.general.theme")}
+                value={theme}
+                options={[
+                  { value: "light", label: t("settings.general.themeLight") },
+                  { value: "dark", label: t("settings.general.themeDark") },
+                ]}
+                onChange={(v) => setTheme(v as "light" | "dark")}
+              />
+              <RadioRow
+                label={t("settings.general.language")}
+                value={language}
+                options={[
+                  { value: "en", label: "English" },
+                  { value: "zh", label: "中文" },
+                ]}
+                onChange={(v) => setLanguage(v as "zh" | "en")}
+                topBorder
+              />
+              <SliderRow
+                label={t("settings.general.fontSize")}
+                value={fontSize}
+                min={10}
+                max={28}
+                onChange={setFontSize}
+                topBorder
+              />
+              <RadioRow
+                label={t("settings.general.autoSave")}
+                value={autoSave}
+                options={[
+                  { value: "off", label: t("settings.general.autoSaveOff") },
+                  { value: "onBlur", label: t("settings.general.autoSaveBlur") },
+                  { value: "afterDelay", label: t("settings.general.autoSaveDelay") },
+                ]}
+                onChange={(v) => setAutoSave(v as "off" | "onBlur" | "afterDelay")}
+                topBorder
+              />
+            </div>
+          </section>
+
           {/* Editor section */}
           <section style={{ marginBottom: 16 }}>
-            <h3
-              style={{
-                fontSize: 12,
-                textTransform: "uppercase",
-                letterSpacing: 0.6,
-                color: "var(--text-soft)",
-                margin: "0 0 6px",
-                fontWeight: 600,
-              }}
-            >
-              {t("settings.editor.heading")}
-            </h3>
-            <div
-              style={{
-                border: "1px solid var(--border)",
-                borderRadius: 6,
-                overflow: "hidden",
-              }}
-            >
+            <h3 style={sectionH3}>{t("settings.editor.heading")}</h3>
+            <div style={sectionBox}>
               <CheckRow checked={softWrap} onChange={setSoftWrap} label={t("settings.editor.softWrap")} />
               <CheckRow
                 checked={showIndentGuides}
@@ -138,6 +176,12 @@ export default function SettingsDialog({ open, onClose }: Props) {
                 checked={showWhitespace}
                 onChange={setShowWhitespace}
                 label={t("settings.editor.whitespace")}
+                topBorder
+              />
+              <CheckRow
+                checked={showMinimap}
+                onChange={setShowMinimap}
+                label={t("settings.editor.minimap")}
                 topBorder
               />
             </div>
@@ -155,16 +199,7 @@ export default function SettingsDialog({ open, onClose }: Props) {
 
           {grouped.map(({ group, items }) => (
             <section key={group} style={{ marginBottom: 16 }}>
-              <h3
-                style={{
-                  fontSize: 12,
-                  textTransform: "uppercase",
-                  letterSpacing: 0.6,
-                  color: "var(--text-soft)",
-                  margin: "0 0 6px",
-                  fontWeight: 600,
-                }}
-              >
+              <h3 style={sectionH3}>
                 {t(`settings.shortcuts.group.${group}`)}
               </h3>
               <div
@@ -318,3 +353,118 @@ function CheckRow({
     </label>
   );
 }
+
+function RadioRow<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+  topBorder,
+}: {
+  label: string;
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (v: T) => void;
+  topBorder?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        padding: "8px 12px",
+        borderTop: topBorder ? "1px solid var(--border)" : undefined,
+      }}
+    >
+      <span style={{ fontSize: 13, color: "var(--text)", flex: 1 }}>{label}</span>
+      <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+        {options.map((opt) => {
+          const active = opt.value === value;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => onChange(opt.value)}
+              style={{
+                padding: "3px 10px",
+                fontSize: 12,
+                borderRadius: 3,
+                border: "1px solid var(--border)",
+                background: active ? "var(--accent)" : "var(--bg)",
+                color: active ? "#fff" : "var(--text)",
+                cursor: "pointer",
+              }}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function SliderRow({
+  label,
+  value,
+  min,
+  max,
+  onChange,
+  topBorder,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (v: number) => void;
+  topBorder?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        padding: "8px 12px",
+        borderTop: topBorder ? "1px solid var(--border)" : undefined,
+      }}
+    >
+      <span style={{ fontSize: 13, color: "var(--text)", flex: 1 }}>{label}</span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        style={{ width: 140 }}
+      />
+      <span
+        style={{
+          fontSize: 12,
+          fontVariantNumeric: "tabular-nums",
+          color: "var(--text-soft)",
+          minWidth: 30,
+          textAlign: "right",
+        }}
+      >
+        {value}px
+      </span>
+    </div>
+  );
+}
+
+const sectionH3: React.CSSProperties = {
+  fontSize: 12,
+  textTransform: "uppercase",
+  letterSpacing: 0.6,
+  color: "var(--text-soft)",
+  margin: "0 0 6px",
+  fontWeight: 600,
+};
+
+const sectionBox: React.CSSProperties = {
+  border: "1px solid var(--border)",
+  borderRadius: 6,
+  overflow: "hidden",
+};
