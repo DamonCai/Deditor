@@ -299,6 +299,29 @@ const ext: Record<string, LangDef> = {
   woff:  { label: "Font",     shiki: "text", cm: cmShell, icon: I("WOF",  "#0ea5e9", LuType) },
   woff2: { label: "Font",     shiki: "text", cm: cmShell, icon: I("WF2",  "#0ea5e9", LuType) },
   eot:   { label: "Font",     shiki: "text", cm: cmShell, icon: I("EOT",  "#0ea5e9", LuType) },
+
+  // Video containers Chromium can't play natively — render as hex so we at
+  // least skip the read_text_file fallback (which would WARN every poll).
+  mkv:   { label: "Video", shiki: "text", cm: cmShell, icon: I("MKV",  "#7c3aed", LuFileVideo) },
+  avi:   { label: "Video", shiki: "text", cm: cmShell, icon: I("AVI",  "#7c3aed", LuFileVideo) },
+  wmv:   { label: "Video", shiki: "text", cm: cmShell, icon: I("WMV",  "#7c3aed", LuFileVideo) },
+  flv:   { label: "Video", shiki: "text", cm: cmShell, icon: I("FLV",  "#7c3aed", LuFileVideo) },
+  mpg:   { label: "Video", shiki: "text", cm: cmShell, icon: I("MPG",  "#7c3aed", LuFileVideo) },
+  mpeg:  { label: "Video", shiki: "text", cm: cmShell, icon: I("MPG",  "#7c3aed", LuFileVideo) },
+  mts:   { label: "Video", shiki: "text", cm: cmShell, icon: I("MTS",  "#7c3aed", LuFileVideo) },
+  m2ts:  { label: "Video", shiki: "text", cm: cmShell, icon: I("M2T",  "#7c3aed", LuFileVideo) },
+  vob:   { label: "Video", shiki: "text", cm: cmShell, icon: I("VOB",  "#7c3aed", LuFileVideo) },
+  rm:    { label: "Video", shiki: "text", cm: cmShell, icon: I("RM",   "#7c3aed", LuFileVideo) },
+  rmvb:  { label: "Video", shiki: "text", cm: cmShell, icon: I("RMV",  "#7c3aed", LuFileVideo) },
+  asf:   { label: "Video", shiki: "text", cm: cmShell, icon: I("ASF",  "#7c3aed", LuFileVideo) },
+  "3gp": { label: "Video", shiki: "text", cm: cmShell, icon: I("3GP",  "#7c3aed", LuFileVideo) },
+
+  // Audio formats browsers don't play — same treatment.
+  aiff:  { label: "Audio", shiki: "text", cm: cmShell, icon: I("AIF",  "#0ea5e9", LuFileAudio) },
+  aif:   { label: "Audio", shiki: "text", cm: cmShell, icon: I("AIF",  "#0ea5e9", LuFileAudio) },
+  mka:   { label: "Audio", shiki: "text", cm: cmShell, icon: I("MKA",  "#0ea5e9", LuFileAudio) },
+  ape:   { label: "Audio", shiki: "text", cm: cmShell, icon: I("APE",  "#0ea5e9", LuFileAudio) },
+  wma:   { label: "Audio", shiki: "text", cm: cmShell, icon: I("WMA",  "#0ea5e9", LuFileAudio) },
 };
 
 const FILENAME_MAP: Record<string, LangDef> = {
@@ -338,6 +361,13 @@ export const HEX_EXTS = [
   "bin", "dat", "iso",
   // fonts
   "ttf", "otf", "woff", "woff2", "eot",
+  // video containers Chromium can't render via <video>
+  // (".ts" is omitted — it conflicts with TypeScript and "MPEG transport
+  //  stream" .ts files are vanishingly rare in editor workflows.)
+  "mkv", "avi", "wmv", "flv", "mpg", "mpeg", "mts", "m2ts",
+  "vob", "rm", "rmvb", "asf", "3gp",
+  // audio formats browsers don't play
+  "aiff", "aif", "mka", "ape", "wma",
 ];
 
 export const SUPPORTED_EXTS = Object.keys(ext);

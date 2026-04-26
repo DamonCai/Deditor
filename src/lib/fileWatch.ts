@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useEditorStore } from "../store/editor";
 import { logInfo, logWarn } from "./logger";
+import { isBinaryRenderable } from "./lang";
 
 const POLL_MS = 3000;
 
@@ -17,7 +18,13 @@ export function useFileWatch(): void {
       const tabs = useEditorStore.getState().tabs;
       const paths: string[] = [];
       for (const t of tabs) {
-        if (t.filePath && !t.diff) paths.push(t.filePath);
+        if (!t.filePath || t.diff) continue;
+        // Binary-rendered tabs (image / pdf / audio / video / hex) live as
+        // data URLs, not text. read_text_file would WARN on every poll for
+        // these — skip them. mtime-driven reload for binaries can be added
+        // later if anyone asks; for now just don't spam the log.
+        if (isBinaryRenderable(t.filePath)) continue;
+        paths.push(t.filePath);
       }
       if (paths.length === 0) return;
 
