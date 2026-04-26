@@ -123,7 +123,35 @@ echo
 
 SCRIPTS_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+strip_volumeicon() {
+  # Tauri's DMG bundler stuffs a 2.3MB .VolumeIcon.icns into every DMG to
+  # paint the volume icon when mounted. We already give the .dmg file
+  # itself a custom Finder icon via the Rez resource-fork trick below,
+  # so the in-volume copy is dead weight.
+  _src="$1"
+  _rw="$(mktemp -t deditor-rw).dmg"
+  _mnt="$(mktemp -d -t deditor-mnt)"
+  _out="$(mktemp -t deditor-out).dmg"
+  rm -f "$_rw" "$_out"
+  hdiutil convert "$_src" -format UDRW -o "$_rw" >/dev/null 2>&1 || { rm -rf "$_rw" "$_mnt" "$_out"; return 1; }
+  hdiutil attach "$_rw" -nobrowse -mountpoint "$_mnt" >/dev/null 2>&1 || { rm -rf "$_rw" "$_mnt" "$_out"; return 1; }
+  rm -f "$_mnt/.VolumeIcon.icns"
+  hdiutil detach "$_mnt" -quiet >/dev/null 2>&1 || hdiutil detach "$_mnt" -force -quiet >/dev/null 2>&1
+  hdiutil convert "$_rw" -format UDZO -imagekey zlib-level=9 -o "$_out" >/dev/null 2>&1 || { rm -rf "$_rw" "$_mnt" "$_out"; return 1; }
+  mv -f "$_out" "$_src"
+  rm -rf "$_rw" "$_mnt"
+  return 0
+}
+
 if [ -d "$BUNDLE_DIR/dmg" ]; then
+  # Strip the auto-injected .VolumeIcon.icns from every freshly built DMG
+  # before re-applying the file-level Finder icon (the convert step below
+  # would otherwise drop the resource fork anyway).
+  for dmg in "$BUNDLE_DIR/dmg"/*.dmg; do
+    [ -e "$dmg" ] || continue
+    strip_volumeicon "$dmg" || echo "  (warning: failed to strip .VolumeIcon.icns from $(basename "$dmg"))"
+  done
+
   # Set custom Finder icon on the .dmg file. Modern .icns is data-fork only
   # (DeRez can't read it directly), so route through sips: bake an icon
   # resource into a PNG copy, extract, then Rez-append onto the .dmg.
