@@ -40,6 +40,7 @@ interface EditorState {
   closeOthers: (id: string) => void;
   setActive: (id: string) => void;
   replaceTabs: (tabs: Tab[], activeId: string) => void;
+  reorderTabs: (fromIdx: number, toIdx: number) => void;
   markSaved: () => void;
 
   setTabPosition: (id: string, pos: TabPosition) => void;
@@ -241,6 +242,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       if (keep.has(k)) nextPositions[k] = oldPositions[k];
     }
     set({ tabs, activeId, tabPositions: nextPositions });
+  },
+
+  reorderTabs: (fromIdx, toIdx) => {
+    const { tabs, activeId } = get();
+    if (fromIdx < 0 || fromIdx >= tabs.length || toIdx < 0 || toIdx > tabs.length) return;
+    // After splice(fromIdx, 1) + splice(toIdx, 0, ...), the tab only changes
+    // position if the final index differs. When toIdx > fromIdx the final
+    // position is toIdx - 1 (because the array shrunk by 1 before inserting).
+    const finalPos = toIdx > fromIdx ? toIdx - 1 : toIdx;
+    if (fromIdx === finalPos) return;
+    const next = [...tabs];
+    const [moved] = next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, moved);
+    set({ tabs: next, activeId });
   },
 
   markSaved: () => {

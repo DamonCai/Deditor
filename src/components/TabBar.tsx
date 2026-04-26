@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { FiChevronDown, FiPlus, FiX } from "react-icons/fi";
 import { useEditorStore, isTabDirty, type Tab } from "../store/editor";
 import { closeTabById, newFile, revealInFinder } from "../lib/fileio";
@@ -8,11 +8,85 @@ import ContextMenu, { type MenuItem } from "./ContextMenu";
 
 export default function TabBar() {
   const t = useT();
-  const { tabs, activeId, setActive, closeOthers } = useEditorStore();
+  const { tabs, activeId, setActive, closeOthers, reorderTabs } = useEditorStore();
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const stripRef = useRef<HTMLDivElement>(null);
   const overflowBtnRef = useRef<HTMLButtonElement>(null);
+
+  const dragState = useRef<{ fromIdx: number; startX: number } | null>(null);
+  const dropIndicator = useRef<number | null>(null);
+  const isDragging = useRef(false);
+  const preventClick = useRef(false);
+
+  const onMouseDownTab = useCallback((e: React.MouseEvent, idx: number) => {
+    if (e.button !== 0) return;
+    dragState.current = { fromIdx: idx, startX: e.clientX };
+    isDragging.current = false;
+  }, []);
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!dragState.current) return;
+      const dx = Math.abs(e.clientX - dragState.current.startX);
+      if (dx < 5) return;
+
+      isDragging.current = true;
+      document.body.style.cursor = "grabbing";
+
+      const strip = stripRef.current;
+      if (!strip) return;
+      const tabEls = Array.from(strip.querySelectorAll<HTMLElement>("[data-tab-id]"));
+      let insertBeforeIdx: number | null = null;
+      for (let i = 0; i < tabEls.length; i++) {
+        const r = tabEls[i].getBoundingClientRect();
+        if (e.clientX < r.left + r.width / 2) {
+          insertBeforeIdx = i;
+          break;
+        }
+      }
+      if (insertBeforeIdx === null && tabEls.length > 0) {
+        insertBeforeIdx = tabEls.length;
+      }
+
+      tabEls.forEach((el) => { el.style.borderLeft = ""; el.style.borderRight = ""; });
+      dropIndicator.current = insertBeforeIdx;
+      if (insertBeforeIdx != null && insertBeforeIdx < tabEls.length) {
+        tabEls[insertBeforeIdx].style.borderLeft = "3px solid #4f8cff";
+      }
+      if (insertBeforeIdx === tabEls.length) {
+        const last = tabEls[tabEls.length - 1];
+        if (last) last.style.borderRight = "3px solid #4f8cff";
+      }
+    };
+
+    const onUp = () => {
+      if (!dragState.current) return;
+      const { fromIdx } = dragState.current;
+      const toIdx = dropIndicator.current;
+
+      if (isDragging.current && toIdx != null && fromIdx !== toIdx) {
+        reorderTabs(fromIdx, toIdx);
+        preventClick.current = true;
+      }
+
+      document.body.style.cursor = "";
+      stripRef.current?.querySelectorAll("[data-tab-id]").forEach((el) => {
+        (el as HTMLElement).style.borderLeft = "";
+        (el as HTMLElement).style.borderRight = "";
+      });
+      dropIndicator.current = null;
+      dragState.current = null;
+      isDragging.current = false;
+    };
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [reorderTabs]);
 
   // Scroll active tab into view whenever it changes
   useLayoutEffect(() => {
@@ -63,14 +137,18 @@ export default function TabBar() {
           scrollbarWidth: "none",
         }}
       >
-        {tabs.map((tab) => (
+        {tabs.map((tab, idx) => (
           <TabItem
             key={tab.id}
             tab={tab}
             active={tab.id === activeId}
-            onClick={() => setActive(tab.id)}
+            onClick={() => {
+              if (preventClick.current) { preventClick.current = false; return; }
+              setActive(tab.id);
+            }}
             onClose={() => closeTabById(tab.id)}
             onContextMenu={(e) => onTabContextMenu(e, tab)}
+            onMouseDown={(e) => onMouseDownTab(e, idx)}
           />
         ))}
       </div>
@@ -151,12 +229,14 @@ function TabItem({
   onClick,
   onClose,
   onContextMenu,
+  onMouseDown,
 }: {
   tab: Tab;
   active: boolean;
   onClick: () => void;
   onClose: () => void;
   onContextMenu?: (e: React.MouseEvent) => void;
+  onMouseDown: (e: React.MouseEvent) => void;
 }) {
   const dirty = isTabDirty(tab);
   const untitled = tStatic("common.untitled");
@@ -170,7 +250,9 @@ function TabItem({
         if (e.button === 1) {
           e.preventDefault();
           onClose();
+          return;
         }
+        onMouseDown(e);
       }}
       title={tab.filePath ?? untitled}
       style={{
@@ -180,7 +262,7 @@ function TabItem({
         padding: "0 8px 0 10px",
         height: "100%",
         fontSize: 12,
-        cursor: "pointer",
+        cursor: "grab",
         background: active ? "var(--bg)" : "transparent",
         color: active ? "var(--text)" : "var(--text-soft)",
         borderRight: "1px solid var(--border)",
