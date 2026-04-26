@@ -126,7 +126,8 @@ fn is_text_file(name: &str) -> bool {
         let ext = &lower[dot + 1..];
         return ALLOWED_EXTS.iter().any(|e| *e == ext);
     }
-    false
+    // No extension → very likely a text doc (LICENSE / README / COPYING / AUTHORS / etc.)
+    true
 }
 
 #[tauri::command]
@@ -215,14 +216,22 @@ fn list_dir(path: String) -> Result<Vec<DirEntry>, String> {
     for entry in read {
         let entry = entry.map_err(|e| e.to_string())?;
         let name = entry.file_name().to_string_lossy().to_string();
-        if name.starts_with('.') {
-            continue;
-        }
         let file_type = match entry.file_type() {
             Ok(t) => t,
             Err(_) => continue,
         };
         let is_dir = file_type.is_dir();
+        // Hidden entries (".something"):
+        //   - dirs: always skip (.git / .vscode / .idea / etc.)
+        //   - files: only show if explicitly in ALLOWED_NAMES (.gitignore / .env / etc.)
+        if name.starts_with('.') {
+            if is_dir {
+                continue;
+            }
+            if !ALLOWED_NAMES.iter().any(|n| n.eq_ignore_ascii_case(&name)) {
+                continue;
+            }
+        }
         if !is_dir && !is_text_file(&name) {
             continue;
         }

@@ -1,6 +1,9 @@
 import { LanguageSupport, StreamLanguage } from "@codemirror/language";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { languages as codeLangs } from "@codemirror/language-data";
+import { tags as t } from "@lezer/highlight";
+import type { Tag } from "@lezer/highlight";
+import { LuFileText } from "react-icons/lu";
 // Static imports of legacy stream-mode parsers so Vite bundles them.
 // (Dynamic template-literal imports with @vite-ignore would fail in the browser
 //  because bare specifiers can't be resolved at runtime.)
@@ -61,8 +64,48 @@ const lazyJS = (jsx?: boolean, ts?: boolean) => async () =>
   (await import("@codemirror/lang-javascript")).javascript({ jsx, typescript: ts });
 
 type Stream = Parameters<typeof StreamLanguage.define>[0];
+
+// Map CM5-era token names (used by @codemirror/legacy-modes) onto Lezer highlight
+// tags so defaultHighlightStyle actually paints them. Without this, modes like
+// shell / powershell emit tokens like "builtin"/"def"/"variable"/"punctuation"
+// that fall through uncolored.
+const STREAM_TOKEN_TABLE: Record<string, Tag> = {
+  keyword: t.keyword,
+  atom: t.atom,
+  number: t.number,
+  string: t.string,
+  string2: t.special(t.string),
+  comment: t.comment,
+  meta: t.meta,
+  operator: t.operator,
+  punctuation: t.punctuation,
+  bracket: t.bracket,
+  tag: t.tagName,
+  attribute: t.attributeName,
+  property: t.propertyName,
+  type: t.typeName,
+  variable: t.variableName,
+  variable2: t.special(t.variableName),
+  variable3: t.local(t.variableName),
+  def: t.definition(t.variableName),
+  builtin: t.standard(t.variableName),
+  qualifier: t.modifier,
+  error: t.invalid,
+  link: t.link,
+  emphasis: t.emphasis,
+  strong: t.strong,
+  heading: t.heading,
+  hr: t.contentSeparator,
+  quote: t.quote,
+};
+
 const fromStream = (mode: Stream) => async () =>
-  new LanguageSupport(StreamLanguage.define(mode));
+  new LanguageSupport(
+    StreamLanguage.define({
+      ...mode,
+      tokenTable: { ...STREAM_TOKEN_TABLE, ...((mode as { tokenTable?: Record<string, Tag> }).tokenTable ?? {}) },
+    }),
+  );
 
 const cmShell = fromStream(shell);
 const cmToml = fromStream(toml);
@@ -172,7 +215,7 @@ const FALLBACK: LangDef = {
   label: "Text",
   shiki: "text",
   cm: cmShell,
-  icon: I("·", "#9aa0a6"),
+  icon: I("·", "#9aa0a6", LuFileText),
 };
 
 export const SUPPORTED_EXTS = Object.keys(ext);
