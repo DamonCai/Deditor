@@ -72,6 +72,16 @@ export function confirmDelete(
   }).then((v) => v === "delete");
 }
 
+/** Generic three+-choice modal. Returns the value of the chosen button, or
+ *  "cancel" if dismissed via Esc / outside-click. */
+export function chooseAction(opts: {
+  title: string;
+  message: string;
+  buttons: ButtonSpec[];
+}): Promise<string> {
+  return show(opts);
+}
+
 export default function ConfirmDialog() {
   const { open, title, message, buttons, resolve } = useConfirm();
   if (!open) return null;

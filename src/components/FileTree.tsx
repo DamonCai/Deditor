@@ -427,6 +427,7 @@ function DirNode({
         active={false}
         onClick={() => setOpen((v) => !v)}
         onContextMenu={(e) => onFolderContextMenu(e, entry.path)}
+        title={entry.path}
       >
         <Caret open={open} />
         <FiFolder size={14} color={FOLDER_COLOR} style={{ flexShrink: 0 }} />
@@ -481,6 +482,7 @@ function FileNode({
       active={active}
       onClick={() => openFileByPath(entry.path)}
       onContextMenu={onContextMenu}
+      title={entry.path}
     >
       <span style={{ width: 12, display: "inline-block" }} />
       <LangIcon filePath={entry.path} />
@@ -495,17 +497,20 @@ function Row({
   onClick,
   onContextMenu,
   children,
+  title,
 }: {
   depth: number;
   active: boolean;
   onClick: () => void;
   onContextMenu?: (e: React.MouseEvent) => void;
   children: React.ReactNode;
+  title?: string;
 }) {
   return (
     <div
       onClick={onClick}
       onContextMenu={onContextMenu}
+      title={title}
       className="flex items-center gap-1 cursor-pointer truncate"
       style={{
         paddingLeft: depth * 14 + 8,

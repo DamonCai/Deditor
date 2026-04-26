@@ -32,6 +32,12 @@ interface PersistedV3 {
   previewPct: number;
   editorFontSize?: number;
   previewMaximized?: boolean;
+  // Legacy git fields kept in the type so old snapshots still parse safely;
+  // unused since the git feature was removed.
+  gitPanelOpen?: boolean;
+  gitPanelHeight?: number;
+  gitPanelTab?: "commit" | "log";
+  gitDiffViewMode?: "side" | "unified";
 }
 
 interface PersistedV2 {

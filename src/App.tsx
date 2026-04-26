@@ -64,7 +64,7 @@ export default function App() {
       .finally(() => setHydrated(true));
   }, []);
 
-  // Persist on any store change (debounced 500ms)
+  // Persist on any store change (debounced 500ms).
   useEffect(() => {
     if (!hydrated) return;
     const unsub = useEditorStore.subscribe(() => {

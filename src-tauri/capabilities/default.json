@@ -8,6 +8,7 @@
     "dialog:default",
     "opener:default",
     "opener:allow-reveal-item-in-dir",
-    "opener:allow-open-path"
+    "opener:allow-open-path",
+    "window-state:default"
   ]
 }

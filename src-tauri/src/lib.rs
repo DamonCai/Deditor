@@ -286,6 +286,9 @@ pub fn run() {
     install_panic_hook();
 
     tauri::Builder::default()
+        // Persist window position / size / monitor / maximized state so
+        // re-opens land where you left off — including across displays.
+        .plugin(tauri_plugin_window_state::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(
