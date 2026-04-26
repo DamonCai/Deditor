@@ -22,6 +22,8 @@ import {
 } from "@codemirror/language";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { detectLang, isMarkdown, isImageFile, isPdfFile, isAudioFile, isVideoFile, isHexFile } from "../lib/lang";
+import type { DiffSpec } from "../store/editor";
+import DiffView from "./DiffView";
 import { saveImage } from "../lib/fileio";
 import { useEditorStore } from "../store/editor";
 import { logError, logInfo } from "../lib/logger";
@@ -56,6 +58,9 @@ interface Props {
   filePath: string | null;
   theme: "light" | "dark";
   fontSize: number;
+  /** When set, the active tab is a side-by-side file comparison; we short-
+   *  circuit and render DiffView, ignoring CodeMirror entirely. */
+  diff?: DiffSpec;
   /** Caret offset to restore on mount (only read once, when this Editor mounts). */
   initialCursor?: number;
   /** First-visible line (1-based) to restore on mount. */
@@ -72,6 +77,7 @@ export default function Editor({
   filePath,
   theme,
   fontSize,
+  diff,
   initialCursor,
   initialScrollLine,
   externalScrollLine,
@@ -83,6 +89,10 @@ export default function Editor({
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const hostRef = useRef<HTMLDivElement>(null);
 
+  // Diff tab — render the side-by-side comparison.
+  if (diff) {
+    return <DiffView spec={diff} />;
+  }
   // Image preview — render a data URL directly as <img>.
   if (isImageFile(filePath) && value.startsWith("data:")) {
     return (

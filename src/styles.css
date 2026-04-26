@@ -10,6 +10,10 @@
   --text: #1f2328;
   --text-soft: #57606a;
   --accent: #2563eb;
+  --diff-add-bg: rgba(34, 197, 94, 0.18);
+  --diff-del-bg: rgba(239, 68, 68, 0.18);
+  --diff-empty-bg: rgba(127, 127, 127, 0.06);
+  --compare-mark-bg: rgba(37, 99, 235, 0.18);
 }
 
 .dark {
@@ -20,6 +24,10 @@
   --text: #e6edf3;
   --text-soft: #8b949e;
   --accent: #58a6ff;
+  --diff-add-bg: rgba(34, 197, 94, 0.22);
+  --diff-del-bg: rgba(239, 68, 68, 0.22);
+  --diff-empty-bg: rgba(255, 255, 255, 0.04);
+  --compare-mark-bg: rgba(88, 166, 255, 0.22);
 }
 
 html,

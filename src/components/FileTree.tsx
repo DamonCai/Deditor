@@ -7,6 +7,7 @@ import {
   listDir,
   openFileByPath,
   openFolder,
+  openCompare,
   renamePath,
   revealInFinder,
   setWorkspaceByPath,
@@ -35,6 +36,8 @@ export default function FileTree() {
   const filePath = useEditorStore(
     (s) => s.tabs.find((t) => t.id === s.activeId)?.filePath ?? null,
   );
+  const compareMarkPath = useEditorStore((s) => s.compareMarkPath);
+  const setCompareMarkPath = useEditorStore((s) => s.setCompareMarkPath);
   const [pathInput, setPathInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -176,12 +179,35 @@ export default function FileTree() {
                   },
                 ])
               }
-              onFileContextMenu={(e, file) =>
-                openMenu(e, [
+              onFileContextMenu={(e, file) => {
+                const marked = compareMarkPath;
+                const items: MenuItem[] = [
                   {
                     label: t("filetree.revealInFinder"),
                     onClick: () => revealInFinder(file),
                   },
+                  { divider: true },
+                ];
+                if (marked && marked !== file) {
+                  items.push({
+                    label: t("filetree.compareWithSelected", {
+                      name: marked.split(/[\\/]/).pop() ?? marked,
+                    }),
+                    onClick: () => void openCompare(marked, file),
+                  });
+                }
+                items.push(
+                  marked === file
+                    ? {
+                        label: t("filetree.unmarkForCompare"),
+                        onClick: () => setCompareMarkPath(null),
+                      }
+                    : {
+                        label: t("filetree.selectForCompare"),
+                        onClick: () => setCompareMarkPath(file),
+                      },
+                );
+                items.push(
                   { divider: true },
                   {
                     label: t("filetree.renameFile"),
@@ -191,8 +217,9 @@ export default function FileTree() {
                     label: t("filetree.deleteFile"),
                     onClick: () => promptDelete(file, false),
                   },
-                ])
-              }
+                );
+                openMenu(e, items);
+              }}
             />
           ))
         )}
@@ -524,13 +551,15 @@ function FileNode({
   onContextMenu?: (e: React.MouseEvent) => void;
 }) {
   const active = entry.path === activePath;
+  const marked = useEditorStore((s) => s.compareMarkPath === entry.path);
   return (
     <Row
       depth={depth}
       active={active}
+      marked={marked}
       onClick={() => void openFileByPath(entry.path)}
       onContextMenu={onContextMenu}
-      title={entry.path}
+      title={marked ? `${entry.path}\n(selected for compare)` : entry.path}
     >
       <span style={{ width: 12, display: "inline-block" }} />
       <LangIcon filePath={entry.path} />
@@ -542,6 +571,7 @@ function FileNode({
 function Row({
   depth,
   active,
+  marked,
   onClick,
   onContextMenu,
   children,
@@ -549,11 +579,16 @@ function Row({
 }: {
   depth: number;
   active: boolean;
+  marked?: boolean;
   onClick: () => void;
   onContextMenu?: (e: React.MouseEvent) => void;
   children: React.ReactNode;
   title?: string;
 }) {
+  // The "marked for compare" highlight uses a dedicated background so it
+  // remains visible even when another tab is the active file. Mark > active
+  // visually so the user keeps track of what they staged for comparison.
+  const baseBg = marked ? "var(--compare-mark-bg)" : active ? "var(--bg-mute)" : "";
   return (
     <div
       onClick={onClick}
@@ -564,14 +599,15 @@ function Row({
         paddingLeft: depth * 14 + 8,
         paddingRight: 8,
         height: 24,
-        background: active ? "var(--bg-mute)" : undefined,
+        background: baseBg || undefined,
         color: active ? "var(--accent)" : "var(--text)",
+        boxShadow: marked ? "inset 2px 0 0 var(--accent)" : undefined,
       }}
       onMouseEnter={(e) => {
-        if (!active) e.currentTarget.style.background = "var(--bg-mute)";
+        if (!marked && !active) e.currentTarget.style.background = "var(--bg-mute)";
       }}
       onMouseLeave={(e) => {
-        if (!active) e.currentTarget.style.background = "";
+        if (!marked && !active) e.currentTarget.style.background = "";
       }}
     >
       {children}

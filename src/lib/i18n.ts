@@ -60,6 +60,13 @@ const ZH: Record<string, string> = {
   "filetree.empty": "(空)",
   "filetree.createFailed": "创建失败: {err}",
   "filetree.deleteFailed": "删除失败: {err}",
+  "filetree.selectForCompare": "选为对比文件",
+  "filetree.unmarkForCompare": "取消对比标记",
+  "filetree.compareWithSelected": '与 "{name}" 对比',
+  "filetree.compareBinaryRefused": "二进制文件不支持文本对比。",
+
+  // diff
+  "diff.identical": "两个文件内容完全相同。",
 
   // tabbar
   "tabbar.newTab": "新建标签 (Cmd/Ctrl+N)",
@@ -204,6 +211,13 @@ const EN: Record<string, string> = {
   "filetree.empty": "(empty)",
   "filetree.createFailed": "Create failed: {err}",
   "filetree.deleteFailed": "Delete failed: {err}",
+  "filetree.selectForCompare": "Select for Compare",
+  "filetree.unmarkForCompare": "Clear Compare Selection",
+  "filetree.compareWithSelected": 'Compare with "{name}"',
+  "filetree.compareBinaryRefused": "Binary files can't be compared as text.",
+
+  // diff
+  "diff.identical": "The two files are identical.",
 
   // tabbar
   "tabbar.newTab": "New tab (Cmd/Ctrl+N)",

@@ -260,14 +260,15 @@ export function schedulePersist(extras: UiExtras): void {
 
 function doSave(extras: UiExtras): void {
   const s = useEditorStore.getState();
-  const activeIndex = Math.max(
-    0,
-    s.tabs.findIndex((t) => t.id === s.activeId),
-  );
+  // Diff tabs are ephemeral — drop them before persisting so they don't show
+  // up empty on next launch.
+  const persistableTabs = s.tabs.filter((t) => !t.diff);
+  const activeIdx0 = persistableTabs.findIndex((t) => t.id === s.activeId);
+  const activeIndex = activeIdx0 < 0 ? 0 : activeIdx0;
   const base: Persisted = {
     v: 3,
     workspaces: s.workspaces,
-    tabs: s.tabs.map((t) => {
+    tabs: persistableTabs.map((t) => {
       const pos = s.tabPositions[t.id];
       // Binary tabs hold a base64 data URL in `content` — that can be many
       // megabytes and would blow localStorage's quota. Persist filePath only

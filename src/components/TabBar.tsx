@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { FiChevronDown, FiPlus, FiX } from "react-icons/fi";
+import { LuGitCompare } from "react-icons/lu";
 import { useEditorStore, isTabDirty, type Tab } from "../store/editor";
 import { closeTabById, newFile, revealInFinder } from "../lib/fileio";
 import { useT, tStatic } from "../lib/i18n";
 import LangIcon from "./LangIcon";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
+
+function basename(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path;
+}
 
 export default function TabBar() {
   const t = useT();
@@ -240,7 +245,14 @@ function TabItem({
 }) {
   const dirty = isTabDirty(tab);
   const untitled = tStatic("common.untitled");
-  const name = tab.filePath ? tab.filePath.split(/[\\/]/).pop() : untitled;
+  const name = tab.diff
+    ? `${basename(tab.diff.leftPath)} ↔ ${basename(tab.diff.rightPath)}`
+    : tab.filePath
+    ? tab.filePath.split(/[\\/]/).pop()
+    : untitled;
+  const tooltip = tab.diff
+    ? `${tab.diff.leftPath}\n↔\n${tab.diff.rightPath}`
+    : tab.filePath ?? untitled;
   return (
     <div
       data-tab-id={tab.id}
@@ -254,7 +266,7 @@ function TabItem({
         }
         onMouseDown(e);
       }}
-      title={tab.filePath ?? untitled}
+      title={tooltip}
       style={{
         display: "flex",
         alignItems: "center",
@@ -271,7 +283,9 @@ function TabItem({
         maxWidth: 220,
       }}
     >
-      {tab.filePath ? (
+      {tab.diff ? (
+        <LuGitCompare size={14} style={{ color: "var(--text-soft)" }} />
+      ) : tab.filePath ? (
         <LangIcon filePath={tab.filePath} size={14} />
       ) : (
         <span style={{ width: 14, display: "inline-block" }} />
@@ -363,12 +377,12 @@ function OverflowDropdown({
     };
   }, [anchorRef, onDismiss]);
 
+  const labelOf = (tb: Tab): string =>
+    tb.diff
+      ? `${basename(tb.diff.leftPath)} ↔ ${basename(tb.diff.rightPath)}`
+      : tb.filePath ?? untitled;
   const filtered = filter
-    ? tabs.filter((tb) =>
-        (tb.filePath ?? untitled)
-          .toLowerCase()
-          .includes(filter.toLowerCase()),
-      )
+    ? tabs.filter((tb) => labelOf(tb).toLowerCase().includes(filter.toLowerCase()))
     : tabs;
 
   return (
@@ -423,12 +437,12 @@ function OverflowDropdown({
         {filtered.map((tb) => {
           const dirty = isTabDirty(tb);
           const isActive = tb.id === activeId;
-          const name = tb.filePath ? tb.filePath.split(/[\\/]/).pop() : untitled;
+          const name = labelOf(tb);
           return (
             <div
               key={tb.id}
               onClick={() => onPick(tb.id)}
-              title={tb.filePath ?? untitled}
+              title={tb.diff ? `${tb.diff.leftPath}\n↔\n${tb.diff.rightPath}` : tb.filePath ?? untitled}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -446,7 +460,9 @@ function OverflowDropdown({
                 if (!isActive) e.currentTarget.style.background = "";
               }}
             >
-              {tb.filePath ? (
+              {tb.diff ? (
+                <LuGitCompare size={14} style={{ color: "var(--text-soft)" }} />
+              ) : tb.filePath ? (
                 <LangIcon filePath={tb.filePath} size={14} />
               ) : (
                 <span style={{ width: 14, display: "inline-block" }} />

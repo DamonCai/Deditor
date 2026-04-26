@@ -73,6 +73,33 @@ export async function openMany(paths: string[]) {
   }
 }
 
+/** Read both files as text and open a side-by-side diff tab. Refuses binary
+ *  files (image/pdf/audio/video/hex) since a meaningful line diff requires
+ *  decodable text. */
+export async function openCompare(leftPath: string, rightPath: string): Promise<void> {
+  if (
+    isImageFile(leftPath) || isPdfFile(leftPath) || isAudioFile(leftPath) ||
+    isVideoFile(leftPath) || isHexFile(leftPath) ||
+    isImageFile(rightPath) || isPdfFile(rightPath) || isAudioFile(rightPath) ||
+    isVideoFile(rightPath) || isHexFile(rightPath)
+  ) {
+    logWarn(`compare refused: binary file involved (${leftPath} vs ${rightPath})`);
+    alert(tStatic("filetree.compareBinaryRefused"));
+    return;
+  }
+  try {
+    const [leftContent, rightContent] = await Promise.all([
+      invoke<string>("read_text_file", { path: leftPath }),
+      invoke<string>("read_text_file", { path: rightPath }),
+    ]);
+    useEditorStore.getState().openDiffTab({ leftPath, rightPath, leftContent, rightContent });
+    useEditorStore.getState().setCompareMarkPath(null);
+    logInfo(`compare opened: ${leftPath} vs ${rightPath}`);
+  } catch (err) {
+    logError(`compare failed: ${leftPath} vs ${rightPath}`, err);
+  }
+}
+
 /** Read a binary file (image / PDF / audio / video) and open it as a tab whose
  *  content is a `data:` URL. The renderer in Editor.tsx branches on file type
  *  to pick the right element (<img>, <iframe>, <audio>, <video>). */
@@ -137,6 +164,8 @@ export async function saveFile() {
   const { tabs, activeId, markSaved } = useEditorStore.getState();
   const active = tabs.find((t) => t.id === activeId);
   if (!active) return;
+  // Diff tabs are read-only — there's nothing to save.
+  if (active.diff) return;
   if (!active.filePath) return saveFileAs();
   try {
     await invoke("write_text_file", { path: active.filePath, content: active.content });
@@ -152,6 +181,7 @@ export async function saveFileAs() {
   const { tabs, activeId, rebindActive } = useEditorStore.getState();
   const active = tabs.find((t) => t.id === activeId);
   if (!active) return;
+  if (active.diff) return;
   const target = await save({
     filters: MD_FILTER,
     defaultPath: active.filePath ?? "untitled.md",
@@ -326,6 +356,15 @@ export async function renamePath(from: string, to: string): Promise<void> {
   if (anyChanged) {
     useEditorStore.setState({ tabs: remapped });
   }
+  // Keep the compare mark in sync if it pointed at the renamed file.
+  const { compareMarkPath, setCompareMarkPath } = useEditorStore.getState();
+  if (compareMarkPath === from) setCompareMarkPath(to);
+  else if (
+    compareMarkPath &&
+    (compareMarkPath.startsWith(from + "/") || compareMarkPath.startsWith(from + "\\"))
+  ) {
+    setCompareMarkPath(to + compareMarkPath.slice(from.length));
+  }
 }
 
 export async function deletePath(path: string): Promise<void> {
@@ -335,6 +374,11 @@ export async function deletePath(path: string): Promise<void> {
     // notify the parent so the tree refreshes
     const idx = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
     if (idx > 0) notifyRefresh(path.slice(0, idx));
+    // Clear the compare mark if it's gone now.
+    const mark = useEditorStore.getState().compareMarkPath;
+    if (mark && (mark === path || mark.startsWith(path + "/") || mark.startsWith(path + "\\"))) {
+      useEditorStore.getState().setCompareMarkPath(null);
+    }
     // Close any tabs pointing at the deleted path or under it (if it was a dir)
     const { tabs, closeTab } = useEditorStore.getState();
     for (const t of tabs) {

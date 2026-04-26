@@ -3,11 +3,22 @@ import { create } from "zustand";
 export type Theme = "light" | "dark";
 export type Lang = "zh" | "en";
 
+export interface DiffSpec {
+  leftPath: string;
+  rightPath: string;
+  leftContent: string;
+  rightContent: string;
+}
+
 export interface Tab {
   id: string;
   filePath: string | null;
   content: string;
   savedContent: string;
+  /** When set, this tab is a side-by-side file comparison. The `filePath`,
+   *  `content`, and `savedContent` fields are ignored for diff tabs (kept on
+   *  the type so the rest of the codebase doesn't have to special-case them). */
+  diff?: DiffSpec;
 }
 
 export interface TabPosition {
@@ -29,10 +40,16 @@ interface EditorState {
   showSidebar: boolean;
   previewMaximized: boolean;
   editorFontSize: number;
+  /** Path of the file the user marked via "Select for Compare" in the file
+   *  tree. Right-clicking another file then offers "Compare with Selected". */
+  compareMarkPath: string | null;
 
   setContent: (content: string) => void;
   // Open a new tab (or focus existing one for the same path).
   openTab: (filePath: string | null, content: string) => string;
+  // Open a side-by-side diff tab. Dedupes on (leftPath, rightPath).
+  openDiffTab: (spec: DiffSpec) => string;
+  setCompareMarkPath: (path: string | null) => void;
   // Replace active tab's file (used when "Save As" rebinds path).
   rebindActive: (filePath: string, content: string) => void;
   newUntitled: () => string;
@@ -147,6 +164,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   showSidebar: true,
   previewMaximized: false,
   editorFontSize: 14,
+  compareMarkPath: null,
 
   setContent: (content) => {
     const { tabs, activeId } = get();
@@ -180,6 +198,29 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({ tabs: [...tabs, t], activeId: t.id });
     return t.id;
   },
+
+  openDiffTab: (spec) => {
+    const { tabs } = get();
+    // Dedupe: same pair (in the same direction) → focus existing tab.
+    const existing = tabs.find(
+      (t) => t.diff && t.diff.leftPath === spec.leftPath && t.diff.rightPath === spec.rightPath,
+    );
+    if (existing) {
+      set({ activeId: existing.id });
+      return existing.id;
+    }
+    const t: Tab = {
+      id: newId(),
+      filePath: null,
+      content: "",
+      savedContent: "",
+      diff: spec,
+    };
+    set({ tabs: [...tabs, t], activeId: t.id });
+    return t.id;
+  },
+
+  setCompareMarkPath: (path) => set({ compareMarkPath: path }),
 
   rebindActive: (filePath, content) => {
     const { tabs, activeId } = get();

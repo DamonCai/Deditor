@@ -36,7 +36,10 @@ export default function App() {
   const active = useActiveTab();
   const filePath = active?.filePath ?? null;
   const content = active?.content ?? "";
-  const previewEnabled = showPreview && isMarkdown(filePath);
+  // Diff tabs disable the markdown preview pane and skip the markdown/json
+  // toolbars — there's nothing to preview when we're showing a comparison.
+  const isDiffTab = !!active?.diff;
+  const previewEnabled = !isDiffTab && showPreview && isMarkdown(filePath);
   // Initial caret + scroll for the active tab. Read imperatively so subscribing
   // components don't re-render every cursor move; Editor only consumes these
   // on mount (a fresh instance is created via `key={tab.id}` per active tab).
@@ -286,13 +289,14 @@ export default function App() {
                   style={{ width: previewEnabled ? `${editorPct}%` : "100%" }}
                   className="min-w-0 flex-1 flex flex-col"
                 >
-                  {isMarkdown(filePath) && <MarkdownToolbar />}
-                  {isJson(filePath) && <JsonToolbar />}
+                  {!isDiffTab && isMarkdown(filePath) && <MarkdownToolbar />}
+                  {!isDiffTab && isJson(filePath) && <JsonToolbar />}
                   <div className="flex-1 min-h-0">
                     <Editor
                       key={active?.id ?? "no-tab"}
                       value={content}
                       filePath={filePath}
+                      diff={active?.diff}
                       theme={theme}
                       fontSize={editorFontSize}
                       initialCursor={initialPos?.cursor}
