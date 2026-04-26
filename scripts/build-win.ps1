@@ -1,7 +1,8 @@
 # DEditor - Windows production build (.msi + .exe)
 # Usage:
-#   .\scripts\build-win.ps1                  # version 0.0.1 (default)
-#   .\scripts\build-win.ps1 -Version 0.2.0   # bump to 0.2.0 and build
+#   .\scripts\build-win.ps1                    # version 0.0.1 (default)
+#   .\scripts\build-win.ps1 -Version 0.2.0     # PowerShell style
+#   .\scripts\build-win.ps1 --version 0.2.0    # GNU style (also accepted)
 param(
     # Default version when -Version is omitted. Every build pins a known
     # version into the three manifest files so the About dialog and
@@ -11,6 +12,47 @@ param(
 
 $ErrorActionPreference = "Stop"
 Set-Location "$PSScriptRoot\.."
+
+# ---------------------------------------------------------------------------
+# Argument fix-up: PowerShell only recognises `-Version 0.2.0`. If the user
+# writes `--version 0.2.0` the parser positional-binds "--version" into
+# $Version and pushes "0.2.0" into $args, which trips the regex check
+# below. Recover that here so both syntaxes work, and surface a clear
+# message for common typos like `--verison`.
+# ---------------------------------------------------------------------------
+if ($Version.StartsWith("-")) {
+    $flag = $Version
+    $typos = @("--verison", "--vesion", "--vresion", "--versoin", "--versino", "--ver")
+    if ($typos -contains $flag.ToLower()) {
+        Write-Host "ERROR: unknown flag '$flag'. Did you mean --version ?"
+        exit 1
+    }
+    if ($flag -ine "--version" -and $flag -ine "-v") {
+        Write-Host "ERROR: unknown flag '$flag'"
+        Write-Host "Use:"
+        Write-Host "  .\scripts\build-win.ps1 -Version 0.2.0"
+        Write-Host "  .\scripts\build-win.ps1 --version 0.2.0"
+        exit 1
+    }
+    if ($args.Count -lt 1) {
+        Write-Host "ERROR: $flag requires a value, e.g. $flag 0.2.0"
+        exit 1
+    }
+    $Version = [string]$args[0]
+    if ($args.Count -gt 1) {
+        $args = $args[1..($args.Count - 1)]
+    } else {
+        $args = @()
+    }
+}
+
+if ($args.Count -gt 0) {
+    Write-Host "ERROR: unknown extra arguments: $($args -join ' ')"
+    Write-Host "Use:"
+    Write-Host "  -Version <X.Y.Z>   (PowerShell) or"
+    Write-Host "  --version <X.Y.Z>  (GNU style)"
+    exit 1
+}
 
 if (-not $IsWindows -and $env:OS -ne "Windows_NT") {
     Write-Host "This script must run on Windows."
@@ -42,20 +84,24 @@ if ($Version -notmatch '^\d+\.\d+\.\d+') {
 }
 Write-Host "Bumping version -> $Version"
 
-# src-tauri/Cargo.toml — anchored to start-of-line so we don't touch
-# version fields inside dependency inline tables.
+# src-tauri/Cargo.toml — `(?m)^version = "..."` only matches a line whose
+# first character is `v`. Dependencies use inline tables (`tauri = { version =
+# "2", ... }`) where `version` isn't at line start, so they're untouched.
 $cargo = Get-Content "src-tauri\Cargo.toml" -Raw
 $cargo = $cargo -replace '(?m)^version = "[^"]*"', ('version = "' + $Version + '"')
 Set-Content -NoNewline -Path "src-tauri\Cargo.toml" -Value $cargo
 
-# src-tauri/tauri.conf.json — only the top-level "version" key exists.
+# src-tauri/tauri.conf.json — only the top-level "version" key exists in
+# our config (no plugin or build sub-object uses that key), so a global
+# replace is safe. PowerShell's -replace has no "count" parameter.
 $conf = Get-Content "src-tauri\tauri.conf.json" -Raw
-$conf = $conf -replace '"version":\s*"[^"]*"', ('"version": "' + $Version + '"'), 1
+$conf = $conf -replace '"version":\s*"[^"]*"', ('"version": "' + $Version + '"')
 Set-Content -NoNewline -Path "src-tauri\tauri.conf.json" -Value $conf
 
-# package.json — top-level "version" only.
+# package.json — top-level "version" only (npm dependency entries are
+# `"<name>": "<range>"`, never `"version": "..."`).
 $pkg = Get-Content "package.json" -Raw
-$pkg = $pkg -replace '"version":\s*"[^"]*"', ('"version": "' + $Version + '"'), 1
+$pkg = $pkg -replace '"version":\s*"[^"]*"', ('"version": "' + $Version + '"')
 Set-Content -NoNewline -Path "package.json" -Value $pkg
 
 # --- Install deps if needed ---
