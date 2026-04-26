@@ -126,34 +126,39 @@ const DEFAULT_CONTENT_ZH = `# 欢迎使用 DEditor
 - \`Cmd/Ctrl+N\` 新建标签
 - \`Cmd/Ctrl+O\` 打开文件（可多选）
 - \`Cmd/Ctrl+Shift+O\` 打开文件夹（添加为工作区）
-- \`Cmd/Ctrl+S\` 保存
-- \`Cmd/Ctrl+Shift+S\` 另存为
+- \`Cmd/Ctrl+S\` 保存，\`Cmd/Ctrl+Shift+S\` 另存为
 - \`Cmd/Ctrl+W\` 关闭当前标签
-- 拖拽文件 / 多个文件到窗口直接打开
+- 拖文件 / 多文件到窗口直接打开；**拖目录则添加为工作区**
 
 ### 导航
 
 - \`Cmd/Ctrl+P\` 跨工作区模糊搜索文件（Goto Anything）
+- \`Cmd/Ctrl+Shift+P\` 命令面板（搜所有命令并执行）
+- \`Cmd/Ctrl+,\` 打开设置
 - \`Cmd/Ctrl+B\` 开关左侧文件树
-- 鼠标中键点击标签 = 关闭
+- \`Cmd/Ctrl+Alt+G\` 跳到指定行
+- 鼠标点 TabBar 切换标签；鼠标中键点标签 = 关闭
 
 ### 编辑
 
-- \`Cmd/Ctrl+Z\` 撤销，\`Cmd/Ctrl+Shift+Z\` 重做
+- \`Cmd/Ctrl+Z\` 撤销，\`Cmd/Ctrl+Shift+Z\` 重做（**切换标签会保留各自的撤销栈**）
 - \`Cmd/Ctrl+X / C / V\` 剪切 / 复制 / 粘贴
 - \`Cmd/Ctrl+A\` 全选
 - \`Cmd/Ctrl+F\` 当前文件内查找，\`Cmd/Ctrl+G\` 跳到下一个匹配
 - \`Cmd/Ctrl+D\` 选中下一个相同词
 - \`Cmd/Ctrl+Shift+L\` 选中所有相同词
 - \`Cmd/Ctrl+Alt+↑ / ↓\` 在上 / 下方加一个光标
+- \`Cmd/Ctrl+Alt+[ / ]\` 折叠 / 展开当前块
 - \`Cmd/Ctrl+Click\` 在点击位置追加光标
 - \`Alt+Drag\` 列选 / 矩形选择
 - \`Tab / Shift+Tab\` 缩进 / 反缩进
 
+> 设置（\`Cmd/Ctrl+,\`）里可以**关闭任何与系统/输入法冲突的快捷键**，菜单条目仍可点击使用。
+
 ### 文件树（右键）
 
 - 在 Finder 中显示
-- 选为对比文件 → 在另一个文件上右键"与 xxx 对比"
+- 选为对比文件 → 在另一个文件上右键"与 xxx 对比" 打开 side-by-side diff
 - 重命名 / 删除 / 新建文件 / 新建文件夹
 - 图片 / PDF / 音视频点击直接打开预览；Word / Excel / 压缩包等二进制文件以 hex dump 展示
 
@@ -177,34 +182,39 @@ A Markdown / multi-language code editor built on **Tauri + React + CodeMirror**.
 - \`Cmd/Ctrl+N\` New tab
 - \`Cmd/Ctrl+O\` Open file (multi-select)
 - \`Cmd/Ctrl+Shift+O\` Open folder (add as workspace)
-- \`Cmd/Ctrl+S\` Save
-- \`Cmd/Ctrl+Shift+S\` Save As
+- \`Cmd/Ctrl+S\` Save, \`Cmd/Ctrl+Shift+S\` Save As
 - \`Cmd/Ctrl+W\` Close current tab
-- Drag one or more files onto the window to open
+- Drag one or more files onto the window to open; **drop a folder to add it as a workspace**
 
 ### Navigation
 
 - \`Cmd/Ctrl+P\` Fuzzy file search across workspaces (Goto Anything)
+- \`Cmd/Ctrl+Shift+P\` Command Palette (search all commands and run)
+- \`Cmd/Ctrl+,\` Open Settings
 - \`Cmd/Ctrl+B\` Toggle the file tree sidebar
-- Middle-click a tab to close it
+- \`Cmd/Ctrl+Alt+G\` Goto line number
+- Click a tab in the bar to switch; middle-click to close
 
 ### Editing
 
-- \`Cmd/Ctrl+Z\` Undo, \`Cmd/Ctrl+Shift+Z\` Redo
+- \`Cmd/Ctrl+Z\` Undo, \`Cmd/Ctrl+Shift+Z\` Redo (**each tab keeps its own undo history**)
 - \`Cmd/Ctrl+X / C / V\` Cut / Copy / Paste
 - \`Cmd/Ctrl+A\` Select all
 - \`Cmd/Ctrl+F\` Find in current file, \`Cmd/Ctrl+G\` Jump to next match
 - \`Cmd/Ctrl+D\` Select next occurrence of the current word
 - \`Cmd/Ctrl+Shift+L\` Select all occurrences
 - \`Cmd/Ctrl+Alt+↑ / ↓\` Add a cursor above / below
+- \`Cmd/Ctrl+Alt+[ / ]\` Fold / Unfold the current block
 - \`Cmd/Ctrl+Click\` Add a cursor at the click position
 - \`Alt+Drag\` Column / rectangular selection
 - \`Tab / Shift+Tab\` Indent / Outdent
 
+> Open Settings (\`Cmd/Ctrl+,\`) to **disable any shortcut that conflicts with your OS, IME, or another app** — menu items remain clickable.
+
 ### File Tree (right-click)
 
 - Reveal in Finder
-- Select for Compare → right-click another file → "Compare with …"
+- Select for Compare → right-click another file → "Compare with …" opens a side-by-side diff
 - Rename / Delete / New File / New Folder
 - Click any image / PDF / audio / video to preview inline; Word / Excel /
   archives and other binaries are shown as a hex dump
