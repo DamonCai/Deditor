@@ -3,8 +3,8 @@ import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { languages as codeLangs } from "@codemirror/language-data";
 import { tags as t } from "@lezer/highlight";
 import type { Tag } from "@lezer/highlight";
-import { LuFileText, LuFileImage, LuFileAudio, LuFileVideo } from "react-icons/lu";
-import { FaRegFilePdf } from "react-icons/fa";
+import { LuFileText, LuFileImage, LuFileAudio, LuFileVideo, LuFileCog, LuDatabase, LuType } from "react-icons/lu";
+import { FaRegFilePdf, FaRegFileWord, FaRegFileExcel, FaRegFilePowerpoint, FaRegFileArchive } from "react-icons/fa";
 // Static imports of legacy stream-mode parsers so Vite bundles them.
 // (Dynamic template-literal imports with @vite-ignore would fail in the browser
 //  because bare specifiers can't be resolved at runtime.)
@@ -232,6 +232,73 @@ const ext: Record<string, LangDef> = {
   mov:  { label: "Video", shiki: "text", cm: cmShell, icon: I("MOV",  "#7c3aed", LuFileVideo) },
   m4v:  { label: "Video", shiki: "text", cm: cmShell, icon: I("M4V",  "#7c3aed", LuFileVideo) },
   ogv:  { label: "Video", shiki: "text", cm: cmShell, icon: I("OGV",  "#7c3aed", LuFileVideo) },
+
+  // Office documents — Word (rendered as hex dump in Editor.tsx)
+  doc:  { label: "Word",  shiki: "text", cm: cmShell, icon: I("DOC",  "#2B579A", FaRegFileWord) },
+  docx: { label: "Word",  shiki: "text", cm: cmShell, icon: I("DOCX", "#2B579A", FaRegFileWord) },
+  docm: { label: "Word",  shiki: "text", cm: cmShell, icon: I("DOCM", "#2B579A", FaRegFileWord) },
+  dot:  { label: "Word",  shiki: "text", cm: cmShell, icon: I("DOT",  "#2B579A", FaRegFileWord) },
+  dotx: { label: "Word",  shiki: "text", cm: cmShell, icon: I("DOTX", "#2B579A", FaRegFileWord) },
+  dotm: { label: "Word",  shiki: "text", cm: cmShell, icon: I("DOTM", "#2B579A", FaRegFileWord) },
+  odt:  { label: "OpenDocument Text", shiki: "text", cm: cmShell, icon: I("ODT", "#008080", FaRegFileWord) },
+  rtf:  { label: "RTF",   shiki: "text", cm: cmShell, icon: I("RTF",  "#2B579A", FaRegFileWord) },
+  pages:{ label: "Pages", shiki: "text", cm: cmShell, icon: I("PGS",  "#FF9500", FaRegFileWord) },
+
+  // Office documents — Excel
+  xls:  { label: "Excel", shiki: "text", cm: cmShell, icon: I("XLS",  "#217346", FaRegFileExcel) },
+  xlsx: { label: "Excel", shiki: "text", cm: cmShell, icon: I("XLSX", "#217346", FaRegFileExcel) },
+  xlsm: { label: "Excel", shiki: "text", cm: cmShell, icon: I("XLSM", "#217346", FaRegFileExcel) },
+  xlsb: { label: "Excel", shiki: "text", cm: cmShell, icon: I("XLSB", "#217346", FaRegFileExcel) },
+  ods:  { label: "OpenDocument Sheet", shiki: "text", cm: cmShell, icon: I("ODS", "#008080", FaRegFileExcel) },
+  numbers: { label: "Numbers", shiki: "text", cm: cmShell, icon: I("NUM", "#34C759", FaRegFileExcel) },
+
+  // Office documents — PowerPoint
+  ppt:  { label: "PowerPoint", shiki: "text", cm: cmShell, icon: I("PPT",  "#B7472A", FaRegFilePowerpoint) },
+  pptx: { label: "PowerPoint", shiki: "text", cm: cmShell, icon: I("PPTX", "#B7472A", FaRegFilePowerpoint) },
+  pptm: { label: "PowerPoint", shiki: "text", cm: cmShell, icon: I("PPTM", "#B7472A", FaRegFilePowerpoint) },
+  odp:  { label: "OpenDocument Presentation", shiki: "text", cm: cmShell, icon: I("ODP", "#008080", FaRegFilePowerpoint) },
+  key:  { label: "Keynote", shiki: "text", cm: cmShell, icon: I("KEY", "#000000", FaRegFilePowerpoint) },
+
+  // Archives
+  zip:  { label: "Archive", shiki: "text", cm: cmShell, icon: I("ZIP",  "#8b5cf6", FaRegFileArchive) },
+  tar:  { label: "Archive", shiki: "text", cm: cmShell, icon: I("TAR",  "#8b5cf6", FaRegFileArchive) },
+  gz:   { label: "Archive", shiki: "text", cm: cmShell, icon: I("GZ",   "#8b5cf6", FaRegFileArchive) },
+  tgz:  { label: "Archive", shiki: "text", cm: cmShell, icon: I("TGZ",  "#8b5cf6", FaRegFileArchive) },
+  bz2:  { label: "Archive", shiki: "text", cm: cmShell, icon: I("BZ2",  "#8b5cf6", FaRegFileArchive) },
+  xz:   { label: "Archive", shiki: "text", cm: cmShell, icon: I("XZ",   "#8b5cf6", FaRegFileArchive) },
+  "7z": { label: "Archive", shiki: "text", cm: cmShell, icon: I("7Z",   "#8b5cf6", FaRegFileArchive) },
+  rar:  { label: "Archive", shiki: "text", cm: cmShell, icon: I("RAR",  "#8b5cf6", FaRegFileArchive) },
+  jar:  { label: "Archive", shiki: "text", cm: cmShell, icon: I("JAR",  "#ED8B00", FaRegFileArchive) },
+  war:  { label: "Archive", shiki: "text", cm: cmShell, icon: I("WAR",  "#ED8B00", FaRegFileArchive) },
+
+  // Databases
+  db:      { label: "Database", shiki: "text", cm: cmShell, icon: I("DB",  "#003B57", LuDatabase) },
+  sqlite:  { label: "SQLite",   shiki: "text", cm: cmShell, icon: I("SQL", "#003B57", LuDatabase) },
+  sqlite3: { label: "SQLite",   shiki: "text", cm: cmShell, icon: I("SQL", "#003B57", LuDatabase) },
+  mdb:     { label: "Access",   shiki: "text", cm: cmShell, icon: I("MDB", "#A4373A", LuDatabase) },
+
+  // Executables / native binaries
+  exe:   { label: "Executable", shiki: "text", cm: cmShell, icon: I("EXE", "#6b7280", LuFileCog) },
+  dll:   { label: "Library",    shiki: "text", cm: cmShell, icon: I("DLL", "#6b7280", LuFileCog) },
+  so:    { label: "Library",    shiki: "text", cm: cmShell, icon: I("SO",  "#6b7280", LuFileCog) },
+  dylib: { label: "Library",    shiki: "text", cm: cmShell, icon: I("DYL", "#6b7280", LuFileCog) },
+  app:   { label: "Application",shiki: "text", cm: cmShell, icon: I("APP", "#6b7280", LuFileCog) },
+  deb:   { label: "Package",    shiki: "text", cm: cmShell, icon: I("DEB", "#a80030", LuFileCog) },
+  rpm:   { label: "Package",    shiki: "text", cm: cmShell, icon: I("RPM", "#cc0000", LuFileCog) },
+  dmg:   { label: "Disk Image", shiki: "text", cm: cmShell, icon: I("DMG", "#6b7280", LuFileCog) },
+  msi:   { label: "Installer",  shiki: "text", cm: cmShell, icon: I("MSI", "#6b7280", LuFileCog) },
+  apk:   { label: "Android",    shiki: "text", cm: cmShell, icon: I("APK", "#3DDC84", LuFileCog) },
+  ipa:   { label: "iOS",        shiki: "text", cm: cmShell, icon: I("IPA", "#A2AAAD", LuFileCog) },
+  bin:   { label: "Binary",     shiki: "text", cm: cmShell, icon: I("BIN", "#6b7280", LuFileCog) },
+  dat:   { label: "Data",       shiki: "text", cm: cmShell, icon: I("DAT", "#6b7280", LuFileCog) },
+  iso:   { label: "Disk Image", shiki: "text", cm: cmShell, icon: I("ISO", "#6b7280", LuFileCog) },
+
+  // Fonts
+  ttf:   { label: "Font",     shiki: "text", cm: cmShell, icon: I("TTF",  "#0ea5e9", LuType) },
+  otf:   { label: "Font",     shiki: "text", cm: cmShell, icon: I("OTF",  "#0ea5e9", LuType) },
+  woff:  { label: "Font",     shiki: "text", cm: cmShell, icon: I("WOF",  "#0ea5e9", LuType) },
+  woff2: { label: "Font",     shiki: "text", cm: cmShell, icon: I("WF2",  "#0ea5e9", LuType) },
+  eot:   { label: "Font",     shiki: "text", cm: cmShell, icon: I("EOT",  "#0ea5e9", LuType) },
 };
 
 const FILENAME_MAP: Record<string, LangDef> = {
@@ -253,6 +320,25 @@ const FALLBACK: LangDef = {
 export const IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico", "tiff", "tif"];
 export const AUDIO_EXTS = ["mp3", "wav", "ogg", "flac", "m4a", "aac", "opus"];
 export const VIDEO_EXTS = ["mp4", "webm", "mov", "m4v", "ogv"];
+
+/** Extensions we render as a hex dump rather than text or any rich preview.
+ *  These are binary formats with no native browser viewer (Office docs,
+ *  archives, executables, databases, fonts, generic binary). */
+export const HEX_EXTS = [
+  // office
+  "doc", "docx", "docm", "dot", "dotx", "dotm", "odt", "rtf", "pages",
+  "xls", "xlsx", "xlsm", "xlsb", "ods", "numbers",
+  "ppt", "pptx", "pptm", "odp", "key",
+  // archives
+  "zip", "tar", "gz", "tgz", "bz2", "xz", "7z", "rar", "jar", "war",
+  // databases
+  "db", "sqlite", "sqlite3", "mdb",
+  // executables / packages
+  "exe", "dll", "so", "dylib", "app", "deb", "rpm", "dmg", "msi", "apk", "ipa",
+  "bin", "dat", "iso",
+  // fonts
+  "ttf", "otf", "woff", "woff2", "eot",
+];
 
 export const SUPPORTED_EXTS = Object.keys(ext);
 
@@ -302,7 +388,21 @@ export function isVideoFile(filePath: string | null): boolean {
   return VIDEO_EXTS.includes(e);
 }
 
-/** True for files we render via a base64 data URL rather than as text. */
+export function isHexFile(filePath: string | null): boolean {
+  if (!filePath) return false;
+  const e = filePath.split(".").pop()?.toLowerCase() ?? "";
+  return HEX_EXTS.includes(e);
+}
+
+/** True for files we render via a base64 data URL rather than as text.
+ *  Persistence treats these specially: we don't write base64 to localStorage,
+ *  we re-read from disk on startup. */
 export function isBinaryRenderable(filePath: string | null): boolean {
-  return isImageFile(filePath) || isPdfFile(filePath) || isAudioFile(filePath) || isVideoFile(filePath);
+  return (
+    isImageFile(filePath) ||
+    isPdfFile(filePath) ||
+    isAudioFile(filePath) ||
+    isVideoFile(filePath) ||
+    isHexFile(filePath)
+  );
 }

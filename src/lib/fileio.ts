@@ -6,7 +6,7 @@ import { confirmUnsaved } from "../components/ConfirmDialog";
 import { logError, logInfo, logWarn } from "./logger";
 import { notifyRefresh } from "./treeRefresh";
 import { tStatic } from "./i18n";
-import { isImageFile, isPdfFile, isAudioFile, isVideoFile } from "./lang";
+import { isImageFile, isPdfFile, isAudioFile, isVideoFile, isHexFile } from "./lang";
 
 const MD_FILTER = [
   { name: "Markdown", extensions: ["md", "markdown", "mdx"] },
@@ -52,6 +52,7 @@ export async function openFileByPath(path: string) {
   if (isPdfFile(path)) return openBinaryAsDataUrl(path, "pdf");
   if (isAudioFile(path)) return openBinaryAsDataUrl(path, "audio");
   if (isVideoFile(path)) return openBinaryAsDataUrl(path, "video");
+  if (isHexFile(path)) return openBinaryAsDataUrl(path, "hex");
   const { tabs } = useEditorStore.getState();
   if (tabs.some((t) => t.filePath === path)) {
     useEditorStore.getState().openTab(path, "");
@@ -77,7 +78,7 @@ export async function openMany(paths: string[]) {
  *  to pick the right element (<img>, <iframe>, <audio>, <video>). */
 export async function openBinaryAsDataUrl(
   path: string,
-  kind: "image" | "pdf" | "audio" | "video",
+  kind: "image" | "pdf" | "audio" | "video" | "hex",
 ): Promise<void> {
   const { openTab, tabs } = useEditorStore.getState();
   if (tabs.some((t) => t.filePath === path)) {

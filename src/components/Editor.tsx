@@ -21,7 +21,7 @@ import {
   LanguageSupport,
 } from "@codemirror/language";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { detectLang, isMarkdown, isImageFile, isPdfFile, isAudioFile, isVideoFile } from "../lib/lang";
+import { detectLang, isMarkdown, isImageFile, isPdfFile, isAudioFile, isVideoFile, isHexFile } from "../lib/lang";
 import { saveImage } from "../lib/fileio";
 import { useEditorStore } from "../store/editor";
 import { logError, logInfo } from "../lib/logger";
@@ -109,6 +109,12 @@ export default function Editor({
         <video src={value} controls style={{ maxWidth: "100%", maxHeight: "100%" }} />
       </div>
     );
+  }
+  // Binary files we don't have a preview for (Office docs, archives, executables,
+  // etc.) — render a hex dump so the user at least sees the raw bytes instead
+  // of UTF-8-decoded garbage.
+  if (isHexFile(filePath) && value.startsWith("data:")) {
+    return <HexView dataUrl={value} filePath={filePath} />;
   }
   const viewRef = useRef<EditorView | null>(null);
   const themeCompartment = useRef(new Compartment());
@@ -491,5 +497,105 @@ function PdfView({ src, title }: { src: string; title: string }) {
         background: "var(--bg)",
       }}
     />
+  );
+}
+
+// Cap the hex dump at 256 KB. Larger files would render >16k rows of text and
+// stall the browser laying them out; the user can see the start of the file
+// and that's enough to identify magic bytes / format. The footer reports the
+// truncation so the bytes-shown-vs-total mismatch isn't surprising.
+const HEX_MAX_BYTES = 256 * 1024;
+const HEX_BYTES_PER_ROW = 16;
+
+function decodeBase64DataUrl(dataUrl: string, maxBytes: number): { bytes: Uint8Array; total: number } {
+  const comma = dataUrl.indexOf(",");
+  const b64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+  // base64 length → byte length: every 4 chars decode to 3 bytes (minus padding).
+  const padding = b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0;
+  const total = Math.floor(b64.length / 4) * 3 - padding;
+  // Decode either the whole thing or just enough base64 chars to cover maxBytes.
+  // ceil(maxBytes / 3) groups of 3 → that many * 4 base64 chars.
+  const wantBytes = Math.min(total, maxBytes);
+  const wantB64Chars = Math.ceil(wantBytes / 3) * 4;
+  const slice = b64.slice(0, wantB64Chars);
+  const binary = atob(slice);
+  const bytes = new Uint8Array(Math.min(binary.length, wantBytes));
+  for (let i = 0; i < bytes.length; i++) bytes[i] = binary.charCodeAt(i);
+  return { bytes, total };
+}
+
+function formatHexDump(bytes: Uint8Array): string {
+  const lines: string[] = [];
+  for (let off = 0; off < bytes.length; off += HEX_BYTES_PER_ROW) {
+    const row = bytes.subarray(off, off + HEX_BYTES_PER_ROW);
+    const offsetStr = off.toString(16).padStart(8, "0");
+    const hexParts: string[] = [];
+    let ascii = "";
+    for (let i = 0; i < HEX_BYTES_PER_ROW; i++) {
+      if (i < row.length) {
+        hexParts.push(row[i].toString(16).padStart(2, "0"));
+        const c = row[i];
+        ascii += c >= 0x20 && c < 0x7f ? String.fromCharCode(c) : ".";
+      } else {
+        hexParts.push("  ");
+        ascii += " ";
+      }
+      if (i === 7) hexParts.push(""); // gap between the two 8-byte halves
+    }
+    lines.push(`${offsetStr}  ${hexParts.join(" ")}  ${ascii}`);
+  }
+  return lines.join("\n");
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+function HexView({ dataUrl, filePath }: { dataUrl: string; filePath: string | null }) {
+  // Memoize across re-renders of the parent — base64 decode + formatting can
+  // be tens of ms for hundred-KB files.
+  const { dump, total, shown } = (() => {
+    try {
+      const { bytes, total } = decodeBase64DataUrl(dataUrl, HEX_MAX_BYTES);
+      return { dump: formatHexDump(bytes), total, shown: bytes.length };
+    } catch (err) {
+      logError("HexView decode failed", err);
+      return { dump: "(failed to decode)", total: 0, shown: 0 };
+    }
+  })();
+  const truncated = shown < total;
+  return (
+    <div className="flex flex-col h-full w-full" style={{ background: "var(--bg)" }}>
+      <div
+        className="px-3 py-1 text-xs"
+        style={{
+          borderBottom: "1px solid var(--border)",
+          background: "var(--bg-soft)",
+          color: "var(--text-soft)",
+          flexShrink: 0,
+          fontFamily: "var(--font-mono, ui-monospace, monospace)",
+        }}
+      >
+        {filePath ? filePath.split(/[\\/]/).pop() : "binary"}
+        {" · "}
+        {formatBytes(total)}
+        {truncated && ` · showing first ${formatBytes(shown)}`}
+      </div>
+      <pre
+        className="flex-1 min-h-0 overflow-auto px-3 py-2 text-xs"
+        style={{
+          margin: 0,
+          color: "var(--text)",
+          fontFamily: "var(--font-mono, ui-monospace, monospace)",
+          tabSize: 4,
+          whiteSpace: "pre",
+        }}
+      >
+        {dump}
+      </pre>
+    </div>
   );
 }
