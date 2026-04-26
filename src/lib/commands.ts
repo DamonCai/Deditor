@@ -10,6 +10,7 @@ import {
   newFile,
   openFile,
   openFolder,
+  reopenLastClosedTab,
   saveFile,
   saveFileAs,
 } from "./fileio";
@@ -35,6 +36,7 @@ export const COMMANDS: Command[] = [
   { id: "cmd.file.save",         labelKey: "cmd.file.save",         shortcut: "Cmd/Ctrl+S",        group: "file", run: () => void saveFile() },
   { id: "cmd.file.saveAs",       labelKey: "cmd.file.saveAs",       shortcut: "Cmd/Ctrl+Shift+S",  group: "file", run: () => void saveFileAs() },
   { id: "cmd.file.closeTab",     labelKey: "cmd.file.closeTab",     shortcut: "Cmd/Ctrl+W",        group: "file", run: () => void closeActiveTab() },
+  { id: "cmd.file.reopen",       labelKey: "cmd.file.reopen",       shortcut: "Cmd/Ctrl+Shift+T",  group: "file", run: () => void reopenLastClosedTab() },
 
   // View
   {

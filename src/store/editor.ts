@@ -1,8 +1,24 @@
 import { create } from "zustand";
 import { DEFAULT_SHORTCUTS, type ShortcutId } from "../lib/shortcuts";
+import { isBinaryRenderable } from "../lib/lang";
 
 export type Theme = "light" | "dark";
 export type Lang = "zh" | "en";
+
+/** A closed tab snapshot, just enough state to bring it back via Cmd+Shift+T.
+ *  We don't persist these across launches — the stack is a session feature. */
+export interface ClosedTabRecord {
+  filePath: string | null;
+  /** Held only for untitled tabs (no filePath) and dirty named tabs that the
+   *  user explicitly chose not to save. Named tabs reopen via the regular
+   *  read-from-disk path so the user gets the latest on-disk content. */
+  content: string;
+  savedContent: string;
+  cursor?: number;
+  scrollTopLine?: number;
+}
+
+const REOPEN_STACK_MAX = 20;
 
 export interface DiffSpec {
   leftPath: string;
@@ -52,6 +68,11 @@ interface EditorState {
    *  all ranges if multi-cursor). 0 when no selection. Not persisted —
    *  selection state shouldn't survive a restart. */
   activeSelectionLength: number;
+  /** LIFO stack of recently-closed tabs, used by Cmd+Shift+T to reopen.
+   *  Capped at REOPEN_STACK_MAX entries. Diff tabs and binary-renderable
+   *  files (image / pdf / audio / video / hex) are not pushed — diff is
+   *  ephemeral and binary content as data URLs would bloat memory. */
+  closedTabsStack: ClosedTabRecord[];
   /** Per-shortcut enable/disable map. Missing keys default to enabled (so new
    *  shortcuts shipped in updates "just work" for upgrading users). */
   shortcuts: Record<string, boolean>;
@@ -102,6 +123,12 @@ interface EditorState {
   openDiffTab: (spec: DiffSpec) => string;
   setCompareMarkPath: (path: string | null) => void;
   setActiveSelectionLength: (n: number) => void;
+  /** Push a closed-tab snapshot onto the reopen stack. Called by `closeTab`;
+   *  exported so external code (e.g. workspace removal) can also enqueue. */
+  pushClosedTab: (record: ClosedTabRecord) => void;
+  /** Pop and return the most recently closed tab. The caller handles the
+   *  actual reopen so the store stays free of IPC. */
+  popClosedTab: () => ClosedTabRecord | null;
   setShortcutEnabled: (id: ShortcutId, enabled: boolean) => void;
   setShortcuts: (next: Record<string, boolean>) => void;
   resetShortcuts: () => void;
@@ -160,6 +187,7 @@ const DEFAULT_CONTENT_ZH = `# 欢迎使用 DEditor
 - \`Cmd/Ctrl+Shift+O\` 打开文件夹（添加为工作区）
 - \`Cmd/Ctrl+S\` 保存，\`Cmd/Ctrl+Shift+S\` 另存为
 - \`Cmd/Ctrl+W\` 关闭当前标签
+- \`Cmd/Ctrl+Shift+T\` 重新打开最近关闭的标签 —— **任何类型**（文本 / 图片 / PDF / 音视频 / 二进制），**可连按**回溯多个
 - 拖文件 / 多文件到窗口直接打开；**拖目录则添加为工作区**
 
 ### 导航
@@ -228,6 +256,7 @@ A Markdown / multi-language code editor built on **Tauri + React + CodeMirror**.
 - \`Cmd/Ctrl+Shift+O\` Open folder (add as workspace)
 - \`Cmd/Ctrl+S\` Save, \`Cmd/Ctrl+Shift+S\` Save As
 - \`Cmd/Ctrl+W\` Close current tab
+- \`Cmd/Ctrl+Shift+T\` Reopen the most recently closed tab — **any type** (text / image / PDF / audio / video / binary); **press repeatedly** to walk back
 - Drag one or more files onto the window to open; **drop a folder to add it as a workspace**
 
 ### Navigation
@@ -329,6 +358,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   editorFontSize: 14,
   compareMarkPath: null,
   activeSelectionLength: 0,
+  closedTabsStack: [],
   shortcuts: { ...DEFAULT_SHORTCUTS },
   settingsOpen: false,
   gotoAnythingOpen: false,
@@ -405,6 +435,18 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({ activeSelectionLength: n });
   },
 
+  pushClosedTab: (record) => {
+    const next = [...get().closedTabsStack, record].slice(-REOPEN_STACK_MAX);
+    set({ closedTabsStack: next });
+  },
+  popClosedTab: () => {
+    const stack = get().closedTabsStack;
+    if (stack.length === 0) return null;
+    const record = stack[stack.length - 1];
+    set({ closedTabsStack: stack.slice(0, -1) });
+    return record;
+  },
+
   setShortcutEnabled: (id, enabled) => {
     const cur = get().shortcuts;
     if (cur[id] === enabled) return;
@@ -452,10 +494,29 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   closeTab: (id) => {
-    const { tabs, activeId, tabPositions, language } = get();
+    const { tabs, activeId, tabPositions, language, closedTabsStack } = get();
+    const closingTab = tabs.find((t) => t.id === id);
+    // Push every closed tab onto the reopen stack except diff tabs (those are
+    // ephemeral by design). Binary-rendered tabs (image / PDF / audio / video
+    // / hex) get pushed with content blanked — `openFileByPath` re-reads from
+    // disk on reopen, so we don't need to carry the data URL around.
+    const reopenWorthy = closingTab && !closingTab.diff;
+    const isBinary = closingTab && isBinaryRenderable(closingTab.filePath);
+    const newStack = reopenWorthy
+      ? [
+          ...closedTabsStack,
+          {
+            filePath: closingTab.filePath,
+            content: isBinary ? "" : closingTab.content,
+            savedContent: isBinary ? "" : closingTab.savedContent,
+            cursor: tabPositions[id]?.cursor,
+            scrollTopLine: tabPositions[id]?.scrollTopLine,
+          },
+        ].slice(-REOPEN_STACK_MAX)
+      : closedTabsStack;
     if (tabs.length === 1) {
       const t = makeTab(null, defaultContentForLang(language));
-      set({ tabs: [t], activeId: t.id, tabPositions: {} });
+      set({ tabs: [t], activeId: t.id, tabPositions: {}, closedTabsStack: newStack });
       return;
     }
     const idx = tabs.findIndex((t) => t.id === id);
@@ -467,17 +528,44 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
     const nextPositions = { ...tabPositions };
     delete nextPositions[id];
-    set({ tabs: next, activeId: newActive, tabPositions: nextPositions });
+    set({
+      tabs: next,
+      activeId: newActive,
+      tabPositions: nextPositions,
+      closedTabsStack: newStack,
+    });
   },
 
   closeOthers: (id) => {
-    const { tabs, tabPositions } = get();
+    const { tabs, tabPositions, closedTabsStack } = get();
     const keep = tabs.find((t) => t.id === id);
     if (!keep) return;
+    // Push every other tab onto the reopen stack, in tab-order so popping
+    // reverses left-to-right (rightmost reopens first). Diff tabs skipped;
+    // binary tabs go in with content blanked (reopen reads from disk).
+    const records: ClosedTabRecord[] = [];
+    for (const t of tabs) {
+      if (t.id === id) continue;
+      if (t.diff) continue;
+      const isBinary = isBinaryRenderable(t.filePath);
+      records.push({
+        filePath: t.filePath,
+        content: isBinary ? "" : t.content,
+        savedContent: isBinary ? "" : t.savedContent,
+        cursor: tabPositions[t.id]?.cursor,
+        scrollTopLine: tabPositions[t.id]?.scrollTopLine,
+      });
+    }
+    const newStack = [...closedTabsStack, ...records].slice(-REOPEN_STACK_MAX);
     const nextPositions = tabPositions[id]
       ? { [id]: tabPositions[id] }
       : {};
-    set({ tabs: [keep], activeId: keep.id, tabPositions: nextPositions });
+    set({
+      tabs: [keep],
+      activeId: keep.id,
+      tabPositions: nextPositions,
+      closedTabsStack: newStack,
+    });
   },
 
   setActive: (id) => {

@@ -73,6 +73,44 @@ export async function openMany(paths: string[]) {
   }
 }
 
+/** Pop the reopen stack (Cmd+Shift+T) and bring the most recently closed
+ *  tab back. Named tabs go through the regular open path so they pick up
+ *  any external changes; untitled tabs restore their snapshot content.
+ *  Cursor / scroll position are restored when present in the record. */
+export async function reopenLastClosedTab(): Promise<void> {
+  const { popClosedTab, openTab, setTabPosition } = useEditorStore.getState();
+  const record = popClosedTab();
+  if (!record) {
+    logInfo("reopenLastClosedTab: stack is empty");
+    return;
+  }
+
+  if (record.filePath == null) {
+    // Untitled snapshot — recreate the tab with whatever content was there.
+    const id = openTab(null, record.content);
+    if (record.cursor != null || record.scrollTopLine != null) {
+      setTabPosition(id, {
+        cursor: record.cursor ?? 0,
+        scrollTopLine: record.scrollTopLine ?? 1,
+      });
+    }
+    logInfo("reopened closed tab (untitled)");
+    return;
+  }
+
+  // Named tab — re-open via the standard dispatch so binary-rendered types
+  // route correctly, then restore the saved cursor / scroll if we had it.
+  await openFileByPath(record.filePath);
+  const tab = useEditorStore.getState().tabs.find((t) => t.filePath === record.filePath);
+  if (tab && (record.cursor != null || record.scrollTopLine != null)) {
+    setTabPosition(tab.id, {
+      cursor: record.cursor ?? 0,
+      scrollTopLine: record.scrollTopLine ?? 1,
+    });
+  }
+  logInfo(`reopened closed tab: ${record.filePath}`);
+}
+
 /** Read both files as text and open a side-by-side diff tab. Refuses binary
  *  files (image/pdf/audio/video/hex) since a meaningful line diff requires
  *  decodable text. */

@@ -30,6 +30,7 @@ export type ShortcutId =
   | "app_command_palette"
   | "app_goto_symbol"
   | "app_find_in_files"
+  | "app_reopen_closed_tab"
   | "app_open_settings"
   | "app_zen_mode"
   | "app_split_editor"
@@ -65,6 +66,7 @@ export const SHORTCUTS: ShortcutMeta[] = [
   { id: "app_command_palette", display: "Cmd/Ctrl+Shift+P", labelKey: "shortcut.nav.commandPalette", layer: "app", group: "nav" },
   { id: "app_goto_symbol",     display: "Cmd/Ctrl+R",       labelKey: "shortcut.nav.gotoSymbol",     layer: "app", group: "nav" },
   { id: "app_find_in_files",   display: "Cmd/Ctrl+Shift+F", labelKey: "shortcut.nav.findInFiles",    layer: "app", group: "nav" },
+  { id: "app_reopen_closed_tab", display: "Cmd/Ctrl+Shift+T", labelKey: "shortcut.file.reopen",       layer: "app", group: "file" },
   { id: "app_toggle_sidebar",  display: "Cmd/Ctrl+B",       labelKey: "shortcut.nav.toggleSidebar",  layer: "app", group: "nav" },
   { id: "app_open_settings",   display: "Cmd/Ctrl+,",       labelKey: "shortcut.nav.openSettings",   layer: "app", group: "nav" },
   { id: "app_zen_mode",        display: "Cmd/Ctrl+K",       labelKey: "shortcut.nav.zenMode",        layer: "app", group: "nav" },

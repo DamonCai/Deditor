@@ -32,6 +32,7 @@ import {
   openMany,
   setWorkspaceByPath,
   saveAllDirty,
+  reopenLastClosedTab,
 } from "./lib/fileio";
 import { loadPersisted, schedulePersist } from "./lib/persistence";
 import { useFileWatch } from "./lib/fileWatch";
@@ -188,6 +189,12 @@ export default function App() {
         if (!isEnabled(prefs, "app_find_in_files")) return;
         e.preventDefault();
         setFindInFilesOpen(true);
+      } else if (k === "t" && e.shiftKey && !e.altKey) {
+        // Cmd/Ctrl+Shift+T → reopen last closed tab. Press repeatedly to
+        // walk back up the close stack (Chrome / VSCode parity).
+        if (!isEnabled(prefs, "app_reopen_closed_tab")) return;
+        e.preventDefault();
+        void reopenLastClosedTab();
       } else if (e.key === "," && !e.shiftKey && !e.altKey) {
         // Cmd/Ctrl+, → Settings. Standard macOS preferences shortcut.
         if (!isEnabled(prefs, "app_open_settings")) return;
@@ -211,8 +218,12 @@ export default function App() {
         useEditorStore.getState().toggleSplitEditor();
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // Capture phase: WKWebView (and Chromium in some setups) treats certain
+    // chords like Cmd+Shift+T as "reopen closed tab" at the browser layer
+    // and consumes them before bubble-phase listeners fire. Capture lets us
+    // intercept first; we then preventDefault to stop the default action.
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, []);
 
   // Bridge native File menu clicks to the existing fileio handlers.

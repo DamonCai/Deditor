@@ -46,6 +46,7 @@
 
 | 快捷键 | 功能 |
 | --- | --- |
+| `Cmd/Ctrl+Shift+T` | 重新打开最近关闭的标签（可连按） |
 | `Cmd/Ctrl+P` | Goto Anything — 跨工作区模糊搜索文件名 |
 | `Cmd/Ctrl+Shift+P` | 命令面板 — 模糊搜任意命令并执行 |
 | `Cmd/Ctrl+R` | Goto Symbol — 当前文件函数 / 标题大纲 |
