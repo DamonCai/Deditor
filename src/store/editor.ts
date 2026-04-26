@@ -58,6 +58,10 @@ interface EditorState {
    *  Stored as a 3-state map so we can tell "user collapsed this" apart from
    *  "we've never seen this path before". */
   expandedDirs: Record<string, boolean>;
+  /** Soft wrap (CodeMirror's `EditorView.lineWrapping`). Default on — matches
+   *  the previous hard-coded behavior so nothing visually changes for
+   *  existing users. */
+  softWrap: boolean;
 
   setContent: (content: string) => void;
   // Open a new tab (or focus existing one for the same path).
@@ -70,6 +74,7 @@ interface EditorState {
   resetShortcuts: () => void;
   setSettingsOpen: (open: boolean) => void;
   setDirExpanded: (path: string, expanded: boolean) => void;
+  setSoftWrap: (on: boolean) => void;
   // Replace active tab's file (used when "Save As" rebinds path).
   rebindActive: (filePath: string, content: string) => void;
   newUntitled: () => string;
@@ -245,6 +250,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   shortcuts: { ...DEFAULT_SHORTCUTS },
   settingsOpen: false,
   expandedDirs: {},
+  softWrap: true,
 
   setContent: (content) => {
     const { tabs, activeId } = get();
@@ -316,6 +322,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (cur[path] === expanded) return;
     set({ expandedDirs: { ...cur, [path]: expanded } });
   },
+  setSoftWrap: (on) => set({ softWrap: on }),
 
   rebindActive: (filePath, content) => {
     const { tabs, activeId } = get();

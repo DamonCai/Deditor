@@ -25,3 +25,11 @@ tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-window-state = "2"
 base64 = "0.22"
+
+# macOS-only: used to strip AppKit's auto-injected Edit-menu items
+# ("Start Dictation…", "Emoji & Symbols", "AutoFill", Speech submenu, …)
+# that bypass our localized labels and stay in the system locale.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = "0.3"
+objc2-foundation = "0.3"

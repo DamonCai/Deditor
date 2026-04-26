@@ -18,6 +18,8 @@ import {
   defaultHighlightStyle,
   indentOnInput,
   bracketMatching,
+  foldGutter,
+  foldKeymap,
   LanguageSupport,
 } from "@codemirror/language";
 import { oneDark } from "@codemirror/theme-one-dark";
@@ -129,6 +131,8 @@ export default function Editor({
   const viewRef = useRef<EditorView | null>(null);
   const themeCompartment = useRef(new Compartment());
   const langCompartment = useRef(new Compartment());
+  const wrapCompartment = useRef(new Compartment());
+  const softWrap = useEditorStore((s) => s.softWrap);
   const onChangeRef = useRef(onChange);
   const onScrollRef = useRef(onScroll);
   const onPositionChangeRef = useRef(onPositionChange);
@@ -168,6 +172,7 @@ export default function Editor({
           : undefined,
       extensions: [
         lineNumbers(),
+        foldGutter(),
         highlightActiveLine(),
         history(),
         indentOnInput(),
@@ -213,9 +218,10 @@ export default function Editor({
           ...defaultKeymap,
           ...historyKeymap,
           ...searchKeymap,
+          ...foldKeymap,
           indentWithTab,
         ]),
-        EditorView.lineWrapping,
+        wrapCompartment.current.of(softWrap ? EditorView.lineWrapping : []),
         EditorView.updateListener.of((u) => {
           if (u.docChanged) onChangeRef.current(u.state.doc.toString());
           if (u.selectionSet || u.docChanged) {
@@ -347,6 +353,14 @@ export default function Editor({
       ),
     });
   }, [theme]);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: wrapCompartment.current.reconfigure(
+        softWrap ? EditorView.lineWrapping : [],
+      ),
+    });
+  }, [softWrap]);
 
   useEffect(() => {
     let cancelled = false;

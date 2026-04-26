@@ -15,6 +15,8 @@ export default function SettingsDialog({ open, onClose }: Props) {
   const shortcuts = useEditorStore((s) => s.shortcuts);
   const setShortcutEnabled = useEditorStore((s) => s.setShortcutEnabled);
   const resetShortcuts = useEditorStore((s) => s.resetShortcuts);
+  const softWrap = useEditorStore((s) => s.softWrap);
+  const setSoftWrap = useEditorStore((s) => s.setSoftWrap);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -100,6 +102,49 @@ export default function SettingsDialog({ open, onClose }: Props) {
         </div>
 
         <div style={{ padding: "12px 16px", flex: 1, overflowY: "auto" }}>
+          {/* Editor section */}
+          <section style={{ marginBottom: 16 }}>
+            <h3
+              style={{
+                fontSize: 12,
+                textTransform: "uppercase",
+                letterSpacing: 0.6,
+                color: "var(--text-soft)",
+                margin: "0 0 6px",
+                fontWeight: 600,
+              }}
+            >
+              {t("settings.editor.heading")}
+            </h3>
+            <div
+              style={{
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+                overflow: "hidden",
+              }}
+            >
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  padding: "8px 12px",
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={softWrap}
+                  onChange={(e) => setSoftWrap(e.target.checked)}
+                  style={{ flexShrink: 0 }}
+                />
+                <span style={{ fontSize: 13, color: "var(--text)", flex: 1 }}>
+                  {t("settings.editor.softWrap")}
+                </span>
+              </label>
+            </div>
+          </section>
+
           <div
             style={{
               fontSize: 13,

@@ -37,31 +37,66 @@ DEditor 项目的协作上下文。Claude Code 在这个目录工作时自动加
 
 通信：前端 `invoke("命令名", { 参数 })` ↔ Rust `#[tauri::command]`，单一通道。
 
-## 已实现功能（截至 2026-04-26）
+## 已实现功能（截至 2026-04-27）
 
-- 多 Tab 编辑、文件拖拽（OS 级 drop）
+- 多 Tab 编辑、文件拖拽（OS 级 drop，支持文件 + 目录）
 - Markdown 实时分栏预览（**仅 .md 显示分栏**；源码文件全宽编辑）
 - 50+ 文件扩展名识别（编辑器侧 CodeMirror lang pack + 预览侧 Shiki 同步）
-- 文件树侧栏（懒加载，路径输入框支持 `~` 展开，可一键收起）
+- 二进制文件 hex 预览（Office/压缩包/可执行文件）+ 图片/PDF/音视频内嵌预览
+- 文件树侧栏（懒加载，路径输入框支持 `~` 展开，可一键收起，**展开状态持久化**）
+- 文件树右键菜单（新建文件 / 文件夹、重命名、删除、Reveal in Finder、对比文件）
 - 多 Tab + 多文件拖拽 + 同名文件去重（聚焦已存在 tab）
 - 未保存切换/关闭三按钮确认（保存 / 不保存 / 取消）
 - 图片粘贴自动落盘到 `<workspace>/assets/`，光标插入 Markdown 链接
 - 导出 HTML / PDF（仅 .md 文件可见这俩按钮）
 - 亮 / 暗主题（顶栏 sun/moon 图标 + StatusBar 文字按钮，**已持久化**）
-- 状态持久化（localStorage：tabs / 工作区 / 主题 / 分栏宽度 / 侧栏开关）
+- 状态持久化（localStorage：tabs / 工作区 / 主题 / 分栏宽度 / 侧栏开关 / 文件树展开 / 快捷键开关）
 - 语言品牌 logo（Python 蛇 / Rust 齿轮 / Go 地鼠等；无 logo 的扩展用首 3 字母彩色 badge 兜底）
+- macOS / Windows 原生菜单栏（中英文同步 i18n，**Edit 子菜单清理 macOS 自动注入项**）
+- 文件对比（右键 Select for Compare → 另一个文件右键 Compare with → 双栏 diff）
+- **Cmd+P Goto Anything**（跨工作区模糊文件搜索，jsdiff/Myers）
+- **设置对话框**（Cmd+,，per-shortcut 启用/禁用，菜单 accelerator 实时联动）
 
-## 路线图（未做）
+## 路线图（按优先级，从上往下做）
 
-- 文件外部变更监听 + reload 提示
-- 切 Tab 保留各自光标位置 / 撤销历史（当前用 `key={tab.id}` 强制重挂载，状态会丢）
+**A. Sublime DNA**
+
+- [ ] **A.2 Cmd+Shift+F Find in Files**：后端 `walkdir` + regex 或 `grep` crate；前端搜索面板 + 结果按文件分组、点跳过去
+- [ ] **A.3 Cmd+G Goto Line**：CodeMirror 默认绑在 `Cmd/Ctrl+Alt+G`，已能用；如要 Cmd+G 加一行 keymap
+- [ ] **A.3 Cmd+R Goto Symbol**：当前文件 outline；MD 抓 `#` 标题 + JS/TS/Py/Go 几门主流走 regex 提取
+- [ ] **A.4 Cmd+Shift+P Command Palette**：复用 GotoAnything 的 UI 框架，命令注册表，模糊搜执行
+
+**B. 编辑硬伤**
+
+- [ ] **B.1 切 Tab 保留光标 + 撤销栈**：CodeMirror `state.toJSON({history})` 序列化到 store，切回 `EditorState.fromJSON` 恢复，去掉 `key={tab.id}`
+- [ ] **B.2 文件外部变更检测**：Rust 端 `notify` crate 监听工作区，emit 到前端，弹"已修改，是否重载？"对话框
+- [ ] **B.3 拖目录到窗口 = 加工作区**：drop 处理里区分 dir vs file，dir 走 `addWorkspace`
+- [ ] **B.4 字体 / 主题 / 语言 进设置面板**：SettingsDialog 加 General 标签页
+
+**C. 编辑器质感**
+
+- [ ] **C.1 Minimap**：用 `@replit/codemirror-minimap`（要新依赖）
+- [ ] **C.2 Split Pane**：App.tsx 布局重构 + store 改造（每个 pane 一个 active tab）
+- [ ] **C.3 Folding**：`@codemirror/language` 自带 `foldGutter()` + `foldKeymap`
+- [ ] **C.4 Bookmarks**：行级标记 + 跳转命令 + StatusBar 显示
+- [ ] **C.5 Distraction-free 模式**：隐藏 TitleBar / TabBar / Sidebar / StatusBar
+- [ ] **C.6 Indent guides / 显示空白 / 显示行尾符**：`highlightWhitespace()` + indent guide
+
+**D. StatusBar 增强**
+
+- [ ] **D.1 光标行/列 + EOL（CRLF/LF）**：从 CM state 读行列；EOL 在文件读时探测；编码统一 UTF-8
+- [ ] **D.2 Soft wrap 开关**：当前固定开 `EditorView.lineWrapping`，改成 store 状态 + Settings 一勾
+- [ ] **D.3 自动保存 / 失焦自动保存**：window blur + 间隔 timer
+
+**执行顺序**（高价值/低改造优先）：
+C.3 → B.3 → D.1 → D.2 → B.1 → A.4 → C.6 → B.2 → A.2 → A.3 → C.5 → B.4 → C.1 → C.2 → C.4 / D.3
+
+**其它已搁置**（按需再开）：
+
 - KaTeX 数学公式 / Mermaid 图表
-- 大纲（TOC）侧栏
-- 文件树搜索框 + 右键菜单（新建 / 重命名 / 删除）
-- 拖目录直接设为工作区（当前只对文件生效）
+- 大纲（TOC）侧栏（A.3 Goto Symbol 完成后再考虑常驻面板）
+- 文件树搜索框
 - WYSIWYG 模式
-- macOS / Windows 原生菜单栏
-- 设置面板
 
 ## 启动 / 打包 / 清理
 

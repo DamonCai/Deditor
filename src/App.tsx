@@ -27,6 +27,7 @@ import {
   openFolder,
   closeActiveTab,
   openMany,
+  setWorkspaceByPath,
 } from "./lib/fileio";
 import { loadPersisted, schedulePersist } from "./lib/persistence";
 
@@ -164,15 +165,31 @@ export default function App() {
     };
   }, []);
 
-  // Tauri OS-level file drag & drop
+  // Tauri OS-level file drag & drop. Files go through openMany (which already
+  // routes by extension to text / image / pdf / audio / video / hex viewers);
+  // directories get added as a workspace instead of opened as a file.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     getCurrentWebview()
-      .onDragDropEvent((event) => {
-        if (event.payload.type === "drop") {
-          void openMany(event.payload.paths);
+      .onDragDropEvent(async (event) => {
+        if (event.payload.type !== "drop") return;
+        const filePaths: string[] = [];
+        for (const p of event.payload.paths) {
+          let kind = "file";
+          try {
+            kind = await invoke<string>("path_kind", { path: p });
+          } catch {
+            // Treat probe failures as "file" so the existing openMany path
+            // can surface a more useful error.
+          }
+          if (kind === "dir") {
+            await setWorkspaceByPath(p).catch(() => {});
+          } else {
+            filePaths.push(p);
+          }
         }
+        if (filePaths.length > 0) await openMany(filePaths);
       })
       .then((fn) => {
         if (cancelled) fn();

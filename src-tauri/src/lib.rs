@@ -341,6 +341,19 @@ fn list_dir(path: String) -> Result<Vec<DirEntry>, String> {
     Ok(out)
 }
 
+/// Tell the frontend whether a path is a file, a directory, or missing.
+/// Used by the OS-drop handler to route dragged folders to `addWorkspace`
+/// instead of trying to open them as a file.
+#[tauri::command]
+fn path_kind(path: String) -> String {
+    let p = expand(&path);
+    match fs::metadata(&p) {
+        Ok(m) if m.is_dir() => "dir".to_string(),
+        Ok(_) => "file".to_string(),
+        Err(_) => "missing".to_string(),
+    }
+}
+
 /// Receive a log line from the frontend.
 /// Levels: "error" | "warn" | "info" | "debug" | "trace"
 #[tauri::command]
@@ -557,7 +570,132 @@ fn build_and_set_menu<R: tauri::Runtime>(
         .items(&[&app_menu, &file_menu, &edit_menu, &window_menu])
         .build()?;
     app.set_menu(menu)?;
+
+    // macOS auto-injects items into any submenu containing cut:/copy:/paste:
+    // ("Start Dictation…", "Emoji & Symbols", "AutoFill" on Sonoma+, plus
+    // Speech / Find / Substitutions / Transformations submenus). The Info.plist
+    // keys NSDisabledDictationMenuItem / NSDisabledCharacterPaletteMenuItem
+    // only cover the first two and aren't honored on every macOS version, so
+    // we walk the live NSMenu after AppKit has injected and remove anything
+    // whose action isn't one of our six known selectors.
+    #[cfg(target_os = "macos")]
+    strip_macos_edit_menu_extras(l.edit);
+
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn strip_macos_edit_menu_extras(edit_title: &str) {
+    use objc2::sel;
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSApplication;
+    use objc2_foundation::NSString;
+
+    // Has to run on the AppKit main thread; we're called from set_menu's
+    // path which is already on the main thread, but bail safely if not.
+    let mtm = match MainThreadMarker::new() {
+        Some(m) => m,
+        None => return,
+    };
+
+    let app = NSApplication::sharedApplication(mtm);
+    let main_menu = match app.mainMenu() {
+        Some(m) => m,
+        None => return,
+    };
+
+    let edit_title_ns = NSString::from_str(edit_title);
+    let count = main_menu.numberOfItems();
+
+    // Find the Edit submenu by title (we localize this label, so we have to
+    // match against the value we just built the menu with).
+    let mut edit_submenu = None;
+    for i in 0..count {
+        let Some(item) = main_menu.itemAtIndex(i) else { continue };
+        let title = item.title();
+        if title.isEqualToString(&edit_title_ns) {
+            if let Some(sub) = item.submenu() {
+                edit_submenu = Some(sub);
+                break;
+            }
+        }
+    }
+    let edit_submenu = match edit_submenu {
+        Some(m) => m,
+        None => return,
+    };
+
+    let allowed = [
+        sel!(undo:),
+        sel!(redo:),
+        sel!(cut:),
+        sel!(copy:),
+        sel!(paste:),
+        sel!(selectAll:),
+    ];
+
+    // Walk back-to-front so removing items doesn't shift indices ahead of us.
+    let mut i = edit_submenu.numberOfItems() - 1;
+    let mut to_remove: Vec<isize> = Vec::new();
+    while i >= 0 {
+        let Some(item) = edit_submenu.itemAtIndex(i) else {
+            i -= 1;
+            continue;
+        };
+        let drop = if item.isSeparatorItem() {
+            // Defer separator pruning to a second pass below — once injected
+            // items are gone we can collapse duplicates and trailing seps.
+            false
+        } else {
+            match item.action() {
+                Some(sel) => !allowed.iter().any(|&s| s == sel),
+                // No action + has submenu → AppKit-injected (Find /
+                // Substitutions / Transformations / Speech). No action + no
+                // submenu → also not ours (we don't build any).
+                None => true,
+            }
+        };
+        if drop {
+            to_remove.push(i);
+        }
+        i -= 1;
+    }
+    for idx in to_remove {
+        edit_submenu.removeItemAtIndex(idx);
+    }
+
+    // Second pass: collapse any trailing separator AppKit may have left, plus
+    // back-to-back separators caused by removing the items between them.
+    let mut prev_sep = true;
+    let mut i: isize = 0;
+    let mut to_remove2: Vec<isize> = Vec::new();
+    while i < edit_submenu.numberOfItems() {
+        let Some(item) = edit_submenu.itemAtIndex(i) else {
+            i += 1;
+            continue;
+        };
+        let is_sep = item.isSeparatorItem();
+        if is_sep && prev_sep {
+            to_remove2.push(i);
+        } else {
+            prev_sep = is_sep;
+        }
+        i += 1;
+    }
+    // Drop trailing separator if we ended on one.
+    let last = edit_submenu.numberOfItems() - 1;
+    if last >= 0 {
+        if let Some(item) = edit_submenu.itemAtIndex(last) {
+            if item.isSeparatorItem() && !to_remove2.contains(&last) {
+                to_remove2.push(last);
+            }
+        }
+    }
+    // Remove back-to-front to keep indices stable.
+    to_remove2.sort();
+    for idx in to_remove2.into_iter().rev() {
+        edit_submenu.removeItemAtIndex(idx);
+    }
 }
 
 /// Initial install at startup. Defaults to English with all accelerators
@@ -660,7 +798,8 @@ pub fn run() {
             frontend_log,
             update_menu_state,
             read_binary_as_base64,
-            list_workspace_files
+            list_workspace_files,
+            path_kind
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -3,16 +3,47 @@ import { detectLang } from "../lib/lang";
 import { useT } from "../lib/i18n";
 import LangIcon from "./LangIcon";
 
+/** Convert a flat char offset into 1-based (line, column). Counts UTF-16
+ *  code units, which is what CodeMirror's selection offsets use. Tab is
+ *  treated as one column — Sublime / VSCode show actual column number, not
+ *  visual column, by default, and matching that keeps the math cheap. */
+function offsetToLineCol(text: string, offset: number): { line: number; col: number } {
+  const safe = Math.max(0, Math.min(offset, text.length));
+  let line = 1;
+  let lastBreak = -1;
+  for (let i = 0; i < safe; i++) {
+    if (text.charCodeAt(i) === 10 /* \n */) {
+      line++;
+      lastBreak = i;
+    }
+  }
+  return { line, col: safe - lastBreak };
+}
+
+/** Detect dominant line ending. Uses the first occurrence so a file freshly
+ *  read from disk reports its on-disk EOL even if the user has since added
+ *  lines via the editor (CodeMirror inserts \n). */
+function detectEol(text: string): "CRLF" | "LF" {
+  const firstNl = text.indexOf("\n");
+  if (firstNl > 0 && text.charCodeAt(firstNl - 1) === 13 /* \r */) return "CRLF";
+  return "LF";
+}
+
 export default function StatusBar() {
   const t = useT();
   const active = useActiveTab();
   const { theme, setTheme } = useEditorStore();
+  const cursorOffset = useEditorStore((s) =>
+    active ? s.tabPositions[active.id]?.cursor ?? 0 : 0,
+  );
   const filePath = active?.filePath ?? null;
   const content = active?.content ?? "";
   const dirty = active ? isTabDirty(active) : false;
   const lines = content.split("\n").length;
   const chars = content.length;
   const lang = detectLang(filePath);
+  const { line, col } = offsetToLineCol(content, cursorOffset);
+  const eol = detectEol(content);
 
   return (
     <div
@@ -31,6 +62,11 @@ export default function StatusBar() {
         {dirty && <span style={{ color: "var(--accent)" }}>●</span>}
       </div>
       <div className="flex items-center gap-4 flex-shrink-0">
+        <span className="tabular-nums" title={t("statusbar.cursor")}>
+          {t("statusbar.lnCol", { line: String(line), col: String(col) })}
+        </span>
+        <span title={t("statusbar.eol")}>{eol}</span>
+        <span title={t("statusbar.encoding")}>UTF-8</span>
         <span>{lang.label}</span>
         <span>
           {lines} {t("statusbar.lines")} · {chars} {t("statusbar.chars")}
