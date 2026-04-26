@@ -239,6 +239,12 @@ body,
   background: var(--bg-mute) !important;
 }
 
+/* Column-mode (Alt-drag) crosshair cue */
+.cm-editor.cm-crosshair-cursor,
+.cm-editor.cm-crosshair-cursor * {
+  cursor: crosshair !important;
+}
+
 /* Print-only injected area (hidden in normal layout). */
 #deditor-print-area {
   display: none;

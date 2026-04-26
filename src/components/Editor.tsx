@@ -1,8 +1,18 @@
 import { useEffect, useRef } from "react";
-import { EditorState, Compartment } from "@codemirror/state";
-import { EditorView, keymap, lineNumbers, highlightActiveLine } from "@codemirror/view";
+import { EditorState, EditorSelection, Compartment } from "@codemirror/state";
+import {
+  EditorView,
+  keymap,
+  lineNumbers,
+  highlightActiveLine,
+  rectangularSelection,
+  crosshairCursor,
+  drawSelection,
+  dropCursor,
+} from "@codemirror/view";
+import type { Command } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
-import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
+import { searchKeymap, highlightSelectionMatches, selectSelectionMatches } from "@codemirror/search";
 import {
   syntaxHighlighting,
   defaultHighlightStyle,
@@ -16,6 +26,28 @@ import { saveImage } from "../lib/fileio";
 import { useEditorStore } from "../store/editor";
 import { logError, logInfo } from "../lib/logger";
 import { setActiveView } from "../lib/editorBridge";
+
+const addCursorVertical = (dir: -1 | 1): Command => (view) => {
+  const { state, dispatch } = view;
+  const newRanges = state.selection.ranges.slice();
+  let added = false;
+  for (const r of state.selection.ranges) {
+    const line = state.doc.lineAt(r.head);
+    const targetNo = line.number + dir;
+    if (targetNo < 1 || targetNo > state.doc.lines) continue;
+    const target = state.doc.line(targetNo);
+    const col = r.head - line.from;
+    const pos = target.from + Math.min(col, target.length);
+    newRanges.push(EditorSelection.cursor(pos));
+    added = true;
+  }
+  if (!added) return false;
+  dispatch({
+    selection: EditorSelection.create(newRanges),
+    scrollIntoView: true,
+  });
+  return true;
+};
 
 interface Props {
   value: string;
@@ -61,8 +93,25 @@ export default function Editor({
         indentOnInput(),
         bracketMatching(),
         highlightSelectionMatches(),
+        EditorState.allowMultipleSelections.of(true),
+        // drawSelection is required for multi-range / column selections to actually render —
+        // native browser selection can only paint one contiguous range.
+        drawSelection(),
+        dropCursor(),
+        // Sublime-style: Cmd/Ctrl+Click adds a cursor; Alt+Drag does column selection.
+        EditorView.clickAddsSelectionRange.of((e) => e.metaKey || e.ctrlKey),
+        rectangularSelection(),
+        crosshairCursor(),
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-        keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
+        keymap.of([
+          { key: "Mod-Alt-ArrowUp", run: addCursorVertical(-1), preventDefault: true },
+          { key: "Mod-Alt-ArrowDown", run: addCursorVertical(1), preventDefault: true },
+          { key: "Mod-Shift-l", run: selectSelectionMatches, preventDefault: true },
+          ...defaultKeymap,
+          ...historyKeymap,
+          ...searchKeymap,
+          indentWithTab,
+        ]),
         EditorView.lineWrapping,
         EditorView.updateListener.of((u) => {
           if (u.docChanged) onChangeRef.current(u.state.doc.toString());
