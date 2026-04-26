@@ -9,10 +9,19 @@ export interface Tab {
   savedContent: string;
 }
 
+export interface TabPosition {
+  cursor: number;
+  scrollTopLine: number;
+}
+
 interface EditorState {
   tabs: Tab[];
   activeId: string | null;
   workspaces: string[];
+  // View state (caret + first visible line) per tab id. Kept outside `tabs`
+  // so frequent updates don't churn the tabs array (which TabBar / TitleBar /
+  // StatusBar all subscribe to).
+  tabPositions: Record<string, TabPosition>;
   theme: Theme;
   showPreview: boolean;
   showSidebar: boolean;
@@ -30,6 +39,9 @@ interface EditorState {
   setActive: (id: string) => void;
   replaceTabs: (tabs: Tab[], activeId: string) => void;
   markSaved: () => void;
+
+  setTabPosition: (id: string, pos: TabPosition) => void;
+  setTabPositions: (positions: Record<string, TabPosition>) => void;
 
   addWorkspace: (path: string) => void;
   removeWorkspace: (path: string) => void;
@@ -85,6 +97,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   tabs: [initial],
   activeId: initial.id,
   workspaces: [],
+  tabPositions: {},
   theme:
     typeof window !== "undefined" &&
     window.matchMedia("(prefers-color-scheme: dark)").matches
@@ -147,10 +160,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   closeTab: (id) => {
-    const { tabs, activeId } = get();
+    const { tabs, activeId, tabPositions } = get();
     if (tabs.length === 1) {
       const t = makeTab(null, DEFAULT_CONTENT);
-      set({ tabs: [t], activeId: t.id });
+      set({ tabs: [t], activeId: t.id, tabPositions: {} });
       return;
     }
     const idx = tabs.findIndex((t) => t.id === id);
@@ -160,14 +173,19 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (activeId === id) {
       newActive = (next[idx] ?? next[idx - 1] ?? next[0]).id;
     }
-    set({ tabs: next, activeId: newActive });
+    const nextPositions = { ...tabPositions };
+    delete nextPositions[id];
+    set({ tabs: next, activeId: newActive, tabPositions: nextPositions });
   },
 
   closeOthers: (id) => {
-    const { tabs } = get();
+    const { tabs, tabPositions } = get();
     const keep = tabs.find((t) => t.id === id);
     if (!keep) return;
-    set({ tabs: [keep], activeId: keep.id });
+    const nextPositions = tabPositions[id]
+      ? { [id]: tabPositions[id] }
+      : {};
+    set({ tabs: [keep], activeId: keep.id, tabPositions: nextPositions });
   },
 
   setActive: (id) => {
@@ -176,7 +194,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   replaceTabs: (tabs: Tab[], activeId: string) => {
     if (tabs.length === 0) return;
-    set({ tabs, activeId });
+    // Drop position entries for tab ids that no longer exist.
+    const keep = new Set(tabs.map((t) => t.id));
+    const oldPositions = get().tabPositions;
+    const nextPositions: Record<string, TabPosition> = {};
+    for (const k of Object.keys(oldPositions)) {
+      if (keep.has(k)) nextPositions[k] = oldPositions[k];
+    }
+    set({ tabs, activeId, tabPositions: nextPositions });
   },
 
   markSaved: () => {
@@ -187,6 +212,22 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       ),
     });
   },
+
+  setTabPosition: (id, pos) => {
+    const cur = get().tabPositions;
+    const prev = cur[id];
+    if (
+      prev &&
+      prev.cursor === pos.cursor &&
+      prev.scrollTopLine === pos.scrollTopLine
+    ) {
+      return;
+    }
+    set({ tabPositions: { ...cur, [id]: pos } });
+  },
+
+  setTabPositions: (positions) =>
+    set({ tabPositions: { ...positions } }),
 
   addWorkspace: (path) => {
     const { workspaces } = get();

@@ -31,6 +31,12 @@ export default function App() {
   const filePath = active?.filePath ?? null;
   const content = active?.content ?? "";
   const previewEnabled = showPreview && isMarkdown(filePath);
+  // Initial caret + scroll for the active tab. Read imperatively so subscribing
+  // components don't re-render every cursor move; Editor only consumes these
+  // on mount (a fresh instance is created via `key={tab.id}` per active tab).
+  const initialPos = active
+    ? useEditorStore.getState().tabPositions[active.id]
+    : undefined;
 
   const [sidebarPx, setSidebarPx] = useState(240);
   const [previewPct, setPreviewPct] = useState(50);
@@ -245,11 +251,18 @@ export default function App() {
                       filePath={filePath}
                       theme={theme}
                       fontSize={editorFontSize}
+                      initialCursor={initialPos?.cursor}
+                      initialScrollLine={initialPos?.scrollTopLine}
                       externalScrollLine={
                         scrollSync?.from === "preview" ? scrollSync.line : undefined
                       }
                       onChange={setContent}
                       onScroll={(line) => setScrollSync({ line, from: "editor" })}
+                      onPositionChange={(pos) => {
+                        if (active) {
+                          useEditorStore.getState().setTabPosition(active.id, pos);
+                        }
+                      }}
                     />
                   </div>
                 </div>

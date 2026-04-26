@@ -54,10 +54,15 @@ interface Props {
   filePath: string | null;
   theme: "light" | "dark";
   fontSize: number;
+  /** Caret offset to restore on mount (only read once, when this Editor mounts). */
+  initialCursor?: number;
+  /** First-visible line (1-based) to restore on mount. */
+  initialScrollLine?: number;
   /** External scroll line (driven by preview); will scroll editor to that line. */
   externalScrollLine?: number;
   onChange: (value: string) => void;
   onScroll?: (firstVisibleLine: number) => void;
+  onPositionChange?: (pos: { cursor: number; scrollTopLine: number }) => void;
 }
 
 export default function Editor({
@@ -65,9 +70,12 @@ export default function Editor({
   filePath,
   theme,
   fontSize,
+  initialCursor,
+  initialScrollLine,
   externalScrollLine,
   onChange,
   onScroll,
+  onPositionChange,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -75,17 +83,41 @@ export default function Editor({
   const langCompartment = useRef(new Compartment());
   const onChangeRef = useRef(onChange);
   const onScrollRef = useRef(onScroll);
+  const onPositionChangeRef = useRef(onPositionChange);
   // Suppress outgoing scroll events for this many ms after a programmatic scroll,
   // to prevent the editor⇄preview sync from echoing back and forth.
   const suppressOutgoingUntil = useRef(0);
+  // Latest known view position; flushed to onPositionChange on a debounce.
+  const positionRef = useRef({
+    cursor: Math.max(0, initialCursor ?? 0),
+    scrollTopLine: Math.max(1, initialScrollLine ?? 1),
+  });
+  const positionFlushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   onChangeRef.current = onChange;
   onScrollRef.current = onScroll;
+  onPositionChangeRef.current = onPositionChange;
+
+  const schedulePositionFlush = () => {
+    if (positionFlushTimer.current) return;
+    positionFlushTimer.current = setTimeout(() => {
+      positionFlushTimer.current = null;
+      onPositionChangeRef.current?.({ ...positionRef.current });
+    }, 200);
+  };
 
   useEffect(() => {
     if (!hostRef.current) return;
 
+    const clampedInitialCursor =
+      initialCursor != null
+        ? Math.max(0, Math.min(initialCursor, value.length))
+        : undefined;
     const state = EditorState.create({
       doc: value,
+      selection:
+        clampedInitialCursor != null
+          ? EditorSelection.cursor(clampedInitialCursor)
+          : undefined,
       extensions: [
         lineNumbers(),
         highlightActiveLine(),
@@ -115,6 +147,10 @@ export default function Editor({
         EditorView.lineWrapping,
         EditorView.updateListener.of((u) => {
           if (u.docChanged) onChangeRef.current(u.state.doc.toString());
+          if (u.selectionSet || u.docChanged) {
+            positionRef.current.cursor = u.state.selection.main.head;
+            schedulePositionFlush();
+          }
         }),
         themeCompartment.current.of(theme === "dark" ? oneDark : []),
         langCompartment.current.of([]),
@@ -141,11 +177,27 @@ export default function Editor({
     viewRef.current = view;
     setActiveView(view);
 
+    // Restore first-visible line. Defer to next frame so CM has measured layout.
+    if (initialScrollLine != null && initialScrollLine > 1) {
+      const target = initialScrollLine;
+      requestAnimationFrame(() => {
+        if (viewRef.current !== view) return;
+        try {
+          const total = view.state.doc.lines;
+          const lineNum = Math.min(Math.max(1, Math.round(target)), total);
+          const line = view.state.doc.line(lineNum);
+          const block = view.lineBlockAt(line.from);
+          suppressOutgoingUntil.current = Date.now() + 200;
+          view.scrollDOM.scrollTop = block.top;
+        } catch {
+          /* doc shorter than expected, or layout not ready */
+        }
+      });
+    }
+
     // Direct scroll-event listener for smooth, every-frame outgoing sync.
     let scrollRafId = 0;
     const onScrollEvt = () => {
-      if (Date.now() < suppressOutgoingUntil.current) return;
-      if (!onScrollRef.current) return;
       if (scrollRafId) return;
       scrollRafId = requestAnimationFrame(() => {
         scrollRafId = 0;
@@ -153,7 +205,14 @@ export default function Editor({
         try {
           const block = view.lineBlockAtHeight(top);
           const line = view.state.doc.lineAt(block.from).number;
-          onScrollRef.current?.(line);
+          // Always track for persistence — even programmatic scrolls reflect
+          // the user's last viewing position.
+          positionRef.current.scrollTopLine = line;
+          schedulePositionFlush();
+          // But don't echo programmatic scrolls back through editor⇄preview sync.
+          if (Date.now() >= suppressOutgoingUntil.current) {
+            onScrollRef.current?.(line);
+          }
         } catch {
           /* during destroy / odd states; ignore */
         }
@@ -164,6 +223,12 @@ export default function Editor({
     return () => {
       view.scrollDOM.removeEventListener("scroll", onScrollEvt);
       if (scrollRafId) cancelAnimationFrame(scrollRafId);
+      // Final flush so the very last position isn't lost on tab switch / unmount.
+      if (positionFlushTimer.current) {
+        clearTimeout(positionFlushTimer.current);
+        positionFlushTimer.current = null;
+      }
+      onPositionChangeRef.current?.({ ...positionRef.current });
       view.destroy();
       viewRef.current = null;
       setActiveView(null);
