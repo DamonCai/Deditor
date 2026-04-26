@@ -38,6 +38,8 @@ interface PersistedV3 {
   language?: Lang;
   /** Per-shortcut enable map. Optional so older snapshots keep loading. */
   shortcuts?: Record<string, boolean>;
+  /** File-tree expansion state. Optional for backward compat. */
+  expandedDirs?: Record<string, boolean>;
   // Legacy git fields kept in the type so old snapshots still parse safely;
   // unused since the git feature was removed.
   gitPanelOpen?: boolean;
@@ -244,6 +246,10 @@ export async function loadPersisted(): Promise<UiExtras | null> {
     useEditorStore.getState().setShortcuts({ ...cur, ...data.shortcuts });
   }
 
+  if (data.expandedDirs && typeof data.expandedDirs === "object") {
+    useEditorStore.setState({ expandedDirs: { ...data.expandedDirs } });
+  }
+
   if (restored.length > 0) {
     const idx = Math.max(0, Math.min(data.activeIndex, restored.length - 1));
     store.replaceTabs(restored, restored[idx].id);
@@ -301,6 +307,7 @@ function doSave(extras: UiExtras): void {
     previewMaximized: s.previewMaximized,
     language: s.language,
     shortcuts: s.shortcuts,
+    expandedDirs: s.expandedDirs,
   };
   try {
     localStorage.setItem(KEY_V3, JSON.stringify(base));

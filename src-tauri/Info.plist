@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+        Suppress AppKit's auto-injected items in the Edit menu so they don't
+        leak the system locale into our localized menu. The two flags below
+        cover "Start Dictation…" and "Emoji & Symbols", which AppKit adds to
+        any submenu whose items have cut:/copy:/paste: actions.
+
+        These keys are honored by NSApplication on macOS 10.6+. They're not
+        listed in modern Apple docs but still work as of Sequoia (15.x).
+    -->
+    <key>NSDisabledDictationMenuItem</key>
+    <true/>
+    <key>NSDisabledCharacterPaletteMenuItem</key>
+    <true/>
+</dict>
+</plist>

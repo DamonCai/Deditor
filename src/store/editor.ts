@@ -50,6 +50,14 @@ interface EditorState {
   /** Whether the Settings dialog is showing. Lives in the store so the
    *  StatusBar (or anything else) can pop it open without a separate bus. */
   settingsOpen: boolean;
+  /** Persisted file-tree expansion state, keyed by absolute path.
+   *  - `true`  = explicitly expanded
+   *  - `false` = explicitly collapsed
+   *  - missing = use the layer's default (workspace roots default to expanded,
+   *              nested folders default to collapsed)
+   *  Stored as a 3-state map so we can tell "user collapsed this" apart from
+   *  "we've never seen this path before". */
+  expandedDirs: Record<string, boolean>;
 
   setContent: (content: string) => void;
   // Open a new tab (or focus existing one for the same path).
@@ -61,6 +69,7 @@ interface EditorState {
   setShortcuts: (next: Record<string, boolean>) => void;
   resetShortcuts: () => void;
   setSettingsOpen: (open: boolean) => void;
+  setDirExpanded: (path: string, expanded: boolean) => void;
   // Replace active tab's file (used when "Save As" rebinds path).
   rebindActive: (filePath: string, content: string) => void;
   newUntitled: () => string;
@@ -235,6 +244,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   compareMarkPath: null,
   shortcuts: { ...DEFAULT_SHORTCUTS },
   settingsOpen: false,
+  expandedDirs: {},
 
   setContent: (content) => {
     const { tabs, activeId } = get();
@@ -300,6 +310,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setShortcuts: (next) => set({ shortcuts: { ...next } }),
   resetShortcuts: () => set({ shortcuts: { ...DEFAULT_SHORTCUTS } }),
   setSettingsOpen: (open) => set({ settingsOpen: open }),
+
+  setDirExpanded: (path, expanded) => {
+    const cur = get().expandedDirs;
+    if (cur[path] === expanded) return;
+    set({ expandedDirs: { ...cur, [path]: expanded } });
+  },
 
   rebindActive: (filePath, content) => {
     const { tabs, activeId } = get();
@@ -410,8 +426,19 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   removeWorkspace: (path) => {
-    const { workspaces } = get();
-    set({ workspaces: workspaces.filter((w) => w !== path) });
+    const { workspaces, expandedDirs } = get();
+    // Drop expansion state for the removed root and any descendant we cached,
+    // so the persisted map doesn't grow unbounded across project switches.
+    const sep = path.includes("\\") && !path.includes("/") ? "\\" : "/";
+    const prefix = path.endsWith(sep) ? path : path + sep;
+    const nextExpanded: Record<string, boolean> = {};
+    for (const k of Object.keys(expandedDirs)) {
+      if (k !== path && !k.startsWith(prefix)) nextExpanded[k] = expandedDirs[k];
+    }
+    set({
+      workspaces: workspaces.filter((w) => w !== path),
+      expandedDirs: nextExpanded,
+    });
   },
 
   setWorkspaces: (paths) => set({ workspaces: paths.slice() }),

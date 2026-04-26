@@ -323,11 +323,15 @@ function WorkspaceSection({
   onFolderContextMenu: (e: React.MouseEvent, dir: string) => void;
   onFileContextMenu: (e: React.MouseEvent, file: string) => void;
 }) {
-  const [open, setOpen] = useState(true);
+  // Workspace roots default to expanded; only honor an explicit `false` from
+  // the persisted map. That way upgrading users who never collapsed anything
+  // still see their workspaces expanded on first launch.
+  const open = useEditorStore((s) => s.expandedDirs[path] !== false);
+  const setDirExpanded = useEditorStore((s) => s.setDirExpanded);
   return (
     <div style={{ marginBottom: 4 }}>
       <div
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setDirExpanded(path, !open)}
         onContextMenu={onContextMenu}
         title={path}
         className="flex items-center gap-1 cursor-pointer"
@@ -468,7 +472,12 @@ function DirNode({
   onFolderContextMenu: (e: React.MouseEvent, dir: string) => void;
   onFileContextMenu: (e: React.MouseEvent, file: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  // Nested folders default to collapsed; only honor an explicit `true` from
+  // the persisted map. The user explicitly opening a folder is what we
+  // remember — we don't want to suddenly expand every folder in a workspace
+  // just because it once existed.
+  const open = useEditorStore((s) => s.expandedDirs[entry.path] === true);
+  const setDirExpanded = useEditorStore((s) => s.setDirExpanded);
   const [entries, setEntries] = useState<DirEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -500,7 +509,7 @@ function DirNode({
       <Row
         depth={depth}
         active={false}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setDirExpanded(entry.path, !open)}
         onContextMenu={(e) => onFolderContextMenu(e, entry.path)}
         title={entry.path}
       >
