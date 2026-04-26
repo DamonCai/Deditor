@@ -6,6 +6,7 @@ import { confirmUnsaved } from "../components/ConfirmDialog";
 import { logError, logInfo, logWarn } from "./logger";
 import { notifyRefresh } from "./treeRefresh";
 import { tStatic } from "./i18n";
+import { isMarkdown } from "./lang";
 
 const MD_FILTER = [
   { name: "Markdown", extensions: ["md", "markdown", "mdx"] },
@@ -61,6 +62,37 @@ export async function openMany(paths: string[]) {
     await openFileByPath(p);
   }
 }
+
+/** Click an image file in the tree: open it as a tab with the image rendered inline. */
+export async function openImageFile(path: string) {
+  const { openTab } = useEditorStore.getState();
+
+  // Check if already open — focus existing tab.
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  const mime = IMAGE_MIME_MAP[ext] ?? "image/png";
+
+  try {
+    const base64 = await invoke<string>("read_binary_as_base64", { path });
+    const dataUrl = `data:${mime};base64,${base64}`;
+    openTab(path, dataUrl);
+    logInfo(`opened image: ${path}`);
+  } catch (err) {
+    logError(`openImageFile failed for ${path}`, err);
+  }
+}
+
+const IMAGE_MIME_MAP: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  svg: "image/svg+xml",
+  webp: "image/webp",
+  bmp: "image/bmp",
+  ico: "image/x-icon",
+  tiff: "image/tiff",
+  tif: "image/tiff",
+};
 
 export async function saveFile() {
   const { tabs, activeId, markSaved } = useEditorStore.getState();

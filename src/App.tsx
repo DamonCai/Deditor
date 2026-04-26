@@ -13,7 +13,7 @@ import TabBar from "./components/TabBar";
 import MarkdownToolbar from "./components/MarkdownToolbar";
 import JsonToolbar from "./components/JsonToolbar";
 import { useEditorStore, useActiveTab } from "./store/editor";
-import { isMarkdown, isJson } from "./lib/lang";
+import { isMarkdown, isJson, isImageFile } from "./lib/lang";
 import { useT } from "./lib/i18n";
 import {
   openFile,
@@ -24,6 +24,7 @@ import {
   openFolder,
   closeActiveTab,
   openMany,
+  openImageFile,
 } from "./lib/fileio";
 import { loadPersisted, schedulePersist } from "./lib/persistence";
 
@@ -140,7 +141,15 @@ export default function App() {
     getCurrentWebview()
       .onDragDropEvent((event) => {
         if (event.payload.type === "drop") {
-          openMany(event.payload.paths);
+          const paths = event.payload.paths;
+          const textPaths: string[] = [];
+          const imagePaths: string[] = [];
+          for (const p of paths) {
+            if (isImageFile(p)) imagePaths.push(p);
+            else textPaths.push(p);
+          }
+          if (textPaths.length > 0) void openMany(textPaths);
+          for (const p of imagePaths) void openImageFile(p);
         }
       })
       .then((fn) => {

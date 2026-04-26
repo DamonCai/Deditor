@@ -21,7 +21,7 @@ import {
   LanguageSupport,
 } from "@codemirror/language";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { detectLang, isMarkdown } from "../lib/lang";
+import { detectLang, isMarkdown, isImageFile } from "../lib/lang";
 import { saveImage } from "../lib/fileio";
 import { useEditorStore } from "../store/editor";
 import { logError, logInfo } from "../lib/logger";
@@ -82,6 +82,15 @@ export default function Editor({
   const t = useT();
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const hostRef = useRef<HTMLDivElement>(null);
+
+  // Image preview — render a data URL directly as <img>.
+  if (isImageFile(filePath) && value.startsWith("data:")) {
+    return (
+      <div className="flex items-center justify-center h-full w-full overflow-auto p-4">
+        <img src={value} alt={filePath ?? "image"} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
+      </div>
+    );
+  }
   const viewRef = useRef<EditorView | null>(null);
   const themeCompartment = useRef(new Compartment());
   const langCompartment = useRef(new Compartment());

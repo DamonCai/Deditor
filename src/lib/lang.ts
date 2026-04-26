@@ -218,6 +218,8 @@ const FALLBACK: LangDef = {
   icon: I("·", "#9aa0a6", LuFileText),
 };
 
+export const IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico", "tiff", "tif"];
+
 export const SUPPORTED_EXTS = Object.keys(ext);
 
 export function detectLang(filePath: string | null): LangDef {
@@ -240,4 +242,10 @@ export function isJson(filePath: string | null): boolean {
   if (!filePath) return false;
   const e = filePath.split(".").pop()?.toLowerCase() ?? "";
   return e === "json" || e === "jsonc" || e === "json5";
+}
+
+export function isImageFile(filePath: string | null): boolean {
+  if (!filePath) return false;
+  const e = filePath.split(".").pop()?.toLowerCase() ?? "";
+  return IMAGE_EXTS.includes(e);
 }

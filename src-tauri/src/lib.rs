@@ -44,6 +44,16 @@ fn read_text_file(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn read_binary_as_base64(path: String) -> Result<String, String> {
+    log::debug!("read_binary_as_base64: {}", path);
+    let bytes = fs::read(expand(&path)).map_err(|e| {
+        log::warn!("read_binary_as_base64 failed: {} -- {}", path, e);
+        e.to_string()
+    })?;
+    Ok(BASE64.encode(&bytes))
+}
+
+#[tauri::command]
 fn write_text_file(path: String, content: String) -> Result<(), String> {
     log::debug!("write_text_file: {} ({} bytes)", path, content.len());
     fs::write(expand(&path), content).map_err(|e| {
@@ -111,6 +121,8 @@ const ALLOWED_EXTS: &[&str] = &[
     "sql", "sh", "bash", "zsh", "fish", "ps1",
     // misc
     "txt", "log", "csv", "diff", "patch", "dockerfile", "make",
+    // images
+    "png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico", "tiff", "tif",
 ];
 
 const ALLOWED_NAMES: &[&str] = &[
@@ -513,7 +525,8 @@ pub fn run() {
             delete_path,
             print_window,
             frontend_log,
-            update_menu_language
+            update_menu_language,
+            read_binary_as_base64
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -6,6 +6,7 @@ import {
   deletePath,
   listDir,
   openFileByPath,
+  openImageFile,
   openFolder,
   renamePath,
   revealInFinder,
@@ -19,6 +20,7 @@ import { promptInput } from "./PromptDialog";
 import { confirmDelete } from "./ConfirmDialog";
 import { logError } from "../lib/logger";
 import { useT, tStatic } from "../lib/i18n";
+import { isImageFile } from "../lib/lang";
 import { FiFolder } from "react-icons/fi";
 
 const FOLDER_COLOR = "#dcb67a"; // soft amber, matches VSCode default folder icon
@@ -528,7 +530,10 @@ function FileNode({
     <Row
       depth={depth}
       active={active}
-      onClick={() => openFileByPath(entry.path)}
+      onClick={() => {
+        if (isImageFile(entry.path)) void openImageFile(entry.path);
+        else void openFileByPath(entry.path);
+      }}
       onContextMenu={onContextMenu}
       title={entry.path}
     >
