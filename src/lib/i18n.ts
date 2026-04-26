@@ -68,6 +68,15 @@ const ZH: Record<string, string> = {
   // diff
   "diff.identical": "两个文件内容完全相同。",
 
+  // Goto Anything (Cmd+P)
+  "goto.placeholder": "输入文件名…（↑↓ 选择，Enter 打开，Esc 关闭）",
+  "goto.placeholderNoWorkspace": "请先添加工作区，然后用 Cmd/Ctrl+P 搜索文件",
+  "goto.indexing": "正在索引工作区…",
+  "goto.empty": "工作区为空。",
+  "goto.noWorkspaceHint": "尚未添加工作区，无法搜索文件。",
+  "goto.noMatch": "没有匹配的文件。",
+  "goto.truncated": "文件数量过多，已截断到前 50,000 个。",
+
   // tabbar
   "tabbar.newTab": "新建标签 (Cmd/Ctrl+N)",
   "tabbar.allTabs": "所有标签 ({n})",
@@ -218,6 +227,15 @@ const EN: Record<string, string> = {
 
   // diff
   "diff.identical": "The two files are identical.",
+
+  // Goto Anything (Cmd+P)
+  "goto.placeholder": "Type a file name… (↑↓ to navigate, Enter to open, Esc to dismiss)",
+  "goto.placeholderNoWorkspace": "Add a workspace first, then press Cmd/Ctrl+P to search files",
+  "goto.indexing": "Indexing workspace…",
+  "goto.empty": "Workspace is empty.",
+  "goto.noWorkspaceHint": "No workspace added — nothing to search.",
+  "goto.noMatch": "No matching files.",
+  "goto.truncated": "Too many files; truncated to the first 50,000.",
 
   // tabbar
   "tabbar.newTab": "New tab (Cmd/Ctrl+N)",

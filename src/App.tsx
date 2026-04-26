@@ -12,6 +12,7 @@ import PromptDialog from "./components/PromptDialog";
 import TabBar from "./components/TabBar";
 import MarkdownToolbar from "./components/MarkdownToolbar";
 import JsonToolbar from "./components/JsonToolbar";
+import GotoAnything from "./components/GotoAnything";
 import { useEditorStore, useActiveTab } from "./store/editor";
 import { isMarkdown, isJson } from "./lib/lang";
 import { useT } from "./lib/i18n";
@@ -55,6 +56,7 @@ export default function App() {
     { line: number; from: "editor" | "preview" } | null
   >(null);
   const [hydrated, setHydrated] = useState(false);
+  const [gotoOpen, setGotoOpen] = useState(false);
   const dragRef = useRef<DragKind>(null);
   const uiRef = useRef({ sidebarPx, previewPct });
   uiRef.current = { sidebarPx, previewPct };
@@ -105,6 +107,12 @@ export default function App() {
       if (k === "b") {
         e.preventDefault();
         useEditorStore.getState().toggleSidebar();
+      } else if (k === "p" && !e.shiftKey && !e.altKey) {
+        // Cmd/Ctrl+P → Goto Anything. Browser default is Print; preventDefault
+        // stops that. (Print is still reachable via the Markdown toolbar /
+        // export menu for `.md`.)
+        e.preventDefault();
+        setGotoOpen(true);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -349,6 +357,7 @@ export default function App() {
       <StatusBar />
       <ConfirmDialog />
       <PromptDialog />
+      <GotoAnything open={gotoOpen} onClose={() => setGotoOpen(false)} />
     </div>
   );
 }

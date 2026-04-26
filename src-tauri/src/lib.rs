@@ -101,6 +101,103 @@ const ALLOWED_NAMES: &[&str] = &[
     ".gitignore", ".dockerignore", ".editorconfig", ".env",
 ];
 
+/// Directory names skipped while walking workspaces for Goto Anything. These
+/// are well-known build / dependency / IDE caches that contain enormous file
+/// counts the user never wants to navigate to. Hidden dirs (".something") are
+/// already excluded by the leading-dot rule below, so don't list those here.
+const IGNORED_WALK_DIRS: &[&str] = &[
+    "node_modules", "bower_components",
+    "target", "dist", "build", "out",
+    "vendor", "Pods", "Carthage", "DerivedData",
+    "coverage", "__pycache__", "venv",
+];
+
+/// Hard cap on the result of `list_workspace_files`. Walking stops as soon as
+/// this many files have been collected — protects against accidentally
+/// indexing a multi-million-file root. Above this size the user should use a
+/// real code-search tool, not Cmd+P.
+const MAX_WORKSPACE_FILES: usize = 50_000;
+
+#[derive(serde::Serialize)]
+struct WorkspaceFile {
+    /// Absolute path to the file.
+    path: String,
+    /// File name (basename), used as the primary fuzzy-match target.
+    name: String,
+    /// Workspace root this file belongs to (for grouping in the UI).
+    workspace: String,
+    /// Path relative to the workspace root, with forward-slash separator.
+    rel: String,
+}
+
+/// Walk every configured workspace root recursively and return a flat list of
+/// (non-hidden) files for the Cmd+P palette to fuzzy-match against.
+#[tauri::command]
+fn list_workspace_files(roots: Vec<String>) -> Result<Vec<WorkspaceFile>, String> {
+    let mut out: Vec<WorkspaceFile> = Vec::new();
+    'roots: for root_str in &roots {
+        let root = expand(root_str);
+        let workspace = root.to_string_lossy().to_string();
+        let mut stack: Vec<PathBuf> = vec![root.clone()];
+        while let Some(dir) = stack.pop() {
+            if out.len() >= MAX_WORKSPACE_FILES {
+                break 'roots;
+            }
+            let read = match fs::read_dir(&dir) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            for entry in read.flatten() {
+                if out.len() >= MAX_WORKSPACE_FILES {
+                    break 'roots;
+                }
+                let name = entry.file_name().to_string_lossy().to_string();
+                let ft = match entry.file_type() {
+                    Ok(t) => t,
+                    Err(_) => continue,
+                };
+                // Skip symlinks unconditionally — both to avoid loops and to
+                // dodge dangling refs into junk dirs we'd otherwise filter.
+                if ft.is_symlink() {
+                    continue;
+                }
+                if ft.is_dir() {
+                    if name.starts_with('.') {
+                        continue;
+                    }
+                    if IGNORED_WALK_DIRS.iter().any(|d| d.eq_ignore_ascii_case(&name)) {
+                        continue;
+                    }
+                    stack.push(entry.path());
+                } else if ft.is_file() {
+                    if name.starts_with('.')
+                        && !ALLOWED_NAMES.iter().any(|n| n.eq_ignore_ascii_case(&name))
+                    {
+                        continue;
+                    }
+                    let path = entry.path();
+                    let rel = path
+                        .strip_prefix(&root)
+                        .map(|p| p.to_string_lossy().replace('\\', "/"))
+                        .unwrap_or_else(|_| path.to_string_lossy().to_string());
+                    out.push(WorkspaceFile {
+                        path: path.to_string_lossy().to_string(),
+                        name,
+                        workspace: workspace.clone(),
+                        rel,
+                    });
+                }
+            }
+        }
+    }
+    log::info!(
+        "list_workspace_files: indexed {} file(s) across {} root(s)",
+        out.len(),
+        roots.len()
+    );
+    Ok(out)
+}
+
 #[tauri::command]
 fn create_file(path: String) -> Result<(), String> {
     let p = expand(&path);
@@ -558,7 +655,8 @@ pub fn run() {
             print_window,
             frontend_log,
             update_menu_language,
-            read_binary_as_base64
+            read_binary_as_base64,
+            list_workspace_files
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

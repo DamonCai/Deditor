@@ -83,13 +83,41 @@ const DEFAULT_CONTENT_ZH = `# 欢迎使用 DEditor
 
 ## 快捷键
 
+### 文件
+
 - \`Cmd/Ctrl+N\` 新建标签
 - \`Cmd/Ctrl+O\` 打开文件（可多选）
-- \`Cmd/Ctrl+Shift+O\` 打开文件夹
+- \`Cmd/Ctrl+Shift+O\` 打开文件夹（添加为工作区）
 - \`Cmd/Ctrl+S\` 保存
+- \`Cmd/Ctrl+Shift+S\` 另存为
 - \`Cmd/Ctrl+W\` 关闭当前标签
-- \`Cmd/Ctrl+B\` 开关侧栏
-- 拖拽文件到窗口可直接打开
+- 拖拽文件 / 多个文件到窗口直接打开
+
+### 导航
+
+- \`Cmd/Ctrl+P\` 跨工作区模糊搜索文件（Goto Anything）
+- \`Cmd/Ctrl+B\` 开关左侧文件树
+- 鼠标中键点击标签 = 关闭
+
+### 编辑
+
+- \`Cmd/Ctrl+Z\` 撤销，\`Cmd/Ctrl+Shift+Z\` 重做
+- \`Cmd/Ctrl+X / C / V\` 剪切 / 复制 / 粘贴
+- \`Cmd/Ctrl+A\` 全选
+- \`Cmd/Ctrl+F\` 当前文件内查找，\`Cmd/Ctrl+G\` 跳到下一个匹配
+- \`Cmd/Ctrl+D\` 选中下一个相同词
+- \`Cmd/Ctrl+Shift+L\` 选中所有相同词
+- \`Cmd/Ctrl+Alt+↑ / ↓\` 在上 / 下方加一个光标
+- \`Cmd/Ctrl+Click\` 在点击位置追加光标
+- \`Alt+Drag\` 列选 / 矩形选择
+- \`Tab / Shift+Tab\` 缩进 / 反缩进
+
+### 文件树（右键）
+
+- 在 Finder 中显示
+- 选为对比文件 → 在另一个文件上右键"与 xxx 对比"
+- 重命名 / 删除 / 新建文件 / 新建文件夹
+- 图片 / PDF / 音视频点击直接打开预览；Word / Excel / 压缩包等二进制文件以 hex dump 展示
 
 ## 代码示例
 
@@ -106,13 +134,42 @@ A Markdown / multi-language code editor built on **Tauri + React + CodeMirror**.
 
 ## Shortcuts
 
+### File
+
 - \`Cmd/Ctrl+N\` New tab
 - \`Cmd/Ctrl+O\` Open file (multi-select)
-- \`Cmd/Ctrl+Shift+O\` Open folder
+- \`Cmd/Ctrl+Shift+O\` Open folder (add as workspace)
 - \`Cmd/Ctrl+S\` Save
+- \`Cmd/Ctrl+Shift+S\` Save As
 - \`Cmd/Ctrl+W\` Close current tab
-- \`Cmd/Ctrl+B\` Toggle sidebar
-- Drag a file onto the window to open it
+- Drag one or more files onto the window to open
+
+### Navigation
+
+- \`Cmd/Ctrl+P\` Fuzzy file search across workspaces (Goto Anything)
+- \`Cmd/Ctrl+B\` Toggle the file tree sidebar
+- Middle-click a tab to close it
+
+### Editing
+
+- \`Cmd/Ctrl+Z\` Undo, \`Cmd/Ctrl+Shift+Z\` Redo
+- \`Cmd/Ctrl+X / C / V\` Cut / Copy / Paste
+- \`Cmd/Ctrl+A\` Select all
+- \`Cmd/Ctrl+F\` Find in current file, \`Cmd/Ctrl+G\` Jump to next match
+- \`Cmd/Ctrl+D\` Select next occurrence of the current word
+- \`Cmd/Ctrl+Shift+L\` Select all occurrences
+- \`Cmd/Ctrl+Alt+↑ / ↓\` Add a cursor above / below
+- \`Cmd/Ctrl+Click\` Add a cursor at the click position
+- \`Alt+Drag\` Column / rectangular selection
+- \`Tab / Shift+Tab\` Indent / Outdent
+
+### File Tree (right-click)
+
+- Reveal in Finder
+- Select for Compare → right-click another file → "Compare with …"
+- Rename / Delete / New File / New Folder
+- Click any image / PDF / audio / video to preview inline; Word / Excel /
+  archives and other binaries are shown as a hex dump
 
 ## Code sample
 
