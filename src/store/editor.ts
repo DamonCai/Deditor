@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 export type Theme = "light" | "dark";
+export type Lang = "zh" | "en";
 
 export interface Tab {
   id: string;
@@ -23,6 +24,7 @@ interface EditorState {
   // StatusBar all subscribe to).
   tabPositions: Record<string, TabPosition>;
   theme: Theme;
+  language: Lang;
   showPreview: boolean;
   showSidebar: boolean;
   previewMaximized: boolean;
@@ -48,6 +50,7 @@ interface EditorState {
   setWorkspaces: (paths: string[]) => void;
 
   setTheme: (theme: Theme) => void;
+  setLanguage: (lang: Lang) => void;
   togglePreview: () => void;
   togglePreviewMaximized: () => void;
   toggleSidebar: () => void;
@@ -56,7 +59,7 @@ interface EditorState {
   isActiveDirty: () => boolean;
 }
 
-export const DEFAULT_CONTENT = `# 欢迎使用 DEditor
+const DEFAULT_CONTENT_ZH = `# 欢迎使用 DEditor
 
 这是一个基于 **Tauri + React + CodeMirror** 的 Markdown / 多语言代码编辑器。
 
@@ -78,6 +81,41 @@ function greet(name: string): string {
 }
 \`\`\`
 `;
+
+const DEFAULT_CONTENT_EN = `# Welcome to DEditor
+
+A Markdown / multi-language code editor built on **Tauri + React + CodeMirror**.
+
+## Shortcuts
+
+- \`Cmd/Ctrl+N\` New tab
+- \`Cmd/Ctrl+O\` Open file (multi-select)
+- \`Cmd/Ctrl+Shift+O\` Open folder
+- \`Cmd/Ctrl+S\` Save
+- \`Cmd/Ctrl+W\` Close current tab
+- \`Cmd/Ctrl+B\` Toggle sidebar
+- Drag a file onto the window to open it
+
+## Code sample
+
+\`\`\`typescript
+function greet(name: string): string {
+  return \`Hello, \${name}!\`;
+}
+\`\`\`
+`;
+
+// First-launch language. Persisted choice (loaded by persistence.ts) overrides
+// this when present, so users who switch to 中文 keep it.
+function detectLang(): Lang {
+  return "en";
+}
+
+export const DEFAULT_CONTENT = DEFAULT_CONTENT_EN;
+
+export function defaultContentForLang(lang: Lang): string {
+  return lang === "en" ? DEFAULT_CONTENT_EN : DEFAULT_CONTENT_ZH;
+}
 
 function newId(): string {
   return (
@@ -103,6 +141,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     window.matchMedia("(prefers-color-scheme: dark)").matches
       ? "dark"
       : "light",
+  language: detectLang(),
   showPreview: true,
   showSidebar: true,
   previewMaximized: false,
@@ -153,16 +192,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   newUntitled: () => {
-    const { tabs } = get();
-    const t = makeTab(null, DEFAULT_CONTENT);
+    const { tabs, language } = get();
+    const t = makeTab(null, defaultContentForLang(language));
     set({ tabs: [...tabs, t], activeId: t.id });
     return t.id;
   },
 
   closeTab: (id) => {
-    const { tabs, activeId, tabPositions } = get();
+    const { tabs, activeId, tabPositions, language } = get();
     if (tabs.length === 1) {
-      const t = makeTab(null, DEFAULT_CONTENT);
+      const t = makeTab(null, defaultContentForLang(language));
       set({ tabs: [t], activeId: t.id, tabPositions: {} });
       return;
     }
@@ -243,6 +282,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setWorkspaces: (paths) => set({ workspaces: paths.slice() }),
 
   setTheme: (theme) => set({ theme }),
+  setLanguage: (language) => {
+    const cur = get();
+    if (cur.language === language) return;
+    // Also rewrite untouched untitled tabs that still hold the welcome doc, so
+    // a user toggling languages right after launch sees the new welcome text.
+    const oldDefault = defaultContentForLang(cur.language);
+    const nextDefault = defaultContentForLang(language);
+    const tabs = cur.tabs.map((t) =>
+      t.filePath === null && t.content === oldDefault && t.savedContent === oldDefault
+        ? { ...t, content: nextDefault, savedContent: nextDefault }
+        : t,
+    );
+    set({ language, tabs });
+  },
   togglePreview: () => {
     const next = !get().showPreview;
     // turning preview off also exits maximized

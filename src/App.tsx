@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 import Editor from "./components/Editor";
 import Preview from "./components/Preview";
 import TitleBar from "./components/TitleBar";
@@ -9,8 +11,10 @@ import ConfirmDialog from "./components/ConfirmDialog";
 import PromptDialog from "./components/PromptDialog";
 import TabBar from "./components/TabBar";
 import MarkdownToolbar from "./components/MarkdownToolbar";
+import JsonToolbar from "./components/JsonToolbar";
 import { useEditorStore, useActiveTab } from "./store/editor";
-import { isMarkdown } from "./lib/lang";
+import { isMarkdown, isJson } from "./lib/lang";
+import { useT } from "./lib/i18n";
 import {
   openFile,
   saveFile,
@@ -25,7 +29,8 @@ import { loadPersisted, schedulePersist } from "./lib/persistence";
 type DragKind = "sidebar" | "preview" | null;
 
 export default function App() {
-  const { theme, showPreview, previewMaximized, showSidebar, editorFontSize, setContent } =
+  const t = useT();
+  const { theme, showPreview, previewMaximized, showSidebar, editorFontSize, setContent, language } =
     useEditorStore();
   const active = useActiveTab();
   const filePath = active?.filePath ?? null;
@@ -54,6 +59,12 @@ export default function App() {
     document.documentElement.classList.toggle("dark", theme === "dark");
   }, [theme]);
 
+  // Keep the native macOS / OS-level app menu in sync with the in-app
+  // language toggle. Rebuild on initial mount + on every language change.
+  useEffect(() => {
+    invoke("update_menu_language", { lang: language }).catch(() => {});
+  }, [language]);
+
   // Hydrate from localStorage on mount
   useEffect(() => {
     loadPersisted()
@@ -79,36 +90,46 @@ export default function App() {
     schedulePersist({ sidebarPx, previewPct });
   }, [hydrated, sidebarPx, previewPct]);
 
+  // File menu lives in the native macOS app menu (built in Rust). Accelerators
+  // there (Cmd+N / Cmd+O / Cmd+S / etc.) are intercepted by the OS, so we
+  // only handle the shortcuts the menu doesn't own here.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
       const k = e.key.toLowerCase();
-      if (k === "o" && e.shiftKey) {
-        e.preventDefault();
-        openFolder();
-      } else if (k === "o") {
-        e.preventDefault();
-        openFile();
-      } else if (k === "s" && e.shiftKey) {
-        e.preventDefault();
-        saveFileAs();
-      } else if (k === "s") {
-        e.preventDefault();
-        saveFile();
-      } else if (k === "n") {
-        e.preventDefault();
-        newFile();
-      } else if (k === "w") {
-        e.preventDefault();
-        closeActiveTab();
-      } else if (k === "b") {
+      if (k === "b") {
         e.preventDefault();
         useEditorStore.getState().toggleSidebar();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Bridge native File menu clicks to the existing fileio handlers.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    listen<string>("menu-action", (e) => {
+      switch (e.payload) {
+        case "file_new": newFile(); break;
+        case "file_open": openFile(); break;
+        case "file_open_folder": openFolder(); break;
+        case "file_save": saveFile(); break;
+        case "file_save_as": saveFileAs(); break;
+        case "file_close_tab": closeActiveTab(); break;
+      }
+    })
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, []);
 
   // Tauri OS-level file drag & drop
@@ -194,7 +215,7 @@ export default function App() {
         ) : (
           <button
             onClick={() => useEditorStore.getState().setShowSidebar(true)}
-            title="展开侧栏 (Cmd/Ctrl+B)"
+            title={t("filetree.expand")}
             style={{
               width: 18,
               flexShrink: 0,
@@ -244,6 +265,7 @@ export default function App() {
                   className="min-w-0 flex-1 flex flex-col"
                 >
                   {isMarkdown(filePath) && <MarkdownToolbar />}
+                  {isJson(filePath) && <JsonToolbar />}
                   <div className="flex-1 min-h-0">
                     <Editor
                       key={active?.id ?? "no-tab"}

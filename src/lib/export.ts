@@ -4,6 +4,7 @@ import { renderMarkdown, renderCode } from "./markdown";
 import { isMarkdown } from "./lang";
 import { useEditorStore } from "../store/editor";
 import { logError, logInfo } from "./logger";
+import { tStatic } from "./i18n";
 
 const PRINT_AREA_ID = "deditor-print-area";
 
@@ -129,7 +130,9 @@ export async function exportPdf() {
   } catch (err) {
     logError("export PDF failed", err);
     alert(
-      `导出 PDF 失败: ${err instanceof Error ? err.message : err}\n你也可以先"导出 HTML"再用浏览器打印另存为 PDF。`,
+      tStatic("export.pdfFailed", {
+        err: err instanceof Error ? err.message : String(err),
+      }),
     );
   } finally {
     // Print dialog is async; clear after a delay so the print snapshot is preserved.

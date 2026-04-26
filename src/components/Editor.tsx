@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { EditorState, EditorSelection, Compartment } from "@codemirror/state";
 import {
   EditorView,
@@ -12,7 +12,7 @@ import {
 } from "@codemirror/view";
 import type { Command } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
-import { searchKeymap, highlightSelectionMatches, selectSelectionMatches } from "@codemirror/search";
+import { searchKeymap, highlightSelectionMatches, selectSelectionMatches, openSearchPanel } from "@codemirror/search";
 import {
   syntaxHighlighting,
   defaultHighlightStyle,
@@ -26,6 +26,8 @@ import { saveImage } from "../lib/fileio";
 import { useEditorStore } from "../store/editor";
 import { logError, logInfo } from "../lib/logger";
 import { setActiveView } from "../lib/editorBridge";
+import { tStatic, useT } from "../lib/i18n";
+import ContextMenu, { type MenuItem } from "./ContextMenu";
 
 const addCursorVertical = (dir: -1 | 1): Command => (view) => {
   const { state, dispatch } = view;
@@ -77,6 +79,8 @@ export default function Editor({
   onScroll,
   onPositionChange,
 }: Props) {
+  const t = useT();
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const themeCompartment = useRef(new Compartment());
@@ -168,6 +172,13 @@ export default function Editor({
               }
             }
             return false;
+          },
+          contextmenu: (e) => {
+            // Replace the OS-native context menu (which follows OS locale)
+            // with our own so it tracks the in-app i18n.
+            e.preventDefault();
+            setCtxMenu({ x: e.clientX, y: e.clientY });
+            return true;
           },
         }),
       ],
@@ -291,13 +302,102 @@ export default function Editor({
     };
   }, [filePath]);
 
+  const buildCtxItems = (): MenuItem[] => {
+    const view = viewRef.current;
+    const sel = view?.state.selection.main;
+    const hasSelection = !!sel && sel.from !== sel.to;
+    return [
+      {
+        label: t("editor.cut"),
+        disabled: !hasSelection,
+        onClick: () => view && doCut(view),
+      },
+      {
+        label: t("editor.copy"),
+        disabled: !hasSelection,
+        onClick: () => view && doCopy(view),
+      },
+      {
+        label: t("editor.paste"),
+        onClick: () => view && doPaste(view),
+      },
+      { divider: true },
+      {
+        label: t("editor.selectAll"),
+        onClick: () => view && doSelectAll(view),
+      },
+      { divider: true },
+      {
+        label: t("editor.find"),
+        onClick: () => view && openSearchPanel(view),
+      },
+    ];
+  };
+
   return (
-    <div
-      ref={hostRef}
-      className="h-full w-full overflow-hidden"
-      style={{ ["--editor-font-size" as string]: `${fontSize}px` }}
-    />
+    <>
+      <div
+        ref={hostRef}
+        className="h-full w-full overflow-hidden"
+        style={{ ["--editor-font-size" as string]: `${fontSize}px` }}
+      />
+      {ctxMenu && (
+        <ContextMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          items={buildCtxItems()}
+          onClose={() => setCtxMenu(null)}
+        />
+      )}
+    </>
   );
+}
+
+async function doCopy(view: EditorView) {
+  const { from, to } = view.state.selection.main;
+  if (from === to) return;
+  const text = view.state.sliceDoc(from, to);
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    /* clipboard denied; nothing more we can do here */
+  }
+}
+
+async function doCut(view: EditorView) {
+  const { from, to } = view.state.selection.main;
+  if (from === to) return;
+  const text = view.state.sliceDoc(from, to);
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    /* fall through */
+  }
+  view.dispatch({ changes: { from, to, insert: "" } });
+  view.focus();
+}
+
+async function doPaste(view: EditorView) {
+  let text: string;
+  try {
+    text = await navigator.clipboard.readText();
+  } catch {
+    return;
+  }
+  if (!text) return;
+  const { from, to } = view.state.selection.main;
+  view.dispatch({
+    changes: { from, to, insert: text },
+    selection: { anchor: from + text.length },
+  });
+  view.focus();
+}
+
+function doSelectAll(view: EditorView) {
+  view.dispatch({
+    selection: { anchor: 0, head: view.state.doc.length },
+  });
+  view.focus();
 }
 
 async function handleImagePaste(blob: File, mime: string, view: EditorView) {
@@ -314,7 +414,7 @@ async function handleImagePaste(blob: File, mime: string, view: EditorView) {
     baseDir = workspaces[0];
   }
   if (!baseDir) {
-    alert("请先保存文件或打开文件夹后再粘贴图片");
+    alert(tStatic("editor.pasteImageNoTarget"));
     return;
   }
   const isMd = isMarkdown(filePath);
@@ -328,7 +428,7 @@ async function handleImagePaste(blob: File, mime: string, view: EditorView) {
     logInfo(`pasted image saved: assets/${name} (${buf.byteLength} bytes)`);
   } catch (err) {
     logError(`paste image save failed: assets/${name}`, err);
-    alert(`保存图片失败: ${err}`);
+    alert(tStatic("editor.saveImageFailed", { err: String(err) }));
     return;
   }
   const rel = `assets/${name}`;

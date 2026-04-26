@@ -7,6 +7,7 @@ import {
   listDir,
   openFileByPath,
   openFolder,
+  renamePath,
   revealInFinder,
   setWorkspaceByPath,
   type DirEntry,
@@ -17,6 +18,7 @@ import ContextMenu, { type MenuItem } from "./ContextMenu";
 import { promptInput } from "./PromptDialog";
 import { confirmDelete } from "./ConfirmDialog";
 import { logError } from "../lib/logger";
+import { useT, tStatic } from "../lib/i18n";
 import { FiFolder } from "react-icons/fi";
 
 const FOLDER_COLOR = "#dcb67a"; // soft amber, matches VSCode default folder icon
@@ -28,6 +30,7 @@ interface MenuState {
 }
 
 export default function FileTree() {
+  const t = useT();
   const { workspaces, removeWorkspace, toggleSidebar } = useEditorStore();
   const filePath = useEditorStore(
     (s) => s.tabs.find((t) => t.id === s.activeId)?.filePath ?? null,
@@ -76,7 +79,7 @@ export default function FileTree() {
           onKeyDown={(e) => {
             if (e.key === "Enter") submit();
           }}
-          placeholder="输入路径添加工作区 (~ 支持)"
+          placeholder={t("filetree.pathPlaceholder")}
           spellCheck={false}
           disabled={busy}
           className="flex-1 min-w-0 px-2 py-1 text-xs rounded outline-none"
@@ -88,7 +91,7 @@ export default function FileTree() {
         />
         <button
           onClick={openFolder}
-          title="选择文件夹（可多选）"
+          title={t("filetree.selectFolder")}
           className="px-2 py-1 text-xs rounded hover:bg-[color:var(--bg-mute)]"
           style={{ color: "var(--text-soft)" }}
         >
@@ -96,7 +99,7 @@ export default function FileTree() {
         </button>
         <button
           onClick={toggleSidebar}
-          title="收起侧栏 (Cmd/Ctrl+B)"
+          title={t("filetree.collapse")}
           className="px-2 py-1 text-xs rounded hover:bg-[color:var(--bg-mute)]"
           style={{ color: "var(--text-soft)", lineHeight: 1 }}
         >
@@ -117,7 +120,7 @@ export default function FileTree() {
             className="px-3 py-4 text-xs"
             style={{ color: "var(--text-soft)" }}
           >
-            上方粘路径回车，或点 📂 选择文件夹（可一次选多个）
+            {t("filetree.emptyHint")}
           </div>
         ) : (
           workspaces.map((w) => (
@@ -128,21 +131,21 @@ export default function FileTree() {
               onContextMenu={(e) =>
                 openMenu(e, [
                   {
-                    label: "在此工作区新建文件",
+                    label: t("filetree.newFileInWs"),
                     onClick: () => promptCreate("file", w),
                   },
                   {
-                    label: "在此工作区新建文件夹",
+                    label: t("filetree.newDirInWs"),
                     onClick: () => promptCreate("dir", w),
                   },
                   { divider: true },
                   {
-                    label: "在 Finder 中显示",
+                    label: t("filetree.revealInFinder"),
                     onClick: () => revealInFinder(w),
                   },
                   { divider: true },
                   {
-                    label: `从工作区移除 "${shortName(w)}"`,
+                    label: t("filetree.removeFromWs", { name: shortName(w) }),
                     onClick: () => removeWorkspace(w),
                   },
                 ])
@@ -150,21 +153,25 @@ export default function FileTree() {
               onFolderContextMenu={(e, dir) =>
                 openMenu(e, [
                   {
-                    label: "新建文件",
+                    label: t("filetree.newFile"),
                     onClick: () => promptCreate("file", dir),
                   },
                   {
-                    label: "新建文件夹",
+                    label: t("filetree.newDir"),
                     onClick: () => promptCreate("dir", dir),
                   },
                   { divider: true },
                   {
-                    label: "在 Finder 中显示",
+                    label: t("filetree.revealInFinder"),
                     onClick: () => revealInFinder(dir),
                   },
                   { divider: true },
                   {
-                    label: "删除文件夹",
+                    label: t("filetree.renameDir"),
+                    onClick: () => promptRename(dir, true),
+                  },
+                  {
+                    label: t("filetree.deleteDir"),
                     onClick: () => promptDelete(dir, true),
                   },
                 ])
@@ -172,12 +179,16 @@ export default function FileTree() {
               onFileContextMenu={(e, file) =>
                 openMenu(e, [
                   {
-                    label: "在 Finder 中显示",
+                    label: t("filetree.revealInFinder"),
                     onClick: () => revealInFinder(file),
                   },
                   { divider: true },
                   {
-                    label: "删除文件",
+                    label: t("filetree.renameFile"),
+                    onClick: () => promptRename(file, false),
+                  },
+                  {
+                    label: t("filetree.deleteFile"),
                     onClick: () => promptDelete(file, false),
                   },
                 ])
@@ -200,9 +211,11 @@ export default function FileTree() {
 
 async function promptCreate(kind: "file" | "dir", parent: string) {
   const v = await promptInput({
-    title: kind === "file" ? "新建文件" : "新建文件夹",
-    label: `位于: ${parent}`,
-    placeholder: kind === "file" ? "name.md" : "folder-name",
+    title: tStatic(kind === "file" ? "filetree.newFile" : "filetree.newDir"),
+    label: tStatic("filetree.locatedAt", { parent }),
+    placeholder: tStatic(
+      kind === "file" ? "filetree.fileNamePlaceholder" : "filetree.dirNamePlaceholder",
+    ),
   });
   if (!v) return;
   try {
@@ -214,7 +227,11 @@ async function promptCreate(kind: "file" | "dir", parent: string) {
     }
   } catch (err) {
     logError(`create ${kind} failed`, err);
-    alert(`创建失败: ${err instanceof Error ? err.message : err}`);
+    alert(
+      tStatic("filetree.createFailed", {
+        err: err instanceof Error ? err.message : String(err),
+      }),
+    );
   }
 }
 
@@ -226,7 +243,39 @@ async function promptDelete(path: string, isDir: boolean) {
     await deletePath(path);
   } catch (err) {
     logError("delete failed", err);
-    alert(`删除失败: ${err instanceof Error ? err.message : err}`);
+    alert(
+      tStatic("filetree.deleteFailed", {
+        err: err instanceof Error ? err.message : String(err),
+      }),
+    );
+  }
+}
+
+async function promptRename(path: string, isDir: boolean) {
+  const oldName = path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+  const newName = await promptInput({
+    title: tStatic(isDir ? "filetree.renameDir" : "filetree.renameFile"),
+    label: tStatic("filetree.renameLabel", { name: oldName }),
+    initial: oldName,
+    placeholder: oldName,
+  });
+  if (!newName || newName === oldName) return;
+  // Build new path under the same parent. We pick the separator from the
+  // existing path so Windows / POSIX both work.
+  const idx = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  if (idx <= 0) return; // root — refuse to rename
+  const sep = path[idx];
+  const parent = path.slice(0, idx);
+  const newPath = parent + sep + newName;
+  try {
+    await renamePath(path, newPath);
+  } catch (err) {
+    logError("rename failed", err);
+    alert(
+      tStatic("filetree.renameFailed", {
+        err: err instanceof Error ? err.message : String(err),
+      }),
+    );
   }
 }
 
@@ -259,8 +308,7 @@ function WorkspaceSection({
           padding: "4px 8px",
           fontSize: 11,
           fontWeight: 700,
-          textTransform: "uppercase",
-          letterSpacing: 0.5,
+          letterSpacing: 0.3,
           color: "var(--text-soft)",
           background: "var(--bg-mute)",
         }}
@@ -339,7 +387,7 @@ function Folder({
             paddingLeft: depth * 14 + 24,
           }}
         >
-          (空)
+          {tStatic("filetree.empty")}
         </div>
       )}
     </div>
@@ -552,7 +600,7 @@ function Caret({ open }: { open: boolean }) {
 function Spinner() {
   return (
     <div className="px-3 py-2 text-xs" style={{ color: "var(--text-soft)" }}>
-      加载中…
+      {tStatic("common.loading")}
     </div>
   );
 }

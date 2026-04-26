@@ -2,10 +2,12 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { FiChevronDown, FiPlus, FiX } from "react-icons/fi";
 import { useEditorStore, isTabDirty, type Tab } from "../store/editor";
 import { closeTabById, newFile, revealInFinder } from "../lib/fileio";
+import { useT, tStatic } from "../lib/i18n";
 import LangIcon from "./LangIcon";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
 
 export default function TabBar() {
+  const t = useT();
   const { tabs, activeId, setActive, closeOthers } = useEditorStore();
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const [overflowOpen, setOverflowOpen] = useState(false);
@@ -26,14 +28,14 @@ export default function TabBar() {
     const items: MenuItem[] = [];
     if (tab.filePath) {
       items.push({
-        label: "在 Finder 中显示",
+        label: t("filetree.revealInFinder"),
         onClick: () => revealInFinder(tab.filePath!),
       });
       items.push({ divider: true });
     }
-    items.push({ label: "关闭", onClick: () => closeTabById(tab.id) });
+    items.push({ label: t("tabbar.close"), onClick: () => closeTabById(tab.id) });
     items.push({
-      label: "关闭其他",
+      label: t("tabbar.closeOthers"),
       onClick: () => closeOthers(tab.id),
       disabled: tabs.length <= 1,
     });
@@ -74,7 +76,7 @@ export default function TabBar() {
       </div>
       <button
         onClick={newFile}
-        title="新建标签 (Cmd/Ctrl+N)"
+        title={t("tabbar.newTab")}
         style={iconBtnStyle}
         onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-mute)")}
         onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
@@ -84,7 +86,7 @@ export default function TabBar() {
       <button
         ref={overflowBtnRef}
         onClick={() => setOverflowOpen((v) => !v)}
-        title={`所有标签 (${tabs.length})`}
+        title={t("tabbar.allTabs", { n: tabs.length })}
         style={{ ...iconBtnStyle, position: "relative" }}
         onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-mute)")}
         onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
@@ -157,7 +159,8 @@ function TabItem({
   onContextMenu?: (e: React.MouseEvent) => void;
 }) {
   const dirty = isTabDirty(tab);
-  const name = tab.filePath ? tab.filePath.split(/[\\/]/).pop() : "未命名";
+  const untitled = tStatic("common.untitled");
+  const name = tab.filePath ? tab.filePath.split(/[\\/]/).pop() : untitled;
   return (
     <div
       data-tab-id={tab.id}
@@ -169,7 +172,7 @@ function TabItem({
           onClose();
         }
       }}
-      title={tab.filePath ?? "未命名"}
+      title={tab.filePath ?? untitled}
       style={{
         display: "flex",
         alignItems: "center",
@@ -202,7 +205,7 @@ function TabItem({
           e.stopPropagation();
           onClose();
         }}
-        title="关闭 (Cmd/Ctrl+W)"
+        title={tStatic("tabbar.closeShortcut")}
         style={{
           width: 16,
           height: 16,
@@ -244,6 +247,8 @@ function OverflowDropdown({
   onClose: (id: string) => void;
   onDismiss: () => void;
 }) {
+  const t = useT();
+  const untitled = t("common.untitled");
   const [filter, setFilter] = useState("");
   const [pos, setPos] = useState<{ top: number; right: number }>({ top: 0, right: 0 });
 
@@ -265,20 +270,20 @@ function OverflowDropdown({
     const onEsc = (e: KeyboardEvent) => {
       if (e.key === "Escape") onDismiss();
     };
-    const t = window.setTimeout(() => {
+    const timer = window.setTimeout(() => {
       window.addEventListener("mousedown", onDocDown);
     }, 0);
     window.addEventListener("keydown", onEsc);
     return () => {
-      clearTimeout(t);
+      clearTimeout(timer);
       window.removeEventListener("mousedown", onDocDown);
       window.removeEventListener("keydown", onEsc);
     };
   }, [anchorRef, onDismiss]);
 
   const filtered = filter
-    ? tabs.filter((t) =>
-        (t.filePath ?? "未命名")
+    ? tabs.filter((tb) =>
+        (tb.filePath ?? untitled)
           .toLowerCase()
           .includes(filter.toLowerCase()),
       )
@@ -307,7 +312,7 @@ function OverflowDropdown({
           autoFocus
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          placeholder={`搜索 ${tabs.length} 个标签...`}
+          placeholder={t("tabbar.searchPlaceholder", { n: tabs.length })}
           style={{
             width: "100%",
             background: "var(--bg-soft)",
@@ -330,18 +335,18 @@ function OverflowDropdown({
               color: "var(--text-soft)",
             }}
           >
-            没有匹配
+            {t("tabbar.noMatches")}
           </div>
         )}
-        {filtered.map((t) => {
-          const dirty = isTabDirty(t);
-          const isActive = t.id === activeId;
-          const name = t.filePath ? t.filePath.split(/[\\/]/).pop() : "未命名";
+        {filtered.map((tb) => {
+          const dirty = isTabDirty(tb);
+          const isActive = tb.id === activeId;
+          const name = tb.filePath ? tb.filePath.split(/[\\/]/).pop() : untitled;
           return (
             <div
-              key={t.id}
-              onClick={() => onPick(t.id)}
-              title={t.filePath ?? "未命名"}
+              key={tb.id}
+              onClick={() => onPick(tb.id)}
+              title={tb.filePath ?? untitled}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -359,8 +364,8 @@ function OverflowDropdown({
                 if (!isActive) e.currentTarget.style.background = "";
               }}
             >
-              {t.filePath ? (
-                <LangIcon filePath={t.filePath} size={14} />
+              {tb.filePath ? (
+                <LangIcon filePath={tb.filePath} size={14} />
               ) : (
                 <span style={{ width: 14, display: "inline-block" }} />
               )}
@@ -379,21 +384,21 @@ function OverflowDropdown({
                   {name}
                   {dirty && " ●"}
                 </span>
-                {t.filePath && (
+                {tb.filePath && (
                   <span
                     className="truncate"
                     style={{ fontSize: 10, color: "var(--text-soft)" }}
                   >
-                    {t.filePath}
+                    {tb.filePath}
                   </span>
                 )}
               </div>
               <span
                 onClick={(e) => {
                   e.stopPropagation();
-                  onClose(t.id);
+                  onClose(tb.id);
                 }}
-                title="关闭"
+                title={t("tabbar.close")}
                 style={{
                   width: 18,
                   height: 18,

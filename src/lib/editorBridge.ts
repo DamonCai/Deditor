@@ -1,4 +1,5 @@
 import type { EditorView } from "@codemirror/view";
+import { tStatic } from "./i18n";
 
 // Module-level handle to the current active editor view.
 // The Editor component registers/unregisters itself on mount/unmount,
@@ -88,7 +89,7 @@ export function insertLink(url: string, displayText?: string): void {
   withView((view) => {
     const { from, to } = view.state.selection.main;
     const sel = view.state.sliceDoc(from, to);
-    const text = displayText ?? sel ?? "链接";
+    const text = displayText ?? sel ?? tStatic("md.linkDefaultText");
     const insert = `[${text}](${url})`;
     view.dispatch({
       changes: { from, to, insert },

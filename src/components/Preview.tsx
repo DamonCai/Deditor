@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { FiMaximize2, FiMinimize2 } from "react-icons/fi";
 import { renderMarkdown, renderCode } from "../lib/markdown";
+import { hydratePlantuml } from "../lib/plantumlHydrate";
 import { isMarkdown } from "../lib/lang";
 import { useEditorStore } from "../store/editor";
+import { useT } from "../lib/i18n";
 
 interface Props {
   source: string;
@@ -15,6 +17,7 @@ interface Props {
 }
 
 export default function Preview({ source, filePath, theme, scrollLine, onScroll }: Props) {
+  const t = useT();
   const [html, setHtml] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
   const isMd = isMarkdown(filePath);
@@ -38,6 +41,15 @@ export default function Preview({ source, filePath, theme, scrollLine, onScroll 
       clearTimeout(id);
     };
   }, [source, filePath, theme, isMd]);
+
+  // After every HTML refresh, walk the DOM and replace plantuml placeholders
+  // with their rendered SVG (cache → network with short timeout). The returned
+  // AbortController cancels in-flight fetches when html changes again.
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const ctrl = hydratePlantuml(containerRef.current);
+    return () => ctrl.abort();
+  }, [html]);
 
   // Apply incoming scrollLine from editor (programmatic scroll).
   useEffect(() => {
@@ -102,7 +114,7 @@ export default function Preview({ source, filePath, theme, scrollLine, onScroll 
         >
           <button
             onClick={togglePreviewMaximized}
-            title={previewMaximized ? "还原（恢复编辑器）" : "放大预览（隐藏编辑器）"}
+            title={previewMaximized ? t("preview.restore") : t("preview.maximize")}
             style={{
               height: 24,
               padding: "0 5px",

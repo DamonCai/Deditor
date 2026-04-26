@@ -5,6 +5,7 @@ import { useEditorStore } from "../store/editor";
 import { confirmUnsaved } from "../components/ConfirmDialog";
 import { logError, logInfo, logWarn } from "./logger";
 import { notifyRefresh } from "./treeRefresh";
+import { tStatic } from "./i18n";
 
 const MD_FILTER = [
   { name: "Markdown", extensions: ["md", "markdown", "mdx"] },
@@ -105,7 +106,7 @@ export async function closeActiveTab() {
   if (!active) return;
   if (active.content !== active.savedContent) {
     const choice = await confirmUnsaved(
-      `"${displayName(active.filePath)}" 有未保存修改，是否保存后再关闭？`,
+      tStatic("fileio.unsavedClose", { name: displayName(active.filePath) }),
     );
     if (choice === "cancel") return;
     if (choice === "save") {
@@ -126,7 +127,7 @@ export async function closeTabById(id: string) {
   if (t.content !== t.savedContent) {
     useEditorStore.getState().setActive(id);
     const choice = await confirmUnsaved(
-      `"${displayName(t.filePath)}" 有未保存修改，是否保存后再关闭？`,
+      tStatic("fileio.unsavedClose", { name: displayName(t.filePath) }),
     );
     if (choice === "cancel") return;
     if (choice === "save") {
@@ -215,7 +216,44 @@ export async function revealInFinder(path: string): Promise<void> {
     await revealItemInDir(path);
   } catch (err) {
     logError(`reveal in finder failed: ${path}`, err);
-    alert(`无法打开位置: ${err instanceof Error ? err.message : err}`);
+    alert(
+      tStatic("fileio.cantOpenLocation", {
+        err: err instanceof Error ? err.message : String(err),
+      }),
+    );
+  }
+}
+
+export async function renamePath(from: string, to: string): Promise<void> {
+  await invoke("rename_path", { from, to });
+  logInfo(`renamed: ${from} -> ${to}`);
+  // Refresh both ends in case from/to were under different parents (defensive;
+  // current callers keep the parent stable but it's cheap to cover both).
+  const fromIdx = Math.max(from.lastIndexOf("/"), from.lastIndexOf("\\"));
+  const toIdx = Math.max(to.lastIndexOf("/"), to.lastIndexOf("\\"));
+  if (fromIdx > 0) notifyRefresh(from.slice(0, fromIdx));
+  if (toIdx > 0 && from.slice(0, fromIdx) !== to.slice(0, toIdx)) {
+    notifyRefresh(to.slice(0, toIdx));
+  }
+  // Re-point any open tabs that referenced the old path. For a directory we
+  // also handle children whose absolute path was prefixed by `from + sep`.
+  const { tabs } = useEditorStore.getState();
+  let anyChanged = false;
+  const remapped = tabs.map((t) => {
+    if (!t.filePath) return t;
+    if (t.filePath === from) {
+      anyChanged = true;
+      return { ...t, filePath: to };
+    }
+    if (t.filePath.startsWith(from + "/") || t.filePath.startsWith(from + "\\")) {
+      anyChanged = true;
+      const rest = t.filePath.slice(from.length);
+      return { ...t, filePath: to + rest };
+    }
+    return t;
+  });
+  if (anyChanged) {
+    useEditorStore.setState({ tabs: remapped });
   }
 }
 
@@ -247,6 +285,6 @@ function joinPath(parent: string, child: string): string {
 }
 
 function displayName(filePath: string | null): string {
-  if (!filePath) return "未命名";
+  if (!filePath) return tStatic("common.untitled");
   return filePath.split(/[\\/]/).pop() ?? filePath;
 }

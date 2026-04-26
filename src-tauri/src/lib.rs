@@ -2,7 +2,8 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 use std::fs;
 use std::path::PathBuf;
-use tauri::Manager;
+use tauri::menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+use tauri::{Emitter, Manager};
 use tauri_plugin_log::{Target, TargetKind};
 
 #[derive(serde::Serialize)]
@@ -180,6 +181,33 @@ fn print_window(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn rename_path(from: String, to: String) -> Result<(), String> {
+    let from_p = expand(&from);
+    let to_p = expand(&to);
+    if !from_p.exists() {
+        let msg = format!("path does not exist: {}", from_p.display());
+        log::warn!("rename_path: {}", msg);
+        return Err(msg);
+    }
+    if to_p.exists() {
+        let msg = format!("target already exists: {}", to_p.display());
+        log::warn!("rename_path: {}", msg);
+        return Err(msg);
+    }
+    fs::rename(&from_p, &to_p).map_err(|e| {
+        log::error!(
+            "rename_path failed: {} -> {} -- {}",
+            from_p.display(),
+            to_p.display(),
+            e
+        );
+        e.to_string()
+    })?;
+    log::info!("renamed: {} -> {}", from_p.display(), to_p.display());
+    Ok(())
+}
+
+#[tauri::command]
 fn delete_path(path: String) -> Result<(), String> {
     let p = expand(&path);
     if !p.exists() {
@@ -262,6 +290,162 @@ fn frontend_log(level: String, message: String) {
     }
 }
 
+struct MenuLabels {
+    file: &'static str,
+    edit: &'static str,
+    window: &'static str,
+    new: &'static str,
+    open: &'static str,
+    open_folder: &'static str,
+    save: &'static str,
+    save_as: &'static str,
+    close_tab: &'static str,
+}
+
+fn labels_for(lang: &str) -> MenuLabels {
+    match lang {
+        "zh" => MenuLabels {
+            file: "文件",
+            edit: "编辑",
+            window: "窗口",
+            new: "新建",
+            open: "打开…",
+            open_folder: "打开文件夹…",
+            save: "保存",
+            save_as: "另存为…",
+            close_tab: "关闭标签",
+        },
+        _ => MenuLabels {
+            file: "File",
+            edit: "Edit",
+            window: "Window",
+            new: "New",
+            open: "Open…",
+            open_folder: "Open Folder…",
+            save: "Save",
+            save_as: "Save As…",
+            close_tab: "Close Tab",
+        },
+    }
+}
+
+/// Build the app menu. Re-callable: each call replaces the current menu so
+/// language changes can rebuild it. `lang` should be "zh" or "en" — anything
+/// else falls back to English.
+fn build_and_set_menu<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    lang: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let l = labels_for(lang);
+
+    // App menu (left-most on macOS; the OS auto-replaces the title with the
+    // bundle's display name, so the literal "DEditor" is just a fallback).
+    let app_menu = SubmenuBuilder::new(app, "DEditor")
+        .about(Some(AboutMetadata {
+            // env!("CARGO_PKG_VERSION") is read at compile time from
+            // src-tauri/Cargo.toml so the build script's version bump
+            // flows straight into the macOS "About DEditor" dialog.
+            name: Some("DEditor".to_string()),
+            version: Some(env!("CARGO_PKG_VERSION").to_string()),
+            ..Default::default()
+        }))
+        .separator()
+        .services()
+        .separator()
+        .hide()
+        .hide_others()
+        .show_all()
+        .separator()
+        .quit()
+        .build()?;
+
+    let new_item = MenuItemBuilder::new(l.new)
+        .id("file_new")
+        .accelerator("CmdOrCtrl+N")
+        .build(app)?;
+    let open_item = MenuItemBuilder::new(l.open)
+        .id("file_open")
+        .accelerator("CmdOrCtrl+O")
+        .build(app)?;
+    let open_folder_item = MenuItemBuilder::new(l.open_folder)
+        .id("file_open_folder")
+        .accelerator("CmdOrCtrl+Shift+O")
+        .build(app)?;
+    let save_item = MenuItemBuilder::new(l.save)
+        .id("file_save")
+        .accelerator("CmdOrCtrl+S")
+        .build(app)?;
+    let save_as_item = MenuItemBuilder::new(l.save_as)
+        .id("file_save_as")
+        .accelerator("CmdOrCtrl+Shift+S")
+        .build(app)?;
+    let close_tab_item = MenuItemBuilder::new(l.close_tab)
+        .id("file_close_tab")
+        .accelerator("CmdOrCtrl+W")
+        .build(app)?;
+
+    let file_menu = SubmenuBuilder::new(app, l.file)
+        .item(&new_item)
+        .separator()
+        .item(&open_item)
+        .item(&open_folder_item)
+        .separator()
+        .item(&save_item)
+        .item(&save_as_item)
+        .separator()
+        .item(&close_tab_item)
+        .build()?;
+
+    let edit_menu = SubmenuBuilder::new(app, l.edit)
+        .undo()
+        .redo()
+        .separator()
+        .cut()
+        .copy()
+        .paste()
+        .select_all()
+        .build()?;
+
+    let window_menu = SubmenuBuilder::new(app, l.window)
+        .minimize()
+        .maximize()
+        .separator()
+        .fullscreen()
+        .build()?;
+
+    let menu = MenuBuilder::new(app)
+        .items(&[&app_menu, &file_menu, &edit_menu, &window_menu])
+        .build()?;
+    app.set_menu(menu)?;
+    Ok(())
+}
+
+/// Initial install at startup. Defaults to English; the frontend pushes the
+/// persisted language right after hydration via `update_menu_language`.
+fn install_app_menu(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let handle = app.handle().clone();
+    build_and_set_menu(&handle, "en")?;
+
+    // Forward file-menu clicks to the frontend. We only care about IDs that
+    // start with `file_`; predefined items (quit, copy, …) handle themselves.
+    app.on_menu_event(|app_handle, event| {
+        let id = event.id().0.as_str().to_string();
+        if id.starts_with("file_") {
+            let _ = app_handle.emit("menu-action", id);
+        }
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+fn update_menu_language(app: tauri::AppHandle, lang: String) -> Result<(), String> {
+    build_and_set_menu(&app, &lang).map_err(|e| {
+        log::error!("update_menu_language failed: {}", e);
+        e.to_string()
+    })
+}
+
 fn install_panic_hook() {
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -314,6 +498,7 @@ pub fn run() {
             if let Ok(log_dir) = app.path().app_log_dir() {
                 log::info!("log directory: {}", log_dir.display());
             }
+            install_app_menu(app)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -324,9 +509,11 @@ pub fn run() {
             save_image,
             create_file,
             create_dir,
+            rename_path,
             delete_path,
             print_window,
-            frontend_log
+            frontend_log,
+            update_menu_language
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,8 +1,10 @@
 import { useActiveTab, isTabDirty, useEditorStore } from "../store/editor";
 import { detectLang } from "../lib/lang";
+import { useT } from "../lib/i18n";
 import LangIcon from "./LangIcon";
 
 export default function StatusBar() {
+  const t = useT();
   const active = useActiveTab();
   const { theme, setTheme } = useEditorStore();
   const filePath = active?.filePath ?? null;
@@ -25,19 +27,19 @@ export default function StatusBar() {
     >
       <div className="flex items-center gap-2 min-w-0">
         {filePath && <LangIcon filePath={filePath} size={14} />}
-        <span className="truncate">{filePath ?? "未命名"}</span>
+        <span className="truncate">{filePath ?? t("statusbar.untitled")}</span>
         {dirty && <span style={{ color: "var(--accent)" }}>●</span>}
       </div>
       <div className="flex items-center gap-4 flex-shrink-0">
         <span>{lang.label}</span>
         <span>
-          {lines} 行 · {chars} 字符
+          {lines} {t("statusbar.lines")} · {chars} {t("statusbar.chars")}
         </span>
         <button
           className="hover:text-[color:var(--text)]"
           onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
         >
-          {theme === "dark" ? "亮色" : "暗色"}
+          {theme === "dark" ? t("statusbar.light") : t("statusbar.dark")}
         </button>
       </div>
     </div>

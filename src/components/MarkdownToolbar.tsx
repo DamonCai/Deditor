@@ -4,13 +4,17 @@ import {
   FiCode,
   FiLink,
   FiList,
-  FiHash,
   FiMessageSquare,
   FiTable,
   FiMinus,
   FiPlus,
+  FiImage,
+  FiCheckSquare,
+  FiDroplet,
+  FiEdit3,
 } from "react-icons/fi";
 import {
+  getActiveView,
   insertCodeBlock,
   insertLink,
   insertText,
@@ -18,18 +22,47 @@ import {
   wrapSelection,
 } from "../lib/editorBridge";
 import { useEditorStore } from "../store/editor";
+import { useT } from "../lib/i18n";
 import { promptInput } from "./PromptDialog";
 
 export default function MarkdownToolbar() {
+  const t = useT();
   const { editorFontSize, setEditorFontSize } = useEditorStore();
 
   const onLink = async () => {
     const url = await promptInput({
-      title: "插入链接",
+      title: t("md.linkPromptTitle"),
       label: "URL",
       placeholder: "https://example.com",
     });
     if (url) insertLink(url);
+  };
+
+  const onImage = async () => {
+    // Two-step prompt — keep it simple rather than building a multi-field
+    // dialog. The first input becomes the alt text; the second is the URL.
+    const alt = await promptInput({
+      title: t("md.imagePromptTitle"),
+      label: t("md.imageAltLabel"),
+      initial: t("md.imageDefaultAlt"),
+      placeholder: t("md.imageDefaultAlt"),
+    });
+    if (alt == null) return;
+    const url = await promptInput({
+      title: t("md.imagePromptTitle"),
+      label: t("md.imageUrlLabel"),
+      placeholder: "https://example.com/pic.png",
+    });
+    if (!url) return;
+    insertText(`![${alt}](${url})`);
+  };
+
+  const wrapColor = (cssProp: "color" | "background", hex: string) => {
+    // Wrap the current selection (or empty caret) with an inline span. The
+    // markdown-it config has `html: true` so this round-trips through the
+    // preview as styled text.
+    wrapSelection(`<span style="${cssProp}:${hex}">`, `</span>`);
+    getActiveView()?.focus();
   };
 
   return (
@@ -43,54 +76,105 @@ export default function MarkdownToolbar() {
         overflowX: "auto",
       }}
     >
-      <ToolbarButton title="加粗 (写入 **...**)" onClick={() => wrapSelection("**")}>
+      {/* Inline emphasis */}
+      <ToolbarButton title={t("md.bold")} onClick={() => wrapSelection("**")}>
         <FiBold size={13} />
       </ToolbarButton>
-      <ToolbarButton title="斜体 (写入 *...*)" onClick={() => wrapSelection("*")}>
+      <ToolbarButton title={t("md.italic")} onClick={() => wrapSelection("*")}>
         <FiItalic size={13} />
       </ToolbarButton>
-      <ToolbarButton title="行内代码 (写入 `...`)" onClick={() => wrapSelection("`")}>
+      <ToolbarButton
+        title={t("md.strikethrough")}
+        onClick={() => wrapSelection("~~")}
+        label="S̶"
+      />
+      <ToolbarButton title={t("md.inlineCode")} onClick={() => wrapSelection("`")}>
         <FiCode size={13} />
       </ToolbarButton>
       <Divider />
-      <ToolbarButton title="一级标题 (#)" onClick={() => prefixLines("# ")}>
-        <FiHash size={13} />
-      </ToolbarButton>
+      {/* Color & highlight — the <input type="color"> sits on top of each
+          button. WebKit's native color picker only opens reliably when the
+          actual click lands on the input, so we make it transparent rather
+          than zero-sized. */}
+      <ColorButton
+        title={t("md.color")}
+        defaultValue="#e53e3e"
+        icon={<FiEdit3 size={13} color="#e53e3e" />}
+        onPick={(hex) => wrapColor("color", hex)}
+      />
+      <ColorButton
+        title={t("md.highlight")}
+        defaultValue="#fff59d"
+        icon={<FiDroplet size={13} color="#d69e2e" />}
+        onPick={(hex) => wrapColor("background", hex)}
+      />
+      <Divider />
+      {/* Headings */}
       <ToolbarButton
-        title="二级标题 (##)"
+        title={t("md.h1")}
+        onClick={() => prefixLines("# ")}
+        label="H1"
+      />
+      <ToolbarButton
+        title={t("md.h2")}
         onClick={() => prefixLines("## ")}
         label="H2"
       />
       <ToolbarButton
-        title="三级标题 (###)"
+        title={t("md.h3")}
         onClick={() => prefixLines("### ")}
         label="H3"
       />
       <Divider />
-      <ToolbarButton title="无序列表 (- )" onClick={() => prefixLines("- ")}>
+      {/* Lists & blocks */}
+      <ToolbarButton title={t("md.ulist")} onClick={() => prefixLines("- ")}>
         <FiList size={13} />
       </ToolbarButton>
-      <ToolbarButton title="引用块 (> )" onClick={() => prefixLines("> ")}>
+      <ToolbarButton
+        title={t("md.olist")}
+        onClick={() => prefixLines("1. ")}
+        label="1."
+      />
+      <ToolbarButton
+        title={t("md.tasklist")}
+        onClick={() => prefixLines("- [ ] ")}
+      >
+        <FiCheckSquare size={13} />
+      </ToolbarButton>
+      <ToolbarButton title={t("md.quote")} onClick={() => prefixLines("> ")}>
         <FiMessageSquare size={13} />
       </ToolbarButton>
-      <ToolbarButton title="代码块 (```)" onClick={() => insertCodeBlock("")} label="{ }" />
+      <ToolbarButton title={t("md.hr")} onClick={() => insertText("\n---\n\n")}>
+        <FiMinus size={13} />
+      </ToolbarButton>
+      <Divider />
+      {/* Code & table */}
       <ToolbarButton
-        title="表格"
-        onClick={() =>
-          insertText(
-            "\n| 列 1 | 列 2 |\n| ---- | ---- |\n| 数据 | 数据 |\n",
-          )
-        }
+        title={t("md.codeblock")}
+        onClick={() => insertCodeBlock("")}
+        label="{ }"
+      />
+      <ToolbarButton
+        title={t("md.table")}
+        onClick={() => insertText(t("md.tableTpl"))}
       >
         <FiTable size={13} />
       </ToolbarButton>
-      <ToolbarButton title="链接" onClick={onLink}>
+      <Divider />
+      {/* Link & image */}
+      <ToolbarButton title={t("md.link")} onClick={onLink}>
         <FiLink size={13} />
       </ToolbarButton>
+      <ToolbarButton title={t("md.image")} onClick={onImage}>
+        <FiImage size={13} />
+      </ToolbarButton>
       <div style={{ flex: 1 }} />
-      <span style={{ fontSize: 11, color: "var(--text-soft)" }}>字号</span>
+      {/* Editor font size */}
+      <span style={{ fontSize: 11, color: "var(--text-soft)" }}>
+        {t("md.fontSize")}
+      </span>
       <ToolbarButton
-        title="字号小一点"
+        title={t("md.smaller")}
         onClick={() => setEditorFontSize(editorFontSize - 1)}
       >
         <FiMinus size={13} />
@@ -106,7 +190,7 @@ export default function MarkdownToolbar() {
         {editorFontSize}
       </span>
       <ToolbarButton
-        title="字号大一点"
+        title={t("md.bigger")}
         onClick={() => setEditorFontSize(editorFontSize + 1)}
       >
         <FiPlus size={13} />
@@ -149,6 +233,61 @@ function ToolbarButton({
     >
       {label ?? children}
     </button>
+  );
+}
+
+function ColorButton({
+  title,
+  defaultValue,
+  icon,
+  onPick,
+}: {
+  title: string;
+  defaultValue: string;
+  icon: React.ReactNode;
+  onPick: (hex: string) => void;
+}) {
+  return (
+    <label
+      title={title}
+      style={{
+        height: 24,
+        padding: "0 5px",
+        position: "relative",
+        display: "inline-flex",
+        alignItems: "center",
+        borderRadius: 4,
+        background: "transparent",
+        cursor: "pointer",
+        color: "var(--text)",
+      }}
+      onMouseEnter={(e) =>
+        (e.currentTarget.style.background = "var(--bg-mute)")
+      }
+      onMouseLeave={(e) =>
+        (e.currentTarget.style.background = "transparent")
+      }
+    >
+      <input
+        type="color"
+        defaultValue={defaultValue}
+        onInput={(e) => onPick((e.target as HTMLInputElement).value)}
+        style={{
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          opacity: 0,
+          cursor: "pointer",
+          // Zero border / padding so the click target matches the visible button.
+          border: "none",
+          padding: 0,
+          margin: 0,
+          background: "transparent",
+        }}
+      />
+      {icon}
+    </label>
   );
 }
 

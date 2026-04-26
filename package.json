@@ -1,7 +1,7 @@
 {
   "name": "deditor",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -48,6 +48,7 @@
     "@tauri-apps/plugin-opener": "^2.2.1",
     "@tauri-apps/plugin-store": "^2.1.0",
     "codemirror": "^6.0.1",
+    "json5": "^2.2.3",
     "markdown-it": "^14.1.0",
     "markdown-it-anchor": "^9.2.0",
     "markdown-it-task-lists": "^2.1.1",

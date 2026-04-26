@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { tStatic } from "../lib/i18n";
 
 export type ConfirmChoice = "save" | "discard" | "cancel";
 
@@ -42,16 +43,16 @@ function show(opts: {
 }
 
 export function confirmUnsaved(
-  message = "当前文件有未保存修改，是否保存？",
-  title = "未保存修改",
+  message?: string,
+  title?: string,
 ): Promise<ConfirmChoice> {
   return show({
-    title,
-    message,
+    title: title ?? tStatic("confirm.unsavedTitle"),
+    message: message ?? tStatic("confirm.unsavedMsg"),
     buttons: [
-      { label: "取消", value: "cancel" },
-      { label: "不保存", value: "discard" },
-      { label: "保存", value: "save", primary: true },
+      { label: tStatic("common.cancel"), value: "cancel" },
+      { label: tStatic("common.discard"), value: "discard" },
+      { label: tStatic("common.save"), value: "save", primary: true },
     ],
   }) as Promise<ConfirmChoice>;
 }
@@ -61,13 +62,13 @@ export function confirmDelete(
   isDir: boolean,
 ): Promise<boolean> {
   return show({
-    title: isDir ? "删除文件夹" : "删除文件",
-    message: isDir
-      ? `确定要删除文件夹 "${name}" 及其全部内容吗？此操作不可恢复。`
-      : `确定要删除文件 "${name}" 吗？此操作不可恢复。`,
+    title: tStatic(isDir ? "confirm.deleteDirTitle" : "confirm.deleteFileTitle"),
+    message: tStatic(isDir ? "confirm.deleteDirMsg" : "confirm.deleteFileMsg", {
+      name,
+    }),
     buttons: [
-      { label: "取消", value: "cancel" },
-      { label: "删除", value: "delete", danger: true },
+      { label: tStatic("common.cancel"), value: "cancel" },
+      { label: tStatic("common.delete"), value: "delete", danger: true },
     ],
   }).then((v) => v === "delete");
 }

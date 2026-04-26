@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { create } from "zustand";
+import { tStatic } from "../lib/i18n";
 
 interface State {
   open: boolean;
@@ -119,7 +120,7 @@ export default function PromptDialog() {
           }}
         />
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <Btn onClick={() => close(null)}>取消</Btn>
+          <Btn onClick={() => close(null)}>{tStatic("common.cancel")}</Btn>
           <Btn
             primary
             onClick={() => {
@@ -127,7 +128,7 @@ export default function PromptDialog() {
               if (v) close(v);
             }}
           >
-            确定
+            {tStatic("common.confirm")}
           </Btn>
         </div>
       </div>

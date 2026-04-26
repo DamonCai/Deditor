@@ -235,3 +235,9 @@ export function isMarkdown(filePath: string | null): boolean {
   const e = filePath.split(".").pop()?.toLowerCase() ?? "";
   return e === "md" || e === "markdown" || e === "mdx";
 }
+
+export function isJson(filePath: string | null): boolean {
+  if (!filePath) return false;
+  const e = filePath.split(".").pop()?.toLowerCase() ?? "";
+  return e === "json" || e === "jsonc" || e === "json5";
+}

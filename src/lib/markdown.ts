@@ -4,9 +4,9 @@ import taskLists from "markdown-it-task-lists";
 import plantumlEncoder from "plantuml-encoder";
 import { ensureLanguage, getHighlighter } from "./highlight";
 import { detectLang } from "./lang";
+import { tStatic } from "./i18n";
 
 const PLANTUML_LANGS = new Set(["plantuml", "puml", "uml"]);
-const PLANTUML_SERVER = "https://www.plantuml.com/plantuml/svg";
 
 function escapeAttr(s: string): string {
   return s
@@ -15,28 +15,38 @@ function escapeAttr(s: string): string {
     .replace(/</g, "&lt;");
 }
 
+/**
+ * Emit a placeholder `<div>` instead of an `<img src=remote>` so markdown
+ * rendering stays fully synchronous and offline-safe. The actual SVG is
+ * fetched (with cache + timeout) by `hydratePlantuml` in Preview.tsx after
+ * the HTML is mounted.
+ */
 function renderPlantuml(source: string, line: number): string {
-  let url: string;
-  let error: string | null = null;
+  let encoded = "";
   try {
-    const encoded = plantumlEncoder.encode(source);
-    url = `${PLANTUML_SERVER}/${encoded}`;
+    encoded = plantumlEncoder.encode(source);
   } catch (e) {
-    error = e instanceof Error ? e.message : String(e);
-    url = "";
-  }
-  if (error) {
-    return `<div class="plantuml-diagram error" data-line="${line}">PlantUML 编码失败: ${escapeAttr(error)}</div>`;
+    const err = e instanceof Error ? e.message : String(e);
+    return `<div class="plantuml-diagram error" data-line="${line}">${escapeAttr(
+      tStatic("markdown.plantumlError", { error: err }),
+    )}</div>`;
   }
   return (
-    `<div class="plantuml-diagram" data-line="${line}">` +
-    `<img src="${url}" alt="PlantUML diagram" loading="lazy" />` +
+    `<div class="plantuml-diagram" data-line="${line}" ` +
+    `data-plantuml-encoded="${escapeAttr(encoded)}" ` +
+    `data-plantuml-source="${escapeAttr(source)}">` +
+    `<div class="plantuml-loading">${escapeAttr(
+      tStatic("markdown.plantumlLoading"),
+    )}</div>` +
     `</div>`
   );
 }
 
 const md = new MarkdownIt({
-  html: false,
+  // Allow inline HTML so `<span style="color:…">` / `<mark>` / `<sup>` etc.
+  // emitted by the toolbar's Color / Highlight buttons render as expected.
+  // Local editor on local content — no XSS surface to worry about.
+  html: true,
   linkify: true,
   breaks: false,
   typographer: false,

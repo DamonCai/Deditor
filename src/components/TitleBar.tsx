@@ -1,29 +1,24 @@
 import { useActiveTab, isTabDirty } from "../store/editor";
 import { useEditorStore } from "../store/editor";
 import { isMarkdown } from "../lib/lang";
+import { useT } from "../lib/i18n";
 import { FiSun, FiMoon } from "react-icons/fi";
-import {
-  openFile,
-  saveFile,
-  saveFileAs,
-  newFile,
-  openFolder,
-} from "../lib/fileio";
 import { exportHtml, exportPdf } from "../lib/export";
 
 export default function TitleBar() {
+  const t = useT();
   const active = useActiveTab();
   const {
     showPreview,
     togglePreview,
-    showSidebar,
-    toggleSidebar,
     theme,
     setTheme,
+    language,
+    setLanguage,
   } = useEditorStore();
   const name = active?.filePath
     ? active.filePath.split(/[\\/]/).pop()
-    : "未命名";
+    : t("common.untitled");
   const dirty = active ? isTabDirty(active) : false;
   const isMd = isMarkdown(active?.filePath ?? null);
   const isDark = theme === "dark";
@@ -44,30 +39,35 @@ export default function TitleBar() {
       </div>
       <div className="flex-1" />
       <div className="flex items-center gap-1 text-xs">
-        <ToolBtn onClick={toggleSidebar} active={showSidebar}>
-          目录
-        </ToolBtn>
-        <ToolBtn onClick={openFolder}>打开文件夹</ToolBtn>
-        <div style={{ width: 1, height: 16, background: "var(--border)", margin: "0 6px" }} />
-        <ToolBtn onClick={newFile}>新建</ToolBtn>
-        <ToolBtn onClick={openFile}>打开</ToolBtn>
-        <ToolBtn onClick={saveFile}>保存</ToolBtn>
-        <ToolBtn onClick={saveFileAs}>另存</ToolBtn>
         {isMd && (
           <>
-            <div style={{ width: 1, height: 16, background: "var(--border)", margin: "0 6px" }} />
             <ToolBtn onClick={togglePreview} active={showPreview}>
-              预览
+              {t("titlebar.preview")}
             </ToolBtn>
             <div style={{ width: 1, height: 16, background: "var(--border)", margin: "0 6px" }} />
-            <ToolBtn onClick={exportHtml}>导出 HTML</ToolBtn>
-            <ToolBtn onClick={exportPdf}>导出 PDF</ToolBtn>
+            <ToolBtn onClick={exportHtml}>{t("titlebar.exportHtml")}</ToolBtn>
+            <ToolBtn onClick={exportPdf}>{t("titlebar.exportPdf")}</ToolBtn>
+            <div style={{ width: 1, height: 16, background: "var(--border)", margin: "0 6px" }} />
           </>
         )}
-        <div style={{ width: 1, height: 16, background: "var(--border)", margin: "0 6px" }} />
+        <button
+          onClick={() => setLanguage(language === "zh" ? "en" : "zh")}
+          title={
+            language === "zh" ? t("titlebar.toEnglish") : t("titlebar.toChinese")
+          }
+          className="px-2 py-1 rounded hover:bg-[color:var(--bg-mute)]"
+          style={{
+            color: "var(--text)",
+            fontWeight: 600,
+            minWidth: 28,
+            textAlign: "center",
+          }}
+        >
+          {language === "zh" ? "EN" : "中"}
+        </button>
         <button
           onClick={() => setTheme(isDark ? "light" : "dark")}
-          title={isDark ? "切到亮色主题" : "切到暗色主题"}
+          title={isDark ? t("titlebar.toLight") : t("titlebar.toDark")}
           className="px-2 py-1 rounded hover:bg-[color:var(--bg-mute)]"
           style={{ color: "var(--text)", display: "inline-flex", alignItems: "center" }}
         >

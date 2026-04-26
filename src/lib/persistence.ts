@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import {
   useEditorStore,
+  type Lang,
   type Tab,
   type TabPosition,
   type Theme,
@@ -32,6 +33,7 @@ interface PersistedV3 {
   previewPct: number;
   editorFontSize?: number;
   previewMaximized?: boolean;
+  language?: Lang;
   // Legacy git fields kept in the type so old snapshots still parse safely;
   // unused since the git feature was removed.
   gitPanelOpen?: boolean;
@@ -198,6 +200,9 @@ export async function loadPersisted(): Promise<UiExtras | null> {
 
   store.setWorkspaces(data.workspaces ?? []);
   if (store.theme !== data.theme) store.setTheme(data.theme);
+  if (data.language === "zh" || data.language === "en") {
+    store.setLanguage(data.language);
+  }
   if (typeof data.editorFontSize === "number") {
     store.setEditorFontSize(data.editorFontSize);
   }
@@ -258,6 +263,7 @@ function doSave(extras: UiExtras): void {
     previewPct: extras.previewPct,
     editorFontSize: s.editorFontSize,
     previewMaximized: s.previewMaximized,
+    language: s.language,
   };
   try {
     localStorage.setItem(KEY_V3, JSON.stringify(base));
