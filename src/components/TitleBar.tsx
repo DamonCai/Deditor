@@ -2,7 +2,7 @@ import { useActiveTab, isTabDirty } from "../store/editor";
 import { useEditorStore } from "../store/editor";
 import { isMarkdown } from "../lib/lang";
 import { useT } from "../lib/i18n";
-import { FiSun, FiMoon } from "react-icons/fi";
+import { FiSun, FiMoon, FiSettings } from "react-icons/fi";
 import { exportHtml, exportPdf } from "../lib/export";
 
 export default function TitleBar() {
@@ -16,6 +16,7 @@ export default function TitleBar() {
     language,
     setLanguage,
   } = useEditorStore();
+  const setSettingsOpen = useEditorStore((s) => s.setSettingsOpen);
   const name = active?.filePath
     ? active.filePath.split(/[\\/]/).pop()
     : t("common.untitled");
@@ -64,6 +65,14 @@ export default function TitleBar() {
           }}
         >
           {language === "zh" ? "EN" : "中"}
+        </button>
+        <button
+          onClick={() => setSettingsOpen(true)}
+          title={t("statusbar.settings")}
+          className="px-2 py-1 rounded hover:bg-[color:var(--bg-mute)]"
+          style={{ color: "var(--text)", display: "inline-flex", alignItems: "center" }}
+        >
+          <FiSettings size={14} />
         </button>
         <button
           onClick={() => setTheme(isDark ? "light" : "dark")}
