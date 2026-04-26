@@ -35,6 +35,40 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "fileAssociations": [
+      {
+        "name": "Markdown Document",
+        "description": "Markdown text document",
+        "role": "Editor",
+        "ext": ["md", "markdown", "mdx"]
+      },
+      {
+        "name": "Source Code",
+        "description": "Programming-language source file",
+        "role": "Editor",
+        "ext": [
+          "js", "jsx", "ts", "tsx", "mjs", "cjs",
+          "py", "pyi",
+          "rs", "go",
+          "java", "kt", "kts", "scala", "groovy",
+          "c", "h", "cpp", "cxx", "cc", "hpp", "hxx",
+          "cs", "swift",
+          "rb", "php", "pl", "lua",
+          "html", "htm", "css", "scss", "less", "sass", "vue", "svelte",
+          "sql", "sh", "bash", "zsh", "fish", "ps1"
+        ]
+      },
+      {
+        "name": "Data / Config File",
+        "description": "Structured data or configuration file",
+        "role": "Editor",
+        "ext": [
+          "json", "jsonc", "json5",
+          "yaml", "yml", "toml", "xml", "ini", "env",
+          "txt", "log", "csv", "diff", "patch"
+        ]
+      }
+    ],
     "macOS": {
       "dmg": {
         "windowSize": { "width": 660, "height": 400 },

@@ -515,6 +515,19 @@ pub fn run() {
             frontend_log,
             update_menu_language
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // OS asked us to open these files (Finder "Open With…" / `open -a`
+            // on macOS, double-click association on Windows, etc.). Forward
+            // each path as a frontend `open-file` event so the JS side runs
+            // the same code path used for drag-and-drop.
+            if let tauri::RunEvent::Opened { urls } = event {
+                for url in urls {
+                    if let Ok(path) = url.to_file_path() {
+                        let _ = app.emit("open-file", path.to_string_lossy().to_string());
+                    }
+                }
+            }
+        });
 }

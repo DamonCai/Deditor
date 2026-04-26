@@ -17,6 +17,7 @@ import { isMarkdown, isJson } from "./lib/lang";
 import { useT } from "./lib/i18n";
 import {
   openFile,
+  openFileByPath,
   saveFile,
   saveFileAs,
   newFile,
@@ -142,6 +143,27 @@ export default function App() {
           openMany(event.payload.paths);
         }
       })
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  // OS-level "Open With → DEditor" (macOS Finder, Windows file association,
+  // `open -a DEditor file.sql` from a terminal, etc.). Tauri raises a
+  // RunEvent::Opened and our Rust glue re-emits it as `open-file` with the
+  // absolute path string. Reuse the regular openFileByPath flow.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    listen<string>("open-file", (e) => {
+      if (e.payload) void openFileByPath(e.payload);
+    })
       .then((fn) => {
         if (cancelled) fn();
         else unlisten = fn;
