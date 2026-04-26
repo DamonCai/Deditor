@@ -143,3 +143,5 @@ $RECYCLE.BIN/
 *.bak
 *.orig
 .history/
+
+/package-lock.json
