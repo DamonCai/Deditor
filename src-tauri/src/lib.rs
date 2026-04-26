@@ -2,7 +2,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 use std::fs;
 use std::path::PathBuf;
-use tauri::menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+use tauri::menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{Emitter, Manager};
 use tauri_plugin_log::{Target, TargetKind};
 
@@ -258,15 +258,35 @@ fn frontend_log(level: String, message: String) {
 }
 
 struct MenuLabels {
+    // Submenu titles
     file: &'static str,
     edit: &'static str,
     window: &'static str,
+    // App submenu (macOS)
+    about: &'static str,
+    services: &'static str,
+    hide: &'static str,
+    hide_others: &'static str,
+    show_all: &'static str,
+    quit: &'static str,
+    // File submenu
     new: &'static str,
     open: &'static str,
     open_folder: &'static str,
     save: &'static str,
     save_as: &'static str,
     close_tab: &'static str,
+    // Edit submenu (predefined items)
+    undo: &'static str,
+    redo: &'static str,
+    cut: &'static str,
+    copy: &'static str,
+    paste: &'static str,
+    select_all: &'static str,
+    // Window submenu (predefined items)
+    minimize: &'static str,
+    maximize: &'static str,
+    fullscreen: &'static str,
 }
 
 fn labels_for(lang: &str) -> MenuLabels {
@@ -275,23 +295,53 @@ fn labels_for(lang: &str) -> MenuLabels {
             file: "文件",
             edit: "编辑",
             window: "窗口",
+            about: "关于 DEditor",
+            services: "服务",
+            hide: "隐藏 DEditor",
+            hide_others: "隐藏其他",
+            show_all: "全部显示",
+            quit: "退出 DEditor",
             new: "新建",
             open: "打开…",
             open_folder: "打开文件夹…",
             save: "保存",
             save_as: "另存为…",
             close_tab: "关闭标签",
+            undo: "撤销",
+            redo: "重做",
+            cut: "剪切",
+            copy: "复制",
+            paste: "粘贴",
+            select_all: "全选",
+            minimize: "最小化",
+            maximize: "最大化",
+            fullscreen: "进入全屏",
         },
         _ => MenuLabels {
             file: "File",
             edit: "Edit",
             window: "Window",
+            about: "About DEditor",
+            services: "Services",
+            hide: "Hide DEditor",
+            hide_others: "Hide Others",
+            show_all: "Show All",
+            quit: "Quit DEditor",
             new: "New",
             open: "Open…",
             open_folder: "Open Folder…",
             save: "Save",
             save_as: "Save As…",
             close_tab: "Close Tab",
+            undo: "Undo",
+            redo: "Redo",
+            cut: "Cut",
+            copy: "Copy",
+            paste: "Paste",
+            select_all: "Select All",
+            minimize: "Minimize",
+            maximize: "Zoom",
+            fullscreen: "Enter Full Screen",
         },
     }
 }
@@ -305,25 +355,41 @@ fn build_and_set_menu<R: tauri::Runtime>(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let l = labels_for(lang);
 
-    // App menu (left-most on macOS; the OS auto-replaces the title with the
-    // bundle's display name, so the literal "DEditor" is just a fallback).
-    let app_menu = SubmenuBuilder::new(app, "DEditor")
-        .about(Some(AboutMetadata {
+    // App menu (left-most on macOS; the OS auto-replaces the submenu title
+    // with the bundle's display name, so the literal "DEditor" is just a
+    // fallback). All items are constructed via PredefinedMenuItem with an
+    // explicit text override — the SubmenuBuilder convenience helpers
+    // (.about(), .services(), etc.) pass `None` for text, which leaves the
+    // OS to localize using the SYSTEM language. Switching the app's UI
+    // language wouldn't reach those, which is exactly the bug we're fixing.
+    let about_item = PredefinedMenuItem::about(
+        app,
+        Some(l.about),
+        Some(AboutMetadata {
             // env!("CARGO_PKG_VERSION") is read at compile time from
             // src-tauri/Cargo.toml so the build script's version bump
             // flows straight into the macOS "About DEditor" dialog.
             name: Some("DEditor".to_string()),
             version: Some(env!("CARGO_PKG_VERSION").to_string()),
             ..Default::default()
-        }))
+        }),
+    )?;
+    let services_item = PredefinedMenuItem::services(app, Some(l.services))?;
+    let hide_item = PredefinedMenuItem::hide(app, Some(l.hide))?;
+    let hide_others_item = PredefinedMenuItem::hide_others(app, Some(l.hide_others))?;
+    let show_all_item = PredefinedMenuItem::show_all(app, Some(l.show_all))?;
+    let quit_item = PredefinedMenuItem::quit(app, Some(l.quit))?;
+
+    let app_menu = SubmenuBuilder::new(app, "DEditor")
+        .item(&about_item)
         .separator()
-        .services()
+        .item(&services_item)
         .separator()
-        .hide()
-        .hide_others()
-        .show_all()
+        .item(&hide_item)
+        .item(&hide_others_item)
+        .item(&show_all_item)
         .separator()
-        .quit()
+        .item(&quit_item)
         .build()?;
 
     let new_item = MenuItemBuilder::new(l.new)
@@ -363,21 +429,32 @@ fn build_and_set_menu<R: tauri::Runtime>(
         .item(&close_tab_item)
         .build()?;
 
+    let undo_item = PredefinedMenuItem::undo(app, Some(l.undo))?;
+    let redo_item = PredefinedMenuItem::redo(app, Some(l.redo))?;
+    let cut_item = PredefinedMenuItem::cut(app, Some(l.cut))?;
+    let copy_item = PredefinedMenuItem::copy(app, Some(l.copy))?;
+    let paste_item = PredefinedMenuItem::paste(app, Some(l.paste))?;
+    let select_all_item = PredefinedMenuItem::select_all(app, Some(l.select_all))?;
+
     let edit_menu = SubmenuBuilder::new(app, l.edit)
-        .undo()
-        .redo()
+        .item(&undo_item)
+        .item(&redo_item)
         .separator()
-        .cut()
-        .copy()
-        .paste()
-        .select_all()
+        .item(&cut_item)
+        .item(&copy_item)
+        .item(&paste_item)
+        .item(&select_all_item)
         .build()?;
 
+    let minimize_item = PredefinedMenuItem::minimize(app, Some(l.minimize))?;
+    let maximize_item = PredefinedMenuItem::maximize(app, Some(l.maximize))?;
+    let fullscreen_item = PredefinedMenuItem::fullscreen(app, Some(l.fullscreen))?;
+
     let window_menu = SubmenuBuilder::new(app, l.window)
-        .minimize()
-        .maximize()
+        .item(&minimize_item)
+        .item(&maximize_item)
         .separator()
-        .fullscreen()
+        .item(&fullscreen_item)
         .build()?;
 
     let menu = MenuBuilder::new(app)
