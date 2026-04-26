@@ -22,10 +22,10 @@ import {
 } from "@codemirror/language";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { detectLang, isMarkdown, isImageFile, isPdfFile, isAudioFile, isVideoFile, isHexFile } from "../lib/lang";
-import type { DiffSpec } from "../store/editor";
+import { useEditorStore, type DiffSpec } from "../store/editor";
 import DiffView from "./DiffView";
+import { isEnabled } from "../lib/shortcuts";
 import { saveImage } from "../lib/fileio";
-import { useEditorStore } from "../store/editor";
 import { logError, logInfo } from "../lib/logger";
 import { setActiveView } from "../lib/editorBridge";
 import { tStatic, useT } from "../lib/i18n";
@@ -183,10 +183,33 @@ export default function Editor({
         rectangularSelection(),
         crosshairCursor(),
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+        // Custom keymap entries respect the user's per-shortcut prefs from
+        // Settings. Read lazily via the store so a `run` invocation always
+        // sees the latest toggle without us rebuilding the keymap. Returning
+        // false from `run` falls through to whatever else is bound — same as
+        // not registering the key at all from CodeMirror's perspective.
         keymap.of([
-          { key: "Mod-Alt-ArrowUp", run: addCursorVertical(-1), preventDefault: true },
-          { key: "Mod-Alt-ArrowDown", run: addCursorVertical(1), preventDefault: true },
-          { key: "Mod-Shift-l", run: selectSelectionMatches, preventDefault: true },
+          {
+            key: "Mod-Alt-ArrowUp",
+            run: (view) =>
+              isEnabled(useEditorStore.getState().shortcuts, "editor_add_cursor_above")
+                ? addCursorVertical(-1)(view)
+                : false,
+          },
+          {
+            key: "Mod-Alt-ArrowDown",
+            run: (view) =>
+              isEnabled(useEditorStore.getState().shortcuts, "editor_add_cursor_below")
+                ? addCursorVertical(1)(view)
+                : false,
+          },
+          {
+            key: "Mod-Shift-l",
+            run: (view) =>
+              isEnabled(useEditorStore.getState().shortcuts, "editor_select_all_matches")
+                ? selectSelectionMatches(view)
+                : false,
+          },
           ...defaultKeymap,
           ...historyKeymap,
           ...searchKeymap,

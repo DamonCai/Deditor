@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { DEFAULT_SHORTCUTS, type ShortcutId } from "../lib/shortcuts";
 
 export type Theme = "light" | "dark";
 export type Lang = "zh" | "en";
@@ -43,6 +44,12 @@ interface EditorState {
   /** Path of the file the user marked via "Select for Compare" in the file
    *  tree. Right-clicking another file then offers "Compare with Selected". */
   compareMarkPath: string | null;
+  /** Per-shortcut enable/disable map. Missing keys default to enabled (so new
+   *  shortcuts shipped in updates "just work" for upgrading users). */
+  shortcuts: Record<string, boolean>;
+  /** Whether the Settings dialog is showing. Lives in the store so the
+   *  StatusBar (or anything else) can pop it open without a separate bus. */
+  settingsOpen: boolean;
 
   setContent: (content: string) => void;
   // Open a new tab (or focus existing one for the same path).
@@ -50,6 +57,10 @@ interface EditorState {
   // Open a side-by-side diff tab. Dedupes on (leftPath, rightPath).
   openDiffTab: (spec: DiffSpec) => string;
   setCompareMarkPath: (path: string | null) => void;
+  setShortcutEnabled: (id: ShortcutId, enabled: boolean) => void;
+  setShortcuts: (next: Record<string, boolean>) => void;
+  resetShortcuts: () => void;
+  setSettingsOpen: (open: boolean) => void;
   // Replace active tab's file (used when "Save As" rebinds path).
   rebindActive: (filePath: string, content: string) => void;
   newUntitled: () => string;
@@ -222,6 +233,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   previewMaximized: false,
   editorFontSize: 14,
   compareMarkPath: null,
+  shortcuts: { ...DEFAULT_SHORTCUTS },
+  settingsOpen: false,
 
   setContent: (content) => {
     const { tabs, activeId } = get();
@@ -278,6 +291,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   setCompareMarkPath: (path) => set({ compareMarkPath: path }),
+
+  setShortcutEnabled: (id, enabled) => {
+    const cur = get().shortcuts;
+    if (cur[id] === enabled) return;
+    set({ shortcuts: { ...cur, [id]: enabled } });
+  },
+  setShortcuts: (next) => set({ shortcuts: { ...next } }),
+  resetShortcuts: () => set({ shortcuts: { ...DEFAULT_SHORTCUTS } }),
+  setSettingsOpen: (open) => set({ settingsOpen: open }),
 
   rebindActive: (filePath, content) => {
     const { tabs, activeId } = get();

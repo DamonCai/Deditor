@@ -444,13 +444,18 @@ fn labels_for(lang: &str) -> MenuLabels {
 }
 
 /// Build the app menu. Re-callable: each call replaces the current menu so
-/// language changes can rebuild it. `lang` should be "zh" or "en" — anything
-/// else falls back to English.
+/// language and shortcut changes can rebuild it. `lang` should be "zh" or
+/// "en" — anything else falls back to English. `disabled_accelerators` lists
+/// menu IDs (e.g. "file_save") whose keyboard accelerator should be omitted —
+/// used by the in-app Settings dialog to free up conflicting shortcuts. The
+/// menu item itself stays clickable; only the keyboard binding is dropped.
 fn build_and_set_menu<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     lang: &str,
+    disabled_accelerators: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let l = labels_for(lang);
+    let is_disabled = |id: &str| disabled_accelerators.iter().any(|s| s == id);
 
     // App menu (left-most on macOS; the OS auto-replaces the submenu title
     // with the bundle's display name, so the literal "DEditor" is just a
@@ -489,30 +494,24 @@ fn build_and_set_menu<R: tauri::Runtime>(
         .item(&quit_item)
         .build()?;
 
-    let new_item = MenuItemBuilder::new(l.new)
-        .id("file_new")
-        .accelerator("CmdOrCtrl+N")
-        .build(app)?;
-    let open_item = MenuItemBuilder::new(l.open)
-        .id("file_open")
-        .accelerator("CmdOrCtrl+O")
-        .build(app)?;
-    let open_folder_item = MenuItemBuilder::new(l.open_folder)
-        .id("file_open_folder")
-        .accelerator("CmdOrCtrl+Shift+O")
-        .build(app)?;
-    let save_item = MenuItemBuilder::new(l.save)
-        .id("file_save")
-        .accelerator("CmdOrCtrl+S")
-        .build(app)?;
-    let save_as_item = MenuItemBuilder::new(l.save_as)
-        .id("file_save_as")
-        .accelerator("CmdOrCtrl+Shift+S")
-        .build(app)?;
-    let close_tab_item = MenuItemBuilder::new(l.close_tab)
-        .id("file_close_tab")
-        .accelerator("CmdOrCtrl+W")
-        .build(app)?;
+    // Helper: build a File menu item, conditionally attaching its accelerator
+    // based on the disabled list. We can't pass `Option` to .accelerator(), so
+    // branch the builder chain instead.
+    let build_file_item = |id: &'static str, label: &str, accel: &'static str| -> Result<_, Box<dyn std::error::Error>> {
+        let b = MenuItemBuilder::new(label).id(id);
+        let item = if is_disabled(id) {
+            b.build(app)?
+        } else {
+            b.accelerator(accel).build(app)?
+        };
+        Ok(item)
+    };
+    let new_item = build_file_item("file_new", l.new, "CmdOrCtrl+N")?;
+    let open_item = build_file_item("file_open", l.open, "CmdOrCtrl+O")?;
+    let open_folder_item = build_file_item("file_open_folder", l.open_folder, "CmdOrCtrl+Shift+O")?;
+    let save_item = build_file_item("file_save", l.save, "CmdOrCtrl+S")?;
+    let save_as_item = build_file_item("file_save_as", l.save_as, "CmdOrCtrl+Shift+S")?;
+    let close_tab_item = build_file_item("file_close_tab", l.close_tab, "CmdOrCtrl+W")?;
 
     let file_menu = SubmenuBuilder::new(app, l.file)
         .item(&new_item)
@@ -561,11 +560,12 @@ fn build_and_set_menu<R: tauri::Runtime>(
     Ok(())
 }
 
-/// Initial install at startup. Defaults to English; the frontend pushes the
-/// persisted language right after hydration via `update_menu_language`.
+/// Initial install at startup. Defaults to English with all accelerators
+/// enabled; the frontend pushes the persisted language and shortcut prefs
+/// right after hydration via `update_menu_state`.
 fn install_app_menu(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let handle = app.handle().clone();
-    build_and_set_menu(&handle, "en")?;
+    build_and_set_menu(&handle, "en", &[])?;
 
     // Forward file-menu clicks to the frontend. We only care about IDs that
     // start with `file_`; predefined items (quit, copy, …) handle themselves.
@@ -580,9 +580,13 @@ fn install_app_menu(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
 }
 
 #[tauri::command]
-fn update_menu_language(app: tauri::AppHandle, lang: String) -> Result<(), String> {
-    build_and_set_menu(&app, &lang).map_err(|e| {
-        log::error!("update_menu_language failed: {}", e);
+fn update_menu_state(
+    app: tauri::AppHandle,
+    lang: String,
+    disabled_accelerators: Vec<String>,
+) -> Result<(), String> {
+    build_and_set_menu(&app, &lang, &disabled_accelerators).map_err(|e| {
+        log::error!("update_menu_state failed: {}", e);
         e.to_string()
     })
 }
@@ -654,7 +658,7 @@ pub fn run() {
             delete_path,
             print_window,
             frontend_log,
-            update_menu_language,
+            update_menu_state,
             read_binary_as_base64,
             list_workspace_files
         ])

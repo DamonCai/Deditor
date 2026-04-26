@@ -1,3 +1,4 @@
+import { FiSettings } from "react-icons/fi";
 import { useActiveTab, isTabDirty, useEditorStore } from "../store/editor";
 import { detectLang } from "../lib/lang";
 import { useT } from "../lib/i18n";
@@ -7,6 +8,7 @@ export default function StatusBar() {
   const t = useT();
   const active = useActiveTab();
   const { theme, setTheme } = useEditorStore();
+  const setSettingsOpen = useEditorStore((s) => s.setSettingsOpen);
   const filePath = active?.filePath ?? null;
   const content = active?.content ?? "";
   const dirty = active ? isTabDirty(active) : false;
@@ -40,6 +42,15 @@ export default function StatusBar() {
           onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
         >
           {theme === "dark" ? t("statusbar.light") : t("statusbar.dark")}
+        </button>
+        <button
+          className="hover:text-[color:var(--text)] flex items-center"
+          onClick={() => setSettingsOpen(true)}
+          title={t("statusbar.settings")}
+          aria-label={t("statusbar.settings")}
+          style={{ padding: 0, lineHeight: 1 }}
+        >
+          <FiSettings size={14} />
         </button>
       </div>
     </div>

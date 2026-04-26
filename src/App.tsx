@@ -13,6 +13,8 @@ import TabBar from "./components/TabBar";
 import MarkdownToolbar from "./components/MarkdownToolbar";
 import JsonToolbar from "./components/JsonToolbar";
 import GotoAnything from "./components/GotoAnything";
+import SettingsDialog from "./components/SettingsDialog";
+import { isEnabled, SHORTCUTS } from "./lib/shortcuts";
 import { useEditorStore, useActiveTab } from "./store/editor";
 import { isMarkdown, isJson } from "./lib/lang";
 import { useT } from "./lib/i18n";
@@ -57,6 +59,9 @@ export default function App() {
   >(null);
   const [hydrated, setHydrated] = useState(false);
   const [gotoOpen, setGotoOpen] = useState(false);
+  const settingsOpen = useEditorStore((s) => s.settingsOpen);
+  const setSettingsOpen = useEditorStore((s) => s.setSettingsOpen);
+  const shortcuts = useEditorStore((s) => s.shortcuts);
   const dragRef = useRef<DragKind>(null);
   const uiRef = useRef({ sidebarPx, previewPct });
   uiRef.current = { sidebarPx, previewPct };
@@ -65,11 +70,18 @@ export default function App() {
     document.documentElement.classList.toggle("dark", theme === "dark");
   }, [theme]);
 
-  // Keep the native macOS / OS-level app menu in sync with the in-app
-  // language toggle. Rebuild on initial mount + on every language change.
+  // Keep the native OS menu in sync with the language toggle and the user's
+  // per-shortcut on/off prefs. Rebuilding the whole menu is cheap; we just
+  // need to push the current state every time anything related changes.
   useEffect(() => {
-    invoke("update_menu_language", { lang: language }).catch(() => {});
-  }, [language]);
+    const disabled = SHORTCUTS
+      .filter((s) => s.layer === "menu" && shortcuts[s.id] === false)
+      .map((s) => s.id);
+    invoke("update_menu_state", {
+      lang: language,
+      disabledAccelerators: disabled,
+    }).catch(() => {});
+  }, [language, shortcuts]);
 
   // Hydrate from localStorage on mount
   useEffect(() => {
@@ -103,16 +115,24 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
+      const prefs = useEditorStore.getState().shortcuts;
       const k = e.key.toLowerCase();
-      if (k === "b") {
+      if (k === "b" && !e.shiftKey && !e.altKey) {
+        if (!isEnabled(prefs, "app_toggle_sidebar")) return;
         e.preventDefault();
         useEditorStore.getState().toggleSidebar();
       } else if (k === "p" && !e.shiftKey && !e.altKey) {
         // Cmd/Ctrl+P → Goto Anything. Browser default is Print; preventDefault
         // stops that. (Print is still reachable via the Markdown toolbar /
         // export menu for `.md`.)
+        if (!isEnabled(prefs, "app_goto_anything")) return;
         e.preventDefault();
         setGotoOpen(true);
+      } else if (e.key === "," && !e.shiftKey && !e.altKey) {
+        // Cmd/Ctrl+, → Settings. Standard macOS preferences shortcut.
+        if (!isEnabled(prefs, "app_open_settings")) return;
+        e.preventDefault();
+        setSettingsOpen(true);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -358,6 +378,7 @@ export default function App() {
       <ConfirmDialog />
       <PromptDialog />
       <GotoAnything open={gotoOpen} onClose={() => setGotoOpen(false)} />
+      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 }

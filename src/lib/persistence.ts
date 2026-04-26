@@ -36,6 +36,8 @@ interface PersistedV3 {
   editorFontSize?: number;
   previewMaximized?: boolean;
   language?: Lang;
+  /** Per-shortcut enable map. Optional so older snapshots keep loading. */
+  shortcuts?: Record<string, boolean>;
   // Legacy git fields kept in the type so old snapshots still parse safely;
   // unused since the git feature was removed.
   gitPanelOpen?: boolean;
@@ -235,6 +237,13 @@ export async function loadPersisted(): Promise<UiExtras | null> {
     previewMaximized: data.previewMaximized ?? false,
   });
 
+  if (data.shortcuts && typeof data.shortcuts === "object") {
+    // Merge over defaults so new shortcuts shipped after the snapshot was
+    // written are still enabled by default.
+    const cur = useEditorStore.getState().shortcuts;
+    useEditorStore.getState().setShortcuts({ ...cur, ...data.shortcuts });
+  }
+
   if (restored.length > 0) {
     const idx = Math.max(0, Math.min(data.activeIndex, restored.length - 1));
     store.replaceTabs(restored, restored[idx].id);
@@ -291,6 +300,7 @@ function doSave(extras: UiExtras): void {
     editorFontSize: s.editorFontSize,
     previewMaximized: s.previewMaximized,
     language: s.language,
+    shortcuts: s.shortcuts,
   };
   try {
     localStorage.setItem(KEY_V3, JSON.stringify(base));
