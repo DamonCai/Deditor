@@ -21,7 +21,7 @@ import {
   LanguageSupport,
 } from "@codemirror/language";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { detectLang, isMarkdown, isImageFile, isPdfFile } from "../lib/lang";
+import { detectLang, isMarkdown, isImageFile, isPdfFile, isAudioFile, isVideoFile } from "../lib/lang";
 import { saveImage } from "../lib/fileio";
 import { useEditorStore } from "../store/editor";
 import { logError, logInfo } from "../lib/logger";
@@ -91,11 +91,24 @@ export default function Editor({
       </div>
     );
   }
-  // PDF preview — let the webview's native viewer render the data URL inline,
-  // wrapped in our own zoom controls (the iframe's native viewer is sealed,
-  // so we use CSS `zoom` on the iframe to scale the rendered output).
+  // PDF preview — let the webview's native viewer render the data URL.
   if (isPdfFile(filePath) && value.startsWith("data:application/pdf")) {
     return <PdfView src={value} title={filePath ?? "pdf"} />;
+  }
+  // Audio / video — render with the native HTML5 element.
+  if (isAudioFile(filePath) && value.startsWith("data:audio")) {
+    return (
+      <div className="flex items-center justify-center h-full w-full p-4">
+        <audio src={value} controls style={{ width: "100%", maxWidth: 640 }} />
+      </div>
+    );
+  }
+  if (isVideoFile(filePath) && value.startsWith("data:video")) {
+    return (
+      <div className="flex items-center justify-center h-full w-full overflow-auto p-4" style={{ background: "var(--bg)" }}>
+        <video src={value} controls style={{ maxWidth: "100%", maxHeight: "100%" }} />
+      </div>
+    );
   }
   const viewRef = useRef<EditorView | null>(null);
   const themeCompartment = useRef(new Compartment());

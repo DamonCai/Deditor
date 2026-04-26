@@ -7,6 +7,8 @@ import {
   type Theme,
 } from "../store/editor";
 import { logInfo, logWarn } from "./logger";
+import { isBinaryRenderable } from "./lang";
+import { readAsDataUrl } from "./fileio";
 
 const KEY_V3 = "deditor:state:v3";
 const KEY_V2 = "deditor:state:v2"; // legacy, migrated to v3
@@ -150,6 +152,26 @@ export async function loadPersisted(): Promise<UiExtras | null> {
       stashPos(id, t);
       continue;
     }
+    // Binary-rendered files (image / pdf / audio / video) live as data: URLs.
+    // We never persist that base64 to localStorage (would blow the quota), so
+    // we always reload from disk here. If the file is gone, drop the tab.
+    if (isBinaryRenderable(t.filePath)) {
+      let dataUrl: string | null = null;
+      try {
+        dataUrl = await readAsDataUrl(t.filePath);
+      } catch {
+        dataUrl = null;
+      }
+      if (dataUrl == null) continue;
+      const id = newId();
+      restored.push({
+        id,
+        filePath: t.filePath,
+        content: dataUrl,
+        savedContent: dataUrl,
+      });
+      continue;
+    }
     // Named tab: try to read current disk contents.
     let disk: string | null = null;
     try {
@@ -247,10 +269,14 @@ function doSave(extras: UiExtras): void {
     workspaces: s.workspaces,
     tabs: s.tabs.map((t) => {
       const pos = s.tabPositions[t.id];
+      // Binary tabs hold a base64 data URL in `content` — that can be many
+      // megabytes and would blow localStorage's quota. Persist filePath only
+      // and rehydrate from disk on next launch.
+      const binary = isBinaryRenderable(t.filePath);
       return {
         filePath: t.filePath,
-        content: t.content,
-        savedContent: t.savedContent,
+        content: binary ? "" : t.content,
+        savedContent: binary ? "" : t.savedContent,
         cursor: pos?.cursor,
         scrollTopLine: pos?.scrollTopLine,
       };

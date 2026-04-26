@@ -6,7 +6,7 @@ import { confirmUnsaved } from "../components/ConfirmDialog";
 import { logError, logInfo, logWarn } from "./logger";
 import { notifyRefresh } from "./treeRefresh";
 import { tStatic } from "./i18n";
-import { isImageFile, isPdfFile } from "./lang";
+import { isImageFile, isPdfFile, isAudioFile, isVideoFile } from "./lang";
 
 const MD_FILTER = [
   { name: "Markdown", extensions: ["md", "markdown", "mdx"] },
@@ -24,6 +24,19 @@ const MD_FILTER = [
       "txt", "log", "csv", "diff", "patch",
     ],
   },
+  {
+    name: "Image",
+    extensions: ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico", "tiff", "tif"],
+  },
+  { name: "PDF", extensions: ["pdf"] },
+  {
+    name: "Audio",
+    extensions: ["mp3", "wav", "ogg", "flac", "m4a", "aac", "opus"],
+  },
+  {
+    name: "Video",
+    extensions: ["mp4", "webm", "mov", "m4v", "ogv"],
+  },
   { name: "All", extensions: ["*"] },
 ];
 
@@ -31,20 +44,14 @@ export async function openFile() {
   const selected = await open({ multiple: true, filters: MD_FILTER });
   if (selected == null) return;
   const paths = Array.isArray(selected) ? selected : [selected];
-  for (const p of paths) {
-    try {
-      const content = await invoke<string>("read_text_file", { path: p });
-      useEditorStore.getState().openTab(p, content);
-      logInfo(`opened file: ${p} (${content.length} chars)`);
-    } catch (err) {
-      logError(`open failed for ${p}`, err);
-    }
-  }
+  await openMany(paths);
 }
 
 export async function openFileByPath(path: string) {
-  if (isImageFile(path)) return openImageFile(path);
-  if (isPdfFile(path)) return openPdfFile(path);
+  if (isImageFile(path)) return openBinaryAsDataUrl(path, "image");
+  if (isPdfFile(path)) return openBinaryAsDataUrl(path, "pdf");
+  if (isAudioFile(path)) return openBinaryAsDataUrl(path, "audio");
+  if (isVideoFile(path)) return openBinaryAsDataUrl(path, "video");
   const { tabs } = useEditorStore.getState();
   if (tabs.some((t) => t.filePath === path)) {
     useEditorStore.getState().openTab(path, "");
@@ -65,42 +72,38 @@ export async function openMany(paths: string[]) {
   }
 }
 
-/** Click an image file in the tree: open it as a tab with the image rendered inline. */
-export async function openImageFile(path: string) {
-  const { openTab } = useEditorStore.getState();
-
-  // Check if already open — focus existing tab.
-  const ext = path.split(".").pop()?.toLowerCase() ?? "";
-  const mime = IMAGE_MIME_MAP[ext] ?? "image/png";
-
-  try {
-    const base64 = await invoke<string>("read_binary_as_base64", { path });
-    const dataUrl = `data:${mime};base64,${base64}`;
-    openTab(path, dataUrl);
-    logInfo(`opened image: ${path}`);
-  } catch (err) {
-    logError(`openImageFile failed for ${path}`, err);
-  }
-}
-
-/** Click a PDF file in the tree: open it as a tab rendered inline via <iframe>. */
-export async function openPdfFile(path: string) {
+/** Read a binary file (image / PDF / audio / video) and open it as a tab whose
+ *  content is a `data:` URL. The renderer in Editor.tsx branches on file type
+ *  to pick the right element (<img>, <iframe>, <audio>, <video>). */
+export async function openBinaryAsDataUrl(
+  path: string,
+  kind: "image" | "pdf" | "audio" | "video",
+): Promise<void> {
   const { openTab, tabs } = useEditorStore.getState();
   if (tabs.some((t) => t.filePath === path)) {
     openTab(path, "");
     return;
   }
   try {
-    const base64 = await invoke<string>("read_binary_as_base64", { path });
-    const dataUrl = `data:application/pdf;base64,${base64}`;
+    const dataUrl = await readAsDataUrl(path);
     openTab(path, dataUrl);
-    logInfo(`opened pdf: ${path}`);
+    logInfo(`opened ${kind}: ${path}`);
   } catch (err) {
-    logError(`openPdfFile failed for ${path}`, err);
+    logError(`open ${kind} failed for ${path}`, err);
   }
 }
 
-const IMAGE_MIME_MAP: Record<string, string> = {
+/** Reload a binary file's data URL from disk (used by persistence to hydrate
+ *  binary tabs on startup — we don't write the data URL to localStorage). */
+export async function readAsDataUrl(path: string): Promise<string> {
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  const mime = MIME_MAP[ext] ?? "application/octet-stream";
+  const base64 = await invoke<string>("read_binary_as_base64", { path });
+  return `data:${mime};base64,${base64}`;
+}
+
+const MIME_MAP: Record<string, string> = {
+  // image
   png: "image/png",
   jpg: "image/jpeg",
   jpeg: "image/jpeg",
@@ -111,6 +114,22 @@ const IMAGE_MIME_MAP: Record<string, string> = {
   ico: "image/x-icon",
   tiff: "image/tiff",
   tif: "image/tiff",
+  // pdf
+  pdf: "application/pdf",
+  // audio
+  mp3: "audio/mpeg",
+  wav: "audio/wav",
+  ogg: "audio/ogg",
+  flac: "audio/flac",
+  m4a: "audio/mp4",
+  aac: "audio/aac",
+  opus: "audio/ogg",
+  // video
+  mp4: "video/mp4",
+  webm: "video/webm",
+  mov: "video/quicktime",
+  m4v: "video/x-m4v",
+  ogv: "video/ogg",
 };
 
 export async function saveFile() {

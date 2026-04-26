@@ -3,7 +3,7 @@ import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { languages as codeLangs } from "@codemirror/language-data";
 import { tags as t } from "@lezer/highlight";
 import type { Tag } from "@lezer/highlight";
-import { LuFileText, LuFileImage } from "react-icons/lu";
+import { LuFileText, LuFileImage, LuFileAudio, LuFileVideo } from "react-icons/lu";
 import { FaRegFilePdf } from "react-icons/fa";
 // Static imports of legacy stream-mode parsers so Vite bundles them.
 // (Dynamic template-literal imports with @vite-ignore would fail in the browser
@@ -216,6 +216,22 @@ const ext: Record<string, LangDef> = {
 
   // PDF (rendered inline in Editor.tsx)
   pdf:  { label: "PDF", shiki: "text", cm: cmShell, icon: I("PDF", "#dc2626", FaRegFilePdf) },
+
+  // Audio (rendered inline in Editor.tsx)
+  mp3:  { label: "Audio", shiki: "text", cm: cmShell, icon: I("MP3",  "#0ea5e9", LuFileAudio) },
+  wav:  { label: "Audio", shiki: "text", cm: cmShell, icon: I("WAV",  "#0ea5e9", LuFileAudio) },
+  ogg:  { label: "Audio", shiki: "text", cm: cmShell, icon: I("OGG",  "#0ea5e9", LuFileAudio) },
+  flac: { label: "Audio", shiki: "text", cm: cmShell, icon: I("FLAC", "#0ea5e9", LuFileAudio) },
+  m4a:  { label: "Audio", shiki: "text", cm: cmShell, icon: I("M4A",  "#0ea5e9", LuFileAudio) },
+  aac:  { label: "Audio", shiki: "text", cm: cmShell, icon: I("AAC",  "#0ea5e9", LuFileAudio) },
+  opus: { label: "Audio", shiki: "text", cm: cmShell, icon: I("OPUS", "#0ea5e9", LuFileAudio) },
+
+  // Video (rendered inline in Editor.tsx)
+  mp4:  { label: "Video", shiki: "text", cm: cmShell, icon: I("MP4",  "#7c3aed", LuFileVideo) },
+  webm: { label: "Video", shiki: "text", cm: cmShell, icon: I("WEBM", "#7c3aed", LuFileVideo) },
+  mov:  { label: "Video", shiki: "text", cm: cmShell, icon: I("MOV",  "#7c3aed", LuFileVideo) },
+  m4v:  { label: "Video", shiki: "text", cm: cmShell, icon: I("M4V",  "#7c3aed", LuFileVideo) },
+  ogv:  { label: "Video", shiki: "text", cm: cmShell, icon: I("OGV",  "#7c3aed", LuFileVideo) },
 };
 
 const FILENAME_MAP: Record<string, LangDef> = {
@@ -235,6 +251,8 @@ const FALLBACK: LangDef = {
 };
 
 export const IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico", "tiff", "tif"];
+export const AUDIO_EXTS = ["mp3", "wav", "ogg", "flac", "m4a", "aac", "opus"];
+export const VIDEO_EXTS = ["mp4", "webm", "mov", "m4v", "ogv"];
 
 export const SUPPORTED_EXTS = Object.keys(ext);
 
@@ -270,4 +288,21 @@ export function isPdfFile(filePath: string | null): boolean {
   if (!filePath) return false;
   const e = filePath.split(".").pop()?.toLowerCase() ?? "";
   return e === "pdf";
+}
+
+export function isAudioFile(filePath: string | null): boolean {
+  if (!filePath) return false;
+  const e = filePath.split(".").pop()?.toLowerCase() ?? "";
+  return AUDIO_EXTS.includes(e);
+}
+
+export function isVideoFile(filePath: string | null): boolean {
+  if (!filePath) return false;
+  const e = filePath.split(".").pop()?.toLowerCase() ?? "";
+  return VIDEO_EXTS.includes(e);
+}
+
+/** True for files we render via a base64 data URL rather than as text. */
+export function isBinaryRenderable(filePath: string | null): boolean {
+  return isImageFile(filePath) || isPdfFile(filePath) || isAudioFile(filePath) || isVideoFile(filePath);
 }
