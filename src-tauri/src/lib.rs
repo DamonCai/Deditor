@@ -96,52 +96,10 @@ fn resolve_path(path: String) -> Result<String, String> {
     Ok(canonical.to_string_lossy().to_string())
 }
 
-const ALLOWED_EXTS: &[&str] = &[
-    // markdown
-    "md", "markdown", "mdx",
-    // js/ts
-    "js", "jsx", "ts", "tsx", "mjs", "cjs",
-    // python
-    "py", "pyi",
-    // rust / go
-    "rs", "go",
-    // jvm
-    "java", "kt", "kts", "scala", "groovy",
-    // c family
-    "c", "h", "cpp", "cxx", "cc", "hpp", "hxx",
-    // dotnet / swift
-    "cs", "swift",
-    // ruby / php / perl / lua
-    "rb", "php", "pl", "lua",
-    // web
-    "html", "htm", "css", "scss", "less", "sass", "vue", "svelte",
-    // data / config
-    "json", "jsonc", "yaml", "yml", "toml", "xml", "ini", "env",
-    // sql / shell
-    "sql", "sh", "bash", "zsh", "fish", "ps1",
-    // misc
-    "txt", "log", "csv", "diff", "patch", "dockerfile", "make",
-    // images
-    "png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico", "tiff", "tif",
-];
-
 const ALLOWED_NAMES: &[&str] = &[
     "Dockerfile", "Makefile", "Rakefile", "Procfile", "Gemfile", "Justfile",
     ".gitignore", ".dockerignore", ".editorconfig", ".env",
 ];
-
-fn is_text_file(name: &str) -> bool {
-    if ALLOWED_NAMES.iter().any(|n| n.eq_ignore_ascii_case(name)) {
-        return true;
-    }
-    let lower = name.to_lowercase();
-    if let Some(dot) = lower.rfind('.') {
-        let ext = &lower[dot + 1..];
-        return ALLOWED_EXTS.iter().any(|e| *e == ext);
-    }
-    // No extension → very likely a text doc (LICENSE / README / COPYING / AUTHORS / etc.)
-    true
-}
 
 #[tauri::command]
 fn create_file(path: String) -> Result<(), String> {
@@ -271,9 +229,6 @@ fn list_dir(path: String) -> Result<Vec<DirEntry>, String> {
             if !ALLOWED_NAMES.iter().any(|n| n.eq_ignore_ascii_case(&name)) {
                 continue;
             }
-        }
-        if !is_dir && !is_text_file(&name) {
-            continue;
         }
         out.push(DirEntry {
             name,

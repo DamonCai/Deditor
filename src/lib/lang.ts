@@ -3,7 +3,8 @@ import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { languages as codeLangs } from "@codemirror/language-data";
 import { tags as t } from "@lezer/highlight";
 import type { Tag } from "@lezer/highlight";
-import { LuFileText } from "react-icons/lu";
+import { LuFileText, LuFileImage } from "react-icons/lu";
+import { FaRegFilePdf } from "react-icons/fa";
 // Static imports of legacy stream-mode parsers so Vite bundles them.
 // (Dynamic template-literal imports with @vite-ignore would fail in the browser
 //  because bare specifiers can't be resolved at runtime.)
@@ -200,6 +201,21 @@ const ext: Record<string, LangDef> = {
   csv:   { label: "CSV",   shiki: "csv",  cm: cmShell, icon: I("CSV", "#237346") },
   diff:  { label: "Diff",  shiki: "diff", cm: cmShell, icon: I("DIF", "#0a8c0a") },
   patch: { label: "Patch", shiki: "diff", cm: cmShell, icon: I("PAT", "#0a8c0a") },
+
+  // Images (cm/shiki are no-ops; rendered inline in Editor.tsx)
+  png:  { label: "Image", shiki: "text", cm: cmShell, icon: I("IMG", "#a78bfa", LuFileImage) },
+  jpg:  { label: "Image", shiki: "text", cm: cmShell, icon: I("IMG", "#a78bfa", LuFileImage) },
+  jpeg: { label: "Image", shiki: "text", cm: cmShell, icon: I("IMG", "#a78bfa", LuFileImage) },
+  gif:  { label: "Image", shiki: "text", cm: cmShell, icon: I("GIF", "#a78bfa", LuFileImage) },
+  webp: { label: "Image", shiki: "text", cm: cmShell, icon: I("IMG", "#a78bfa", LuFileImage) },
+  bmp:  { label: "Image", shiki: "text", cm: cmShell, icon: I("BMP", "#a78bfa", LuFileImage) },
+  ico:  { label: "Icon",  shiki: "text", cm: cmShell, icon: I("ICO", "#a78bfa", LuFileImage) },
+  tiff: { label: "Image", shiki: "text", cm: cmShell, icon: I("TIF", "#a78bfa", LuFileImage) },
+  tif:  { label: "Image", shiki: "text", cm: cmShell, icon: I("TIF", "#a78bfa", LuFileImage) },
+  svg:  { label: "SVG",   shiki: "xml",  cm: cmShell, icon: I("SVG", "#ffb013", LuFileImage) },
+
+  // PDF (rendered inline in Editor.tsx)
+  pdf:  { label: "PDF", shiki: "text", cm: cmShell, icon: I("PDF", "#dc2626", FaRegFilePdf) },
 };
 
 const FILENAME_MAP: Record<string, LangDef> = {
@@ -248,4 +264,10 @@ export function isImageFile(filePath: string | null): boolean {
   if (!filePath) return false;
   const e = filePath.split(".").pop()?.toLowerCase() ?? "";
   return IMAGE_EXTS.includes(e);
+}
+
+export function isPdfFile(filePath: string | null): boolean {
+  if (!filePath) return false;
+  const e = filePath.split(".").pop()?.toLowerCase() ?? "";
+  return e === "pdf";
 }

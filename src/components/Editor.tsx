@@ -21,7 +21,7 @@ import {
   LanguageSupport,
 } from "@codemirror/language";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { detectLang, isMarkdown, isImageFile } from "../lib/lang";
+import { detectLang, isMarkdown, isImageFile, isPdfFile } from "../lib/lang";
 import { saveImage } from "../lib/fileio";
 import { useEditorStore } from "../store/editor";
 import { logError, logInfo } from "../lib/logger";
@@ -90,6 +90,12 @@ export default function Editor({
         <img src={value} alt={filePath ?? "image"} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
       </div>
     );
+  }
+  // PDF preview — let the webview's native viewer render the data URL inline,
+  // wrapped in our own zoom controls (the iframe's native viewer is sealed,
+  // so we use CSS `zoom` on the iframe to scale the rendered output).
+  if (isPdfFile(filePath) && value.startsWith("data:application/pdf")) {
+    return <PdfView src={value} title={filePath ?? "pdf"} />;
   }
   const viewRef = useRef<EditorView | null>(null);
   const themeCompartment = useRef(new Compartment());
@@ -457,4 +463,20 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
     binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
   }
   return btoa(binary);
+}
+
+function PdfView({ src, title }: { src: string; title: string }) {
+  return (
+    <iframe
+      src={src}
+      title={title}
+      style={{
+        width: "100%",
+        height: "100%",
+        border: "none",
+        display: "block",
+        background: "var(--bg)",
+      }}
+    />
+  );
 }

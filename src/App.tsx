@@ -13,7 +13,7 @@ import TabBar from "./components/TabBar";
 import MarkdownToolbar from "./components/MarkdownToolbar";
 import JsonToolbar from "./components/JsonToolbar";
 import { useEditorStore, useActiveTab } from "./store/editor";
-import { isMarkdown, isJson, isImageFile } from "./lib/lang";
+import { isMarkdown, isJson, isImageFile, isPdfFile } from "./lib/lang";
 import { useT } from "./lib/i18n";
 import {
   openFile,
@@ -25,6 +25,7 @@ import {
   closeActiveTab,
   openMany,
   openImageFile,
+  openPdfFile,
 } from "./lib/fileio";
 import { loadPersisted, schedulePersist } from "./lib/persistence";
 
@@ -144,12 +145,15 @@ export default function App() {
           const paths = event.payload.paths;
           const textPaths: string[] = [];
           const imagePaths: string[] = [];
+          const pdfPaths: string[] = [];
           for (const p of paths) {
             if (isImageFile(p)) imagePaths.push(p);
+            else if (isPdfFile(p)) pdfPaths.push(p);
             else textPaths.push(p);
           }
           if (textPaths.length > 0) void openMany(textPaths);
           for (const p of imagePaths) void openImageFile(p);
+          for (const p of pdfPaths) void openPdfFile(p);
         }
       })
       .then((fn) => {

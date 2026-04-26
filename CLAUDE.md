@@ -98,11 +98,12 @@ DEditor 项目的协作上下文。Claude Code 在这个目录工作时自动加
 - Bundle identifier：`com.deditor.app`
 - 不要意外引入回 `M Editor` / `m-editor` / `m-client`（旧名，已全替换）
 
-### 3. 加新语言支持的 3 步
+### 3. 加新语言支持
 
 1. `src/lib/lang.ts` 的 `ext` 表：加扩展名 → CodeMirror loader + Shiki 名 + 图标
-2. `src-tauri/src/lib.rs` 的 `ALLOWED_EXTS`：加扩展名（让文件树显示）
-3. （可选）`src/lib/fileio.ts` 的 `MD_FILTER`：加扩展名（打开对话框过滤）
+2. （可选）`src/lib/fileio.ts` 的 `MD_FILTER`：加扩展名（打开对话框过滤）
+
+文件树侧默认显示**所有**非隐藏文件（`list_dir` 不再按扩展名过滤）。隐藏目录（`.git` 等）继续屏蔽；隐藏文件白名单见 `src-tauri/src/lib.rs` 的 `ALLOWED_NAMES`（`.gitignore` / `.env` 等）。
 
 ## 日志系统
 

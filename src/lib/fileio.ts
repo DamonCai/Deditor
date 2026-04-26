@@ -6,7 +6,7 @@ import { confirmUnsaved } from "../components/ConfirmDialog";
 import { logError, logInfo, logWarn } from "./logger";
 import { notifyRefresh } from "./treeRefresh";
 import { tStatic } from "./i18n";
-import { isMarkdown } from "./lang";
+import { isImageFile, isPdfFile } from "./lang";
 
 const MD_FILTER = [
   { name: "Markdown", extensions: ["md", "markdown", "mdx"] },
@@ -43,6 +43,8 @@ export async function openFile() {
 }
 
 export async function openFileByPath(path: string) {
+  if (isImageFile(path)) return openImageFile(path);
+  if (isPdfFile(path)) return openPdfFile(path);
   const { tabs } = useEditorStore.getState();
   if (tabs.some((t) => t.filePath === path)) {
     useEditorStore.getState().openTab(path, "");
@@ -78,6 +80,23 @@ export async function openImageFile(path: string) {
     logInfo(`opened image: ${path}`);
   } catch (err) {
     logError(`openImageFile failed for ${path}`, err);
+  }
+}
+
+/** Click a PDF file in the tree: open it as a tab rendered inline via <iframe>. */
+export async function openPdfFile(path: string) {
+  const { openTab, tabs } = useEditorStore.getState();
+  if (tabs.some((t) => t.filePath === path)) {
+    openTab(path, "");
+    return;
+  }
+  try {
+    const base64 = await invoke<string>("read_binary_as_base64", { path });
+    const dataUrl = `data:application/pdf;base64,${base64}`;
+    openTab(path, dataUrl);
+    logInfo(`opened pdf: ${path}`);
+  } catch (err) {
+    logError(`openPdfFile failed for ${path}`, err);
   }
 }
 
