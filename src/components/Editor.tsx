@@ -271,6 +271,11 @@ export default function Editor({
           if (u.selectionSet || u.docChanged) {
             positionRef.current.cursor = u.state.selection.main.head;
             schedulePositionFlush();
+            // Update the StatusBar's selection-length readout. Sum every
+            // range so multi-cursor selections still report a useful total.
+            let selLen = 0;
+            for (const r of u.state.selection.ranges) selLen += r.to - r.from;
+            useEditorStore.getState().setActiveSelectionLength(selLen);
           }
         }),
         themeCompartment.current.of(theme === "dark" ? oneDark : []),
@@ -405,6 +410,9 @@ export default function Editor({
       view.destroy();
       viewRef.current = null;
       setActiveView(null);
+      // Clear the StatusBar readout so a closed editor's last selection
+      // count doesn't linger over the next tab.
+      useEditorStore.getState().setActiveSelectionLength(0);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

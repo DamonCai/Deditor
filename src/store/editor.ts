@@ -48,6 +48,10 @@ interface EditorState {
   /** Path of the file the user marked via "Select for Compare" in the file
    *  tree. Right-clicking another file then offers "Compare with Selected". */
   compareMarkPath: string | null;
+  /** Total characters currently selected in the active editor (sum across
+   *  all ranges if multi-cursor). 0 when no selection. Not persisted —
+   *  selection state shouldn't survive a restart. */
+  activeSelectionLength: number;
   /** Per-shortcut enable/disable map. Missing keys default to enabled (so new
    *  shortcuts shipped in updates "just work" for upgrading users). */
   shortcuts: Record<string, boolean>;
@@ -97,6 +101,7 @@ interface EditorState {
   // Open a side-by-side diff tab. Dedupes on (leftPath, rightPath).
   openDiffTab: (spec: DiffSpec) => string;
   setCompareMarkPath: (path: string | null) => void;
+  setActiveSelectionLength: (n: number) => void;
   setShortcutEnabled: (id: ShortcutId, enabled: boolean) => void;
   setShortcuts: (next: Record<string, boolean>) => void;
   resetShortcuts: () => void;
@@ -323,6 +328,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   previewMaximized: false,
   editorFontSize: 14,
   compareMarkPath: null,
+  activeSelectionLength: 0,
   shortcuts: { ...DEFAULT_SHORTCUTS },
   settingsOpen: false,
   gotoAnythingOpen: false,
@@ -393,6 +399,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   setCompareMarkPath: (path) => set({ compareMarkPath: path }),
+
+  setActiveSelectionLength: (n) => {
+    if (get().activeSelectionLength === n) return;
+    set({ activeSelectionLength: n });
+  },
 
   setShortcutEnabled: (id, enabled) => {
     const cur = get().shortcuts;

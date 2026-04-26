@@ -32,10 +32,10 @@ function detectEol(text: string): "CRLF" | "LF" {
 export default function StatusBar() {
   const t = useT();
   const active = useActiveTab();
-  const { theme, setTheme } = useEditorStore();
   const cursorOffset = useEditorStore((s) =>
     active ? s.tabPositions[active.id]?.cursor ?? 0 : 0,
   );
+  const selectionLen = useEditorStore((s) => s.activeSelectionLength);
   const filePath = active?.filePath ?? null;
   const content = active?.content ?? "";
   const dirty = active ? isTabDirty(active) : false;
@@ -64,6 +64,11 @@ export default function StatusBar() {
       <div className="flex items-center gap-4 flex-shrink-0">
         <span className="tabular-nums" title={t("statusbar.cursor")}>
           {t("statusbar.lnCol", { line: String(line), col: String(col) })}
+          {selectionLen > 0 && (
+            <span style={{ color: "var(--accent)", marginLeft: 6 }}>
+              {t("statusbar.selected", { n: String(selectionLen) })}
+            </span>
+          )}
         </span>
         <span title={t("statusbar.eol")}>{eol}</span>
         <span title={t("statusbar.encoding")}>UTF-8</span>
@@ -71,12 +76,6 @@ export default function StatusBar() {
         <span>
           {lines} {t("statusbar.lines")} · {chars} {t("statusbar.chars")}
         </span>
-        <button
-          className="hover:text-[color:var(--text)]"
-          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-        >
-          {theme === "dark" ? t("statusbar.light") : t("statusbar.dark")}
-        </button>
       </div>
     </div>
   );
