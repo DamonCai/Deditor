@@ -3,6 +3,64 @@ import JSON5 from "json5";
 const MAX_UNWRAP_DEPTH = 5;
 
 /**
+ * Convert Python-style literals (`True` / `False` / `None`) outside of strings
+ * to their JSON equivalents. JSON5 already handles single quotes, unquoted
+ * keys, and trailing commas, so the only remaining gap when someone pastes a
+ * Python `repr(dict)` dump is these three keywords.
+ *
+ * The scan tracks whether we're inside a `'...'` or `"..."` string (with `\`
+ * escapes) so literal-looking words inside string values aren't rewritten.
+ * Replacements happen only at word boundaries to avoid touching identifiers
+ * like `TrueColor` or property keys that happen to contain the substring.
+ */
+function convertPythonLiterals(text: string): string {
+  let out = "";
+  let i = 0;
+  const n = text.length;
+  const isWordChar = (c: string) => /[A-Za-z0-9_$]/.test(c);
+  while (i < n) {
+    const c = text[i];
+    if (c === '"' || c === "'") {
+      const quote = c;
+      out += c;
+      i++;
+      while (i < n) {
+        const ch = text[i];
+        if (ch === "\\" && i + 1 < n) {
+          out += ch + text[i + 1];
+          i += 2;
+          continue;
+        }
+        out += ch;
+        i++;
+        if (ch === quote) break;
+      }
+      continue;
+    }
+    const prev = i > 0 ? text[i - 1] : " ";
+    if (!isWordChar(prev)) {
+      const tryReplace = (kw: string, repl: string) => {
+        if (text.startsWith(kw, i)) {
+          const after = text[i + kw.length] ?? " ";
+          if (!isWordChar(after)) {
+            out += repl;
+            i += kw.length;
+            return true;
+          }
+        }
+        return false;
+      };
+      if (tryReplace("True", "true")) continue;
+      if (tryReplace("False", "false")) continue;
+      if (tryReplace("None", "null")) continue;
+    }
+    out += c;
+    i++;
+  }
+  return out;
+}
+
+/**
  * Parse a piece of text into a JSON value, peeling away common forms of
  * "wrapping" the user might have pasted:
  *
@@ -43,6 +101,20 @@ function smartParse(text: string, depth = 0): unknown {
       parsedSuccessfully = true;
     } catch {
       /* fall through */
+    }
+  }
+  // 2b. Python-style: convert True/False/None outside strings, then JSON5.
+  //     Covers `repr(dict)` output that mixes single quotes with Python
+  //     keywords. Cheap to try; only runs after strict + JSON5 both fail.
+  if (!parsedSuccessfully) {
+    const pyConverted = convertPythonLiterals(t);
+    if (pyConverted !== t) {
+      try {
+        parsed = JSON5.parse(pyConverted);
+        parsedSuccessfully = true;
+      } catch {
+        /* fall through */
+      }
     }
   }
   // 4. Raw escaped text — wrap in quotes and parse as a JSON string, then

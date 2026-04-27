@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { FiMaximize2, FiMinimize2 } from "react-icons/fi";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { renderMarkdown, renderCode } from "../lib/markdown";
 import { hydratePlantuml } from "../lib/plantumlHydrate";
 import { isMarkdown } from "../lib/lang";
 import { useEditorStore } from "../store/editor";
 import { useT } from "../lib/i18n";
+import { logError } from "../lib/logger";
 
 interface Props {
   source: string;
@@ -68,6 +70,27 @@ export default function Preview({ source, filePath, theme, scrollLine, onScroll 
     suppressOutgoingUntil.current = Date.now() + 200;
     root.scrollTo({ top, behavior: "auto" });
   }, [scrollLine, html]);
+
+  // Intercept anchor clicks so external links open in the OS default browser
+  // instead of navigating the WebView away from the editor (which would
+  // effectively unload the app). In-page anchors (`#foo`) keep their default
+  // hash-jump behavior so heading links still work.
+  useEffect(() => {
+    const root = containerRef.current;
+    if (!root) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      const a = target?.closest?.("a") as HTMLAnchorElement | null;
+      if (!a) return;
+      const raw = a.getAttribute("href");
+      if (!raw) return;
+      if (raw.startsWith("#")) return;
+      e.preventDefault();
+      openUrl(a.href).catch((err) => logError("openUrl failed", err));
+    };
+    root.addEventListener("click", handler);
+    return () => root.removeEventListener("click", handler);
+  }, []);
 
   // Outgoing: report which source line is at the top when user scrolls preview.
   useEffect(() => {
