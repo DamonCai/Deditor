@@ -184,6 +184,8 @@ const ZH: Record<string, string> = {
   "tabbar.copyPath": "复制文件路径",
   "tabbar.copyName": "复制文件名",
   "tabbar.copyEncodedPath": "复制文件转译路径",
+  "tabbar.showPreview": "显示预览",
+  "tabbar.hidePreview": "隐藏预览",
 
   // json toolbar
   "json.format": "格式化",
@@ -445,6 +447,8 @@ const EN: Record<string, string> = {
   "tabbar.copyPath": "Copy File Path",
   "tabbar.copyName": "Copy File Name",
   "tabbar.copyEncodedPath": "Copy Escaped File Path",
+  "tabbar.showPreview": "Show Preview",
+  "tabbar.hidePreview": "Hide Preview",
 
   // json toolbar
   "json.format": "Format",

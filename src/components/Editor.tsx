@@ -38,6 +38,7 @@ import {
   clearBookmarks,
 } from "../lib/bookmarks";
 import { saveImage } from "../lib/fileio";
+import { exportHtml, exportPdf } from "../lib/export";
 import { logError, logInfo } from "../lib/logger";
 import { setActiveView } from "../lib/editorBridge";
 import { tStatic, useT } from "../lib/i18n";
@@ -508,7 +509,7 @@ export default function Editor({
     const view = viewRef.current;
     const sel = view?.state.selection.main;
     const hasSelection = !!sel && sel.from !== sel.to;
-    return [
+    const items: MenuItem[] = [
       {
         label: t("editor.cut"),
         disabled: !hasSelection,
@@ -534,6 +535,17 @@ export default function Editor({
         onClick: () => view && openSearchPanel(view),
       },
     ];
+    if (isMarkdown(filePath)) {
+      const { showPreview, togglePreview } = useEditorStore.getState();
+      items.push({ divider: true });
+      items.push({
+        label: showPreview ? t("tabbar.hidePreview") : t("tabbar.showPreview"),
+        onClick: () => togglePreview(),
+      });
+      items.push({ label: t("titlebar.exportHtml"), onClick: () => exportHtml() });
+      items.push({ label: t("titlebar.exportPdf"), onClick: () => exportPdf() });
+    }
+    return items;
   };
 
   return (
