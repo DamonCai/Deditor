@@ -181,6 +181,9 @@ const ZH: Record<string, string> = {
   "tabbar.closeShortcut": "关闭 (Cmd/Ctrl+W)",
   "tabbar.searchPlaceholder": "搜索 {n} 个标签...",
   "tabbar.noMatches": "没有匹配",
+  "tabbar.copyPath": "复制文件路径",
+  "tabbar.copyName": "复制文件名",
+  "tabbar.copyEncodedPath": "复制文件转译路径",
 
   // json toolbar
   "json.format": "格式化",
@@ -256,6 +259,8 @@ const ZH: Record<string, string> = {
   "markdown.plantumlLoading": "正在加载 PlantUML 图表…",
   "markdown.plantumlOffline":
     "PlantUML 服务无法访问（离线或超时）— 显示原始源码作为替代",
+  "markdown.mermaidLoading": "正在加载 Mermaid 图表…",
+  "markdown.mermaidError": "Mermaid 渲染失败: {error}",
 };
 
 const EN: Record<string, string> = {
@@ -437,6 +442,9 @@ const EN: Record<string, string> = {
   "tabbar.closeShortcut": "Close (Cmd/Ctrl+W)",
   "tabbar.searchPlaceholder": "Search {n} tabs…",
   "tabbar.noMatches": "No matches",
+  "tabbar.copyPath": "Copy File Path",
+  "tabbar.copyName": "Copy File Name",
+  "tabbar.copyEncodedPath": "Copy Escaped File Path",
 
   // json toolbar
   "json.format": "Format",
@@ -513,6 +521,8 @@ const EN: Record<string, string> = {
   "markdown.plantumlLoading": "Loading PlantUML diagram…",
   "markdown.plantumlOffline":
     "PlantUML service unreachable (offline or timed out) — showing source instead",
+  "markdown.mermaidLoading": "Loading Mermaid diagram…",
+  "markdown.mermaidError": "Mermaid render failed: {error}",
 };
 
 const DICTS: Record<Lang, Record<string, string>> = { zh: ZH, en: EN };

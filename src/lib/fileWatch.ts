@@ -61,6 +61,10 @@ export function useFileWatch(): void {
         // Disk content already matches what we have — false alarm
         // (could be e.g. our own write or a touch with no real change).
         if (fresh === cur.content) continue;
+        // Disk matches what we last saved → it's our own write (the user has
+        // since kept typing, so cur.content drifted from disk). No external
+        // editor was involved; just bump the mtime baseline silently.
+        if (fresh === cur.savedContent) continue;
 
         if (cur.content === cur.savedContent) {
           // Clean tab: silently swap in the new content.

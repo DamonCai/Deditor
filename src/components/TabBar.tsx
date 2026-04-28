@@ -11,6 +11,17 @@ function basename(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
 }
 
+/** Percent-encode each path segment so spaces and unicode survive a paste
+ *  into a markdown link / URL field. Separators are preserved so the result
+ *  is still a recognizable absolute path. */
+function toEncodedPath(path: string): string {
+  const sep = path.includes("\\") && !path.includes("/") ? "\\" : "/";
+  return path
+    .split(sep)
+    .map((seg) => encodeURIComponent(seg))
+    .join(sep);
+}
+
 export default function TabBar() {
   const t = useT();
   const { tabs, activeId, setActive, closeOthers, reorderTabs } = useEditorStore();
@@ -106,9 +117,29 @@ export default function TabBar() {
     e.stopPropagation();
     const items: MenuItem[] = [];
     if (tab.filePath) {
+      const path = tab.filePath;
+      const name = basename(path);
+      items.push({
+        label: t("tabbar.copyPath"),
+        onClick: () => {
+          navigator.clipboard.writeText(path).catch(() => {});
+        },
+      });
+      items.push({
+        label: t("tabbar.copyEncodedPath"),
+        onClick: () => {
+          navigator.clipboard.writeText(toEncodedPath(path)).catch(() => {});
+        },
+      });
+      items.push({
+        label: t("tabbar.copyName"),
+        onClick: () => {
+          navigator.clipboard.writeText(name).catch(() => {});
+        },
+      });
       items.push({
         label: t("filetree.revealInFinder"),
-        onClick: () => revealInFinder(tab.filePath!),
+        onClick: () => revealInFinder(path),
       });
       items.push({ divider: true });
     }

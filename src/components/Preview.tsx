@@ -3,10 +3,20 @@ import { FiMaximize2, FiMinimize2 } from "react-icons/fi";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { renderMarkdown, renderCode } from "../lib/markdown";
 import { hydratePlantuml } from "../lib/plantumlHydrate";
+import { hydrateMermaid } from "../lib/mermaidHydrate";
+import { hydrateLocalImages } from "../lib/localImgHydrate";
 import { isMarkdown } from "../lib/lang";
 import { useEditorStore } from "../store/editor";
 import { useT } from "../lib/i18n";
 import { logError } from "../lib/logger";
+import { openFileByPath } from "../lib/fileio";
+import {
+  dirname,
+  isExternalUrl,
+  isLocalRef,
+  resolveAgainst,
+  stripFileScheme,
+} from "../lib/pathUtil";
 
 interface Props {
   source: string;
@@ -53,6 +63,23 @@ export default function Preview({ source, filePath, theme, scrollLine, onScroll 
     return () => ctrl.abort();
   }, [html]);
 
+  // Mermaid blocks: lazy-load mermaid.js, render each placeholder. Re-runs
+  // whenever the html or theme changes (theme switch needs a re-render so the
+  // diagram re-themes correctly).
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const ctrl = hydrateMermaid(containerRef.current, theme);
+    return () => ctrl.abort();
+  }, [html, theme]);
+
+  // Local images: rewrite `<img>` src to a Tauri asset:// URL so the WebView
+  // can load files outside its own origin. Relative paths resolve against the
+  // active markdown file's directory.
+  useEffect(() => {
+    if (!containerRef.current) return;
+    hydrateLocalImages(containerRef.current, filePath);
+  }, [html, filePath]);
+
   // Apply incoming scrollLine from editor (programmatic scroll).
   useEffect(() => {
     if (scrollLine == null) return;
@@ -71,26 +98,58 @@ export default function Preview({ source, filePath, theme, scrollLine, onScroll 
     root.scrollTo({ top, behavior: "auto" });
   }, [scrollLine, html]);
 
-  // Intercept anchor clicks so external links open in the OS default browser
-  // instead of navigating the WebView away from the editor (which would
-  // effectively unload the app). In-page anchors (`#foo`) keep their default
-  // hash-jump behavior so heading links still work.
+  // Intercept clicks on anchors and images. External `http(s):` links go to
+  // the OS browser; local file paths (relative or absolute, with or without
+  // `file://`) open as a tab via `openFileByPath`. In-page anchors (`#foo`)
+  // keep their default hash-jump behavior so heading links still work.
+  // Clicks on local images also open the image as a tab (zoom-in affordance
+  // in the rendered preview).
   useEffect(() => {
     const root = containerRef.current;
     if (!root) return;
+    const baseDir = filePath ? dirname(filePath) : "";
     const handler = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
-      const a = target?.closest?.("a") as HTMLAnchorElement | null;
-      if (!a) return;
-      const raw = a.getAttribute("href");
-      if (!raw) return;
-      if (raw.startsWith("#")) return;
-      e.preventDefault();
-      openUrl(a.href).catch((err) => logError("openUrl failed", err));
+      if (!target) return;
+      const a = target.closest("a") as HTMLAnchorElement | null;
+      if (a) {
+        const raw = a.getAttribute("href");
+        if (!raw) return;
+        if (raw.startsWith("#")) return;
+        if (isExternalUrl(raw)) {
+          e.preventDefault();
+          openUrl(a.href).catch((err) => logError("openUrl failed", err));
+          return;
+        }
+        if (isLocalRef(raw)) {
+          e.preventDefault();
+          const stripped = stripFileScheme(raw);
+          const cleanIdx = stripped.search(/[#?]/);
+          const ref = cleanIdx >= 0 ? stripped.slice(0, cleanIdx) : stripped;
+          const resolved = resolveAgainst(baseDir, ref);
+          openFileByPath(resolved).catch((err) =>
+            logError(`open local link failed: ${resolved}`, err),
+          );
+          return;
+        }
+        return;
+      }
+      // Image click → open in tab (image preview). The hydrator stores the
+      // resolved absolute path on `data-abs-path`.
+      const img = target.closest("img[data-abs-path]") as HTMLImageElement | null;
+      if (img) {
+        e.preventDefault();
+        const abs = img.dataset.absPath;
+        if (abs) {
+          openFileByPath(abs).catch((err) =>
+            logError(`open local image failed: ${abs}`, err),
+          );
+        }
+      }
     };
     root.addEventListener("click", handler);
     return () => root.removeEventListener("click", handler);
-  }, []);
+  }, [filePath]);
 
   // Outgoing: report which source line is at the top when user scrolls preview.
   useEffect(() => {

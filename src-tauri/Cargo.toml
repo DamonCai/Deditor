@@ -1,6 +1,6 @@
 [package]
 name = "deditor"
-version = "0.3.0"
+version = "0.4.0"
 description = "DEditor - Markdown and multi-language code editor"
 authors = ["DEditor"]
 license = ""
@@ -19,7 +19,7 @@ tauri-build = { version = "2", features = [] }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-log = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"

@@ -133,8 +133,42 @@ body,
   padding-left: 1.6em;
   margin: 0.6em 0;
 }
+.preview ul {
+  list-style: disc outside;
+}
+.preview ol {
+  list-style: decimal outside;
+}
+.preview ul ul,
+.preview ol ul {
+  list-style: circle outside;
+}
+.preview ul ul ul,
+.preview ol ul ul {
+  list-style: square outside;
+}
 .preview li {
   margin: 0.25em 0;
+}
+/* In a loose list each <li> wraps its text in a <p>, which would otherwise
+   inherit the document <p> margins (0.8em top+bottom = ~1.6em between items)
+   and look like an extra blank line between items. Strip those margins so a
+   loose list renders as tightly as the surrounding `.preview li` margin
+   allows — matches the GitHub / VSCode preview cadence. Sibling paragraphs
+   inside the same <li> (continuation paragraph) keep their separator. */
+.preview li > p {
+  margin: 0;
+}
+.preview li > p + p {
+  margin-top: 0.5em;
+}
+.preview li::marker {
+  color: var(--text-soft);
+}
+.preview li.task-list-item,
+.preview li:has(> input[type="checkbox"]) {
+  list-style: none;
+  margin-left: -1.2em;
 }
 .preview table {
   border-collapse: collapse;
@@ -193,6 +227,52 @@ body,
   margin-bottom: 6px;
 }
 .preview .plantuml-diagram.error .plantuml-source {
+  background: var(--bg-mute);
+  color: var(--text-soft);
+  padding: 8px 12px;
+  font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  white-space: pre;
+  overflow-x: auto;
+  border-radius: 4px;
+  margin: 0;
+}
+
+/* Mermaid diagram */
+.preview .mermaid-diagram {
+  display: flex;
+  justify-content: center;
+  margin: 1.2em 0;
+  padding: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-x: auto;
+}
+.preview .mermaid-diagram svg {
+  max-width: 100%;
+  height: auto;
+}
+.preview .mermaid-diagram .mermaid-loading {
+  color: var(--text-soft);
+  font-size: 12px;
+  font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
+  padding: 8px 12px;
+}
+.preview .mermaid-diagram.error {
+  flex-direction: column;
+  align-items: stretch;
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.05);
+  border-color: rgba(239, 68, 68, 0.3);
+  font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
+  font-size: 13px;
+}
+.preview .mermaid-diagram.error .mermaid-error-msg {
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+.preview .mermaid-diagram.error .mermaid-source {
   background: var(--bg-mute);
   color: var(--text-soft);
   padding: 8px 12px;

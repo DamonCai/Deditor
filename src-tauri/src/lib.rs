@@ -503,6 +503,47 @@ fn file_mtimes(paths: Vec<String>) -> Vec<Option<u64>> {
         .collect()
 }
 
+/// Push a path onto the OS "recent documents" list. On macOS the entries
+/// surface in the Dock right-click menu and in File → Open Recent. On other
+/// platforms this is a no-op (we still maintain the macOS list explicitly
+/// because Tauri's window-state plugin doesn't touch NSDocumentController).
+#[tauri::command]
+fn add_recent_document(path: String) {
+    #[cfg(target_os = "macos")]
+    {
+        note_recent_document(&path);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = path;
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn note_recent_document(path: &str) {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSDocumentController;
+    use objc2_foundation::{NSString, NSURL};
+
+    // Must run on the AppKit main thread. Tauri commands marshal there by
+    // default for sync commands; bail safely if not.
+    let mtm = match MainThreadMarker::new() {
+        Some(m) => m,
+        None => return,
+    };
+
+    let p = expand(path);
+    let abs = match fs::canonicalize(&p) {
+        Ok(c) => c,
+        Err(_) => p,
+    };
+    let abs_str = abs.to_string_lossy().to_string();
+    let ns_path = NSString::from_str(&abs_str);
+    let url = NSURL::fileURLWithPath(&ns_path);
+    let controller = NSDocumentController::sharedDocumentController(mtm);
+    controller.noteNewRecentDocumentURL(&url);
+}
+
 /// Tell the frontend whether a path is a file, a directory, or missing.
 /// Used by the OS-drop handler to route dragged folders to `addWorkspace`
 /// instead of trying to open them as a file.
@@ -963,7 +1004,8 @@ pub fn run() {
             list_workspace_files,
             path_kind,
             file_mtimes,
-            find_in_files
+            find_in_files,
+            add_recent_document
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

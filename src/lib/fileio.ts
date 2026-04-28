@@ -47,21 +47,50 @@ export async function openFile() {
   await openMany(paths);
 }
 
+/** Push a successfully-opened file onto the OS recent-documents list (macOS
+ *  Dock right-click / File → Open Recent). No-op on other platforms. Errors
+ *  are swallowed — failing to update the recent list shouldn't break opens. */
+function noteRecentDocument(path: string): void {
+  invoke("add_recent_document", { path }).catch(() => {});
+}
+
 export async function openFileByPath(path: string) {
-  if (isImageFile(path)) return openBinaryAsDataUrl(path, "image");
-  if (isPdfFile(path)) return openBinaryAsDataUrl(path, "pdf");
-  if (isAudioFile(path)) return openBinaryAsDataUrl(path, "audio");
-  if (isVideoFile(path)) return openBinaryAsDataUrl(path, "video");
-  if (isHexFile(path)) return openBinaryAsDataUrl(path, "hex");
+  if (isImageFile(path)) {
+    await openBinaryAsDataUrl(path, "image");
+    noteRecentDocument(path);
+    return;
+  }
+  if (isPdfFile(path)) {
+    await openBinaryAsDataUrl(path, "pdf");
+    noteRecentDocument(path);
+    return;
+  }
+  if (isAudioFile(path)) {
+    await openBinaryAsDataUrl(path, "audio");
+    noteRecentDocument(path);
+    return;
+  }
+  if (isVideoFile(path)) {
+    await openBinaryAsDataUrl(path, "video");
+    noteRecentDocument(path);
+    return;
+  }
+  if (isHexFile(path)) {
+    await openBinaryAsDataUrl(path, "hex");
+    noteRecentDocument(path);
+    return;
+  }
   const { tabs } = useEditorStore.getState();
   if (tabs.some((t) => t.filePath === path)) {
     useEditorStore.getState().openTab(path, "");
+    noteRecentDocument(path);
     return;
   }
   try {
     const content = await invoke<string>("read_text_file", { path });
     useEditorStore.getState().openTab(path, content);
     logInfo(`opened file: ${path} (${content.length} chars)`);
+    noteRecentDocument(path);
   } catch (err) {
     logError(`open failed for ${path}`, err);
   }

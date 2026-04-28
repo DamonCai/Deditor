@@ -7,6 +7,7 @@ import { detectLang } from "./lang";
 import { tStatic } from "./i18n";
 
 const PLANTUML_LANGS = new Set(["plantuml", "puml", "uml"]);
+const MERMAID_LANGS = new Set(["mermaid"]);
 
 function escapeAttr(s: string): string {
   return s
@@ -21,6 +22,21 @@ function escapeAttr(s: string): string {
  * fetched (with cache + timeout) by `hydratePlantuml` in Preview.tsx after
  * the HTML is mounted.
  */
+/**
+ * Emit a placeholder `<div>` for mermaid blocks. The actual SVG is rendered
+ * by `hydrateMermaid` in Preview.tsx after mount (mermaid is large + lazy).
+ */
+function renderMermaid(source: string, line: number): string {
+  return (
+    `<div class="mermaid-diagram" data-line="${line}" ` +
+    `data-mermaid-source="${escapeAttr(source)}">` +
+    `<div class="mermaid-loading">${escapeAttr(
+      tStatic("markdown.mermaidLoading"),
+    )}</div>` +
+    `</div>`
+  );
+}
+
 function renderPlantuml(source: string, line: number): string {
   let encoded = "";
   try {
@@ -84,6 +100,17 @@ md.renderer.rules.fence = (tokens, idx, options, env, self) => {
   },
 );
 
+// Tag images with their raw `src`. Preview.tsx walks these after mount, resolves
+// relative paths against the active markdown file's directory, and rewrites the
+// `src` to a Tauri asset:// URL so the WebView can actually load local files.
+const originalImage = md.renderer.rules.image!;
+md.renderer.rules.image = (tokens, idx, options, env, self) => {
+  const token = tokens[idx];
+  const srcAttr = token.attrGet("src") ?? "";
+  if (srcAttr) token.attrSet("data-raw-src", srcAttr);
+  return originalImage(tokens, idx, options, env, self);
+};
+
 export interface RenderOptions {
   theme: "light" | "dark";
 }
@@ -104,6 +131,11 @@ export async function renderMarkdown(
     if (PLANTUML_LANGS.has(lang)) {
       const line = t.map ? t.map[0] + 1 : 0;
       highlighted.set(i, renderPlantuml(t.content, line));
+      continue;
+    }
+    if (MERMAID_LANGS.has(lang)) {
+      const line = t.map ? t.map[0] + 1 : 0;
+      highlighted.set(i, renderMermaid(t.content, line));
       continue;
     }
     const resolved = await ensureLanguage(hl, lang);
