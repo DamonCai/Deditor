@@ -26,9 +26,10 @@ import {
   LanguageSupport,
 } from "@codemirror/language";
 import { islandDark } from "../lib/islandDarkTheme";
-import { detectLang, isMarkdown, isImageFile, isPdfFile, isAudioFile, isVideoFile, isHexFile } from "../lib/lang";
+import { detectLang, isMarkdown, isImageFile, isPdfFile, isAudioFile, isVideoFile, isHexFile, isXmindFile } from "../lib/lang";
 import { useEditorStore, type DiffSpec } from "../store/editor";
 import DiffView from "./DiffView";
+import XmindView from "./XmindView";
 import { isEnabled } from "../lib/shortcuts";
 import {
   bookmarkExtension,
@@ -158,6 +159,10 @@ export default function Editor({
         <video src={value} controls style={{ maxWidth: "100%", maxHeight: "100%" }} />
       </div>
     );
+  }
+  // XMind workbook — read-only viewer (and mind-elixir-backed editor).
+  if (isXmindFile(filePath) && value.startsWith("data:")) {
+    return <XmindView dataUrl={value} filePath={filePath} tabId={tabId} />;
   }
   // Binary files we don't have a preview for (Office docs, archives, executables,
   // etc.) — render a hex dump so the user at least sees the raw bytes instead

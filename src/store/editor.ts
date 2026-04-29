@@ -116,7 +116,7 @@ interface EditorState {
    *  after the user stops typing. onBlur saves when the window loses focus. */
   autoSave: "off" | "onBlur" | "afterDelay";
 
-  setContent: (content: string) => void;
+  setContent: (content: string, tabId?: string) => void;
   // Open a new tab (or focus existing one for the same path).
   openTab: (filePath: string | null, content: string) => string;
   // Open a side-by-side diff tab. Dedupes on (leftPath, rightPath).
@@ -374,10 +374,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   zenMode: false,
   autoSave: "off",
 
-  setContent: (content) => {
+  setContent: (content, tabId) => {
     const { tabs, activeId } = get();
+    const target = tabId ?? activeId;
     set({
-      tabs: tabs.map((t) => (t.id === activeId ? { ...t, content } : t)),
+      tabs: tabs.map((t) => (t.id === target ? { ...t, content } : t)),
     });
   },
 

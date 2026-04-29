@@ -6,7 +6,7 @@ import { confirmUnsaved } from "../components/ConfirmDialog";
 import { logError, logInfo, logWarn } from "./logger";
 import { notifyRefresh } from "./treeRefresh";
 import { tStatic } from "./i18n";
-import { isImageFile, isPdfFile, isAudioFile, isVideoFile, isHexFile } from "./lang";
+import { isImageFile, isPdfFile, isAudioFile, isVideoFile, isHexFile, isXmindFile } from "./lang";
 
 const MD_FILTER = [
   { name: "Markdown", extensions: ["md", "markdown", "mdx"] },
@@ -80,6 +80,11 @@ export async function openFileByPath(path: string) {
     noteRecentDocument(path);
     return;
   }
+  if (isXmindFile(path)) {
+    await openBinaryAsDataUrl(path, "xmind");
+    noteRecentDocument(path);
+    return;
+  }
   const { tabs } = useEditorStore.getState();
   if (tabs.some((t) => t.filePath === path)) {
     useEditorStore.getState().openTab(path, "");
@@ -146,9 +151,9 @@ export async function reopenLastClosedTab(): Promise<void> {
 export async function openCompare(leftPath: string, rightPath: string): Promise<void> {
   if (
     isImageFile(leftPath) || isPdfFile(leftPath) || isAudioFile(leftPath) ||
-    isVideoFile(leftPath) || isHexFile(leftPath) ||
+    isVideoFile(leftPath) || isHexFile(leftPath) || isXmindFile(leftPath) ||
     isImageFile(rightPath) || isPdfFile(rightPath) || isAudioFile(rightPath) ||
-    isVideoFile(rightPath) || isHexFile(rightPath)
+    isVideoFile(rightPath) || isHexFile(rightPath) || isXmindFile(rightPath)
   ) {
     logWarn(`compare refused: binary file involved (${leftPath} vs ${rightPath})`);
     alert(tStatic("filetree.compareBinaryRefused"));
@@ -172,7 +177,7 @@ export async function openCompare(leftPath: string, rightPath: string): Promise<
  *  to pick the right element (<img>, <iframe>, <audio>, <video>). */
 export async function openBinaryAsDataUrl(
   path: string,
-  kind: "image" | "pdf" | "audio" | "video" | "hex",
+  kind: "image" | "pdf" | "audio" | "video" | "hex" | "xmind",
 ): Promise<void> {
   const { openTab, tabs } = useEditorStore.getState();
   if (tabs.some((t) => t.filePath === path)) {
@@ -225,12 +230,32 @@ const MIME_MAP: Record<string, string> = {
   mov: "video/quicktime",
   m4v: "video/x-m4v",
   ogv: "video/ogg",
+  // xmind
+  xmind: "application/vnd.xmind.workbook",
 };
 
-/** Save every dirty tab that has a filePath. Untitled / diff / binary tabs
- *  are skipped. Used by auto-save (blur / debounce) and the future "save all"
- *  command. Errors are swallowed per file so one bad disk doesn't block the
- *  whole batch. */
+/** Extract the base64 payload from a `data:...;base64,...` URL. */
+function dataUrlToBase64(dataUrl: string): string | null {
+  if (!dataUrl.startsWith("data:")) return null;
+  const idx = dataUrl.indexOf(";base64,");
+  if (idx < 0) return null;
+  return dataUrl.slice(idx + ";base64,".length);
+}
+
+/** Write a tab's content to disk. data: URLs go through write_binary_file
+ *  (we strip the prefix and decode on the Rust side); plain text uses
+ *  write_text_file. Lets callers stay agnostic to whether a tab is binary. */
+async function writeTabContent(path: string, content: string): Promise<void> {
+  const b64 = dataUrlToBase64(content);
+  if (b64 != null) {
+    await invoke("write_binary_file", { path, data: b64 });
+  } else {
+    await invoke("write_text_file", { path, content });
+  }
+}
+
+/** Save every dirty tab that has a filePath. Untitled / diff tabs are skipped.
+ *  Binary tabs whose content is a data URL go through write_binary_file. */
 export async function saveAllDirty(): Promise<void> {
   const { tabs, markSaved, activeId } = useEditorStore.getState();
   for (const t of tabs) {
@@ -238,7 +263,7 @@ export async function saveAllDirty(): Promise<void> {
     if (t.diff) continue;
     if (t.content === t.savedContent) continue;
     try {
-      await invoke("write_text_file", { path: t.filePath, content: t.content });
+      await writeTabContent(t.filePath, t.content);
       // markSaved only operates on active tab; do it manually for non-active
       if (t.id === activeId) {
         markSaved();
@@ -266,7 +291,7 @@ export async function saveFile() {
   if (active.diff) return;
   if (!active.filePath) return saveFileAs();
   try {
-    await invoke("write_text_file", { path: active.filePath, content: active.content });
+    await writeTabContent(active.filePath, active.content);
     markSaved();
     logInfo(`saved: ${active.filePath} (${active.content.length} chars)`);
   } catch (err) {
@@ -286,7 +311,7 @@ export async function saveFileAs() {
   });
   if (!target) return;
   try {
-    await invoke("write_text_file", { path: target, content: active.content });
+    await writeTabContent(target, active.content);
     rebindActive(target, active.content);
     logInfo(`saved as: ${target} (${active.content.length} chars)`);
   } catch (err) {

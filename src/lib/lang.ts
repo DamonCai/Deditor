@@ -3,7 +3,7 @@ import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { languages as codeLangs } from "@codemirror/language-data";
 import { tags as t } from "@lezer/highlight";
 import type { Tag } from "@lezer/highlight";
-import { LuFileText, LuFileImage, LuFileAudio, LuFileVideo, LuFileCog, LuDatabase, LuType } from "react-icons/lu";
+import { LuFileText, LuFileImage, LuFileAudio, LuFileVideo, LuFileCog, LuDatabase, LuType, LuNetwork } from "react-icons/lu";
 import { FaRegFilePdf, FaRegFileWord, FaRegFileExcel, FaRegFilePowerpoint, FaRegFileArchive } from "react-icons/fa";
 // Static imports of legacy stream-mode parsers so Vite bundles them.
 // (Dynamic template-literal imports with @vite-ignore would fail in the browser
@@ -293,6 +293,9 @@ const ext: Record<string, LangDef> = {
   dat:   { label: "Data",       shiki: "text", cm: cmShell, icon: I("DAT", "#6b7280", LuFileCog) },
   iso:   { label: "Disk Image", shiki: "text", cm: cmShell, icon: I("ISO", "#6b7280", LuFileCog) },
 
+  // Mind map (XMind workbook) — read-only viewer
+  xmind: { label: "XMind", shiki: "text", cm: cmShell, icon: I("MM",  "#dc6b1d", LuNetwork) },
+
   // Fonts
   ttf:   { label: "Font",     shiki: "text", cm: cmShell, icon: I("TTF",  "#0ea5e9", LuType) },
   otf:   { label: "Font",     shiki: "text", cm: cmShell, icon: I("OTF",  "#0ea5e9", LuType) },
@@ -424,6 +427,12 @@ export function isHexFile(filePath: string | null): boolean {
   return HEX_EXTS.includes(e);
 }
 
+export function isXmindFile(filePath: string | null): boolean {
+  if (!filePath) return false;
+  const e = filePath.split(".").pop()?.toLowerCase() ?? "";
+  return e === "xmind";
+}
+
 /** True for files we render via a base64 data URL rather than as text.
  *  Persistence treats these specially: we don't write base64 to localStorage,
  *  we re-read from disk on startup. */
@@ -433,6 +442,7 @@ export function isBinaryRenderable(filePath: string | null): boolean {
     isPdfFile(filePath) ||
     isAudioFile(filePath) ||
     isVideoFile(filePath) ||
-    isHexFile(filePath)
+    isHexFile(filePath) ||
+    isXmindFile(filePath)
   );
 }

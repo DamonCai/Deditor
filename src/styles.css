@@ -43,6 +43,11 @@ body,
   font-family:
     -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+  /* Lock the document viewport so embedded canvases (mind-elixir's
+     scrollIntoView, etc.) can't push the chrome (titlebar / tab bar) off
+     the page when their internal content grows. Anything that needs to
+     scroll provides its own scroll container. */
+  overflow: hidden;
 }
 
 /* CodeMirror fills its container */

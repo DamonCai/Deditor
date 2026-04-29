@@ -63,6 +63,19 @@ fn write_text_file(path: String, content: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn write_binary_file(path: String, data: String) -> Result<(), String> {
+    let bytes = BASE64.decode(&data).map_err(|e| {
+        log::error!("write_binary_file base64 decode failed: {} -- {}", path, e);
+        e.to_string()
+    })?;
+    log::debug!("write_binary_file: {} ({} bytes)", path, bytes.len());
+    fs::write(expand(&path), &bytes).map_err(|e| {
+        log::error!("write_binary_file failed: {} -- {}", path, e);
+        e.to_string()
+    })
+}
+
+#[tauri::command]
 fn save_image(dir: String, name: String, data: String) -> Result<String, String> {
     let bytes = BASE64.decode(&data).map_err(|e| {
         log::error!("save_image base64 decode failed for {}: {}", name, e);
@@ -990,6 +1003,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             read_text_file,
             write_text_file,
+            write_binary_file,
             list_dir,
             resolve_path,
             save_image,
