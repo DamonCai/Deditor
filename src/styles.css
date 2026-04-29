@@ -17,17 +17,20 @@
 }
 
 .dark {
-  --bg: #0d1117;
-  --bg-soft: #161b22;
-  --bg-mute: #21262d;
-  --border: #30363d;
-  --text: #e6edf3;
-  --text-soft: #8b949e;
-  --accent: #58a6ff;
-  --diff-add-bg: rgba(34, 197, 94, 0.22);
-  --diff-del-bg: rgba(239, 68, 68, 0.22);
-  --diff-empty-bg: rgba(255, 255, 255, 0.04);
-  --compare-mark-bg: rgba(88, 166, 255, 0.22);
+  /* Island Dark-inspired palette: cool blue-gray, low contrast, soft borders.
+     Editor canvas is one step darker than chrome so the editor feels like an
+     "island" inside the surrounding panels. */
+  --bg: #1e1f22;        /* editor canvas / main content */
+  --bg-soft: #2b2d30;   /* sidebar, status bar, tab bar, panels */
+  --bg-mute: #393b40;   /* hover, code chips, inputs */
+  --border: #393b40;
+  --text: #bcbec4;
+  --text-soft: #7f8186;
+  --accent: #3574f0;
+  --diff-add-bg: rgba(85, 175, 95, 0.18);
+  --diff-del-bg: rgba(229, 86, 86, 0.20);
+  --diff-empty-bg: rgba(255, 255, 255, 0.03);
+  --compare-mark-bg: rgba(53, 116, 240, 0.22);
 }
 
 html,

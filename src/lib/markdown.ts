@@ -128,7 +128,7 @@ export async function renderMarkdown(
   const hl = await getHighlighter();
   const tokens = md.parse(source, {});
   const highlighted = new Map<number, string>();
-  const shikiTheme = opts.theme === "dark" ? "github-dark" : "github-light";
+  const shikiTheme = opts.theme === "dark" ? "one-dark-pro" : "github-light";
 
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
@@ -169,7 +169,7 @@ export async function renderCode(
   const hl = await getHighlighter();
   const langDef = detectLang(filePath);
   const resolved = await ensureLanguage(hl, langDef.shiki);
-  const shikiTheme = opts.theme === "dark" ? "github-dark" : "github-light";
+  const shikiTheme = opts.theme === "dark" ? "one-dark-pro" : "github-light";
   try {
     return hl.codeToHtml(source, { lang: resolved, theme: shikiTheme });
   } catch {

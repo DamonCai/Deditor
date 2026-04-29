@@ -36,7 +36,7 @@ const PRELOAD: BundledLanguage[] = [
 export function getHighlighter(): Promise<Highlighter> {
   if (!highlighterPromise) {
     highlighterPromise = createHighlighter({
-      themes: ["github-light", "github-dark"],
+      themes: ["github-light", "one-dark-pro"],
       langs: PRELOAD,
     }).then((hl) => {
       PRELOAD.forEach((l) => loadedLangs.add(l));

@@ -25,7 +25,7 @@ import {
   foldKeymap,
   LanguageSupport,
 } from "@codemirror/language";
-import { oneDark } from "@codemirror/theme-one-dark";
+import { islandDark } from "../lib/islandDarkTheme";
 import { detectLang, isMarkdown, isImageFile, isPdfFile, isAudioFile, isVideoFile, isHexFile } from "../lib/lang";
 import { useEditorStore, type DiffSpec } from "../store/editor";
 import DiffView from "./DiffView";
@@ -284,7 +284,7 @@ export default function Editor({
             useEditorStore.getState().setActiveSelectionLength(selLen);
           }
         }),
-        themeCompartment.current.of(theme === "dark" ? oneDark : []),
+        themeCompartment.current.of(theme === "dark" ? islandDark : []),
         langCompartment.current.of([]),
         EditorView.domEventHandlers({
           paste: (e, view) => {
@@ -452,7 +452,7 @@ export default function Editor({
   useEffect(() => {
     viewRef.current?.dispatch({
       effects: themeCompartment.current.reconfigure(
-        theme === "dark" ? oneDark : [],
+        theme === "dark" ? islandDark : [],
       ),
     });
   }, [theme]);
