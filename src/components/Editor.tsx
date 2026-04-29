@@ -39,6 +39,7 @@ import {
 } from "../lib/bookmarks";
 import { saveImage } from "../lib/fileio";
 import { exportHtml, exportPdf } from "../lib/export";
+import { codeBlockCompletion } from "../lib/codeBlockComplete";
 import { logError, logInfo } from "../lib/logger";
 import { setActiveView } from "../lib/editorBridge";
 import { tStatic, useT } from "../lib/i18n";
@@ -171,6 +172,7 @@ export default function Editor({
   const indentCompartment = useRef(new Compartment());
   const whitespaceCompartment = useRef(new Compartment());
   const minimapCompartment = useRef(new Compartment());
+  const completionCompartment = useRef(new Compartment());
   const softWrap = useEditorStore((s) => s.softWrap);
   const showIndentGuides = useEditorStore((s) => s.showIndentGuides);
   const showWhitespace = useEditorStore((s) => s.showWhitespace);
@@ -266,6 +268,9 @@ export default function Editor({
         indentCompartment.current.of(showIndentGuides ? indentationMarkers() : []),
         whitespaceCompartment.current.of(showWhitespace ? highlightWhitespace() : []),
         minimapCompartment.current.of(showMinimap ? buildMinimap() : []),
+        completionCompartment.current.of(
+          isMarkdown(filePath) ? codeBlockCompletion() : [],
+        ),
         bookmarkExtension(),
         EditorView.updateListener.of((u) => {
           if (u.docChanged) onChangeRef.current(u.state.doc.toString());
@@ -503,6 +508,14 @@ export default function Editor({
     return () => {
       cancelled = true;
     };
+  }, [filePath]);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: completionCompartment.current.reconfigure(
+        isMarkdown(filePath) ? codeBlockCompletion() : [],
+      ),
+    });
   }, [filePath]);
 
   const buildCtxItems = (): MenuItem[] => {
