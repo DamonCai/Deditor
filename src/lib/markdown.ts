@@ -93,6 +93,12 @@ md.renderer.rules.fence = (tokens, idx, options, env, self) => {
     md.renderer.rules[rule] = (tokens, idx, options, env, self) => {
       const token = tokens[idx];
       if (token.map) token.attrSet("data-line", String(token.map[0] + 1));
+      // Ordered-list items: token.info holds the digits the author actually
+      // typed (CommonMark normally renumbers 1,2,3…). Inject `value="N"` so
+      // `1. / 5. / 9.` renders as 1 / 5 / 9 instead of 1 / 2 / 3.
+      if (rule === "list_item_open" && token.info) {
+        token.attrSet("value", token.info);
+      }
       return original
         ? original(tokens, idx, options, env, self)
         : self.renderToken(tokens, idx, options);
