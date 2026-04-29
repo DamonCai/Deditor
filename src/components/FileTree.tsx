@@ -117,7 +117,10 @@ export default function FileTree() {
           {error}
         </div>
       )}
-      <div className="flex-1 overflow-auto py-1">
+      <div
+        className="flex-1 py-1"
+        style={{ overflowY: "auto", overflowX: "hidden" }}
+      >
         {workspaces.length === 0 ? (
           <div
             className="px-3 py-4 text-xs"
@@ -515,7 +518,7 @@ function DirNode({
       >
         <Caret open={open} />
         <FiFolder size={14} color={FOLDER_COLOR} style={{ flexShrink: 0 }} />
-        <span className="truncate">{entry.name}</span>
+        <span className="truncate" style={{ minWidth: 0, flex: 1 }}>{entry.name}</span>
       </Row>
       {open && (
         <div>
@@ -570,9 +573,9 @@ function FileNode({
       onContextMenu={onContextMenu}
       title={marked ? `${entry.path}\n(selected for compare)` : entry.path}
     >
-      <span style={{ width: 12, display: "inline-block" }} />
+      <span style={{ width: 12, display: "inline-block", flexShrink: 0 }} />
       <LangIcon filePath={entry.path} />
-      <span className="truncate">{entry.name}</span>
+      <span className="truncate" style={{ minWidth: 0, flex: 1 }}>{entry.name}</span>
     </Row>
   );
 }
