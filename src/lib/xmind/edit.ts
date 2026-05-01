@@ -1,5 +1,6 @@
 import { unzipSync, zipSync, strFromU8, strToU8 } from "fflate";
 import type { XmindTopic } from "./parse";
+import { structureToDirection } from "./layout";
 
 /** Mind-elixir node shape (subset we use). The lib accepts loose extras under
  *  any key, so anything we attach as `_xmind` rides along on round-trip. */
@@ -8,6 +9,10 @@ export interface MENode {
   topic: string;
   children?: MENode[];
   hyperLink?: string;
+  /** mind-elixir reads this in SIDE direction: 0 = LHS, 1 = RHS. Used to mimic
+   *  XMind's unbalanced clockwise distribution. Ignored by mind-elixir in
+   *  RIGHT/LEFT direction. */
+  direction?: number;
   /** Stash XMind-only fields here so they survive a round-trip even though
    *  mind-elixir doesn't render or modify them. New nodes the user adds via
    *  mind-elixir won't have this — that's fine, save() emits a minimal
@@ -21,6 +26,16 @@ export interface MENode {
     /** XMind layout hint, e.g. "org.xmind.ui.brace.right". Critical to preserve
      *  on the root topic so XMind picks the right layout when reopening. */
     structureClass?: string;
+    /** Marks a synthetic child injected from XMind's detached array, so save
+     *  re-emits it under children.detached instead of children.attached. */
+    detachedRoot?: boolean;
+    /** Original floating-topic position from the source file; preserved as-is
+     *  on round-trip. */
+    position?: { x: number; y: number };
+    /** Source-file index among root's attached children. We reorder for an
+     *  XMind-like clockwise display, then restore source order on save so the
+     *  on-disk file isn't gratuitously mutated. */
+    origIndex?: number;
   };
 }
 
@@ -28,32 +43,88 @@ export interface MEData {
   nodeData: MENode;
 }
 
-export function topicToMENode(t: XmindTopic): MENode {
+export function topicToMENode(t: XmindTopic, isRoot = false): MENode {
   const node: MENode = {
     id: t.id,
     topic: t.title || " ",
   };
   if (t.href) node.hyperLink = t.href;
-  if (t.children.length > 0) node.children = t.children.map(topicToMENode);
+
+  const attached: MENode[] = t.children.map((c) => topicToMENode(c, false));
+  const detached: MENode[] = t.detached.map((c) => {
+    const me = topicToMENode(c, false);
+    me._xmind = { ...(me._xmind ?? {}), detachedRoot: true };
+    return me;
+  });
+
+  // Approximate XMind's "unbalanced" clockwise distribution at the sheet root:
+  // first floor(N/2) attached children fill the right side top-to-bottom in
+  // source order; the rest fill the left side top-to-bottom in *reversed*
+  // source order (clockwise wrap). origIndex on each child lets save restore
+  // the source-file order. Detached topics ride along on the right since they
+  // have no real "side" affinity. mind-elixir ignores `direction` outside SIDE
+  // mode, so this is a no-op for RIGHT/LEFT structures.
+  let kids: MENode[];
+  if (
+    isRoot &&
+    attached.length > 1 &&
+    structureToDirection(t.structureClass) === "side"
+  ) {
+    attached.forEach((k, i) => {
+      k._xmind = { ...(k._xmind ?? {}), origIndex: i };
+    });
+    const rightCount = Math.floor(attached.length / 2);
+    const right = attached.slice(0, rightCount);
+    const left = attached.slice(rightCount).reverse();
+    right.forEach((k) => { k.direction = 1; });
+    left.forEach((k) => { k.direction = 0; });
+    // Detached side from XMind position.x: negative = LHS, otherwise RHS.
+    const detachedRight: MENode[] = [];
+    const detachedLeft: MENode[] = [];
+    for (const k of detached) {
+      const x = k._xmind?.position?.x;
+      if (typeof x === "number" && x < 0) {
+        k.direction = 0;
+        detachedLeft.push(k);
+      } else {
+        k.direction = 1;
+        detachedRight.push(k);
+      }
+    }
+    // Order in `kids` controls top-to-bottom append order within each side
+    // container, so detached topics sit at the BOTTOM of their side (matches
+    // XMind, where floating topics are positioned below the main branches).
+    kids = [...right, ...left, ...detachedRight, ...detachedLeft];
+  } else {
+    kids = [...attached, ...detached];
+  }
+
+  if (kids.length > 0) node.children = kids;
   if (
     t.notes || t.labels?.length || t.markers?.length || t.href ||
-    t.style || t.structureClass
+    t.style || t.structureClass || t.position
   ) {
     node._xmind = {
+      ...(node._xmind ?? {}),
       notes: t.notes,
       labels: t.labels,
       markers: t.markers,
       href: t.href,
       style: t.style,
       structureClass: t.structureClass,
+      position: t.position,
     };
   }
   return node;
 }
 
 /** mind-elixir node tree → raw v3 topic JSON (the shape XMind expects in
- *  content.json's rootTopic). Existing fields stashed in _xmind survive. */
-function meNodeToRawTopic(n: MENode): Record<string, unknown> {
+ *  content.json's rootTopic). Existing fields stashed in _xmind survive.
+ *  `isRoot` gates the children.detached branch — XMind only honors detached
+ *  on the root, so a detached topic the user dragged under a non-root parent
+ *  is demoted back to an ordinary attached child rather than written into a
+ *  bogus children.detached on a non-root. */
+function meNodeToRawTopic(n: MENode, isRoot = false): Record<string, unknown> {
   const x = n._xmind ?? {};
   const out: Record<string, unknown> = {
     id: n.id || randId(),
@@ -68,8 +139,47 @@ function meNodeToRawTopic(n: MENode): Record<string, unknown> {
   }
   if (x.style !== undefined) out.style = x.style;
   if (x.structureClass) out.structureClass = x.structureClass;
+  // Sync floating-topic position.x sign with the current direction. mind-elixir
+  // updates `direction` when the user drags a node across LHS/RHS, so without
+  // this flip XMind would reopen the topic on the opposite side from what we
+  // last showed. n.direction is undefined for non-detached or non-SIDE nodes,
+  // skip in those cases.
+  let pos = x.position;
+  if (
+    isRoot && x.detachedRoot && pos &&
+    (n.direction === 0 || n.direction === 1)
+  ) {
+    const wantNeg = n.direction === 0;
+    if ((pos.x < 0) !== wantNeg) pos = { x: -pos.x, y: pos.y };
+  }
+  if (isRoot && pos) out.position = pos;
   if (n.children && n.children.length > 0) {
-    out.children = { attached: n.children.map(meNodeToRawTopic) };
+    let attached: MENode[] = [];
+    const detached: MENode[] = [];
+    for (const c of n.children) {
+      if (isRoot && c._xmind?.detachedRoot) detached.push(c);
+      else attached.push(c);
+    }
+    // Restore source-file order at root: tagged children sort by origIndex,
+    // user-added children (no origIndex) keep their relative order at the end.
+    if (isRoot && attached.length > 1) {
+      const tagged: MENode[] = [];
+      const untagged: MENode[] = [];
+      for (const c of attached) {
+        if (c._xmind?.origIndex !== undefined) tagged.push(c);
+        else untagged.push(c);
+      }
+      tagged.sort((a, b) => a._xmind!.origIndex! - b._xmind!.origIndex!);
+      attached = [...tagged, ...untagged];
+    }
+    if (attached.length > 0 || detached.length > 0) {
+      const ch: Record<string, unknown> = {};
+      if (attached.length > 0) ch.attached = attached.map((c) => meNodeToRawTopic(c, false));
+      // Detached emission keeps isRoot=true so each floating subtree's own
+      // root retains its position metadata.
+      if (detached.length > 0) ch.detached = detached.map((c) => meNodeToRawTopic(c, true));
+      out.children = ch;
+    }
   }
   return out;
 }
@@ -94,7 +204,7 @@ export function saveSheetEdit(
   if (!Array.isArray(sheets)) throw new Error("Cannot save: malformed content.json.");
   const target = sheets.find((s) => s.id === sheetId) ?? sheets[0];
   if (!target) throw new Error("Cannot save: sheet not found.");
-  target.rootTopic = meNodeToRawTopic(newRoot);
+  target.rootTopic = meNodeToRawTopic(newRoot, true);
   files["content.json"] = strToU8(JSON.stringify(sheets));
 
   // Bump metadata.modifiedTime / modifier so XMind can show "edited externally"

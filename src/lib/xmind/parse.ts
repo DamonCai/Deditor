@@ -37,9 +37,15 @@ export interface XmindTopic {
   markers?: string[];
   /** Per-topic style override (color, shape, line). Properties subset. */
   style?: XmindStyleProperties;
+  /** XMind floating-topic position. Only present on detached topics; the
+   *  renderer ignores it but the save path needs it to round-trip. */
+  position?: { x: number; y: number };
   children: XmindTopic[];
   /** Topics rendered as call-out bubbles in XMind. */
   callout: XmindTopic[];
+  /** Floating topics; mind-elixir has no equivalent so the renderer folds
+   *  them under the root. */
+  detached: XmindTopic[];
 }
 
 export interface XmindStyleProperties {
@@ -102,7 +108,8 @@ interface RawTopic {
   labels?: string[];
   markers?: { markerId?: string }[];
   style?: { properties?: Record<string, string> };
-  children?: { attached?: RawTopic[]; callout?: RawTopic[] };
+  position?: { x?: number; y?: number };
+  children?: { attached?: RawTopic[]; callout?: RawTopic[]; detached?: RawTopic[] };
 }
 
 interface RawSheet {
@@ -184,8 +191,13 @@ function toTopic(r: RawTopic): XmindTopic {
     labels: r.labels,
     markers: (r.markers ?? []).map((m) => m.markerId ?? "").filter(Boolean),
     style: pickStyle(r.style?.properties),
+    position:
+      typeof r.position?.x === "number" && typeof r.position?.y === "number"
+        ? { x: r.position.x, y: r.position.y }
+        : undefined,
     children: (r.children?.attached ?? []).map(toTopic),
     callout: (r.children?.callout ?? []).map(toTopic),
+    detached: (r.children?.detached ?? []).map(toTopic),
   };
 }
 
@@ -240,6 +252,10 @@ function legacyTopic(el: Element): XmindTopic {
   el.querySelectorAll(":scope > children > topics[type=\"attached\"] > topic").forEach((c) => {
     childTopics.push(legacyTopic(c as Element));
   });
+  const detachedTopics: XmindTopic[] = [];
+  el.querySelectorAll(":scope > children > topics[type=\"detached\"] > topic").forEach((c) => {
+    detachedTopics.push(legacyTopic(c as Element));
+  });
   const markers: string[] = [];
   el.querySelectorAll(":scope > marker-refs > marker-ref").forEach((m) => {
     const id = m.getAttribute("marker-id");
@@ -253,6 +269,7 @@ function legacyTopic(el: Element): XmindTopic {
     markers: markers.length > 0 ? markers : undefined,
     children: childTopics,
     callout: [],
+    detached: detachedTopics,
   };
 }
 

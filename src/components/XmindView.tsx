@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { dataUrlToBytes, parseXmind } from "../lib/xmind/parse";
 import type { XmindWorkbook } from "../lib/xmind/parse";
 import { logError } from "../lib/logger";
-import XmindCanvas from "./XmindCanvas";
+import XmindCanvas, { type XmindCanvasHandle } from "./XmindCanvas";
 
 type ViewMode = "read" | "edit";
 const VIEW_MODE_KEY = "deditor:xmind:viewMode";
@@ -32,6 +32,7 @@ export default function XmindView({ dataUrl, filePath, tabId }: Props) {
       return "read";
     }
   });
+  const canvasRef = useRef<XmindCanvasHandle>(null);
   const applyMode = (m: ViewMode) => {
     setMode(m);
     try { localStorage.setItem(VIEW_MODE_KEY, m); } catch { /* ignore */ }
@@ -75,6 +76,7 @@ export default function XmindView({ dataUrl, filePath, tabId }: Props) {
   // Edit is supported on v3 only — legacy XML files would need a separate
   // serializer to round-trip safely; we don't ship one.
   const canEdit = !!tabId && wb.version === "v3";
+  const isEditing = mode === "edit" && canEdit;
 
   return (
     <div className="flex flex-col h-full w-full" style={{ background: "var(--bg)" }}>
@@ -87,13 +89,16 @@ export default function XmindView({ dataUrl, filePath, tabId }: Props) {
         mode={mode}
         onMode={applyMode}
         canEdit={canEdit}
+        canAddDetached={isEditing}
+        onAddDetached={() => canvasRef.current?.addDetachedTopic()}
       />
       <XmindCanvas
         // Re-mount on mode flip so mind-elixir picks up the new editable flag,
         // and on sheet switch so the canvas swaps trees cleanly.
+        ref={canvasRef}
         key={`${sheet.id}-${mode}`}
         sheet={sheet}
-        readonly={mode === "read" || !canEdit}
+        readonly={!isEditing}
         originalDataUrl={dataUrl}
         tabId={tabId}
       />
@@ -111,9 +116,12 @@ interface HeaderProps {
   onMode: (m: ViewMode) => void;
   /** false → Edit button greyed out (legacy XML files / no tabId). */
   canEdit: boolean;
+  /** Show / enable the "+ 自由主题" button (only true while editing). */
+  canAddDetached: boolean;
+  onAddDetached: () => void;
 }
 
-function Header({ fileName, version, sheets, activeIdx, onActive, mode, onMode, canEdit }: HeaderProps) {
+function Header({ fileName, version, sheets, activeIdx, onActive, mode, onMode, canEdit, canAddDetached, onAddDetached }: HeaderProps) {
   return (
     <div
       className="flex items-center gap-2 px-3 py-1 text-xs"
@@ -151,6 +159,20 @@ function Header({ fileName, version, sheets, activeIdx, onActive, mode, onMode, 
         </>
       )}
       <div className="flex-1" />
+      {canAddDetached && (
+        <button
+          onClick={onAddDetached}
+          className="px-2 py-0.5 rounded mr-2"
+          title="添加自由主题（不与主树连线）"
+          style={{
+            background: "transparent",
+            color: "var(--text-soft)",
+            border: "1px solid var(--border)",
+          }}
+        >
+          + 自由主题
+        </button>
+      )}
       <div className="flex items-center gap-1">
         <button
           onClick={() => onMode("read")}

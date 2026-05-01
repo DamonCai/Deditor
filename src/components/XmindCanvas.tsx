@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import MindElixir from "mind-elixir";
 import "mind-elixir/style.css";
 import type { XmindSheet } from "../lib/xmind/parse";
@@ -12,13 +12,19 @@ import {
 } from "../lib/xmind/edit";
 import { logError } from "../lib/logger";
 import { useEditorStore } from "../store/editor";
-import { saveFile } from "../lib/fileio";
+import { saveFile, closeActiveTab } from "../lib/fileio";
 
 interface Props {
   sheet: XmindSheet;
   readonly: boolean;
   originalDataUrl: string;
   tabId?: string;
+}
+
+export interface XmindCanvasHandle {
+  /** Append a new floating topic to root and trigger a save flush. No-op in
+   *  read mode or if mind-elixir hasn't mounted yet. */
+  addDetachedTopic: () => void;
 }
 
 /** Single rendering surface for both Read and Edit. mind-elixir handles both;
@@ -31,10 +37,15 @@ interface Props {
  *   - flush() reads mind-elixir's live direction and writes it back as the
  *     root topic's structureClass, so direction changes survive the save and
  *     show up correctly when you switch back to Read mode. */
-export default function XmindCanvas({ sheet, readonly, originalDataUrl, tabId }: Props) {
+const XmindCanvas = forwardRef<XmindCanvasHandle, Props>(function XmindCanvas(
+  { sheet, readonly, originalDataUrl, tabId }, ref,
+) {
   const hostRef = useRef<HTMLDivElement>(null);
   const meRef = useRef<MindElixirInstance | null>(null);
   const flushTimer = useRef<number | null>(null);
+  // Imperative methods that need access to closures created inside useEffect
+  // (flush, mind-elixir refresh) live behind a ref that the effect populates.
+  const addDetachedRef = useRef<() => void>(() => {});
   // Snapshot the structureClass we started with so we can preserve the *exact*
   // string (e.g. "org.xmind.ui.brace.right") when the user hasn't changed
   // direction. mind-elixir only knows RIGHT/LEFT/SIDE; round-tripping through
@@ -42,10 +53,14 @@ export default function XmindCanvas({ sheet, readonly, originalDataUrl, tabId }:
   const initialStructureClass = useRef<string | undefined>(undefined);
   const initialDirection = useRef<number>(0);
 
+  useImperativeHandle(ref, () => ({
+    addDetachedTopic: () => addDetachedRef.current(),
+  }), []);
+
   useEffect(() => {
     if (!hostRef.current) return;
 
-    const data = { nodeData: topicToMENode(sheet.rootTopic) };
+    const data = { nodeData: topicToMENode(sheet.rootTopic, true) };
     const direction = structureToDirection(sheet.rootTopic.structureClass);
     const meDirection =
       direction === "left" ? MindElixir.LEFT
@@ -66,6 +81,35 @@ export default function XmindCanvas({ sheet, readonly, originalDataUrl, tabId }:
     } as unknown as ConstructorParameters<typeof MindElixir>[0]);
     me.init(data as unknown as Parameters<typeof me.init>[0]);
     meRef.current = me as unknown as MindElixirInstance;
+
+    // After every layout, clear the stroke on the main-branch line that runs
+    // from root to a detached top-level topic. mind-elixir paints one path
+    // per `me-main > me-wrapper` in DOM order into `inst.lines`, so wrapper
+    // index === path index. We can't use branchColor for this — that color
+    // cascades to descendants and would also blank out the floating subtree's
+    // own internal connectors.
+    const bus = (me as unknown as {
+      bus?: { addListener: (e: string, fn: () => void) => void };
+    }).bus;
+    const hideDetachedRootLines = () => {
+      const inst = meRef.current as unknown as {
+        map?: HTMLElement;
+        lines?: SVGElement;
+      } | null;
+      if (!inst?.map || !inst?.lines) return;
+      const wrappers = inst.map.querySelectorAll("me-main > me-wrapper");
+      const paths = inst.lines.children;
+      for (let i = 0; i < wrappers.length; i++) {
+        const tpc = wrappers[i].querySelector("me-tpc") as
+          | (Element & { nodeObj?: MENode })
+          | null;
+        if (tpc?.nodeObj?._xmind?.detachedRoot && paths[i]) {
+          (paths[i] as SVGElement).setAttribute("stroke", "transparent");
+        }
+      }
+    };
+    if (bus?.addListener) bus.addListener("linkDiv", hideDetachedRootLines);
+    hideDetachedRootLines();
 
     if (readonly || !tabId) {
       return () => { if (hostRef.current) hostRef.current.innerHTML = ""; meRef.current = null; };
@@ -118,22 +162,66 @@ export default function XmindCanvas({ sheet, readonly, originalDataUrl, tabId }:
     };
 
     // mind-elixir emits "operation" on every structural / textual edit.
-    const bus = (me as unknown as {
-      bus?: { addListener: (e: string, fn: () => void) => void };
-    }).bus;
     if (bus?.addListener) bus.addListener("operation", scheduleFlush);
 
-    // Capture-phase Cmd/Ctrl+S so mind-elixir's keypress handler can't
-    // swallow it. We sync-flush latest state into tab.content, then run
-    // saveFile() — which reads from the (now-fresh) store and writes to disk.
-    const onKeyCapture = (e: KeyboardEvent) => {
-      const isSave =
-        (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && (e.key === "s" || e.key === "S");
-      if (!isSave) return;
-      e.preventDefault();
-      e.stopPropagation();
+    addDetachedRef.current = () => {
+      const inst = meRef.current as unknown as {
+        map: HTMLElement;
+        direction: number;
+        addChild: (el: Element, node: MENode) => void;
+        getData: () => { nodeData: MENode };
+      } | null;
+      if (!inst) return;
+      const rootTpc = inst.map.querySelector("me-root me-tpc");
+      if (!rootTpc) return;
+      // Stagger y so multiple new floating topics don't pile up when XMind
+      // re-opens. Initial x sign matches mind-elixir's global direction;
+      // SIDE mode auto-balances per-node and is corrected after addChild.
+      const live = inst.getData();
+      const existingDetached = (live.nodeData.children ?? []).filter(
+        (c) => c._xmind?.detachedRoot,
+      ).length;
+      const y = 200 + existingDetached * 80;
+      const initialX = inst.direction === MindElixir.LEFT ? -150 : 150;
+      const newNode: MENode = {
+        id: crypto.randomUUID().replace(/-/g, ""),
+        topic: "自由主题",
+        _xmind: {
+          detachedRoot: true,
+          position: { x: initialX, y },
+        },
+      };
+      // addChild fires linkDiv (→ hideDetachedRootLines) + operation
+      // (→ scheduleFlush) and preserves mind-elixir's undo stack. In SIDE
+      // mode it auto-balances and writes the chosen side onto newNode.direction.
+      inst.addChild(rootTpc, newNode);
+      if (newNode._xmind?.position) {
+        const wantNeg =
+          newNode.direction === 0 ||
+          (newNode.direction === undefined && inst.direction === MindElixir.LEFT);
+        const x = wantNeg ? -150 : 150;
+        newNode._xmind.position = { x, y };
+      }
       forceFlush();
-      saveFile().catch((err) => logError("xmind save failed", err));
+    };
+
+    // mind-elixir's keypress handler preventDefaults every key except Cmd+CVX,
+    // which suppresses the OS menu accelerators for Cmd+S (save) and Cmd+W
+    // (close tab). Capture-phase intercept restores both.
+    const onKeyCapture = (e: KeyboardEvent) => {
+      const meta = e.metaKey || e.ctrlKey;
+      if (!meta || e.shiftKey || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k === "s") {
+        e.preventDefault();
+        e.stopPropagation();
+        forceFlush();
+        saveFile().catch((err) => logError("xmind save failed", err));
+      } else if (k === "w") {
+        e.preventDefault();
+        e.stopPropagation();
+        closeActiveTab().catch((err) => logError("xmind close tab failed", err));
+      }
     };
     window.addEventListener("keydown", onKeyCapture, true);
 
@@ -157,7 +245,9 @@ export default function XmindCanvas({ sheet, readonly, originalDataUrl, tabId }:
       <div ref={hostRef} className="absolute inset-0" style={{ overflow: "hidden" }} />
     </div>
   );
-}
+});
+
+export default XmindCanvas;
 
 /** Reverse mapping: mind-elixir's direction enum → an XMind structureClass.
  *  Used only when the user actually toggled direction in the toolbar; if they
