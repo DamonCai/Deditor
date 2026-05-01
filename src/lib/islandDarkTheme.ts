@@ -56,7 +56,7 @@ const editorTheme = EditorView.theme(
       backgroundColor: PALETTE.selection,
     },
     ".cm-activeLine": {
-      backgroundColor: PALETTE.bgActiveLine,
+      backgroundColor: "rgba(255, 255, 255, 0.06)",
     },
     ".cm-gutters": {
       backgroundColor: PALETTE.bgGutter,
