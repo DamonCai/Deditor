@@ -20,7 +20,7 @@ import { promptInput } from "./PromptDialog";
 import { confirmDelete } from "./ConfirmDialog";
 import { logError } from "../lib/logger";
 import { useT, tStatic } from "../lib/i18n";
-import { FiFolder } from "react-icons/fi";
+import { FiFolder, FiFolderPlus } from "react-icons/fi";
 
 const FOLDER_COLOR = "#dcb67a"; // soft amber, matches VSCode default folder icon
 
@@ -95,10 +95,10 @@ export default function FileTree() {
         <button
           onClick={openFolder}
           title={t("filetree.selectFolder")}
-          className="px-2 py-1 text-xs rounded hover:bg-[color:var(--bg-mute)]"
+          className="px-2 py-1 rounded hover:bg-[color:var(--bg-mute)] inline-flex items-center justify-center"
           style={{ color: "var(--text-soft)" }}
         >
-          📂
+          <FiFolderPlus size={14} />
         </button>
         <button
           onClick={toggleSidebar}
@@ -600,7 +600,14 @@ function Row({
   // The "marked for compare" highlight uses a dedicated background so it
   // remains visible even when another tab is the active file. Mark > active
   // visually so the user keeps track of what they staged for comparison.
-  const baseBg = marked ? "var(--compare-mark-bg)" : active ? "var(--bg-mute)" : "";
+  // Selected uses --selection-bg (JetBrains "row highlight" color); hover
+  // uses the gentler --hover-bg overlay so they're visually distinct — you
+  // can tell at a glance which row is selected vs. just under the cursor.
+  const baseBg = marked
+    ? "var(--compare-mark-bg)"
+    : active
+    ? "var(--selection-bg)"
+    : "";
   return (
     <div
       onClick={onClick}
@@ -610,13 +617,14 @@ function Row({
       style={{
         paddingLeft: depth * 14 + 8,
         paddingRight: 8,
-        height: 24,
+        height: 22,
+        fontSize: 13,
         background: baseBg || undefined,
-        color: active ? "var(--accent)" : "var(--text)",
+        color: "var(--text)",
         boxShadow: marked ? "inset 2px 0 0 var(--accent)" : undefined,
       }}
       onMouseEnter={(e) => {
-        if (!marked && !active) e.currentTarget.style.background = "var(--bg-mute)";
+        if (!marked && !active) e.currentTarget.style.background = "var(--hover-bg)";
       }}
       onMouseLeave={(e) => {
         if (!marked && !active) e.currentTarget.style.background = "";

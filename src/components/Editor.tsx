@@ -18,6 +18,8 @@ import { copyLineDown, defaultKeymap, history, historyField, historyKeymap, inde
 import { searchKeymap, highlightSelectionMatches, selectSelectionMatches, openSearchPanel } from "@codemirror/search";
 import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 import { markdownTableKeymap } from "../lib/markdownTable";
+import { colorPreview } from "../lib/colorPreview";
+import { inspectionMarkers } from "../lib/inspectionMarkers";
 import {
   syntaxHighlighting,
   defaultHighlightStyle,
@@ -28,6 +30,7 @@ import {
   LanguageSupport,
 } from "@codemirror/language";
 import { islandDark } from "../lib/islandDarkTheme";
+import { islandLight } from "../lib/islandLightTheme";
 import { detectLang, isMarkdown, isImageFile, isPdfFile, isAudioFile, isVideoFile, isHexFile, isXmindFile } from "../lib/lang";
 import { useEditorStore, type DiffSpec } from "../store/editor";
 import DiffView from "./DiffView";
@@ -69,6 +72,22 @@ const addCursorVertical = (dir: -1 | 1): Command => (view) => {
   });
   return true;
 };
+
+/** True if the file's extension is one where color literals (#rgb, rgb(...))
+ *  naturally appear, so the color-swatch ViewPlugin should be enabled. */
+const COLOR_PREVIEW_EXT = new Set([
+  ".css", ".scss", ".sass", ".less", ".styl",
+  ".html", ".htm", ".vue", ".svelte",
+  ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs",
+  ".md", ".mdx", ".markdown",
+  ".json", ".jsonc", ".yaml", ".yml",
+]);
+function colorPreviewSupported(filePath: string | null): boolean {
+  if (!filePath) return false;
+  const dot = filePath.lastIndexOf(".");
+  if (dot < 0) return false;
+  return COLOR_PREVIEW_EXT.has(filePath.slice(dot).toLowerCase());
+}
 
 interface Props {
   value: string;
@@ -291,7 +310,12 @@ export default function Editor({
         completionCompartment.current.of(
           isMarkdown(filePath) ? codeBlockCompletion() : [],
         ),
+        // Color swatch widgets — only enabled for languages where color
+        // literals appear naturally. Enabling globally would noisily decorate
+        // identifiers like `rgb(...)` in unrelated code that happens to match.
+        colorPreviewSupported(filePath) ? colorPreview() : [],
         bookmarkExtension(),
+        inspectionMarkers(),
         EditorView.updateListener.of((u) => {
           if (u.docChanged) onChangeRef.current(u.state.doc.toString());
           if (u.selectionSet || u.docChanged) {
@@ -304,7 +328,7 @@ export default function Editor({
             useEditorStore.getState().setActiveSelectionLength(selLen);
           }
         }),
-        themeCompartment.current.of(theme === "dark" ? islandDark : []),
+        themeCompartment.current.of(theme === "dark" ? islandDark : islandLight),
         langCompartment.current.of([]),
         EditorView.domEventHandlers({
           paste: (e, view) => {
@@ -472,7 +496,7 @@ export default function Editor({
   useEffect(() => {
     viewRef.current?.dispatch({
       effects: themeCompartment.current.reconfigure(
-        theme === "dark" ? islandDark : [],
+        theme === "dark" ? islandDark : islandLight,
       ),
     });
   }, [theme]);
@@ -591,11 +615,14 @@ export default function Editor({
 
   return (
     <>
-      <div
-        ref={hostRef}
-        className="h-full w-full overflow-hidden"
-        style={{ ["--editor-font-size" as string]: `${fontSize}px` }}
-      />
+      <div className="relative h-full w-full">
+        <div
+          ref={hostRef}
+          className="h-full w-full overflow-hidden"
+          style={{ ["--editor-font-size" as string]: `${fontSize}px` }}
+        />
+        <InspectionsBadge value={value} filePath={filePath} />
+      </div>
       {ctxMenu && (
         <ContextMenu
           x={ctxMenu.x}
@@ -605,6 +632,61 @@ export default function Editor({
         />
       )}
     </>
+  );
+}
+
+/** IntelliJ-style inspections widget in the editor's top-right corner. We
+ *  don't ship a real linter so we surface document stats instead — line/char
+ *  counts always, plus an estimated read time for Markdown. Pure decorative
+ *  pill; click target reserved for future "jump to next problem" wiring. */
+function InspectionsBadge({
+  value,
+  filePath,
+}: {
+  value: string;
+  filePath: string | null;
+}) {
+  // data: URLs are binary content (image / pdf / hex), the badge is meaningless.
+  if (value.startsWith("data:")) return null;
+  const lines = value === "" ? 0 : value.split("\n").length;
+  const chars = value.length;
+  // Markdown read-time: 300 cn-chars/min OR 200 en-words/min, whichever larger.
+  let readMin = 0;
+  if (isMarkdown(filePath)) {
+    const cjk = (value.match(/[一-鿿]/g) ?? []).length;
+    const words = value.split(/\s+/).filter(Boolean).length;
+    readMin = Math.max(1, Math.round(Math.max(cjk / 300, words / 200)));
+  }
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: 6,
+        right: 14,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "2px 10px",
+        fontSize: 11,
+        color: "var(--text-soft)",
+        background: "color-mix(in srgb, var(--bg-soft) 85%, transparent)",
+        border: "1px solid var(--border)",
+        borderRadius: 999,
+        backdropFilter: "blur(6px)",
+        pointerEvents: "none",
+        userSelect: "none",
+      }}
+    >
+      <span className="tabular-nums">{lines.toLocaleString()} 行</span>
+      <span style={{ opacity: 0.5 }}>·</span>
+      <span className="tabular-nums">{chars.toLocaleString()} 字</span>
+      {readMin > 0 && (
+        <>
+          <span style={{ opacity: 0.5 }}>·</span>
+          <span className="tabular-nums">~{readMin} min</span>
+        </>
+      )}
+    </div>
   );
 }
 

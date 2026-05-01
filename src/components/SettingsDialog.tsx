@@ -84,7 +84,7 @@ export default function SettingsDialog({ open, onClose }: Props) {
           color: "var(--text)",
           border: "1px solid var(--border)",
           borderRadius: 8,
-          boxShadow: "0 12px 40px rgba(0,0,0,0.4)",
+          boxShadow: "var(--shadow-modal)",
           overflow: "hidden",
         }}
       >

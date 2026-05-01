@@ -54,7 +54,7 @@ export default function ContextMenu({ x, y, items, onClose }: Props) {
         background: "var(--bg)",
         border: "1px solid var(--border)",
         borderRadius: 6,
-        boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+        boxShadow: "var(--shadow-popup)",
         padding: "4px 0",
         minWidth: 160,
         fontSize: 13,

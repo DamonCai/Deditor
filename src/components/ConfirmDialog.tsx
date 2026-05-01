@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { tStatic } from "../lib/i18n";
+import { Button } from "./ui/Button";
 
 export type ConfirmChoice = "save" | "discard" | "cancel";
 
@@ -124,7 +125,7 @@ export default function ConfirmDialog() {
           color: "var(--text)",
           border: "1px solid var(--border)",
           borderRadius: 8,
-          boxShadow: "0 10px 40px rgba(0,0,0,0.25)",
+          boxShadow: "var(--shadow-modal)",
           padding: 20,
         }}
       >
@@ -134,53 +135,17 @@ export default function ConfirmDialog() {
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           {buttons.map((b) => (
-            <Btn key={b.value} primary={b.primary} danger={b.danger} onClick={() => close(b.value)}>
+            <Button
+              key={b.value}
+              variant={b.danger ? "danger" : b.primary ? "primary" : "secondary"}
+              onClick={() => close(b.value)}
+              style={{ padding: "6px 16px", fontSize: 13 }}
+            >
               {b.label}
-            </Btn>
+            </Button>
           ))}
         </div>
       </div>
     </div>
-  );
-}
-
-function Btn({
-  children,
-  onClick,
-  primary,
-  danger,
-}: {
-  children: React.ReactNode;
-  onClick: () => void;
-  primary?: boolean;
-  danger?: boolean;
-}) {
-  let bg = "var(--bg-soft)";
-  let color = "var(--text)";
-  let border = "1px solid var(--border)";
-  if (danger) {
-    bg = "#dc2626";
-    color = "#fff";
-    border = "1px solid #dc2626";
-  } else if (primary) {
-    bg = "var(--accent)";
-    color = "#fff";
-    border = "1px solid var(--accent)";
-  }
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        padding: "6px 16px",
-        fontSize: 13,
-        borderRadius: 5,
-        border,
-        background: bg,
-        color,
-        cursor: "pointer",
-      }}
-    >
-      {children}
-    </button>
   );
 }

@@ -3,6 +3,7 @@ import { dataUrlToBytes, parseXmind } from "../lib/xmind/parse";
 import type { XmindWorkbook } from "../lib/xmind/parse";
 import { logError } from "../lib/logger";
 import XmindCanvas, { type XmindCanvasHandle } from "./XmindCanvas";
+import { Button } from "./ui/Button";
 
 type ViewMode = "read" | "edit";
 const VIEW_MODE_KEY = "deditor:xmind:viewMode";
@@ -142,65 +143,47 @@ function Header({ fileName, version, sheets, activeIdx, onActive, mode, onMode, 
           <span>·</span>
           <div className="flex items-center gap-1">
             {sheets.map((s, i) => (
-              <button
+              <Button
                 key={s.id}
+                size="sm"
+                pressed={i === activeIdx}
                 onClick={() => onActive(i)}
-                className="px-2 py-0.5 rounded"
-                style={{
-                  background: i === activeIdx ? "var(--bg-mute)" : "transparent",
-                  color: i === activeIdx ? "var(--text)" : "var(--text-soft)",
-                  border: "1px solid var(--border)",
-                }}
               >
                 {s.title || `Sheet ${i + 1}`}
-              </button>
+              </Button>
             ))}
           </div>
         </>
       )}
       <div className="flex-1" />
       {canAddDetached && (
-        <button
+        <Button
+          size="sm"
           onClick={onAddDetached}
-          className="px-2 py-0.5 rounded mr-2"
           title="添加自由主题（不与主树连线）"
-          style={{
-            background: "transparent",
-            color: "var(--text-soft)",
-            border: "1px solid var(--border)",
-          }}
+          style={{ marginRight: 8 }}
         >
           + 自由主题
-        </button>
+        </Button>
       )}
       <div className="flex items-center gap-1">
-        <button
+        <Button
+          size="sm"
+          pressed={mode === "read"}
           onClick={() => onMode("read")}
-          className="px-2 py-0.5 rounded"
           title="只读视图"
-          style={{
-            background: mode === "read" ? "var(--bg-mute)" : "transparent",
-            color: mode === "read" ? "var(--text)" : "var(--text-soft)",
-            border: "1px solid var(--border)",
-          }}
         >
           Read
-        </button>
-        <button
-          onClick={() => canEdit && onMode("edit")}
+        </Button>
+        <Button
+          size="sm"
+          pressed={mode === "edit"}
           disabled={!canEdit}
-          className="px-2 py-0.5 rounded"
+          onClick={() => canEdit && onMode("edit")}
           title={canEdit ? "编辑（Cmd+S 写回 .xmind）" : "此文件不支持编辑（旧版 XML 格式）"}
-          style={{
-            background: mode === "edit" ? "var(--bg-mute)" : "transparent",
-            color: !canEdit ? "var(--text-soft)" : mode === "edit" ? "var(--text)" : "var(--text-soft)",
-            border: "1px solid var(--border)",
-            opacity: canEdit ? 1 : 0.5,
-            cursor: canEdit ? "pointer" : "not-allowed",
-          }}
         >
           Edit
-        </button>
+        </Button>
       </div>
     </div>
   );

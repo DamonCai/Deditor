@@ -156,7 +156,7 @@ export default function TabBar() {
     <div
       className="flex items-stretch select-none"
       style={{
-        height: 32,
+        height: 28,
         background: "var(--bg-soft)",
         borderBottom: "1px solid var(--border)",
         position: "relative",
@@ -428,7 +428,7 @@ function OverflowDropdown({
         background: "var(--bg)",
         border: "1px solid var(--border)",
         borderRadius: 6,
-        boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+        boxShadow: "var(--shadow-popup)",
         zIndex: 2000,
         display: "flex",
         flexDirection: "column",

@@ -85,7 +85,7 @@ export default function PromptDialog() {
           color: "var(--text)",
           border: "1px solid var(--border)",
           borderRadius: 8,
-          boxShadow: "0 10px 40px rgba(0,0,0,0.25)",
+          boxShadow: "var(--shadow-modal)",
           padding: 20,
         }}
       >

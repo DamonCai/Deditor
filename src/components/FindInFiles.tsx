@@ -6,6 +6,7 @@ import { getActiveView } from "../lib/editorBridge";
 import { useT, tStatic } from "../lib/i18n";
 import { logError, logInfo } from "../lib/logger";
 import { chooseAction } from "./ConfirmDialog";
+import { Button } from "./ui/Button";
 import LangIcon from "./LangIcon";
 
 interface Props {
@@ -187,7 +188,7 @@ export default function FindInFiles({ open, onClose }: Props) {
           background: "var(--bg)",
           border: "1px solid var(--border)",
           borderRadius: 8,
-          boxShadow: "0 12px 40px rgba(0,0,0,0.4)",
+          boxShadow: "var(--shadow-modal)",
           overflow: "hidden",
         }}
       >
@@ -202,23 +203,20 @@ export default function FindInFiles({ open, onClose }: Props) {
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
+              pressed={showReplace}
               onClick={() => setShowReplace((v) => !v)}
               title={t("find.toggleReplace")}
               style={{
-                padding: "5px 8px",
-                fontSize: 11,
-                fontFamily: "var(--font-mono, ui-monospace, monospace)",
-                border: "1px solid var(--border)",
-                borderRadius: 4,
-                background: showReplace ? "var(--bg-mute)" : "var(--bg)",
-                color: "var(--text-soft)",
-                cursor: "pointer",
                 width: 22,
+                padding: "3px 0",
+                fontFamily: "var(--font-mono, ui-monospace, monospace)",
               }}
             >
               {showReplace ? "▾" : "▸"}
-            </button>
+            </Button>
             <input
               ref={inputRef}
               value={query}
@@ -241,22 +239,15 @@ export default function FindInFiles({ open, onClose }: Props) {
                 outline: "none",
               }}
             />
-            <button
+            <Button
+              variant={caseSensitive ? "primary" : "secondary"}
+              size="sm"
               onClick={() => setCaseSensitive((v) => !v)}
               title={t("find.caseSensitive")}
-              style={{
-                padding: "5px 10px",
-                fontSize: 11,
-                fontFamily: "var(--font-mono, ui-monospace, monospace)",
-                border: "1px solid var(--border)",
-                borderRadius: 4,
-                background: caseSensitive ? "var(--accent)" : "var(--bg)",
-                color: caseSensitive ? "#fff" : "var(--text-soft)",
-                cursor: "pointer",
-              }}
+              style={{ fontFamily: "var(--font-mono, ui-monospace, monospace)" }}
             >
               Aa
-            </button>
+            </Button>
           </div>
           {showReplace && (
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -278,30 +269,15 @@ export default function FindInFiles({ open, onClose }: Props) {
                   outline: "none",
                 }}
               />
-              <button
+              <Button
+                variant="primary"
+                size="sm"
                 onClick={() => void onReplaceAll()}
                 disabled={!results || results.hits.length === 0 || replacing}
                 title={t("find.replaceAll")}
-                style={{
-                  padding: "5px 10px",
-                  fontSize: 12,
-                  border: "1px solid var(--border)",
-                  borderRadius: 4,
-                  background: "var(--bg)",
-                  color:
-                    !results || results.hits.length === 0 || replacing
-                      ? "var(--text-soft)"
-                      : "var(--text)",
-                  cursor:
-                    !results || results.hits.length === 0 || replacing
-                      ? "not-allowed"
-                      : "pointer",
-                  opacity:
-                    !results || results.hits.length === 0 || replacing ? 0.5 : 1,
-                }}
               >
                 {replacing ? t("find.replacing") : t("find.replaceAll")}
-              </button>
+              </Button>
             </div>
           )}
         </div>

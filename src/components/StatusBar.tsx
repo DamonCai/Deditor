@@ -47,10 +47,11 @@ export default function StatusBar() {
 
   return (
     <div
-      className="flex items-center justify-between text-xs select-none"
+      className="flex items-center justify-between select-none"
       style={{
-        height: 24,
-        padding: "0 12px",
+        height: 22,
+        padding: "0 10px",
+        fontSize: 11,
         background: "var(--bg-soft)",
         borderTop: "1px solid var(--border)",
         color: "var(--text-soft)",
@@ -58,7 +59,11 @@ export default function StatusBar() {
     >
       <div className="flex items-center gap-2 min-w-0">
         {filePath && <LangIcon filePath={filePath} size={14} />}
-        <span className="truncate">{filePath ?? t("statusbar.untitled")}</span>
+        {filePath ? (
+          <Breadcrumbs path={filePath} />
+        ) : (
+          <span className="truncate">{t("statusbar.untitled")}</span>
+        )}
         {dirty && <span style={{ color: "var(--accent)" }}>●</span>}
       </div>
       <div className="flex items-center gap-4 flex-shrink-0">
@@ -78,5 +83,63 @@ export default function StatusBar() {
         </span>
       </div>
     </div>
+  );
+}
+
+/** IntelliJ-style breadcrumb path. Splits on / or \, shows last 3 segments
+ *  with `…` to indicate truncation if there are more. The final segment (file
+ *  name) is rendered in regular text color, parents in --text-soft. Hovering
+ *  a segment lifts it to --text. Pure display — no click-to-navigate yet. */
+function Breadcrumbs({ path }: { path: string }) {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  const MAX = 3;
+  const truncated = parts.length > MAX;
+  const tail = truncated ? parts.slice(parts.length - MAX) : parts;
+  return (
+    <span
+      className="truncate"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 2,
+        minWidth: 0,
+      }}
+      title={path}
+    >
+      {truncated && <Crumb dim>…</Crumb>}
+      {truncated && <Sep />}
+      {tail.map((seg, i) => {
+        const isLast = i === tail.length - 1;
+        return (
+          <span key={i} style={{ display: "inline-flex", alignItems: "center" }}>
+            <Crumb dim={!isLast}>{seg}</Crumb>
+            {!isLast && <Sep />}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+function Crumb({ children, dim }: { children: React.ReactNode; dim?: boolean }) {
+  return (
+    <span
+      style={{
+        color: dim ? "var(--text-soft)" : "var(--text)",
+        cursor: "default",
+        padding: "0 2px",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
+function Sep() {
+  return (
+    <span style={{ color: "var(--text-soft)", padding: "0 2px", opacity: 0.6 }}>
+      ›
+    </span>
   );
 }

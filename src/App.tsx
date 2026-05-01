@@ -40,7 +40,6 @@ import { useFileWatch } from "./lib/fileWatch";
 type DragKind = "sidebar" | "preview" | null;
 
 export default function App() {
-  const t = useT();
   const { theme, showPreview, previewMaximized, showSidebar, editorFontSize, setContent, language } =
     useEditorStore();
   const active = useActiveTab();
@@ -352,7 +351,7 @@ export default function App() {
     <div className="flex flex-col h-full">
       {!zenMode && <TitleBar />}
       <div className="flex flex-1 min-h-0">
-        {!zenMode && showSidebar ? (
+        {!zenMode && showSidebar && (
           <>
             <div
               style={{ width: sidebarPx, flexShrink: 0 }}
@@ -368,36 +367,6 @@ export default function App() {
               }}
             />
           </>
-        ) : (
-          <button
-            onClick={() => useEditorStore.getState().setShowSidebar(true)}
-            title={t("filetree.expand")}
-            style={{
-              width: 18,
-              flexShrink: 0,
-              background: "var(--bg-soft)",
-              border: "none",
-              borderRight: "1px solid var(--border)",
-              cursor: "pointer",
-              color: "var(--text-soft)",
-              fontSize: 14,
-              lineHeight: 1,
-              padding: 0,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "var(--bg-mute)";
-              e.currentTarget.style.color = "var(--text)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "var(--bg-soft)";
-              e.currentTarget.style.color = "var(--text-soft)";
-            }}
-          >
-            ›
-          </button>
         )}
         <div className="flex flex-col flex-1 min-w-0">
           {!zenMode && <TabBar />}
