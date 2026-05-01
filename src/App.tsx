@@ -36,6 +36,7 @@ import {
 } from "./lib/fileio";
 import { loadPersisted, schedulePersist } from "./lib/persistence";
 import { useFileWatch } from "./lib/fileWatch";
+import { Button } from "./components/ui/Button";
 
 type DragKind = "sidebar" | "preview" | null;
 
@@ -512,34 +513,12 @@ function ExternalChangeBanner({ tab }: { tab: { id: string; externalChange?: str
       }}
     >
       <span style={{ flex: 1, color: "var(--text)" }}>{t("watch.externalChanged")}</span>
-      <button
-        onClick={reload}
-        style={{
-          padding: "3px 10px",
-          fontSize: 12,
-          border: "1px solid var(--accent)",
-          background: "var(--accent)",
-          color: "#fff",
-          borderRadius: 3,
-          cursor: "pointer",
-        }}
-      >
+      <Button variant="primary" size="sm" onClick={reload}>
         {t("watch.reload")}
-      </button>
-      <button
-        onClick={dismiss}
-        style={{
-          padding: "3px 10px",
-          fontSize: 12,
-          border: "1px solid var(--border)",
-          background: "var(--bg)",
-          color: "var(--text)",
-          borderRadius: 3,
-          cursor: "pointer",
-        }}
-      >
+      </Button>
+      <Button variant="secondary" size="sm" onClick={dismiss}>
         {t("watch.keepMine")}
-      </button>
+      </Button>
     </div>
   );
 }

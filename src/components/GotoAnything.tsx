@@ -218,13 +218,13 @@ export default function GotoAnything({ open, onClose }: Props) {
                   gap: 10,
                   padding: "6px 12px",
                   cursor: "pointer",
-                  background: isSel ? "var(--bg-mute)" : undefined,
-                  color: isSel ? "var(--accent)" : "var(--text)",
+                  background: isSel ? "var(--selection-bg)" : undefined,
+                  color: "var(--text)",
                 }}
               >
                 <LangIcon filePath={r.file.path} size={16} />
                 <div style={{ flex: 1, minWidth: 0, fontSize: 13 }}>
-                  <div style={{ fontWeight: 500, color: isSel ? "var(--accent)" : "var(--text)" }}>
+                  <div style={{ fontWeight: 500, color: "var(--text)" }}>
                     {highlightString(r.file.name, lastNameMatchedIdx(r))}
                   </div>
                   <div

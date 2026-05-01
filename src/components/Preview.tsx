@@ -8,6 +8,7 @@ import { hydrateLocalImages } from "../lib/localImgHydrate";
 import { isMarkdown } from "../lib/lang";
 import { useEditorStore } from "../store/editor";
 import { useT } from "../lib/i18n";
+import { Button } from "./ui/Button";
 import { logError } from "../lib/logger";
 import { openFileByPath } from "../lib/fileio";
 import {
@@ -194,29 +195,18 @@ export default function Preview({ source, filePath, theme, scrollLine, onScroll 
             flexShrink: 0,
           }}
         >
-          <button
+          <Button
+            variant="ghost"
+            size="icon"
+            pressed={previewMaximized}
             onClick={togglePreviewMaximized}
             title={previewMaximized ? t("preview.restore") : t("preview.maximize")}
             style={{
-              height: 24,
-              padding: "0 5px",
-              display: "inline-flex",
-              alignItems: "center",
-              borderRadius: 4,
-              background: "transparent",
-              border: "none",
-              cursor: "pointer",
               color: previewMaximized ? "var(--accent)" : "var(--text)",
             }}
-            onMouseEnter={(e) =>
-              (e.currentTarget.style.background = "var(--bg-mute)")
-            }
-            onMouseLeave={(e) =>
-              (e.currentTarget.style.background = "transparent")
-            }
           >
             {previewMaximized ? <FiMinimize2 size={13} /> : <FiMaximize2 size={13} />}
-          </button>
+          </Button>
         </div>
       )}
       <div

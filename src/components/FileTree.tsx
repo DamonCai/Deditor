@@ -20,7 +20,8 @@ import { promptInput } from "./PromptDialog";
 import { confirmDelete } from "./ConfirmDialog";
 import { logError } from "../lib/logger";
 import { useT, tStatic } from "../lib/i18n";
-import { FiFolder, FiFolderPlus } from "react-icons/fi";
+import { FiFolder, FiFolderPlus, FiChevronsLeft } from "react-icons/fi";
+import { Button } from "./ui/Button";
 
 const FOLDER_COLOR = "#dcb67a"; // soft amber, matches VSCode default folder icon
 
@@ -92,22 +93,22 @@ export default function FileTree() {
             color: "var(--text)",
           }}
         />
-        <button
+        <Button
+          variant="ghost"
+          size="icon"
           onClick={openFolder}
           title={t("filetree.selectFolder")}
-          className="px-2 py-1 rounded hover:bg-[color:var(--bg-mute)] inline-flex items-center justify-center"
-          style={{ color: "var(--text-soft)" }}
         >
-          <FiFolderPlus size={14} />
-        </button>
-        <button
+          <FiFolderPlus size={16} />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
           onClick={toggleSidebar}
           title={t("filetree.collapse")}
-          className="px-2 py-1 text-xs rounded hover:bg-[color:var(--bg-mute)]"
-          style={{ color: "var(--text-soft)", lineHeight: 1 }}
         >
-          «
-        </button>
+          <FiChevronsLeft size={16} />
+        </Button>
       </div>
       {error && (
         <div

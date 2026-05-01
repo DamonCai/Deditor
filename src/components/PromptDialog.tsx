@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { create } from "zustand";
 import { tStatic } from "../lib/i18n";
+import { Button } from "./ui/Button";
 
 interface State {
   open: boolean;
@@ -120,45 +121,20 @@ export default function PromptDialog() {
           }}
         />
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <Btn onClick={() => close(null)}>{tStatic("common.cancel")}</Btn>
-          <Btn
-            primary
+          <Button variant="secondary" onClick={() => close(null)}>
+            {tStatic("common.cancel")}
+          </Button>
+          <Button
+            variant="primary"
             onClick={() => {
               const v = inputRef.current?.value.trim() ?? "";
               if (v) close(v);
             }}
           >
             {tStatic("common.confirm")}
-          </Btn>
+          </Button>
         </div>
       </div>
     </div>
-  );
-}
-
-function Btn({
-  children,
-  onClick,
-  primary,
-}: {
-  children: React.ReactNode;
-  onClick: () => void;
-  primary?: boolean;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        padding: "6px 16px",
-        fontSize: 13,
-        borderRadius: 5,
-        border: primary ? "1px solid var(--accent)" : "1px solid var(--border)",
-        background: primary ? "var(--accent)" : "var(--bg-soft)",
-        color: primary ? "#fff" : "var(--text)",
-        cursor: "pointer",
-      }}
-    >
-      {children}
-    </button>
   );
 }

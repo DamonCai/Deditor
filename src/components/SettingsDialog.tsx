@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { useEditorStore } from "../store/editor";
 import { SHORTCUTS, type ShortcutMeta } from "../lib/shortcuts";
 import { useT } from "../lib/i18n";
+import { Button } from "./ui/Button";
 
 interface Props {
   open: boolean;
@@ -101,22 +102,16 @@ export default function SettingsDialog({ open, onClose }: Props) {
           }}
         >
           <span>{t("settings.title")}</span>
-          <button
+          <Button
             ref={closeBtnRef}
+            variant="ghost"
+            size="icon"
             onClick={onClose}
             aria-label="Close"
-            style={{
-              border: "none",
-              background: "transparent",
-              fontSize: 18,
-              lineHeight: 1,
-              color: "var(--text-soft)",
-              cursor: "pointer",
-              padding: "0 4px",
-            }}
+            style={{ fontSize: 16 }}
           >
             ×
-          </button>
+          </Button>
         </div>
 
         <div style={{ padding: "12px 16px", flex: 1, overflowY: "auto" }}>
@@ -303,34 +298,12 @@ export default function SettingsDialog({ open, onClose }: Props) {
             background: "var(--bg-soft)",
           }}
         >
-          <button
-            onClick={resetShortcuts}
-            style={{
-              border: "1px solid var(--border)",
-              background: "var(--bg)",
-              color: "var(--text)",
-              padding: "5px 12px",
-              borderRadius: 4,
-              fontSize: 12,
-              cursor: "pointer",
-            }}
-          >
+          <Button variant="secondary" onClick={resetShortcuts}>
             {t("settings.reset")}
-          </button>
-          <button
-            onClick={onClose}
-            style={{
-              border: "1px solid var(--accent)",
-              background: "var(--accent)",
-              color: "#fff",
-              padding: "5px 16px",
-              borderRadius: 4,
-              fontSize: 12,
-              cursor: "pointer",
-            }}
-          >
+          </Button>
+          <Button variant="primary" onClick={onClose}>
             {t("settings.done")}
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -394,22 +367,38 @@ function RadioRow<T extends string>({
       }}
     >
       <span style={{ fontSize: 13, color: "var(--text)", flex: 1 }}>{label}</span>
-      <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-        {options.map((opt) => {
+      <div
+        role="radiogroup"
+        style={{
+          display: "inline-flex",
+          flexShrink: 0,
+          border: "1px solid var(--border)",
+          borderRadius: 4,
+          overflow: "hidden",
+          background: "var(--bg)",
+        }}
+      >
+        {options.map((opt, i) => {
           const active = opt.value === value;
           return (
             <button
               key={opt.value}
               type="button"
+              role="radio"
+              aria-checked={active}
               onClick={() => onChange(opt.value)}
+              className="deditor-btn"
               style={{
-                padding: "3px 10px",
+                padding: "3px 12px",
                 fontSize: 12,
-                borderRadius: 3,
-                border: "1px solid var(--border)",
-                background: active ? "var(--accent)" : "var(--bg)",
+                border: "none",
+                borderLeft: i === 0 ? "none" : "1px solid var(--border)",
+                background: active ? "var(--accent)" : "transparent",
                 color: active ? "#fff" : "var(--text)",
                 cursor: "pointer",
+                whiteSpace: "nowrap",
+                transition:
+                  "background 120ms ease, color 120ms ease",
               }}
             >
               {opt.label}

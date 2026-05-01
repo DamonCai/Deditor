@@ -3,6 +3,7 @@ import { useEditorStore } from "../store/editor";
 import { useT } from "../lib/i18n";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { FiSettings, FiSearch, FiSun, FiMoon } from "react-icons/fi";
+import { Button } from "./ui/Button";
 
 // macOS draws traffic lights inside our overlay-styled title bar; reserve ~80px
 // on the left so the controls don't overlap the leftmost toolbar content.
@@ -115,58 +116,31 @@ export default function TitleBar() {
 
       {/* Right-side action cluster. */}
       <div className="flex items-center" style={{ gap: 2 }}>
-        <ToolbarIconButton
+        <Button
+          variant="ghost"
+          size="iconLg"
           title={t("shortcut.nav.gotoAnything")}
           onClick={() => setGotoAnythingOpen(true)}
         >
-          <FiSearch size={15} />
-        </ToolbarIconButton>
-        <ToolbarIconButton
+          <FiSearch size={16} />
+        </Button>
+        <Button
+          variant="ghost"
+          size="iconLg"
           title={theme === "dark" ? "Light theme" : "Dark theme"}
           onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
         >
-          {theme === "dark" ? <FiSun size={15} /> : <FiMoon size={15} />}
-        </ToolbarIconButton>
-        <ToolbarIconButton
+          {theme === "dark" ? <FiSun size={16} /> : <FiMoon size={16} />}
+        </Button>
+        <Button
+          variant="ghost"
+          size="iconLg"
           title={t("statusbar.settings")}
           onClick={() => setSettingsOpen(true)}
         >
-          <FiSettings size={15} />
-        </ToolbarIconButton>
+          <FiSettings size={16} />
+        </Button>
       </div>
     </div>
-  );
-}
-
-function ToolbarIconButton({
-  title,
-  onClick,
-  children,
-}: {
-  title: string;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      title={title}
-      className="deditor-btn"
-      data-variant="ghost"
-      style={{
-        width: 28,
-        height: 28,
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "transparent",
-        color: "var(--text-soft)",
-        border: "none",
-        borderRadius: 4,
-        cursor: "pointer",
-      }}
-    >
-      {children}
-    </button>
   );
 }

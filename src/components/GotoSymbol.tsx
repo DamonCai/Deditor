@@ -181,8 +181,8 @@ export default function GotoSymbol({ open, onClose }: Props) {
                   gap: 10,
                   padding: "5px 12px 5px " + (12 + r.sym.depth * 12) + "px",
                   cursor: "pointer",
-                  background: isSel ? "var(--bg-mute)" : undefined,
-                  color: isSel ? "var(--accent)" : "var(--text)",
+                  background: isSel ? "var(--selection-bg)" : undefined,
+                  color: "var(--text)",
                 }}
               >
                 <span

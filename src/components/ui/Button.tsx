@@ -1,11 +1,12 @@
+import { forwardRef } from "react";
 import type { ButtonHTMLAttributes, CSSProperties } from "react";
 
 type Variant = "primary" | "secondary" | "ghost" | "danger";
 
 interface Props extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "style"> {
   variant?: Variant;
-  /** Compact variant — used in toolbar / dialog footer rows. */
-  size?: "sm" | "md";
+  /** sm / md = text rows. icon = 24x24 square (toolbar). iconLg = 28x28. */
+  size?: "sm" | "md" | "icon" | "iconLg";
   /** Visually-active state for two-state toggles (Aa, ▸ etc). */
   pressed?: boolean;
   style?: CSSProperties;
@@ -21,16 +22,25 @@ interface Props extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "style"> {
  *
  *  Hover: --hover-bg overlay; Active: same overlay darkened. Disabled drops
  *  cursor + opacity but stays styled so layout is consistent. */
-export function Button({
-  variant = "secondary",
-  size = "md",
-  pressed,
-  style,
-  disabled,
-  children,
-  ...rest
-}: Props) {
-  const padding = size === "sm" ? "3px 10px" : "5px 12px";
+export const Button = forwardRef<HTMLButtonElement, Props>(function Button(
+  {
+    variant = "secondary",
+    size = "md",
+    pressed,
+    style,
+    disabled,
+    children,
+    ...rest
+  },
+  ref,
+) {
+  const isIcon = size === "icon" || size === "iconLg";
+  const iconBox = size === "iconLg" ? 28 : 24;
+  const padding = isIcon
+    ? "0"
+    : size === "sm"
+      ? "3px 10px"
+      : "5px 12px";
   const fontSize = size === "sm" ? 11 : 12;
 
   let base: CSSProperties;
@@ -53,14 +63,14 @@ export function Button({
       base = {
         background: pressed ? "var(--bg-mute)" : "transparent",
         color: "var(--text-soft)",
-        border: "1px solid transparent",
+        border: "none",
       };
       break;
     case "secondary":
     default:
       base = {
         background: pressed ? "var(--bg-mute)" : "transparent",
-        color: pressed ? "var(--text)" : "var(--text-soft)",
+        color: "var(--text)",
         border: "1px solid var(--border)",
       };
   }
@@ -68,6 +78,7 @@ export function Button({
   return (
     <button
       {...rest}
+      ref={ref}
       disabled={disabled}
       data-variant={variant}
       data-pressed={pressed ? "true" : undefined}
@@ -81,8 +92,20 @@ export function Button({
         opacity: disabled ? 0.5 : 1,
         transition: "background 120ms ease, color 120ms ease, border-color 120ms ease",
         whiteSpace: "nowrap",
+        ...(isIcon
+          ? {
+              width: iconBox,
+              height: iconBox,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }
+          : {}),
         ...style,
       }}
-    />
+    >
+      {children}
+    </button>
   );
-}
+});

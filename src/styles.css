@@ -9,7 +9,10 @@
   --bg: #ffffff;
   --bg-soft: #f7f8fa;
   --bg-mute: #ebecf0;
-  --border: #dbdfe4;
+  /* Borders sit between bg and bg-soft luminance so they read as subtle
+     dividers in JetBrains New UI fashion — visible against the canvas, but
+     blending into chrome so panel transitions don't feel "lined". */
+  --border: #e2e4e8;
   --text: #000000;
   --text-soft: #6c707e;
   --accent: #3574f0;
@@ -34,7 +37,9 @@
   --bg: #1e1f22;        /* editor canvas / main content */
   --bg-soft: #2b2d30;   /* sidebar, status bar, tab bar, panels */
   --bg-mute: #393b40;   /* hover, code chips, inputs */
-  --border: #393b40;
+  /* Border lightened just enough to read on bg/bg-soft, but no longer
+     identical to --bg-mute (which would make hover bleed into the border). */
+  --border: #34363a;
   --text: #dfe1e5;
   --text-soft: #868a91;
   --accent: #3574f0;

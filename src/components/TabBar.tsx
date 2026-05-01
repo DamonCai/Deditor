@@ -6,6 +6,7 @@ import { closeTabById, newFile, revealInFinder } from "../lib/fileio";
 import { useT, tStatic } from "../lib/i18n";
 import LangIcon from "./LangIcon";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
+import { Button } from "./ui/Button";
 
 function basename(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
@@ -188,22 +189,20 @@ export default function TabBar() {
           />
         ))}
       </div>
-      <button
+      <Button
+        variant="ghost"
         onClick={newFile}
         title={t("tabbar.newTab")}
         style={iconBtnStyle}
-        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-mute)")}
-        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
       >
         <FiPlus size={14} />
-      </button>
-      <button
+      </Button>
+      <Button
         ref={overflowBtnRef}
+        variant="ghost"
         onClick={() => setOverflowOpen((v) => !v)}
         title={t("tabbar.allTabs", { n: tabs.length })}
         style={{ ...iconBtnStyle, position: "relative" }}
-        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-mute)")}
-        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
       >
         <FiChevronDown size={14} />
         <span
@@ -218,7 +217,7 @@ export default function TabBar() {
         >
           {tabs.length}
         </span>
-      </button>
+      </Button>
       {overflowOpen && (
         <OverflowDropdown
           tabs={tabs}
@@ -248,15 +247,13 @@ export default function TabBar() {
 
 const iconBtnStyle: React.CSSProperties = {
   width: 32,
+  height: "100%",
   flexShrink: 0,
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  background: "transparent",
-  border: "none",
+  borderRadius: 0,
   borderLeft: "1px solid var(--border)",
-  color: "var(--text-soft)",
-  cursor: "pointer",
+  borderTop: "none",
+  borderRight: "none",
+  borderBottom: "none",
 };
 
 function TabItem({
@@ -345,7 +342,7 @@ function TabItem({
           color: "var(--text-soft)",
         }}
         onMouseEnter={(e) => {
-          e.currentTarget.style.background = "var(--bg-mute)";
+          e.currentTarget.style.background = "var(--hover-bg)";
           e.currentTarget.style.color = "var(--text)";
         }}
         onMouseLeave={(e) => {
@@ -481,11 +478,11 @@ function OverflowDropdown({
                 padding: "5px 10px",
                 fontSize: 12,
                 cursor: "pointer",
-                background: isActive ? "var(--bg-mute)" : undefined,
-                color: isActive ? "var(--accent)" : "var(--text)",
+                background: isActive ? "var(--selection-bg)" : undefined,
+                color: isActive ? "var(--text)" : "var(--text)",
               }}
               onMouseEnter={(e) => {
-                if (!isActive) e.currentTarget.style.background = "var(--bg-mute)";
+                if (!isActive) e.currentTarget.style.background = "var(--hover-bg)";
               }}
               onMouseLeave={(e) => {
                 if (!isActive) e.currentTarget.style.background = "";

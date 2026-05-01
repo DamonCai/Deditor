@@ -338,7 +338,7 @@ export default function FindInFiles({ open, onClose }: Props) {
                     cursor: "pointer",
                   }}
                   onMouseEnter={(e) => {
-                    e.currentTarget.style.background = "var(--bg-mute)";
+                    e.currentTarget.style.background = "var(--hover-bg)";
                   }}
                   onMouseLeave={(e) => {
                     e.currentTarget.style.background = "";

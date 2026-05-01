@@ -87,7 +87,7 @@ export default function ContextMenu({ x, y, items, onClose }: Props) {
             }}
             onMouseEnter={(e) => {
               if (!item.disabled)
-                e.currentTarget.style.background = "var(--bg-mute)";
+                e.currentTarget.style.background = "var(--hover-bg)";
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.background = "";

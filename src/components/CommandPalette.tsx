@@ -188,8 +188,8 @@ export default function CommandPalette({ open, onClose }: Props) {
                   gap: 10,
                   padding: "6px 12px",
                   cursor: "pointer",
-                  background: isSel ? "var(--bg-mute)" : undefined,
-                  color: isSel ? "var(--accent)" : "var(--text)",
+                  background: isSel ? "var(--selection-bg)" : undefined,
+                  color: "var(--text)",
                 }}
               >
                 <span

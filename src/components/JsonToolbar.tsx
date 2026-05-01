@@ -1,6 +1,7 @@
 import { FiZap, FiMinimize2 } from "react-icons/fi";
 import { useT } from "../lib/i18n";
 import { getActiveView } from "../lib/editorBridge";
+import { Button } from "./ui/Button";
 import {
   compactJson,
   smartFormat,
@@ -86,31 +87,15 @@ function Btn({
   primary?: boolean;
 }) {
   return (
-    <button
+    <Button
+      variant={primary ? "primary" : "ghost"}
+      size="sm"
       title={title}
       onClick={onClick}
-      style={{
-        height: 24,
-        padding: "0 10px",
-        display: "inline-flex",
-        alignItems: "center",
-        borderRadius: 4,
-        background: primary ? "var(--accent)" : "transparent",
-        border: primary ? "none" : "none",
-        cursor: "pointer",
-        color: primary ? "white" : "var(--text)",
-        fontSize: 12,
-        fontWeight: primary ? 600 : 500,
-      }}
-      onMouseEnter={(e) => {
-        if (!primary) e.currentTarget.style.background = "var(--bg-mute)";
-      }}
-      onMouseLeave={(e) => {
-        if (!primary) e.currentTarget.style.background = "transparent";
-      }}
+      style={primary ? undefined : { color: "var(--text)" }}
     >
       {children}
-    </button>
+    </Button>
   );
 }
 

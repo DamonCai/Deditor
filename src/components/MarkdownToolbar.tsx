@@ -24,6 +24,7 @@ import {
 import { useEditorStore } from "../store/editor";
 import { useT } from "../lib/i18n";
 import { promptInput } from "./PromptDialog";
+import { Button } from "./ui/Button";
 
 export default function MarkdownToolbar() {
   const t = useT();
@@ -211,28 +212,19 @@ function ToolbarButton({
   label?: string;
 }) {
   return (
-    <button
+    <Button
+      variant="ghost"
+      size={label ? "sm" : "icon"}
       title={title}
       onClick={onClick}
-      style={{
-        height: 24,
-        padding: label ? "0 6px" : "0 5px",
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 2,
-        borderRadius: 4,
-        background: "transparent",
-        border: "none",
-        cursor: "pointer",
-        color: "var(--text)",
-        fontSize: 11,
-        fontWeight: label ? 600 : 400,
-      }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-mute)")}
-      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+      style={
+        label
+          ? { height: 24, fontWeight: 600, color: "var(--text)" }
+          : { color: "var(--text)" }
+      }
     >
       {label ?? children}
-    </button>
+    </Button>
   );
 }
 
@@ -262,7 +254,7 @@ function ColorButton({
         color: "var(--text)",
       }}
       onMouseEnter={(e) =>
-        (e.currentTarget.style.background = "var(--bg-mute)")
+        (e.currentTarget.style.background = "var(--hover-bg)")
       }
       onMouseLeave={(e) =>
         (e.currentTarget.style.background = "transparent")
