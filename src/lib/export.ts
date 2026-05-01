@@ -73,11 +73,16 @@ async function buildBodyHtml(source: string, filePath: string | null): Promise<s
 }
 
 function buildStandalonePage(body: string, title: string): string {
+  // KaTeX CSS via CDN — inlining the stylesheet would still leave font files
+  // unresolved, and the standalone HTML is most often viewed online anyway.
+  const katexCdn =
+    '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">';
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <title>${escapeHtml(title)}</title>
+${katexCdn}
 <style>${PRINT_CSS.replace(new RegExp(`#${PRINT_AREA_ID}`, "g"), "body")}</style>
 </head>
 <body>

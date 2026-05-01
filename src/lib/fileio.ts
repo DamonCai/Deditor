@@ -7,6 +7,7 @@ import { logError, logInfo, logWarn } from "./logger";
 import { notifyRefresh } from "./treeRefresh";
 import { tStatic } from "./i18n";
 import { isImageFile, isPdfFile, isAudioFile, isVideoFile, isHexFile, isXmindFile } from "./lang";
+import { formatBuffer } from "./format";
 
 const MD_FILTER = [
   { name: "Markdown", extensions: ["md", "markdown", "mdx"] },
@@ -254,16 +255,34 @@ async function writeTabContent(path: string, content: string): Promise<void> {
   }
 }
 
+/** Run Prettier on `content` if format-on-save is enabled and the path's
+ *  extension has a configured parser. Returns the (possibly-formatted) text.
+ *  Errors fall through silently — saving an unformattable file is still
+ *  better than refusing to save. */
+async function maybeFormat(content: string, path: string): Promise<string> {
+  if (!useEditorStore.getState().formatOnSave) return content;
+  // data: URLs are binary tabs; never run a text formatter on them.
+  if (content.startsWith("data:")) return content;
+  try {
+    const formatted = await formatBuffer(content, path);
+    return formatted ?? content;
+  } catch {
+    return content;
+  }
+}
+
 /** Save every dirty tab that has a filePath. Untitled / diff tabs are skipped.
  *  Binary tabs whose content is a data URL go through write_binary_file. */
 export async function saveAllDirty(): Promise<void> {
-  const { tabs, markSaved, activeId } = useEditorStore.getState();
+  const { tabs, markSaved, activeId, setContent } = useEditorStore.getState();
   for (const t of tabs) {
     if (!t.filePath) continue;
     if (t.diff) continue;
     if (t.content === t.savedContent) continue;
     try {
-      await writeTabContent(t.filePath, t.content);
+      const formatted = await maybeFormat(t.content, t.filePath);
+      if (formatted !== t.content) setContent(formatted, t.id);
+      await writeTabContent(t.filePath, formatted);
       // markSaved only operates on active tab; do it manually for non-active
       if (t.id === activeId) {
         markSaved();
@@ -276,7 +295,7 @@ export async function saveAllDirty(): Promise<void> {
             ),
         });
       }
-      logInfo(`auto-saved: ${t.filePath} (${t.content.length} chars)`);
+      logInfo(`auto-saved: ${t.filePath} (${formatted.length} chars)`);
     } catch (err) {
       logError(`auto-save failed for ${t.filePath}`, err);
     }
@@ -284,16 +303,35 @@ export async function saveAllDirty(): Promise<void> {
 }
 
 export async function saveFile() {
-  const { tabs, activeId, markSaved } = useEditorStore.getState();
+  const { tabs, activeId, markSaved, setContent } = useEditorStore.getState();
   const active = tabs.find((t) => t.id === activeId);
   if (!active) return;
   // Diff tabs are read-only — there's nothing to save.
   if (active.diff) return;
   if (!active.filePath) return saveFileAs();
+  // No-op fast path: Cmd+S on an unmodified file shouldn't bump mtime. Vite
+  // (and any other HMR / file watcher) treats every mtime change as a real
+  // edit and will fully reload, which causes a visible flash. Skip when
+  // there's nothing to format and nothing to write.
+  if (
+    active.content === active.savedContent &&
+    !useEditorStore.getState().formatOnSave
+  ) {
+    return;
+  }
   try {
-    await writeTabContent(active.filePath, active.content);
+    const formatted = await maybeFormat(active.content, active.filePath);
+    if (formatted === active.savedContent) {
+      // Format-on-save was on but produced the same bytes already on disk.
+      // Skip the write to avoid an HMR-triggering touch.
+      if (formatted !== active.content) setContent(formatted, active.id);
+      markSaved();
+      return;
+    }
+    if (formatted !== active.content) setContent(formatted, active.id);
+    await writeTabContent(active.filePath, formatted);
     markSaved();
-    logInfo(`saved: ${active.filePath} (${active.content.length} chars)`);
+    logInfo(`saved: ${active.filePath} (${formatted.length} chars)`);
   } catch (err) {
     logError(`save failed for ${active.filePath}`, err);
     throw err;
@@ -311,9 +349,10 @@ export async function saveFileAs() {
   });
   if (!target) return;
   try {
-    await writeTabContent(target, active.content);
-    rebindActive(target, active.content);
-    logInfo(`saved as: ${target} (${active.content.length} chars)`);
+    const formatted = await maybeFormat(active.content, target);
+    await writeTabContent(target, formatted);
+    rebindActive(target, formatted);
+    logInfo(`saved as: ${target} (${formatted.length} chars)`);
   } catch (err) {
     logError(`saveAs failed for ${target}`, err);
     throw err;

@@ -104,6 +104,8 @@ interface EditorState {
   showWhitespace: boolean;
   /** Render a minimap on the right edge of the editor. */
   showMinimap: boolean;
+  /** Auto-close brackets / quotes (CodeMirror's `closeBrackets` extension). */
+  autoCloseBrackets: boolean;
   /** Split the editor area into two side-by-side views of the same active
    *  tab (independent cursor + scroll). Toggled via the command palette /
    *  shortcut. Tab list itself is unchanged — both views read the same tab. */
@@ -115,6 +117,10 @@ interface EditorState {
   /** Auto-save: "off" | "onBlur" | "afterDelay". afterDelay debounces 1.5s
    *  after the user stops typing. onBlur saves when the window loses focus. */
   autoSave: "off" | "onBlur" | "afterDelay";
+  /** Run Prettier before writing supported files to disk. Off by default —
+   *  format-on-save is opinionated and surprising for users with their own
+   *  formatter setup. */
+  formatOnSave: boolean;
 
   setContent: (content: string, tabId?: string) => void;
   // Open a new tab (or focus existing one for the same path).
@@ -142,11 +148,13 @@ interface EditorState {
   setShowIndentGuides: (on: boolean) => void;
   setShowWhitespace: (on: boolean) => void;
   setShowMinimap: (on: boolean) => void;
+  setAutoCloseBrackets: (on: boolean) => void;
   toggleSplitEditor: () => void;
   setSplitEditor: (on: boolean) => void;
   toggleZenMode: () => void;
   setZenMode: (on: boolean) => void;
   setAutoSave: (mode: "off" | "onBlur" | "afterDelay") => void;
+  setFormatOnSave: (on: boolean) => void;
   // Replace active tab's file (used when "Save As" rebinds path).
   rebindActive: (filePath: string, content: string) => void;
   newUntitled: () => string;
@@ -370,9 +378,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   showIndentGuides: true,
   showWhitespace: false,
   showMinimap: false,
+  autoCloseBrackets: true,
   splitEditor: false,
   zenMode: false,
   autoSave: "off",
+  formatOnSave: false,
 
   setContent: (content, tabId) => {
     const { tabs, activeId } = get();
@@ -470,11 +480,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setShowIndentGuides: (on) => set({ showIndentGuides: on }),
   setShowWhitespace: (on) => set({ showWhitespace: on }),
   setShowMinimap: (on) => set({ showMinimap: on }),
+  setAutoCloseBrackets: (on) => set({ autoCloseBrackets: on }),
   toggleSplitEditor: () => set({ splitEditor: !get().splitEditor }),
   setSplitEditor: (on) => set({ splitEditor: on }),
   toggleZenMode: () => set({ zenMode: !get().zenMode }),
   setZenMode: (on) => set({ zenMode: on }),
   setAutoSave: (mode) => set({ autoSave: mode }),
+  setFormatOnSave: (on) => set({ formatOnSave: on }),
 
   rebindActive: (filePath, content) => {
     const { tabs, activeId } = get();

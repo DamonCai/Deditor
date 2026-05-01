@@ -3,8 +3,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEditorStore } from "../store/editor";
 import { openFileByPath } from "../lib/fileio";
 import { getActiveView } from "../lib/editorBridge";
-import { useT } from "../lib/i18n";
-import { logError } from "../lib/logger";
+import { useT, tStatic } from "../lib/i18n";
+import { logError, logInfo } from "../lib/logger";
+import { chooseAction } from "./ConfirmDialog";
 import LangIcon from "./LangIcon";
 
 interface Props {
@@ -25,13 +26,21 @@ interface SearchResult {
   files_scanned: number;
 }
 
+interface ReplaceResult {
+  total: number;
+  files_changed: number;
+}
+
 export default function FindInFiles({ open, onClose }: Props) {
   const t = useT();
   const workspaces = useEditorStore((s) => s.workspaces);
   const [query, setQuery] = useState("");
+  const [replacement, setReplacement] = useState("");
+  const [showReplace, setShowReplace] = useState(false);
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [results, setResults] = useState<SearchResult | null>(null);
   const [searching, setSearching] = useState(false);
+  const [replacing, setReplacing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const reqIdRef = useRef(0);
 
@@ -93,6 +102,48 @@ export default function FindInFiles({ open, onClose }: Props) {
     }
   };
 
+  const onReplaceAll = async () => {
+    if (!results || results.hits.length === 0 || replacing) return;
+    const uniquePaths = Array.from(new Set(results.hits.map((h) => h.path)));
+    const choice = await chooseAction({
+      title: tStatic("find.replaceConfirmTitle"),
+      message: tStatic("find.replaceConfirmMsg", {
+        count: String(results.hits.length),
+        files: String(uniquePaths.length),
+      }),
+      buttons: [
+        { label: tStatic("common.cancel"), value: "cancel" },
+        { label: tStatic("find.replaceAll"), value: "ok", primary: true, danger: true },
+      ],
+    });
+    if (choice !== "ok") return;
+    setReplacing(true);
+    try {
+      const res = await invoke<ReplaceResult>("replace_in_files", {
+        paths: uniquePaths,
+        query,
+        replacement,
+        caseSensitive,
+      });
+      logInfo(
+        `replace_in_files: ${res.total} replacement(s) across ${res.files_changed} file(s)`,
+      );
+      // Re-run the search so the result list reflects post-replacement state.
+      // Bump reqIdRef so the in-flight debounce (if any) discards.
+      reqIdRef.current++;
+      const fresh = await invoke<SearchResult>("find_in_files", {
+        roots: workspaces,
+        query,
+        caseSensitive,
+      });
+      setResults(fresh);
+    } catch (err) {
+      logError("replace_in_files failed", err);
+    } finally {
+      setReplacing(false);
+    }
+  };
+
   const openHit = async (path: string, line: number, col: number) => {
     await openFileByPath(path);
     // Defer one frame so the editor mounts / state restores before we jump.
@@ -143,51 +194,116 @@ export default function FindInFiles({ open, onClose }: Props) {
         <div
           style={{
             display: "flex",
-            alignItems: "center",
-            gap: 8,
+            flexDirection: "column",
+            gap: 6,
             padding: "10px 12px",
             borderBottom: "1px solid var(--border)",
             background: "var(--bg-soft)",
           }}
         >
-          <input
-            ref={inputRef}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={onKeyDown}
-            placeholder={
-              workspaces.length === 0
-                ? t("find.placeholderNoWorkspace")
-                : t("find.placeholder")
-            }
-            spellCheck={false}
-            style={{
-              flex: 1,
-              padding: "6px 10px",
-              fontSize: 13,
-              background: "var(--bg)",
-              color: "var(--text)",
-              border: "1px solid var(--border)",
-              borderRadius: 4,
-              outline: "none",
-            }}
-          />
-          <button
-            onClick={() => setCaseSensitive((v) => !v)}
-            title={t("find.caseSensitive")}
-            style={{
-              padding: "5px 10px",
-              fontSize: 11,
-              fontFamily: "var(--font-mono, ui-monospace, monospace)",
-              border: "1px solid var(--border)",
-              borderRadius: 4,
-              background: caseSensitive ? "var(--accent)" : "var(--bg)",
-              color: caseSensitive ? "#fff" : "var(--text-soft)",
-              cursor: "pointer",
-            }}
-          >
-            Aa
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              onClick={() => setShowReplace((v) => !v)}
+              title={t("find.toggleReplace")}
+              style={{
+                padding: "5px 8px",
+                fontSize: 11,
+                fontFamily: "var(--font-mono, ui-monospace, monospace)",
+                border: "1px solid var(--border)",
+                borderRadius: 4,
+                background: showReplace ? "var(--bg-mute)" : "var(--bg)",
+                color: "var(--text-soft)",
+                cursor: "pointer",
+                width: 22,
+              }}
+            >
+              {showReplace ? "▾" : "▸"}
+            </button>
+            <input
+              ref={inputRef}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={onKeyDown}
+              placeholder={
+                workspaces.length === 0
+                  ? t("find.placeholderNoWorkspace")
+                  : t("find.placeholder")
+              }
+              spellCheck={false}
+              style={{
+                flex: 1,
+                padding: "6px 10px",
+                fontSize: 13,
+                background: "var(--bg)",
+                color: "var(--text)",
+                border: "1px solid var(--border)",
+                borderRadius: 4,
+                outline: "none",
+              }}
+            />
+            <button
+              onClick={() => setCaseSensitive((v) => !v)}
+              title={t("find.caseSensitive")}
+              style={{
+                padding: "5px 10px",
+                fontSize: 11,
+                fontFamily: "var(--font-mono, ui-monospace, monospace)",
+                border: "1px solid var(--border)",
+                borderRadius: 4,
+                background: caseSensitive ? "var(--accent)" : "var(--bg)",
+                color: caseSensitive ? "#fff" : "var(--text-soft)",
+                cursor: "pointer",
+              }}
+            >
+              Aa
+            </button>
+          </div>
+          {showReplace && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ width: 22 }} />
+              <input
+                value={replacement}
+                onChange={(e) => setReplacement(e.target.value)}
+                onKeyDown={onKeyDown}
+                placeholder={t("find.replacePlaceholder")}
+                spellCheck={false}
+                style={{
+                  flex: 1,
+                  padding: "6px 10px",
+                  fontSize: 13,
+                  background: "var(--bg)",
+                  color: "var(--text)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 4,
+                  outline: "none",
+                }}
+              />
+              <button
+                onClick={() => void onReplaceAll()}
+                disabled={!results || results.hits.length === 0 || replacing}
+                title={t("find.replaceAll")}
+                style={{
+                  padding: "5px 10px",
+                  fontSize: 12,
+                  border: "1px solid var(--border)",
+                  borderRadius: 4,
+                  background: "var(--bg)",
+                  color:
+                    !results || results.hits.length === 0 || replacing
+                      ? "var(--text-soft)"
+                      : "var(--text)",
+                  cursor:
+                    !results || results.hits.length === 0 || replacing
+                      ? "not-allowed"
+                      : "pointer",
+                  opacity:
+                    !results || results.hits.length === 0 || replacing ? 0.5 : 1,
+                }}
+              >
+                {replacing ? t("find.replacing") : t("find.replaceAll")}
+              </button>
+            </div>
+          )}
         </div>
 
         <div

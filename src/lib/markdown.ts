@@ -1,6 +1,8 @@
 import MarkdownIt from "markdown-it";
 import anchor from "markdown-it-anchor";
 import taskLists from "markdown-it-task-lists";
+import katex from "@vscode/markdown-it-katex";
+import "katex/dist/katex.min.css";
 import plantumlEncoder from "plantuml-encoder";
 import { ensureLanguage, getHighlighter } from "./highlight";
 import { detectLang } from "./lang";
@@ -70,6 +72,10 @@ const md = new MarkdownIt({
 
 md.use(anchor, { permalink: false });
 md.use(taskLists, { enabled: false });
+// `$...$` inline + `$$...$$` block. The plugin defaults to throwOnError=false,
+// so malformed expressions render as a red error instead of breaking the
+// whole Markdown render.
+md.use(katex);
 
 const originalFence = md.renderer.rules.fence!;
 md.renderer.rules.fence = (tokens, idx, options, env, self) => {

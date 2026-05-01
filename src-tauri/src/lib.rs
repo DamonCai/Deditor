@@ -497,6 +497,100 @@ fn find_subseq(hay: &[u8], needle: &[u8]) -> Option<usize> {
     None
 }
 
+#[derive(serde::Serialize)]
+struct ReplaceResult {
+    /// Total replacement count across all files.
+    total: u32,
+    /// Number of files that had at least one replacement (and were rewritten).
+    files_changed: u32,
+}
+
+/// Plain-substring replace across the supplied file paths. Mirrors the case-
+/// folding rules of `find_in_files` (ASCII-only case folding when not case-
+/// sensitive — non-ASCII letters compare byte-for-byte). Skips binary-looking
+/// files (NUL byte in the first 8 KB) defensively even though the caller is
+/// expected to pass paths that came from `find_in_files`.
+#[tauri::command]
+fn replace_in_files(
+    paths: Vec<String>,
+    query: String,
+    replacement: String,
+    case_sensitive: bool,
+) -> Result<ReplaceResult, String> {
+    if query.is_empty() {
+        return Ok(ReplaceResult { total: 0, files_changed: 0 });
+    }
+    let mut total: u32 = 0;
+    let mut files_changed: u32 = 0;
+    for path_str in &paths {
+        let path = expand(path_str);
+        let bytes = match fs::read(&path) {
+            Ok(b) => b,
+            Err(e) => return Err(format!("read {}: {}", path.display(), e)),
+        };
+        let probe_end = bytes.len().min(8192);
+        if bytes[..probe_end].iter().any(|&b| b == 0) {
+            continue;
+        }
+        let text = match std::str::from_utf8(&bytes) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        let (next, count) = substring_replace_all(text, &query, &replacement, case_sensitive);
+        if count == 0 {
+            continue;
+        }
+        fs::write(&path, &next).map_err(|e| format!("write {}: {}", path.display(), e))?;
+        total = total.saturating_add(count);
+        files_changed = files_changed.saturating_add(1);
+    }
+    log::info!(
+        "replace_in_files: \"{}\" → \"{}\" — {} replacements across {} file(s)",
+        query, replacement, total, files_changed
+    );
+    Ok(ReplaceResult { total, files_changed })
+}
+
+/// Replace every (non-overlapping) occurrence of `needle` in `hay`, returning
+/// the new text and the replacement count. ASCII case folding when not
+/// case-sensitive — non-ASCII bytes are compared verbatim (so CJK is unaffected).
+fn substring_replace_all(
+    hay: &str,
+    needle: &str,
+    replacement: &str,
+    case_sensitive: bool,
+) -> (String, u32) {
+    let hb = hay.as_bytes();
+    let nb = needle.as_bytes();
+    if nb.is_empty() || nb.len() > hb.len() {
+        return (hay.to_string(), 0);
+    }
+    let mut out = String::with_capacity(hay.len());
+    let mut count: u32 = 0;
+    let mut i = 0;
+    let mut copied_until = 0;
+    while i + nb.len() <= hb.len() {
+        let m = if case_sensitive {
+            &hb[i..i + nb.len()] == nb
+        } else {
+            (0..nb.len()).all(|k| hb[i + k].eq_ignore_ascii_case(&nb[k]))
+        };
+        if m {
+            // Splicing at byte offset `i` is UTF-8-safe because `needle` itself
+            // is UTF-8 and we only match aligned occurrences of it.
+            out.push_str(&hay[copied_until..i]);
+            out.push_str(replacement);
+            count = count.saturating_add(1);
+            i += nb.len();
+            copied_until = i;
+        } else {
+            i += 1;
+        }
+    }
+    out.push_str(&hay[copied_until..]);
+    (out, count)
+}
+
 /// Batched modification-time query, returned in milliseconds since the Unix
 /// epoch. The frontend polls this every few seconds to detect files that
 /// were edited outside DEditor (git pull, formatter, another editor, …).
@@ -1019,6 +1113,7 @@ pub fn run() {
             path_kind,
             file_mtimes,
             find_in_files,
+            replace_in_files,
             add_recent_document
         ])
         .build(tauri::generate_context!())

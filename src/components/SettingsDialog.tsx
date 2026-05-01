@@ -23,6 +23,8 @@ export default function SettingsDialog({ open, onClose }: Props) {
   const setShowWhitespace = useEditorStore((s) => s.setShowWhitespace);
   const showMinimap = useEditorStore((s) => s.showMinimap);
   const setShowMinimap = useEditorStore((s) => s.setShowMinimap);
+  const autoCloseBrackets = useEditorStore((s) => s.autoCloseBrackets);
+  const setAutoCloseBrackets = useEditorStore((s) => s.setAutoCloseBrackets);
   const fontSize = useEditorStore((s) => s.editorFontSize);
   const setFontSize = useEditorStore((s) => s.setEditorFontSize);
   const theme = useEditorStore((s) => s.theme);
@@ -31,6 +33,8 @@ export default function SettingsDialog({ open, onClose }: Props) {
   const setLanguage = useEditorStore((s) => s.setLanguage);
   const autoSave = useEditorStore((s) => s.autoSave);
   const setAutoSave = useEditorStore((s) => s.setAutoSave);
+  const formatOnSave = useEditorStore((s) => s.formatOnSave);
+  const setFormatOnSave = useEditorStore((s) => s.setFormatOnSave);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -158,6 +162,12 @@ export default function SettingsDialog({ open, onClose }: Props) {
                 onChange={(v) => setAutoSave(v as "off" | "onBlur" | "afterDelay")}
                 topBorder
               />
+              <CheckRow
+                checked={formatOnSave}
+                onChange={setFormatOnSave}
+                label={t("settings.general.formatOnSave")}
+                topBorder
+              />
             </div>
           </section>
 
@@ -182,6 +192,12 @@ export default function SettingsDialog({ open, onClose }: Props) {
                 checked={showMinimap}
                 onChange={setShowMinimap}
                 label={t("settings.editor.minimap")}
+                topBorder
+              />
+              <CheckRow
+                checked={autoCloseBrackets}
+                onChange={setAutoCloseBrackets}
+                label={t("settings.editor.autoCloseBrackets")}
                 topBorder
               />
             </div>

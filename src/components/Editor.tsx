@@ -14,8 +14,10 @@ import {
 import { indentationMarkers } from "@replit/codemirror-indentation-markers";
 import { showMinimap as showMinimapFacet } from "@replit/codemirror-minimap";
 import type { Command } from "@codemirror/view";
-import { defaultKeymap, history, historyField, historyKeymap, indentWithTab } from "@codemirror/commands";
+import { copyLineDown, defaultKeymap, history, historyField, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { searchKeymap, highlightSelectionMatches, selectSelectionMatches, openSearchPanel } from "@codemirror/search";
+import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
+import { markdownTableKeymap } from "../lib/markdownTable";
 import {
   syntaxHighlighting,
   defaultHighlightStyle,
@@ -178,10 +180,12 @@ export default function Editor({
   const whitespaceCompartment = useRef(new Compartment());
   const minimapCompartment = useRef(new Compartment());
   const completionCompartment = useRef(new Compartment());
+  const autoCloseCompartment = useRef(new Compartment());
   const softWrap = useEditorStore((s) => s.softWrap);
   const showIndentGuides = useEditorStore((s) => s.showIndentGuides);
   const showWhitespace = useEditorStore((s) => s.showWhitespace);
   const showMinimap = useEditorStore((s) => s.showMinimap);
+  const autoCloseBrackets = useEditorStore((s) => s.autoCloseBrackets);
   const onChangeRef = useRef(onChange);
   const onScrollRef = useRef(onScroll);
   const onPositionChangeRef = useRef(onPositionChange);
@@ -263,6 +267,16 @@ export default function Editor({
           { key: "F8", run: nextBookmark, preventDefault: true },
           { key: "Shift-F8", run: prevBookmark, preventDefault: true },
           { key: "Mod-Shift-F2", run: clearBookmarks, preventDefault: true },
+          // Sublime-style duplicate line. defaultKeymap already binds
+          // Shift-Alt-Down → copyLineDown, but Cmd+Shift+D is the muscle
+          // memory most users come in with.
+          { key: "Mod-Shift-d", run: copyLineDown, preventDefault: true },
+          // Markdown-only: Tab/Shift-Tab navigate between table cells. The
+          // handlers return false outside tables so the default Tab (indent)
+          // continues to work in code/prose. Gated on `isMarkdown(filePath)`
+          // to avoid the negligible cost on non-Markdown files entirely.
+          ...(isMarkdown(filePath) ? markdownTableKeymap : []),
+          ...closeBracketsKeymap,
           ...defaultKeymap,
           ...historyKeymap,
           ...searchKeymap,
@@ -273,6 +287,7 @@ export default function Editor({
         indentCompartment.current.of(showIndentGuides ? indentationMarkers() : []),
         whitespaceCompartment.current.of(showWhitespace ? highlightWhitespace() : []),
         minimapCompartment.current.of(showMinimap ? buildMinimap() : []),
+        autoCloseCompartment.current.of(autoCloseBrackets ? closeBrackets() : []),
         completionCompartment.current.of(
           isMarkdown(filePath) ? codeBlockCompletion() : [],
         ),
@@ -493,6 +508,14 @@ export default function Editor({
       ),
     });
   }, [showMinimap]);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: autoCloseCompartment.current.reconfigure(
+        autoCloseBrackets ? closeBrackets() : [],
+      ),
+    });
+  }, [autoCloseBrackets]);
 
   useEffect(() => {
     let cancelled = false;

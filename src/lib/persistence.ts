@@ -45,7 +45,9 @@ interface PersistedV3 {
   showIndentGuides?: boolean;
   showWhitespace?: boolean;
   showMinimap?: boolean;
+  autoCloseBrackets?: boolean;
   autoSave?: "off" | "onBlur" | "afterDelay";
+  formatOnSave?: boolean;
   // Legacy git fields kept in the type so old snapshots still parse safely;
   // unused since the git feature was removed.
   gitPanelOpen?: boolean;
@@ -268,8 +270,14 @@ export async function loadPersisted(): Promise<UiExtras | null> {
   if (typeof data.showMinimap === "boolean") {
     useEditorStore.setState({ showMinimap: data.showMinimap });
   }
+  if (typeof data.autoCloseBrackets === "boolean") {
+    useEditorStore.setState({ autoCloseBrackets: data.autoCloseBrackets });
+  }
   if (data.autoSave === "off" || data.autoSave === "onBlur" || data.autoSave === "afterDelay") {
     useEditorStore.setState({ autoSave: data.autoSave });
+  }
+  if (typeof data.formatOnSave === "boolean") {
+    useEditorStore.setState({ formatOnSave: data.formatOnSave });
   }
 
   if (restored.length > 0) {
@@ -334,7 +342,9 @@ function doSave(extras: UiExtras): void {
     showIndentGuides: s.showIndentGuides,
     showWhitespace: s.showWhitespace,
     showMinimap: s.showMinimap,
+    autoCloseBrackets: s.autoCloseBrackets,
     autoSave: s.autoSave,
+    formatOnSave: s.formatOnSave,
   };
   try {
     localStorage.setItem(KEY_V3, JSON.stringify(base));

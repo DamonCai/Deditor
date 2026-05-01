@@ -15,6 +15,16 @@ import {
   saveFileAs,
 } from "./fileio";
 import { useEditorStore } from "../store/editor";
+import { getActiveView } from "./editorBridge";
+import {
+  copyLineDown,
+  moveLineDown,
+  moveLineUp,
+  toggleComment,
+} from "@codemirror/commands";
+import { formatTableAtCursor } from "./markdownTable";
+import { formatBuffer } from "./format";
+import { logError, logInfo } from "./logger";
 
 export interface Command {
   id: string;
@@ -26,6 +36,13 @@ export interface Command {
   /** Group heading for the palette list. */
   group: "file" | "view" | "nav" | "editor";
   run: () => void | Promise<void>;
+}
+
+function runOnEditor(cmd: (v: import("@codemirror/view").EditorView) => boolean): void {
+  const view = getActiveView();
+  if (!view) return;
+  cmd(view);
+  view.focus();
 }
 
 export const COMMANDS: Command[] = [
@@ -122,5 +139,71 @@ export const COMMANDS: Command[] = [
     shortcut: "Cmd/Ctrl+,",
     group: "nav",
     run: () => useEditorStore.getState().setSettingsOpen(true),
+  },
+
+  // Editor (text manipulation — bound by CodeMirror keymap, surfaced here so
+  // they're discoverable in the palette).
+  {
+    id: "cmd.editor.toggleComment",
+    labelKey: "cmd.editor.toggleComment",
+    shortcut: "Cmd/Ctrl+/",
+    group: "editor",
+    run: () => runOnEditor(toggleComment),
+  },
+  {
+    id: "cmd.editor.moveLineUp",
+    labelKey: "cmd.editor.moveLineUp",
+    shortcut: "Alt+↑",
+    group: "editor",
+    run: () => runOnEditor(moveLineUp),
+  },
+  {
+    id: "cmd.editor.moveLineDown",
+    labelKey: "cmd.editor.moveLineDown",
+    shortcut: "Alt+↓",
+    group: "editor",
+    run: () => runOnEditor(moveLineDown),
+  },
+  {
+    id: "cmd.editor.duplicateLine",
+    labelKey: "cmd.editor.duplicateLine",
+    shortcut: "Cmd/Ctrl+Shift+D",
+    group: "editor",
+    run: () => runOnEditor(copyLineDown),
+  },
+  {
+    id: "cmd.editor.formatTable",
+    labelKey: "cmd.editor.formatTable",
+    group: "editor",
+    run: () => runOnEditor(formatTableAtCursor),
+  },
+  {
+    id: "cmd.editor.formatDocument",
+    labelKey: "cmd.editor.formatDocument",
+    shortcut: "Cmd/Ctrl+Shift+I",
+    group: "editor",
+    run: async () => {
+      const view = getActiveView();
+      if (!view) return;
+      const { tabs, activeId, setContent } = useEditorStore.getState();
+      const active = tabs.find((t) => t.id === activeId);
+      if (!active || active.diff || !active.filePath) return;
+      try {
+        const text = view.state.doc.toString();
+        const formatted = await formatBuffer(text, active.filePath);
+        if (formatted == null || formatted === text) return;
+        setContent(formatted, active.id);
+        // Replace the editor's doc in-place so cursor lands at the start (cleanest
+        // safe spot — Prettier may have reflowed every line below the cursor).
+        view.dispatch({
+          changes: { from: 0, to: view.state.doc.length, insert: formatted },
+          selection: { anchor: 0 },
+        });
+        view.focus();
+        logInfo(`formatDocument: rewrote ${active.filePath}`);
+      } catch (e) {
+        logError("formatDocument failed", e);
+      }
+    },
   },
 ];
