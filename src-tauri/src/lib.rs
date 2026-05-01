@@ -43,10 +43,30 @@ fn read_text_file(path: String) -> Result<String, String> {
     })
 }
 
+/// Hard cap on binary preview size. base64 expands ~33% so the in-memory
+/// payload (Tab content + JS string) is roughly 1.33× this. 50 MB keeps the
+/// frontend responsive and prevents `localStorage` from thrashing the quota
+/// fallback during persistence.
+const BINARY_PREVIEW_CAP: u64 = 50 * 1024 * 1024;
+
 #[tauri::command]
 fn read_binary_as_base64(path: String) -> Result<String, String> {
     log::debug!("read_binary_as_base64: {}", path);
-    let bytes = fs::read(expand(&path)).map_err(|e| {
+    let p = expand(&path);
+    let meta = fs::metadata(&p).map_err(|e| {
+        log::warn!("read_binary_as_base64 stat failed: {} -- {}", path, e);
+        e.to_string()
+    })?;
+    if meta.len() > BINARY_PREVIEW_CAP {
+        let msg = format!(
+            "file too large for preview ({} bytes; cap {} bytes)",
+            meta.len(),
+            BINARY_PREVIEW_CAP
+        );
+        log::warn!("read_binary_as_base64 rejected: {} -- {}", path, msg);
+        return Err(msg);
+    }
+    let bytes = fs::read(&p).map_err(|e| {
         log::warn!("read_binary_as_base64 failed: {} -- {}", path, e);
         e.to_string()
     })?;
@@ -657,7 +677,11 @@ fn note_recent_document(path: &str) {
 #[tauri::command]
 fn path_kind(path: String) -> String {
     let p = expand(&path);
-    match fs::metadata(&p) {
+    // symlink_metadata doesn't follow symlinks — a dangling/circular symlink
+    // therefore reports as "file" instead of erroring out, so the drop handler
+    // routes it through openMany where the user gets a real "can't read"
+    // message instead of a silent failure.
+    match fs::symlink_metadata(&p) {
         Ok(m) if m.is_dir() => "dir".to_string(),
         Ok(_) => "file".to_string(),
         Err(_) => "missing".to_string(),
