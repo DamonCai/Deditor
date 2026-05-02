@@ -15,8 +15,10 @@ import {
 } from "react-icons/fi";
 import { useEditorStore } from "../store/editor";
 import { useT, tStatic } from "../lib/i18n";
-import { openCommitDiff } from "../lib/fileio";
+import { openCommitDiff, openFileByPath } from "../lib/fileio";
 import { refreshGit, gitStatusColor } from "../lib/git";
+import { buildGitSubmenu } from "../lib/gitMenu";
+import ContextMenu, { type MenuItem } from "./ContextMenu";
 import LangIcon from "./LangIcon";
 import { logError } from "../lib/logger";
 import { chooseAction } from "./ConfirmDialog";
@@ -180,6 +182,117 @@ export default function CommitPanel() {
       c.dominant === "D",
     );
   };
+
+  // Right-click on a file row → JetBrains-style menu. Per-row state is
+  // captured in the closure so the menu items act on the right file.
+  const [ctxMenu, setCtxMenu] = useState<{
+    x: number;
+    y: number;
+    items: MenuItem[];
+  } | null>(null);
+  const onRowContextMenu = useCallback(
+    (e: React.MouseEvent, c: GitChange) => {
+      if (!workspace) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setCtxMenu({
+        x: e.clientX,
+        y: e.clientY,
+        items: buildFileMenu(workspace, c, {
+          openDiff: () => onRowClick(c),
+          jumpToSource: () => void openFileByPath(c.path),
+          commitFile: () => {
+            // Focus this single file: uncheck everything else, ensure this
+            // one is checked, focus the message textarea so the user can
+            // type + click Commit.
+            for (const other of changes) {
+              setCommitChecked(workspace, other.rel, other.rel === c.rel);
+            }
+            requestAnimationFrame(() => messageRef.current?.focus());
+          },
+          rollback: async () => {
+            const ok = await chooseAction({
+              title: tStatic("commit.row.confirmRollbackTitle"),
+              message: tStatic("commit.row.confirmRollbackMsg", { name: c.rel }),
+              buttons: [
+                { label: tStatic("common.cancel"), value: "cancel" },
+                { label: tStatic("commit.rollback"), value: "ok", danger: true },
+              ],
+            });
+            if (ok !== "ok") return;
+            try {
+              await invoke("git_rollback_paths", {
+                workspace,
+                paths: [c.rel],
+              });
+              await refresh();
+              refreshGit(workspace);
+            } catch (err) {
+              setErr(String(err));
+            }
+          },
+          addToVcs: async () => {
+            try {
+              await invoke("git_stage_paths", {
+                workspace,
+                paths: [c.rel],
+              });
+              await refresh();
+              refreshGit(workspace);
+            } catch (err) {
+              setErr(String(err));
+            }
+          },
+          addToGitignore: async () => {
+            try {
+              await appendToGitignore(workspace, c.rel);
+              await refresh();
+            } catch (err) {
+              setErr(
+                tStatic("commit.row.gitignoreFail", { err: String(err) }),
+              );
+            }
+          },
+          createPatch: () => {
+            useEditorStore
+              .getState()
+              .openGitDialog({ kind: "createPatch", workspace });
+          },
+          copyPatch: async () => {
+            try {
+              const patch = await invoke<string>(
+                "git_create_patch_for_path",
+                { workspace, path: c.rel, staged: false },
+              );
+              await navigator.clipboard.writeText(patch);
+            } catch (err) {
+              setErr(String(err));
+            }
+          },
+          deleteFile: async () => {
+            const ok = await chooseAction({
+              title: tStatic("commit.row.confirmDeleteTitle"),
+              message: tStatic("commit.row.confirmDeleteMsg", { name: c.rel }),
+              buttons: [
+                { label: tStatic("common.cancel"), value: "cancel" },
+                { label: tStatic("common.delete"), value: "ok", danger: true },
+              ],
+            });
+            if (ok !== "ok") return;
+            try {
+              await invoke("delete_path", { path: c.path });
+              await refresh();
+              refreshGit(workspace);
+            } catch (err) {
+              setErr(String(err));
+            }
+          },
+        }),
+      });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [workspace, changes, setCommitChecked],
+  );
 
   const doCommit = async (alsoPush: boolean) => {
     if (!workspace) return;
@@ -381,6 +494,7 @@ export default function CommitPanel() {
             unchecked={unchecked}
             setRangeChecked={setRangeChecked}
             onRowClick={onRowClick}
+            onRowContextMenu={onRowContextMenu}
             flatMode={viewMode === "flat"}
           />
         )}
@@ -396,6 +510,7 @@ export default function CommitPanel() {
             unchecked={unchecked}
             setRangeChecked={setRangeChecked}
             onRowClick={onRowClick}
+            onRowContextMenu={onRowContextMenu}
             flatMode={viewMode === "flat"}
           />
         )}
@@ -584,6 +699,14 @@ export default function CommitPanel() {
           {busy === "pushing" ? t("commit.pushing") : t("commit.commitAndPush")}
         </button>
       </div>
+      {ctxMenu && (
+        <ContextMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          items={ctxMenu.items}
+          onClose={() => setCtxMenu(null)}
+        />
+      )}
     </div>
   );
 }
@@ -734,6 +857,7 @@ function Section({
   unchecked,
   setRangeChecked,
   onRowClick,
+  onRowContextMenu,
   flatMode,
 }: {
   title: string;
@@ -746,6 +870,7 @@ function Section({
   unchecked: Set<string>;
   setRangeChecked: (rels: string[], checked: boolean) => void;
   onRowClick: (c: GitChange) => void;
+  onRowContextMenu: (e: React.MouseEvent, c: GitChange) => void;
   flatMode?: boolean;
 }) {
   const t = useT();
@@ -800,6 +925,7 @@ function Section({
           unchecked={unchecked}
           setRangeChecked={setRangeChecked}
           onRowClick={onRowClick}
+          onRowContextMenu={onRowContextMenu}
           isWorkspaceRoot
           flatMode={flatMode}
         />
@@ -817,6 +943,7 @@ function DirRow({
   unchecked,
   setRangeChecked,
   onRowClick,
+  onRowContextMenu,
   isWorkspaceRoot,
   flatMode,
 }: {
@@ -828,6 +955,7 @@ function DirRow({
   unchecked: Set<string>;
   setRangeChecked: (rels: string[], checked: boolean) => void;
   onRowClick: (c: GitChange) => void;
+  onRowContextMenu: (e: React.MouseEvent, c: GitChange) => void;
   isWorkspaceRoot?: boolean;
   flatMode?: boolean;
 }) {
@@ -897,6 +1025,7 @@ function DirRow({
               unchecked={unchecked}
               setRangeChecked={setRangeChecked}
               onRowClick={onRowClick}
+              onRowContextMenu={onRowContextMenu}
               flatMode={flatMode}
             />
           ) : (
@@ -909,6 +1038,7 @@ function DirRow({
                 setRangeChecked([child.rel], unchecked.has(child.rel))
               }
               onClick={() => onRowClick(child.change)}
+              onContextMenu={(e) => onRowContextMenu(e, child.change)}
               showDirSuffix={flatMode}
             />
           ),
@@ -923,6 +1053,7 @@ function FileRow({
   checked,
   onToggle,
   onClick,
+  onContextMenu,
   showDirSuffix,
 }: {
   file: TreeFile;
@@ -930,6 +1061,7 @@ function FileRow({
   checked: boolean;
   onToggle: () => void;
   onClick: () => void;
+  onContextMenu: (e: React.MouseEvent) => void;
   showDirSuffix?: boolean;
 }) {
   const c = file.change;
@@ -943,6 +1075,7 @@ function FileRow({
   return (
     <div
       onClick={onClick}
+      onContextMenu={onContextMenu}
       title={c.rel}
       className="flex items-center"
       style={{
@@ -1404,4 +1537,100 @@ function subjectColor(msg: string): string {
   if (n > 72) return "#e55353";
   if (n > 50) return "#caa54e";
   return "var(--text-soft)";
+}
+
+/** Right-click menu items for a single file row in the Commit panel. We
+ *  keep JetBrains' visible structure but skip entries that don't map to
+ *  plain git (Move to Changelist, Shelve, UML diagram, New Merge Request,
+ *  Local History — all JetBrains-only concepts). The Git submenu reuses
+ *  the same builder the FileTree uses, so behavior is consistent. */
+function buildFileMenu(
+  workspace: string,
+  c: GitChange,
+  handlers: {
+    openDiff: () => void;
+    jumpToSource: () => void;
+    commitFile: () => void;
+    rollback: () => void;
+    addToVcs: () => void;
+    addToGitignore: () => void;
+    createPatch: () => void;
+    copyPatch: () => void;
+    deleteFile: () => void;
+  },
+): MenuItem[] {
+  const isUntracked = c.dominant === "U";
+  const isDeleted = c.dominant === "D";
+  return [
+    {
+      label: tStatic("commit.row.commitFile"),
+      onClick: handlers.commitFile,
+    },
+    {
+      label: tStatic("commit.row.rollback"),
+      disabled: isUntracked,
+      onClick: handlers.rollback,
+    },
+    { divider: true },
+    {
+      label: tStatic("commit.row.showDiff"),
+      onClick: handlers.openDiff,
+    },
+    {
+      label: tStatic("commit.row.jumpToSource"),
+      disabled: isDeleted,
+      onClick: handlers.jumpToSource,
+    },
+    { divider: true },
+    {
+      label: tStatic("commit.row.addToVcs"),
+      // Only meaningful when the file isn't already tracked.
+      disabled: !isUntracked,
+      onClick: handlers.addToVcs,
+    },
+    {
+      label: tStatic("commit.row.addToGitignore"),
+      onClick: handlers.addToGitignore,
+    },
+    { divider: true },
+    {
+      label: tStatic("commit.row.createPatch"),
+      onClick: handlers.createPatch,
+    },
+    {
+      label: tStatic("commit.row.copyPatch"),
+      onClick: handlers.copyPatch,
+    },
+    { divider: true },
+    {
+      label: tStatic("commit.row.delete"),
+      onClick: handlers.deleteFile,
+    },
+    { divider: true },
+    {
+      label: tStatic("commit.row.gitSubmenu"),
+      submenu: buildGitSubmenu(workspace, c.path),
+    },
+  ];
+}
+
+/** Append a workspace-relative path to .gitignore, creating the file if
+ *  it doesn't exist. Idempotent: an already-present line is not duplicated. */
+async function appendToGitignore(workspace: string, rel: string): Promise<void> {
+  const sep = workspace.includes("\\") && !workspace.includes("/") ? "\\" : "/";
+  const path = workspace.endsWith(sep)
+    ? `${workspace}.gitignore`
+    : `${workspace}${sep}.gitignore`;
+  let existing = "";
+  try {
+    existing = await invoke<string>("read_text_file", { path });
+  } catch {
+    /* file doesn't exist; we'll create it */
+  }
+  const lines = existing.split(/\r?\n/);
+  if (lines.some((l) => l.trim() === rel)) return;
+  const next = (existing.endsWith("\n") || existing.length === 0
+    ? existing
+    : existing + "\n") + rel + "\n";
+  await invoke("write_text_file", { path, content: next });
 }

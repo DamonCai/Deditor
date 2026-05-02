@@ -2328,6 +2328,25 @@ fn git_create_patch(workspace: String, staged: bool) -> Result<String, String> {
     run_git_capture(&workspace, &args)
 }
 
+/// Per-file unified diff — used by the Commit panel's "Copy as Patch" /
+/// "Create Patch" file-row actions.
+#[tauri::command]
+fn git_create_patch_for_path(
+    workspace: String,
+    path: String,
+    staged: bool,
+) -> Result<String, String> {
+    let posix = path.replace('\\', "/");
+    let mut args: Vec<&str> = if staged {
+        vec!["diff", "--cached"]
+    } else {
+        vec!["diff"]
+    };
+    args.push("--");
+    args.push(&posix);
+    run_git_capture(&workspace, &args)
+}
+
 /// `git apply` a patch passed as text. Validates first via `--check`. The
 /// `index` flag forwards `--index` so changes land in both worktree + index.
 #[tauri::command]
@@ -3455,6 +3474,7 @@ pub fn run() {
             git_undo_last_commit,
             git_update_project,
             git_create_patch,
+            git_create_patch_for_path,
             git_apply_patch,
             git_line_history,
             git_blame,
