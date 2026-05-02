@@ -269,6 +269,61 @@ fn create_dir(path: String) -> Result<(), String> {
     Ok(())
 }
 
+// Persist UI state (open tabs, workspaces, settings) to a real file in the
+// platform's app-data dir instead of WKWebView localStorage. Reason: ad-hoc
+// signed builds get a new code-signing identifier on every rebuild, which
+// makes WKWebView treat each install as a different app and silently lose
+// localStorage. A file in `~/Library/Application Support/com.deditor.app/`
+// (macOS), `%APPDATA%\com.deditor.app\` (Windows), or
+// `~/.local/share/com.deditor.app/` (Linux) survives reinstalls cleanly.
+fn app_state_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|d| d.join("state.json"))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn read_app_state(app: tauri::AppHandle) -> Result<String, String> {
+    let path = app_state_path(&app)?;
+    if !path.exists() {
+        return Ok(String::new());
+    }
+    fs::read_to_string(&path).map_err(|e| {
+        log::warn!("read_app_state failed: {} -- {}", path.display(), e);
+        e.to_string()
+    })
+}
+
+#[tauri::command]
+fn write_app_state(app: tauri::AppHandle, content: String) -> Result<(), String> {
+    let path = app_state_path(&app)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| {
+            log::error!("write_app_state mkdir failed: {} -- {}", parent.display(), e);
+            e.to_string()
+        })?;
+    }
+    // Atomic write: stage to a sibling tmp file, then rename. Avoids leaving
+    // a half-written state.json behind if we crash mid-write.
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, content.as_bytes()).map_err(|e| {
+        log::error!("write_app_state stage failed: {} -- {}", tmp.display(), e);
+        e.to_string()
+    })?;
+    fs::rename(&tmp, &path).map_err(|e| {
+        log::error!(
+            "write_app_state rename failed: {} -> {} -- {}",
+            tmp.display(),
+            path.display(),
+            e
+        );
+        e.to_string()
+    })?;
+    log::debug!("write_app_state: {} ({} bytes)", path.display(), content.len());
+    Ok(())
+}
+
 #[tauri::command]
 fn print_window(app: tauri::AppHandle) -> Result<(), String> {
     let win = app
@@ -1138,7 +1193,9 @@ pub fn run() {
             file_mtimes,
             find_in_files,
             replace_in_files,
-            add_recent_document
+            add_recent_document,
+            read_app_state,
+            write_app_state
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

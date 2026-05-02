@@ -2,23 +2,32 @@
 # DEditor - macOS / Linux dev launcher
 #
 # Usage:
-#   ./scripts/start.sh             dev launch + wipe vite cache + WebView persistence (default)
-#   ./scripts/start.sh --no-reset  skip the wipe (faster restart, but stale state may bite)
+#   ./scripts/start.sh                dev launch (default: clears node_modules/.vite only)
+#   ./scripts/start.sh --no-reset     skip the vite cache wipe (slightly faster)
+#   ./scripts/start.sh --reset-state  ALSO wipe WebView storage — drops all open
+#                                     tabs, workspaces, settings. Use only when
+#                                     localStorage state is actually corrupt
+#                                     (DEditor must be quit first).
 set -e
 
 cd "$(dirname "$0")/.."
 
-RESET=1
+RESET_VITE=1
+RESET_STATE=0
 for arg in "$@"; do
   case "$arg" in
     --no-reset|--keep-cache)
-      RESET=0
+      RESET_VITE=0
       ;;
     --reset|--clean-cache)
-      RESET=1
+      RESET_VITE=1
+      ;;
+    --reset-state|--full-reset)
+      RESET_VITE=1
+      RESET_STATE=1
       ;;
     -h|--help)
-      sed -n '2,6p' "$0"
+      sed -n '2,9p' "$0"
       exit 0
       ;;
     *)
@@ -29,31 +38,22 @@ for arg in "$@"; do
   esac
 done
 
-# --- Reset (default; opt out with --no-reset) ---
+# --- Vite cache (default on; cheap and safe — never touches user state) ---
 
-if [ "$RESET" -eq 1 ]; then
+if [ "$RESET_VITE" -eq 1 ] && [ -d node_modules/.vite ]; then
+  echo "Clearing vite dep cache (node_modules/.vite)..."
+  rm -rf node_modules/.vite
+fi
+
+# --- WebView state (opt-in; destroys tabs/workspaces/settings) ---
+
+if [ "$RESET_STATE" -eq 1 ]; then
   case "$(uname -s)" in
     Darwin*)
       if pgrep -f "DEditor.app/Contents/MacOS/DEditor" >/dev/null 2>&1; then
         echo "DEditor is still running. Quit the app (Cmd+Q) first, then re-run." >&2
-        echo "(or pass --no-reset to skip the cache wipe and start anyway)" >&2
         exit 1
       fi
-      ;;
-    Linux*)
-      if pgrep -x "deditor" >/dev/null 2>&1; then
-        echo "DEditor is still running. Quit it first, then re-run." >&2
-        echo "(or pass --no-reset to skip the cache wipe and start anyway)" >&2
-        exit 1
-      fi
-      ;;
-  esac
-
-  echo "Clearing vite dep cache (node_modules/.vite)..."
-  rm -rf node_modules/.vite
-
-  case "$(uname -s)" in
-    Darwin*)
       WEBKIT_DIR="$HOME/Library/WebKit/com.deditor.app"
       if [ -d "$WEBKIT_DIR" ]; then
         echo "Clearing macOS WebView storage ($WEBKIT_DIR)..."
@@ -61,6 +61,10 @@ if [ "$RESET" -eq 1 ]; then
       fi
       ;;
     Linux*)
+      if pgrep -x "deditor" >/dev/null 2>&1; then
+        echo "DEditor is still running. Quit it first, then re-run." >&2
+        exit 1
+      fi
       for d in "$HOME/.local/share/com.deditor.app" "$HOME/.cache/com.deditor.app"; do
         if [ -d "$d" ]; then
           echo "Clearing Linux WebView storage ($d)..."

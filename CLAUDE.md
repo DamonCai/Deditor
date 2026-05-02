@@ -82,7 +82,7 @@ DEditor 项目的协作上下文。Claude Code 在这个目录工作时自动加
 | --- | --- |
 | `fileio.ts` | 所有文件操作：open/save/save-as/close、`openFileByPath` 按类型分流 |
 | `lang.ts` | 50+ 扩展名 → CodeMirror lang loader + Shiki id + 图标。是 / 否判定（isMarkdown / isImageFile / isHexFile / 等） |
-| `persistence.ts` | localStorage v3 序列化/反序列化 |
+| `persistence.ts` | 状态序列化/反序列化（走 Rust `read_app_state` / `write_app_state` 写到 `<app_data_dir>/state.json`；老 localStorage 一次性迁移）|
 | `fileWatch.ts` | 3s 轮询 `file_mtimes`，clean tab 静默重载 / dirty tab 横幅提示 |
 | `fuzzy.ts` | 子序列模糊匹配 + 打分（边界、连击、大小写、前缀、长度惩罚） |
 | `diff.ts` | jsdiff 包 → 行对齐的 DiffRow（mod/add/del/eq）|
@@ -132,6 +132,7 @@ DEditor 项目的协作上下文。Claude Code 在这个目录工作时自动加
 | `print_window` | 触发系统打印对话框（PDF 导出） |
 | `add_recent_document` | 把路径推到 OS "最近打开" 列表（macOS Dock / Windows Jump List） |
 | `update_menu_state` | 重建原生菜单（语言变化或快捷键开关变化时调） |
+| `read_app_state` / `write_app_state` | UI state 文件持久化（`<app_data_dir>/state.json`，stage-and-rename 原子写） |
 | `frontend_log` | 前端日志桥转发到 Rust log |
 
 **Rust 侧关键设计**：
@@ -184,17 +185,26 @@ interface TabPosition {
 
 `Editor.tsx` 顶部有 `editorStateCache: Map<tabId, JSON>`。tab 切换时 Editor 卸载，把 `state.toJSON({history: historyField})` 写进 cache；下次挂载从 cache `EditorState.fromJSON` 恢复，撤销栈跨 tab 切换得以保留。`main.tsx` 订阅 store 在 tab 关闭时清缓存。
 
-### 持久化（localStorage v3）
+### 持久化（state.json，文件式）
 
-key：`deditor:state:v3`（旧 v1 / v2 自动迁移）
+**位置**：`<app_data_dir>/state.json`，由 Rust 的 `read_app_state` / `write_app_state` 命令读写
+- macOS：`~/Library/Application Support/com.deditor.app/state.json`
+- Windows：`%APPDATA%\com.deditor.app\state.json`
+- Linux：`~/.local/share/com.deditor.app/state.json`
+
+**为什么不再用 localStorage**：DEditor 是 ad-hoc 无签名打包，每次 build 的 codesign Identifier (`deditor-<随机hash>`) 都不同，WKWebView 把每次新签名当成"另一个 app"，导致 `~/Library/WebKit/com.deditor.app/` 里的 localStorage 在重装后无法被新进程读到。文件方式不依赖 webview 身份，重装/卸载重装都能恢复。
+
+**Schema 仍为 v3**（之前的迁移代码保留）。`loadPersisted()` 优先 `invoke("read_app_state")`；为空则 fallback 读 localStorage v3/v2/v1（一次性迁移，老用户升级不丢标签）；下一次 `doSave` 写入文件成功后扫掉 localStorage。
+
+**写入路径**：`write_app_state` 用 stage-and-rename（写 `state.json.tmp` → `fs::rename`）做原子写，避免半截文件。
 
 **会持久化**（`doSave` 写入）：
 - 标签元数据：`filePath / content / savedContent / cursor / scrollTopLine`
 - 工作区列表 + 文件树展开状态
 - 主题 / 语言 / 字号
 - 视图开关：showPreview / showSidebar / previewMaximized
-- 编辑器选项：softWrap / showIndentGuides / showWhitespace / showMinimap
-- autoSave 模式
+- 编辑器选项：softWrap / showIndentGuides / showWhitespace / showMinimap / autoCloseBrackets
+- autoSave / formatOnSave
 - 快捷键启用表
 
 **不持久化**：
@@ -202,8 +212,6 @@ key：`deditor:state:v3`（旧 v1 / v2 自动迁移）
 - 二进制 tab 的 `content`（data URL，可能几 MB；`filePath` 留下，启动时从磁盘 rehydrate）
 - 浮层 open 状态、活跃选区长度、CodeMirror history
 - zenMode、splitEditor（每次启动重置）
-
-**fallback**：写入 quota exceeded 时，自动降级写"仅元数据"（drop 所有 content）。
 
 ### 关键数据流
 
@@ -375,7 +383,7 @@ Settings 切语言 / 切某条快捷键开关
 
 **架构 / 工程**
 
-- localStorage v3 持久化（tabs / 工作区 / 主题 / 字号 / 编辑器开关组 / 快捷键表 / 自动保存模式 / ...）
+- 文件式持久化 `<app_data_dir>/state.json`（tabs / 工作区 / 主题 / 字号 / 编辑器开关组 / 快捷键表 / 自动保存模式 / ...），重装不丢；老 localStorage 自动一次性迁移
 - 语言品牌 logo（Simple Icons / Lucide / Font Awesome）+ 字母 badge 兜底（`LangIcon`）
 - 完整日志（Rust panic hook + 前端 error/rejection 转发，10MB 滚动）
 
@@ -442,11 +450,13 @@ Settings 切语言 / 切某条快捷键开关
 ## 启动 / 打包 / 清理
 
 ```sh
-./scripts/start.sh              # 开发（mac/linux）：默认先清 node_modules/.vite + ~/Library/WebKit/com.deditor.app，再 npm i + tauri dev
-                                # （DEditor 必须先退，否则报错；如不想清缓存加 --no-reset）
-./scripts/start.sh --no-reset   # 跳过清缓存（启动快，但可能撞到旧状态）
-.\scripts\start.ps1             # Windows 等价（默认也清 %LOCALAPPDATA%\com.deditor.app\EBWebView）
-.\scripts\start.ps1 -NoReset    # Windows: 跳过清缓存
+./scripts/start.sh                # 开发（mac/linux）：默认只清 node_modules/.vite，保留标签 / 工作区
+./scripts/start.sh --no-reset     # 连 vite 缓存都不清（启动稍快）
+./scripts/start.sh --reset-state  # 额外清掉 ~/Library/WebKit/com.deditor.app
+                                  # （会丢标签 / 工作区 / 设置；DEditor 必须先退；只在 localStorage 状态真的坏了时用）
+.\scripts\start.ps1               # Windows 等价（默认只清 .vite）
+.\scripts\start.ps1 -NoReset      # Windows: 连 vite 也不清
+.\scripts\start.ps1 -ResetState   # Windows: 额外清 %LOCALAPPDATA%\com.deditor.app\EBWebView
 
 ./scripts/build-mac.sh       # 出 .dmg（自动复制到 scripts/）
 ./scripts/build-mac.sh --universal   # arm64 + x64 通用包
@@ -525,11 +535,14 @@ SetFile -a C "$DMG"                        # 标记 "Has Custom Icon"
 | Tauri 配置 | `src-tauri/tauri.conf.json` |
 | 前端入口 | `src/main.tsx` → `src/App.tsx` |
 | Zustand store | `src/store/editor.ts`（导出 `DEFAULT_CONTENT` 欢迎文档常量） |
-| 持久化 | `src/lib/persistence.ts`（localStorage key `deditor:state:v3`，旧 v1/v2 自动迁移） |
+| 持久化 | `src/lib/persistence.ts` → Rust `read_app_state` / `write_app_state` → `<app_data_dir>/state.json`（schema v3；首次启动从老 localStorage 迁移） |
 | .dmg 最终位置 | `scripts/DEditor_<ver>_<arch>.dmg`（build-mac.sh 自动 cp） |
 | .dmg 原始位置 | `src-tauri/target/release/bundle/dmg/...` |
 | Cargo target（4GB+） | `src-tauri/target/`（clean.sh 删这个） |
-| WebView localStorage | `~/Library/WebKit/com.deditor.app/WebsiteData/LocalStorage/` |
+| 持久化 state.json（macOS） | `~/Library/Application Support/com.deditor.app/state.json` |
+| 持久化 state.json（Windows） | `%APPDATA%\com.deditor.app\state.json` |
+| 持久化 state.json（Linux） | `~/.local/share/com.deditor.app/state.json` |
+| WebView localStorage（已弃用） | `~/Library/WebKit/com.deditor.app/WebsiteData/LocalStorage/`（仅老版本残留，启动迁移后会被清掉） |
 | 日志文件（macOS） | `~/Library/Logs/com.deditor.app/deditor.log`（10MB 滚动，KeepAll） |
 | 日志文件（Windows） | `%LOCALAPPDATA%\com.deditor.app\logs\deditor.log` |
 | 日志文件（Linux） | `~/.local/share/com.deditor.app/logs/deditor.log` |

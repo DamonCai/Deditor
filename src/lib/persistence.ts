@@ -10,9 +10,13 @@ import { logInfo, logWarn } from "./logger";
 import { isBinaryRenderable } from "./lang";
 import { readAsDataUrl } from "./fileio";
 
+// localStorage keys are LEGACY: persistence now lives in a real file managed
+// by the Rust side (see read_app_state / write_app_state). We still read these
+// once on first launch after upgrade so existing users don't lose their
+// tabs/workspaces, then sweep them.
 const KEY_V3 = "deditor:state:v3";
-const KEY_V2 = "deditor:state:v2"; // legacy, migrated to v3
-const KEY_V1 = "deditor:state:v1"; // legacy, migrated to v3
+const KEY_V2 = "deditor:state:v2";
+const KEY_V1 = "deditor:state:v1";
 
 interface PersistedTab {
   filePath: string | null;
@@ -123,16 +127,32 @@ export interface UiExtras {
   previewPct: number;
 }
 
-export async function loadPersisted(): Promise<UiExtras | null> {
-  let raw: string | null = null;
+async function readRaw(): Promise<string | null> {
+  // Primary: file managed by Rust (`<app_data_dir>/state.json`). Survives
+  // reinstall — unlike WKWebView localStorage, which gets a fresh bucket
+  // every time the ad-hoc code-signing identifier changes.
   try {
-    raw =
+    const fileRaw = await invoke<string>("read_app_state");
+    if (fileRaw && fileRaw.length > 0) return fileRaw;
+  } catch (err) {
+    logWarn("read_app_state failed; falling back to localStorage", err);
+  }
+  // Fallback / migration path: read whatever the previous (localStorage)
+  // backend wrote. The very next save flushes it back into the file, after
+  // which the localStorage keys get swept (see doSave).
+  try {
+    return (
       localStorage.getItem(KEY_V3) ??
       localStorage.getItem(KEY_V2) ??
-      localStorage.getItem(KEY_V1);
+      localStorage.getItem(KEY_V1)
+    );
   } catch {
     return null;
   }
+}
+
+export async function loadPersisted(): Promise<UiExtras | null> {
+  const raw = await readRaw();
   if (!raw) return null;
 
   const data = migrate(raw);
@@ -315,9 +335,9 @@ function doSave(extras: UiExtras): void {
     workspaces: s.workspaces,
     tabs: persistableTabs.map((t) => {
       const pos = s.tabPositions[t.id];
-      // Binary tabs hold a base64 data URL in `content` — that can be many
-      // megabytes and would blow localStorage's quota. Persist filePath only
-      // and rehydrate from disk on next launch.
+      // Binary tabs hold a base64 data URL in `content` — easily multi-MB.
+      // Persist filePath only and rehydrate from disk on next launch; keeps
+      // state.json small and skips serializing data we'll re-read anyway.
       const binary = isBinaryRenderable(t.filePath);
       return {
         filePath: t.filePath,
@@ -346,29 +366,17 @@ function doSave(extras: UiExtras): void {
     autoSave: s.autoSave,
     formatOnSave: s.formatOnSave,
   };
-  try {
-    localStorage.setItem(KEY_V3, JSON.stringify(base));
-    // sweep older keys once we're successfully on v3
-    localStorage.removeItem(KEY_V2);
-    localStorage.removeItem(KEY_V1);
-  } catch (err) {
-    // Likely QuotaExceeded if files are huge; fall back to metadata-only.
-    try {
-      const compact: Persisted = {
-        ...base,
-        tabs: base.tabs
-          .filter((t) => t.filePath)
-          .map((t) => ({
-            filePath: t.filePath,
-            content: "",
-            savedContent: "",
-            cursor: t.cursor,
-            scrollTopLine: t.scrollTopLine,
-          })),
-      };
-      localStorage.setItem(KEY_V3, JSON.stringify(compact));
-    } catch {
-      logWarn("persistence save failed (quota exceeded?)", err);
-    }
-  }
+  invoke("write_app_state", { content: JSON.stringify(base) })
+    .then(() => {
+      // Sweep legacy localStorage once we know the file write succeeded —
+      // otherwise an interrupted migration could lose the snapshot.
+      try {
+        localStorage.removeItem(KEY_V3);
+        localStorage.removeItem(KEY_V2);
+        localStorage.removeItem(KEY_V1);
+      } catch {
+        /* private mode etc.; harmless */
+      }
+    })
+    .catch((err) => logWarn("write_app_state failed", err));
 }

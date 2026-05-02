@@ -1,29 +1,36 @@
 # DEditor - Windows dev launcher
 #
 # Usage:
-#   .\scripts\start.ps1             dev launch + wipe vite cache + WebView2 persistence (default)
-#   .\scripts\start.ps1 -NoReset    skip the wipe (faster restart, but stale state may bite)
+#   .\scripts\start.ps1                dev launch (default: clears node_modules\.vite only)
+#   .\scripts\start.ps1 -NoReset       skip the vite cache wipe (slightly faster)
+#   .\scripts\start.ps1 -ResetState    ALSO wipe WebView2 storage — drops all open
+#                                      tabs, workspaces, settings. Use only when
+#                                      localStorage state is actually corrupt
+#                                      (DEditor must be quit first).
 param(
-    [switch]$NoReset
+    [switch]$NoReset,
+    [switch]$ResetState
 )
 
 $ErrorActionPreference = "Stop"
 Set-Location "$PSScriptRoot\.."
 
-# --- Reset (default; opt out with -NoReset) ---
+# --- Vite cache (default on; cheap and safe — never touches user state) ---
 
 if (-not $NoReset) {
-    if (Get-Process -Name "DEditor" -ErrorAction SilentlyContinue) {
-        Write-Host "DEditor is still running. Quit it first, then re-run."
-        Write-Host "(or pass -NoReset to skip the cache wipe and start anyway)"
-        exit 1
-    }
-
     if (Test-Path node_modules\.vite) {
         Write-Host "Clearing vite dep cache (node_modules\.vite)..."
         Remove-Item -Recurse -Force node_modules\.vite
     }
+}
 
+# --- WebView state (opt-in; destroys tabs/workspaces/settings) ---
+
+if ($ResetState) {
+    if (Get-Process -Name "DEditor" -ErrorAction SilentlyContinue) {
+        Write-Host "DEditor is still running. Quit it first, then re-run."
+        exit 1
+    }
     $webview2Dir = Join-Path $env:LOCALAPPDATA "com.deditor.app\EBWebView"
     if (Test-Path $webview2Dir) {
         Write-Host "Clearing WebView2 storage ($webview2Dir)..."
