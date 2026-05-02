@@ -1554,7 +1554,7 @@ pub fn run() {
             replace_in_files,
             add_recent_document,
             read_app_state,
-            write_app_state
+            write_app_state,
             term_open,
             term_write,
             term_resize,
