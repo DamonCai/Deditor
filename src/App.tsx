@@ -3,6 +3,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import Editor from "./components/Editor";
+import EditorHost from "./components/EditorHost";
 import Preview from "./components/Preview";
 import TitleBar from "./components/TitleBar";
 import StatusBar from "./components/StatusBar";
@@ -87,6 +88,11 @@ export default function App() {
   const editorFontSize = useEditorStore((s) => s.editorFontSize);
   const setContent = useEditorStore((s) => s.setContent);
   const language = useEditorStore((s) => s.language);
+  // Tabs list — needed by EditorHost so it can keep visited tabs mounted.
+  // Subscribing to the array reference re-renders App on tab open/close +
+  // any in-place tab mutation. Cheap; the heavy DOM work belongs to the
+  // CodeMirror instances which themselves stay alive.
+  const tabs = useEditorStore((s) => s.tabs);
   const active = useActiveTab();
   const filePath = active?.filePath ?? null;
   const content = active?.content ?? "";
@@ -98,12 +104,8 @@ export default function App() {
   const isLogTab = !!active?.log;
   const isSpecialTab = isDiffTab || isLogTab;
   const previewEnabled = !isSpecialTab && showPreview && isMarkdown(filePath);
-  // Initial caret + scroll for the active tab. Read imperatively so subscribing
-  // components don't re-render every cursor move; Editor only consumes these
-  // on mount (a fresh instance is created via `key={tab.id}` per active tab).
-  const initialPos = active
-    ? useEditorStore.getState().tabPositions[active.id]
-    : undefined;
+  // EditorHost handles initial cursor / scroll restoration per-tab now —
+  // see EditorSlot. App no longer needs to thread it through.
 
   const [sidebarPx, setSidebarPx] = useState(240);
   const [previewPct, setPreviewPct] = useState(50);
@@ -557,28 +559,17 @@ export default function App() {
                     <ExternalChangeBanner tab={active} />
                   )}
                   <div className="flex-1 min-h-0 flex">
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <Editor
-                        key={active?.id ?? "no-tab"}
-                        tabId={active?.id}
-                        value={content}
-                        filePath={filePath}
-                        diff={active?.diff}
-                        log={active?.log}
+                    <div style={{ flex: 1, minWidth: 0, display: "flex" }}>
+                      <EditorHost
+                        tabs={tabs}
+                        activeId={active?.id ?? null}
                         theme={theme}
                         fontSize={editorFontSize}
-                        initialCursor={initialPos?.cursor}
-                        initialScrollLine={initialPos?.scrollTopLine}
                         externalScrollLine={
                           scrollSync?.from === "preview" ? scrollSync.line : undefined
                         }
                         onChange={setContent}
                         onScroll={(line) => setScrollSync({ line, from: "editor" })}
-                        onPositionChange={(pos) => {
-                          if (active) {
-                            useEditorStore.getState().setTabPosition(active.id, pos);
-                          }
-                        }}
                       />
                     </div>
                     {splitEditor && !isSpecialTab && (

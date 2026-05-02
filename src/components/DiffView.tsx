@@ -188,22 +188,38 @@ export default function DiffView({ spec }: Props) {
   const themeId = theme === "dark" ? "one-dark-pro" : "github-light";
   const [leftTokens, setLeftTokens] = useState<ShikiTok[][]>([]);
   const [rightTokens, setRightTokens] = useState<ShikiTok[][]>([]);
+  // Bypass Shiki for huge files. Tokenizing 200KB+ blocks the main thread
+  // for hundreds of ms. Plain text renders instantly; the user can still
+  // read the diff structure (the +/-/M backgrounds + word-diff overlay
+  // already convey the change).
+  const SHIKI_MAX_BYTES = 200 * 1024;
+  const SHIKI_MAX_LINES = 5000;
+  const tooBig = (s: string) =>
+    s.length > SHIKI_MAX_BYTES || (s.match(/\n/g)?.length ?? 0) > SHIKI_MAX_LINES;
   useEffect(() => {
     let cancelled = false;
-    void tokenizeLines(spec.leftContent, langId, themeId)
-      .then((toks) => {
-        if (!cancelled) setLeftTokens(toks);
-      })
-      .catch(() => {
-        if (!cancelled) setLeftTokens([]);
-      });
-    void tokenizeLines(spec.rightContent, langId, themeId)
-      .then((toks) => {
-        if (!cancelled) setRightTokens(toks);
-      })
-      .catch(() => {
-        if (!cancelled) setRightTokens([]);
-      });
+    if (tooBig(spec.leftContent)) {
+      setLeftTokens([]);
+    } else {
+      void tokenizeLines(spec.leftContent, langId, themeId)
+        .then((toks) => {
+          if (!cancelled) setLeftTokens(toks);
+        })
+        .catch(() => {
+          if (!cancelled) setLeftTokens([]);
+        });
+    }
+    if (tooBig(spec.rightContent)) {
+      setRightTokens([]);
+    } else {
+      void tokenizeLines(spec.rightContent, langId, themeId)
+        .then((toks) => {
+          if (!cancelled) setRightTokens(toks);
+        })
+        .catch(() => {
+          if (!cancelled) setRightTokens([]);
+        });
+    }
     return () => {
       cancelled = true;
     };

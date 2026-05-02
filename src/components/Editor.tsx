@@ -597,10 +597,32 @@ export default function Editor({
     const workspaces = useEditorStore.getState().workspaces;
     const ws = workspaceOf(filePath, workspaces);
     if (!ws) return;
-    void refreshVcsForView(viewRef.current, ws, filePath, {
-      gutterEnabled,
-      blameEnabled,
-    });
+    // Defer the two git CLI subprocess invokes (blame + diff) until the
+    // browser has a moment of idle. The editor renders + paints the file
+    // first; markers fade in milliseconds later. Fallback to setTimeout
+    // when requestIdleCallback isn't available (Safari < 16).
+    let cancelled = false;
+    const run = () => {
+      if (cancelled || !viewRef.current) return;
+      void refreshVcsForView(viewRef.current, ws, filePath, {
+        gutterEnabled,
+        blameEnabled,
+      });
+    };
+    type IdleCb = (cb: IdleRequestCallback, opts?: { timeout: number }) => number;
+    const ric = (window as unknown as { requestIdleCallback?: IdleCb })
+      .requestIdleCallback;
+    const handle: number = ric
+      ? ric(run, { timeout: 500 })
+      : window.setTimeout(run, 80);
+    return () => {
+      cancelled = true;
+      const cic = (
+        window as unknown as { cancelIdleCallback?: (h: number) => void }
+      ).cancelIdleCallback;
+      if (ric && cic) cic(handle);
+      else window.clearTimeout(handle);
+    };
   }, [filePath, gutterEnabled, blameEnabled, value]);
 
   const buildCtxItems = (): MenuItem[] => {
