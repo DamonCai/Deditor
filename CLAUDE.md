@@ -71,7 +71,7 @@ DEditor 项目的协作上下文。Claude Code 在这个目录工作时自动加
 | 层 | 路径 | 职责 |
 | --- | --- | --- |
 | **Shell** | `App.tsx` | 全局布局拼装、`Cmd+X` 键盘、OS 拖拽、文件菜单事件桥 |
-| **UI 组件** | `components/` | 纯展示 + 局部交互。对话框 / 浮层（GotoAnything、CommandPalette、GotoSymbol、FindInFiles、SettingsDialog、DiffView、HexView、ConfirmDialog、PromptDialog、ContextMenu）；专用预览器（XmindView + XmindCanvas）；按文件类型显示的工具条（MarkdownToolbar、JsonToolbar）；语言图标（LangIcon）；统一 Button（`ui/Button.tsx`，JetBrains 视觉）|
+| **UI 组件** | `components/` | 纯展示 + 局部交互。对话框 / 浮层（GotoAnything、CommandPalette、GotoSymbol、FindInFiles、SettingsDialog、DiffView、HexView、ConfirmDialog、PromptDialog、ContextMenu）；专用预览器（XmindView + XmindCanvas）；按文件类型显示的工具条（MarkdownToolbar、JsonToolbar）；语言图标（LangIcon）；统一 Button（`ui/Button.tsx`，JetBrains 视觉）；**EditorHost** 多实例编辑器宿主（per-tab CodeMirror 实例常驻内存，切 tab 走 display 切换）；Git 全套（CommitPanel、LogPanel、BranchPopover、PushDialog、StashDialog、ConflictResolutionDialog、ManageRemotesDialog、ResetHeadDialog、TagsDialog、InitRepoDialog、CloneRepoDialog、PatchDialog） |
 | **Store** | `store/editor.ts` | 单一 Zustand store。约 30 个字段，所有跨组件共享状态 |
 | **Lib** | `lib/*.ts` | 纯逻辑 / IPC 包装。每个文件单一职责 |
 | **入口** | `main.tsx` | React 挂载 + 全局 log handler + tab cache 清理订阅 |
@@ -92,7 +92,10 @@ DEditor 项目的协作上下文。Claude Code 在这个目录工作时自动加
 | `shortcuts.ts` | 可启用/禁用快捷键的元数据表 + `isEnabled()` 守卫 |
 | `i18n.ts` | 中英扁平 key 表 + `t()` 模板替换 |
 | `markdown.ts` | markdown-it 实例（anchor/task-lists 插件） |
-| `highlight.ts` | Shiki 单例 + 按需懒加载语言 |
+| `highlight.ts` | Shiki 单例 + 按需懒加载语言 + `tokenizeLines(text, lang, theme)` 给 DiffView 用 |
+| `git.ts` | Git store + `refreshGit` (250ms coalesce) + `useGitBranch / useFileGitStatus / useBranchList / fetchGitLog / fetchCommitFiles / fetchFileAt / backgroundFetch` + `requestBranchPopover` 总线 |
+| `gitMenu.ts` | FileTree → Git ›  右键菜单 24 项构建器（共享给 CommitPanel 文件行右键） |
+| `vcsGutter.ts` | CodeMirror StateField + Decoration：编辑器左侧改动条（绿+ / 蓝M / 红D） + 当前行末 inline blame widget |
 | `export.ts` | HTML / PDF 导出 |
 | `editorBridge.ts` | 持有当前活跃 EditorView 引用，跨组件命令访问 |
 | `treeRefresh.ts` | 文件树 invalidate 总线（重命名/删除后自动刷新） |
@@ -144,19 +147,25 @@ DEditor 项目的协作上下文。Claude Code 在这个目录工作时自动加
 
 ### 状态管理（Zustand store）
 
-**单一 store**，约 30 个字段，按用途分组：
+**单一 store**，按用途分组：
 
 | 组 | 字段 | 备注 |
 | --- | --- | --- |
 | 标签 | `tabs / activeId / tabPositions` | tabs[]、当前 active id、cursor + scrollLine 缓存 |
-| 工作区 | `workspaces / expandedDirs / compareMarkPath` | 工作区列表、文件树展开状态、对比标记 |
+| 工作区 | `workspaces / expandedDirs / compareMarkPath / focusedWorkspace` | `focusedWorkspace` = 用户最近在文件树点击的工作区，驱动 git 命令归属 |
 | 主题 / i18n | `theme / language` | |
-| 视图开关 | `showPreview / previewMaximized / showSidebar / zenMode / splitEditor` | |
+| 视图开关 | `showPreview / previewMaximized / showSidebar / zenMode / splitEditor / leftPanel` | `leftPanel: "files" \| "commit"` —— 侧栏内容路由器（Cmd+K 切到 commit，CommitPanel 顶部 ← 切回 files），无 ActivityBar |
 | 编辑器选项 | `editorFontSize / softWrap / showIndentGuides / showWhitespace / showMinimap / autoCloseBrackets` | |
-| 自动保存 | `autoSave: "off" \| "onBlur" \| "afterDelay"` | |
+| 自动保存 | `autoSave: "off" \| "onBlur" \| "afterDelay" / formatOnSave` | |
 | 快捷键 | `shortcuts: Record<id, boolean>` | 全局开关表 |
+| 终端 | `terminalOpen / terminalMaximized / terminalShell / terminalSessions / activeTerminalId / terminalSessionCwds` | 多 session 支持，per-session cwd 用于 BranchPopover "在终端 checkout" 复用 |
+| Diff viewer | `diffViewMode / diffIgnoreWhitespace / diffHighlightWords / diffCollapseUnchanged` | DiffView 工具栏所有勾选状态 |
+| Commit | `commitDrafts / commitAmend / commitUnchecked / commitOptions / commitMessageHistory / commitViewMode / commitFocusVersion` | 全部 per-workspace；`commitFocusVersion` 是 Cmd+K → focus textarea 的版本号触发器 |
+| Git VCS 装饰 | `gutterMarkers / inlineBlame / bgFetchEnabled / bgFetchIntervalMin` | 编辑器侧栏改动条 + inline blame + 后台 fetch 配置 |
+| Git 对话框 | `gitDialog: { kind: ...; ... } \| null` | 单 slot 路由 8 种 git 对话框（push/stash/remotes/resetHead/conflicts/init/clone/tags/createPatch/applyPatch） |
 | 浮层 | `settingsOpen / gotoAnythingOpen / commandPaletteOpen / gotoSymbolOpen / findInFilesOpen` | 浮层都升到 store，让命令面板能触发（FindInFiles 同时承担 Find & Replace） |
 | 状态栏 | `activeSelectionLength` | 选区字符数实时显示 |
+| 关闭重开 | `closedTabsStack` | LIFO，Cmd+Shift+T 复活 |
 
 **Tab 形状**：
 
@@ -166,10 +175,13 @@ interface Tab {
   filePath: string | null;
   content: string;       // 文本 / 二进制 data URL / 空串
   savedContent: string;  // 用于 dirty 判定
-  diff?: DiffSpec;       // 双栏 diff tab
+  diff?: DiffSpec;       // 双栏 diff tab — Editor 短路渲染 DiffView
+  log?: LogSpec;         // Git Log tab —— Editor 短路渲染 LogPanel
   externalChange?: string;  // 外部变更时暂存的磁盘内容
 }
 ```
+
+`isTabDirty(tab)` 对 diff / log 这两类虚拟 tab 返回 false（没东西可保存）。`persistableTabs` 也过滤掉它们（重启后从 git state 重新派生）。
 
 **TabPosition**（独立于 tab 数组，按 id 索引）：
 
@@ -182,9 +194,19 @@ interface TabPosition {
 
 放在外面是因为光标频繁变动，不想触发 TabBar/TitleBar 重渲染。
 
-**CodeMirror state 缓存**（不在 Zustand 里，模块级 Map）：
+**EditorHost 多实例编辑器宿主**（`components/EditorHost.tsx`）：
 
-`Editor.tsx` 顶部有 `editorStateCache: Map<tabId, JSON>`。tab 切换时 Editor 卸载，把 `state.toJSON({history: historyField})` 写进 cache；下次挂载从 cache `EditorState.fromJSON` 恢复，撤销栈跨 tab 切换得以保留。`main.tsx` 订阅 store 在 tab 关闭时清缓存。
+主编辑器区域不是单一 `<Editor key={activeId}>`，而是 EditorHost — 维护一个 `mounted: Set<tabId>`，**用户访问过的每个 tab 都有自己的 Editor 实例常驻内存**，叠在 `position: absolute; inset: 0` 的容器里，只有 active 的 `display: flex`。
+
+- 切回访问过的 tab → 零 CodeMirror 重建、零 Shiki re-tokenize、零 git_blame IPC，瞬间切
+- 第一次访问新 tab → 正常 mount 一次（同旧行为）
+- 关 tab → unmount Editor 释放内存
+- 启动只 mount 当前 active tab，冷启动不变慢
+- 内存代价：每个 visited tab ~5-15MB CodeMirror state + DOM；在桌面应用预算内
+
+**CodeMirror state 缓存**（兜底，不在 Zustand 里，模块级 Map）：
+
+`Editor.tsx` 顶部有 `editorStateCache: Map<tabId, JSON>`。EditorHost 让大多数 tab 切换都不再触发 unmount，所以这个 cache 只在 split-editor 等少数 unmount 路径时仍然 fallback 用。`main.tsx` 订阅 store 在 tab 关闭时清缓存。
 
 ### 持久化（state.json，文件式）
 
@@ -409,7 +431,7 @@ DEditor 的 git 能力按 JetBrains IntelliJ 一比一对齐。所有 git 操作
 | `lib/gitMenu.ts` | FileTree 右键的 `Git ›` 子菜单（24 项，1:1 还原 JetBrains） |
 | `lib/vcsGutter.ts` | CodeMirror StateField + Decoration：左侧改动条（绿+/蓝M/红D）+ 当前行末 inline blame widget |
 | `components/BranchPopover.tsx` | TitleBar 分支按钮 → Cascading 菜单（搜索 + Local/Remote 分组 + per-row submenu：Checkout / Compare / Merge / Rebase / Pull rebase or merge / Update / Push / Rename / Delete） |
-| `components/CommitPanel.tsx` | 左侧 sidebar（ActivityBar 第二个图标 / Cmd+K）：tree 视图 + tri-state checkbox + 文件行右键菜单（11 项 + Git 子菜单） |
+| `components/CommitPanel.tsx` | 侧栏 tool window — Cmd+K（或右键 Git → Commit Directory）把侧栏从 FileTree 切到 Commit；顶栏左 ← 按钮切回 Project。Tree / Flat dropdown、tri-state checkbox、message 50/72 列指示、Cmd+↑/↓ 调历史消息、⚙ 选项菜单（signoff / allow-empty / author override）、文件行右键菜单（12 项 + Git 子菜单） |
 | `components/LogPanel.tsx` | Editor-area tab：filter toolbar / commit list / detail / 12 项右键（含 Cherry-Pick / Revert / Reset / Reword / Squash / Drop / Open on Remote / Compare Selected） |
 | `components/PushDialog.tsx` | commit preview + force-with-lease + tags + set-upstream |
 | `components/StashDialog.tsx` | list / apply / pop / drop / show diff / new with options |
@@ -429,7 +451,7 @@ DEditor 的 git 能力按 JetBrains IntelliJ 一比一对齐。所有 git 操作
 
 **Diff Viewer 工具栏**
 
-Side-by-side / Unified 切换 · Ignore whitespace（none/leading/all）· Highlight words · Collapse unchanged fragments（threshold=6, context=3）· Shiki 语法高亮（按 `rightPath` 检测语言）
+Side-by-side / Unified 切换 · Ignore whitespace（none/leading/all）· Highlight words · Collapse unchanged fragments（threshold=6, context=3）· Shiki 语法高亮（按 `rightPath` 检测语言；文件 >200KB 或 >5000 行自动跳过 tokenize 渲原文，避免阻塞）
 
 **后台 fetch**
 
@@ -468,8 +490,13 @@ Side-by-side / Unified 切换 · Ignore whitespace（none/leading/all）· Highl
 | Replace in Files | 复用 Find in Files 的命中点位（同一限制） |
 | Hex View | 256 KB 上限；超过部分截断 |
 | 文件 mtime 轮询 | 3 秒，每次最多查所有 named tab 的 mtime（一次 IPC 批量） |
-| localStorage 配额 | 二进制 tab 不写 content；超额自动降级到元数据-only |
-| Editor 重挂载 | `key={tab.id}` 每次切 tab 卸载 + mount。state.toJSON 缓存让感知上"无缝" |
+| state.json 写入 | 500ms debounce；JSON.stringify + Tauri IPC 写入磁盘，stage-and-rename 原子 |
+| **Tab 切换** | EditorHost 让访问过的 tab 常驻内存，仅切 `display`，不重建 CodeMirror |
+| **Store re-render** | 所有大组件用 per-field selector（`useEditorStore((s) => s.x)`）。早期版本用 `useEditorStore()` destructure 整 store，任何字段变都重渲整个 App + 1000-行 DiffView，已修 |
+| **VCS gutter / blame** | 在 `requestIdleCallback`（fallback `setTimeout(80ms)`）里 fetch git_blame / git_file_diff_lines，编辑器先画好代码，markers 几十毫秒后追加 |
+| **DiffView Shiki 上限** | `>200KB` 或 `>5000 行` 跳过 Shiki tokenize（直接渲原文），避免主线程阻塞 |
+| **DiffView 折叠** | 长度 > 6 的连续 eq 行折叠成 "▾ N hidden"，留 3 行 context；toolbar 复选框可关 |
+| **后台 git fetch** | 5min 默认，per-workspace 串行 `git fetch --all --prune`，启动延迟 5s；ahead/behind chip 暴露结果 |
 | Vite chunk warning | `dist/index-*.js` 1.3MB（gzip 455KB）—— Shiki 把所有语法包打到一起，预期 |
 
 ## 已实现功能（截至 2026-05-02）
@@ -528,7 +555,7 @@ Side-by-side / Unified 切换 · Ignore whitespace（none/leading/all）· Highl
 - **Cmd+, 设置对话框**：通用（主题/语言/字号/自动保存）+ 编辑器（开关组）+ 快捷键（每条都可禁用）
 - **Cmd+K 专注模式**（Zen）+ **Cmd+\\ 分屏编辑**（同 tab 双视图独立光标/滚动）
 - macOS / Windows 原生菜单栏（中英文 i18n，**objc2 清掉 AppKit 注入的 Start Dictation / AutoFill / Emoji 等**）
-- StatusBar：行/列、选区字符数、EOL（LF/CRLF）、UTF-8、语言、行/字数
+- StatusBar：行/列、选区字符数、EOL（LF/CRLF）、UTF-8、语言、行/字数 + 终端 toggle 图标；diff tab 时从 `tab.diff.rightPath`/`rightContent` 读取（不再误识别为 Markdown）；分支按钮已搬到 TitleBar
 - 统一 Button 组件（`ui/Button.tsx`，4 variant × 4 size，pressed 状态用于切换按钮）
 
 **架构 / 工程**
@@ -703,6 +730,9 @@ SetFile -a C "$DMG"                        # 标记 "Has Custom Icon"
 | --- | --- |
 | 加新支持的语言 / 扩展名 | `src/lib/lang.ts` 的 `ext` 表（CodeMirror loader + Shiki id + 图标） |
 | 加新文件类型分流（视频之类） | `src/lib/lang.ts` 加 `is*File()` + `src/lib/fileio.ts` 的 `openFileByPath` 分流 + `src/components/Editor.tsx` 加渲染分支 |
+| 加新 git 命令 | `src-tauri/src/lib.rs` 加 `#[tauri::command] fn git_xxx`（用 `run_git` / `run_git_capture` helper）+ 注册 + 前端 `lib/git.ts` 加包装 |
+| 加新虚拟 tab 类型（如 conflict log） | `Tab` 加 `xxx?: XxxSpec` 字段 + `Editor.tsx` 短路分支 + `TabBar.tsx` 加 label 分支 + `isTabDirty` / `persistableTabs` 排除 |
+| 加新 git 对话框 | `gitDialog: { kind: "yyy"; ... }` 加分支 + `App.tsx` 的 `<GitDialogHost>` switch + 新 component + i18n |
 | 加新 Rust 命令 | `src-tauri/src/lib.rs` 加 `#[tauri::command] fn xxx(...)` + `invoke_handler![]` 注册 |
 | 加新 React 组件 | 放进 `src/components/`，UI 状态如要全局共享则加进 `store/editor.ts` |
 | 加新快捷键（可禁用的） | `src/lib/shortcuts.ts` 加 `ShortcutId` 枚举值 + `SHORTCUTS` 元数据 + `App.tsx` 的 keydown handler 加分支 |
