@@ -25,13 +25,13 @@ const PALETTE = {
   number: "#2aacb8",         // cyan — numbers / atoms
   comment: "#7a7e85",        // gray italic — comments
   fn: "#56a8f5",             // blue — function / method names
-  type: "#dfe1e5",           // default — types (kept calm)
+  type: "#ffc66d",
   constant: "#c77dbb",       // purple — constants / true / false / null
   variable: "#dfe1e5",       // default text color for variables
-  property: "#dfe1e5",       // property access stays calm
+  property: "#9876aa",
   tag: "#cf8e6d",            // HTML/XML tags reuse keyword orange
   attr: "#aaa9fc",           // soft purple for attributes
-  meta: "#7a7e85",           // pragma / annotations / decorators
+  meta: "#bbb529",            // mustard — pragmas, decorators, JSDoc tags
   invalid: "#ff5c57",        // errors
   link: "#56a8f5",
   heading: "#cf8e6d",
@@ -108,11 +108,31 @@ const editorTheme = EditorView.theme(
 const highlightStyle = HighlightStyle.define([
   { tag: t.keyword, color: PALETTE.keyword },
   { tag: [t.controlKeyword, t.moduleKeyword, t.operatorKeyword], color: PALETTE.keyword },
-  { tag: [t.name, t.deleted, t.character, t.macroName], color: PALETTE.variable },
+  { tag: [t.name, t.deleted, t.character], color: PALETTE.variable },
+  { tag: [t.macroName], color: PALETTE.fn },
   { tag: [t.propertyName], color: PALETTE.property },
-  { tag: [t.function(t.variableName), t.function(t.propertyName), t.labelName], color: PALETTE.fn },
+  { tag: [t.null], color: PALETTE.constant },
+  {
+    tag: [
+      t.function(t.variableName),
+      t.function(t.propertyName),
+      t.definition(t.function(t.variableName)),
+      t.labelName,
+    ],
+    color: PALETTE.fn,
+  },
   { tag: [t.color, t.constant(t.name), t.standard(t.name)], color: PALETTE.constant },
-  { tag: [t.definition(t.name), t.separator], color: PALETTE.text },
+  {
+    tag: [
+      t.definition(t.variableName),
+      t.definition(t.propertyName),
+      t.definition(t.typeName),
+      t.definition(t.className),
+    ],
+    color: PALETTE.type,
+    fontWeight: "500",
+  },
+  { tag: [t.separator], color: PALETTE.text },
   { tag: [t.typeName, t.className, t.namespace], color: PALETTE.type },
   { tag: [t.number, t.changed, t.annotation, t.modifier, t.self], color: PALETTE.number },
   { tag: [t.atom, t.bool, t.special(t.variableName)], color: PALETTE.constant },

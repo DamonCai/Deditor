@@ -45,13 +45,14 @@ export default function JsonToolbar() {
 
   return (
     <div
-      className="flex items-center gap-1 px-2 select-none"
+      className="flex flex-nowrap items-center gap-1 px-2 select-none"
       style={{
         height: 32,
         background: "var(--bg-soft)",
         borderBottom: "1px solid var(--border)",
         flexShrink: 0,
         overflowX: "auto",
+        whiteSpace: "nowrap",
       }}
     >
       <Btn
@@ -92,7 +93,13 @@ function Btn({
       size="sm"
       title={title}
       onClick={onClick}
-      style={primary ? undefined : { color: "var(--text)" }}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        flexShrink: 0,
+        whiteSpace: "nowrap",
+        ...(primary ? {} : { color: "var(--text)" }),
+      }}
     >
       {children}
     </Button>
@@ -107,6 +114,7 @@ function Divider() {
         height: 14,
         background: "var(--border)",
         margin: "0 4px",
+        flexShrink: 0,
       }}
     />
   );
