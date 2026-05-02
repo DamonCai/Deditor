@@ -25,7 +25,7 @@ const PALETTE = {
   number: "#1750eb",         // blue — numbers
   comment: "#8c8c8c",        // gray italic — comments
   fn: "#00627a",             // teal — function / method names
-  type: "#000000",           // default — types
+  type: "#a31515",
   constant: "#871094",       // purple — constants / true / false / null
   variable: "#000000",
   property: "#871094",
@@ -110,11 +110,31 @@ const editorTheme = EditorView.theme(
 const highlightStyle = HighlightStyle.define([
   { tag: t.keyword, color: PALETTE.keyword, fontWeight: "500" },
   { tag: [t.controlKeyword, t.moduleKeyword, t.operatorKeyword], color: PALETTE.keyword, fontWeight: "500" },
-  { tag: [t.name, t.deleted, t.character, t.macroName], color: PALETTE.variable },
+  { tag: [t.name, t.deleted, t.character], color: PALETTE.variable },
+  { tag: [t.macroName], color: PALETTE.fn },
   { tag: [t.propertyName], color: PALETTE.property },
-  { tag: [t.function(t.variableName), t.function(t.propertyName), t.labelName], color: PALETTE.fn },
+  { tag: [t.null], color: PALETTE.constant },
+  {
+    tag: [
+      t.function(t.variableName),
+      t.function(t.propertyName),
+      t.definition(t.function(t.variableName)),
+      t.labelName,
+    ],
+    color: PALETTE.fn,
+  },
   { tag: [t.color, t.constant(t.name), t.standard(t.name)], color: PALETTE.constant },
-  { tag: [t.definition(t.name), t.separator], color: PALETTE.text },
+  {
+    tag: [
+      t.definition(t.variableName),
+      t.definition(t.propertyName),
+      t.definition(t.typeName),
+      t.definition(t.className),
+    ],
+    color: PALETTE.type,
+    fontWeight: "500",
+  },
+  { tag: [t.separator], color: PALETTE.text },
   { tag: [t.typeName, t.className, t.namespace], color: PALETTE.type, fontWeight: "500" },
   { tag: [t.number, t.changed, t.annotation, t.modifier, t.self], color: PALETTE.number },
   { tag: [t.atom, t.bool, t.special(t.variableName)], color: PALETTE.constant },

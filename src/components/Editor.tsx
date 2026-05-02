@@ -543,15 +543,18 @@ export default function Editor({
 
   useEffect(() => {
     let cancelled = false;
-    detectLang(filePath)
+    const def = detectLang(filePath);
+    def
       .cm()
       .then((support: LanguageSupport) => {
         if (cancelled || !viewRef.current) return;
         viewRef.current.dispatch({
           effects: langCompartment.current.reconfigure(support),
         });
+        logInfo(`lang set: ${def.label} for ${filePath ?? "(no path)"}`);
       })
-      .catch(() => {
+      .catch((err) => {
+        logError(`load language failed for ${filePath ?? "(no path)"}`, err);
         if (!viewRef.current) return;
         viewRef.current.dispatch({
           effects: langCompartment.current.reconfigure([]),
