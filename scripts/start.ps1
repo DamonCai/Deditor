@@ -1,6 +1,35 @@
 # DEditor - Windows dev launcher
+#
+# Usage:
+#   .\scripts\start.ps1             dev launch + wipe vite cache + WebView2 persistence (default)
+#   .\scripts\start.ps1 -NoReset    skip the wipe (faster restart, but stale state may bite)
+param(
+    [switch]$NoReset
+)
+
 $ErrorActionPreference = "Stop"
 Set-Location "$PSScriptRoot\.."
+
+# --- Reset (default; opt out with -NoReset) ---
+
+if (-not $NoReset) {
+    if (Get-Process -Name "DEditor" -ErrorAction SilentlyContinue) {
+        Write-Host "DEditor is still running. Quit it first, then re-run."
+        Write-Host "(or pass -NoReset to skip the cache wipe and start anyway)"
+        exit 1
+    }
+
+    if (Test-Path node_modules\.vite) {
+        Write-Host "Clearing vite dep cache (node_modules\.vite)..."
+        Remove-Item -Recurse -Force node_modules\.vite
+    }
+
+    $webview2Dir = Join-Path $env:LOCALAPPDATA "com.deditor.app\EBWebView"
+    if (Test-Path $webview2Dir) {
+        Write-Host "Clearing WebView2 storage ($webview2Dir)..."
+        Remove-Item -Recurse -Force $webview2Dir
+    }
+}
 
 # --- Toolchain checks ---
 

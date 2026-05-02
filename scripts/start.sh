@@ -1,8 +1,75 @@
 #!/usr/bin/env bash
 # DEditor - macOS / Linux dev launcher
+#
+# Usage:
+#   ./scripts/start.sh             dev launch + wipe vite cache + WebView persistence (default)
+#   ./scripts/start.sh --no-reset  skip the wipe (faster restart, but stale state may bite)
 set -e
 
 cd "$(dirname "$0")/.."
+
+RESET=1
+for arg in "$@"; do
+  case "$arg" in
+    --no-reset|--keep-cache)
+      RESET=0
+      ;;
+    --reset|--clean-cache)
+      RESET=1
+      ;;
+    -h|--help)
+      sed -n '2,6p' "$0"
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $arg" >&2
+      echo "Run with --help for usage." >&2
+      exit 2
+      ;;
+  esac
+done
+
+# --- Reset (default; opt out with --no-reset) ---
+
+if [ "$RESET" -eq 1 ]; then
+  case "$(uname -s)" in
+    Darwin*)
+      if pgrep -f "DEditor.app/Contents/MacOS/DEditor" >/dev/null 2>&1; then
+        echo "DEditor is still running. Quit the app (Cmd+Q) first, then re-run." >&2
+        echo "(or pass --no-reset to skip the cache wipe and start anyway)" >&2
+        exit 1
+      fi
+      ;;
+    Linux*)
+      if pgrep -x "deditor" >/dev/null 2>&1; then
+        echo "DEditor is still running. Quit it first, then re-run." >&2
+        echo "(or pass --no-reset to skip the cache wipe and start anyway)" >&2
+        exit 1
+      fi
+      ;;
+  esac
+
+  echo "Clearing vite dep cache (node_modules/.vite)..."
+  rm -rf node_modules/.vite
+
+  case "$(uname -s)" in
+    Darwin*)
+      WEBKIT_DIR="$HOME/Library/WebKit/com.deditor.app"
+      if [ -d "$WEBKIT_DIR" ]; then
+        echo "Clearing macOS WebView storage ($WEBKIT_DIR)..."
+        rm -rf "$WEBKIT_DIR"
+      fi
+      ;;
+    Linux*)
+      for d in "$HOME/.local/share/com.deditor.app" "$HOME/.cache/com.deditor.app"; do
+        if [ -d "$d" ]; then
+          echo "Clearing Linux WebView storage ($d)..."
+          rm -rf "$d"
+        fi
+      done
+      ;;
+  esac
+fi
 
 # --- Toolchain checks ---
 

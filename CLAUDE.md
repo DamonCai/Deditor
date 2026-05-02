@@ -71,7 +71,7 @@ DEditor 项目的协作上下文。Claude Code 在这个目录工作时自动加
 | 层 | 路径 | 职责 |
 | --- | --- | --- |
 | **Shell** | `App.tsx` | 全局布局拼装、`Cmd+X` 键盘、OS 拖拽、文件菜单事件桥 |
-| **UI 组件** | `components/` | 纯展示 + 局部交互。10 个对话框 / 浮层（GotoAnything、CommandPalette、GotoSymbol、FindInFiles、SettingsDialog、DiffView、HexView、ConfirmDialog、PromptDialog、ContextMenu）|
+| **UI 组件** | `components/` | 纯展示 + 局部交互。对话框 / 浮层（GotoAnything、CommandPalette、GotoSymbol、FindInFiles、SettingsDialog、DiffView、HexView、ConfirmDialog、PromptDialog、ContextMenu）；专用预览器（XmindView + XmindCanvas）；按文件类型显示的工具条（MarkdownToolbar、JsonToolbar）；语言图标（LangIcon）；统一 Button（`ui/Button.tsx`，JetBrains 视觉）|
 | **Store** | `store/editor.ts` | 单一 Zustand store。约 30 个字段，所有跨组件共享状态 |
 | **Lib** | `lib/*.ts` | 纯逻辑 / IPC 包装。每个文件单一职责 |
 | **入口** | `main.tsx` | React 挂载 + 全局 log handler + tab cache 清理订阅 |
@@ -97,7 +97,20 @@ DEditor 项目的协作上下文。Claude Code 在这个目录工作时自动加
 | `editorBridge.ts` | 持有当前活跃 EditorView 引用，跨组件命令访问 |
 | `treeRefresh.ts` | 文件树 invalidate 总线（重命名/删除后自动刷新） |
 | `logger.ts` | 前端 → Rust 日志桥 + window.error 全局 hook |
-| `plantumlHydrate.ts` | PlantUML 块异步渲染 |
+| `plantumlHydrate.ts` | PlantUML 块异步渲染（用公共 server，需联网） |
+| `mermaidHydrate.ts` | Mermaid 图表懒加载渲染（mermaid ~700KB，按需 import） |
+| `localImgHydrate.ts` | Markdown 预览本地图片：`<img data-raw-src>` 重写为 `convertFileSrc()` 出来的 asset:// URL |
+| `pathUtil.ts` | 轻量路径工具（`isLocalRef` / `stripFileScheme` / `dirname` / `resolveAgainst`），POSIX + Windows 兼容 |
+| `format.ts` | Prettier 包装（standalone + plugin 懒加载），按扩展名走对应 parser，失败返回 null 让调用端兜底 |
+| `markdownTable.ts` | Markdown 表格 keymap：Tab / Shift+Tab 跨格、Enter 加新行、对齐分隔行重排 |
+| `jsonFormat.ts` | JSON / JSONC / JSON5 智能格式化：`smartFormat` / `compactJson` / `sortKeysFormat`，能解 Python `repr(dict)` 字面量 |
+| `codeBlockComplete.ts` | Markdown ` ``` ` 输入后弹出语言名补全（mermaid / plantuml 优先，常用语言其次） |
+| `colorPreview.ts` | CodeMirror ViewPlugin：在 hex / rgb / hsl 颜色字面量前画一个小色块 widget，仅可见行 |
+| `inspectionMarkers.ts` | IntelliJ 风格右侧 strip：把 bookmarks 等位置在文件高度上等比例打点，点击跳行 |
+| `islandLightTheme.ts` / `islandDarkTheme.ts` | 自带的 JetBrains-Island 风格 CodeMirror 主题（替代默认 oneDark） |
+| `xmind/parse.ts` | 解析 .xmind 压缩包（fflate）→ workbook / sheets / topics 模型，兼容 v3 (content.json) 与 legacy (content.xml) |
+| `xmind/edit.ts` | 把 mind-elixir 节点树写回 .xmind 压缩包，保留 XMind-only 字段（notes / labels / structureClass …）|
+| `xmind/layout.ts` | XMind `structureClass` → mind-elixir Direction（right / left / side / down）映射 |
 
 ### Rust 后端
 
@@ -106,16 +119,18 @@ DEditor 项目的协作上下文。Claude Code 在这个目录工作时自动加
 | 命令 | 用途 |
 | --- | --- |
 | `read_text_file` / `write_text_file` | 文本读写 |
-| `read_binary_as_base64` | 图片/PDF/音视频/hex 用 |
+| `read_binary_as_base64` / `write_binary_file` | 二进制读写（图片/PDF/音视频/hex/.xmind 用；写用于 XMind 保存等场景）|
 | `list_dir` | 文件树懒加载（一层）|
 | `list_workspace_files` | Goto Anything 用，递归 DFS（50k 上限）|
 | `find_in_files` | Find in Files，含 NUL byte 二进制探测 + 1MB/file 上限 + 5k hits 上限 |
+| `replace_in_files` | Find & Replace 全工作区批量替换（基于 `find_in_files` 命中点位） |
 | `file_mtimes` | 批量 mtime 轮询（外部变更检测） |
 | `path_kind` | "file" / "dir" / "missing"，drop 时分流 |
 | `resolve_path` | `~` 展开 + canonicalize |
 | `save_image` | 粘贴图片落盘到 `<workspace>/assets/` |
 | `create_file` / `create_dir` / `rename_path` / `delete_path` | 文件树右键操作 |
 | `print_window` | 触发系统打印对话框（PDF 导出） |
+| `add_recent_document` | 把路径推到 OS "最近打开" 列表（macOS Dock / Windows Jump List） |
 | `update_menu_state` | 重建原生菜单（语言变化或快捷键开关变化时调） |
 | `frontend_log` | 前端日志桥转发到 Rust log |
 
@@ -135,10 +150,10 @@ DEditor 项目的协作上下文。Claude Code 在这个目录工作时自动加
 | 工作区 | `workspaces / expandedDirs / compareMarkPath` | 工作区列表、文件树展开状态、对比标记 |
 | 主题 / i18n | `theme / language` | |
 | 视图开关 | `showPreview / previewMaximized / showSidebar / zenMode / splitEditor` | |
-| 编辑器选项 | `editorFontSize / softWrap / showIndentGuides / showWhitespace / showMinimap` | |
+| 编辑器选项 | `editorFontSize / softWrap / showIndentGuides / showWhitespace / showMinimap / autoCloseBrackets` | |
 | 自动保存 | `autoSave: "off" \| "onBlur" \| "afterDelay"` | |
 | 快捷键 | `shortcuts: Record<id, boolean>` | 全局开关表 |
-| 浮层 | `settingsOpen / gotoAnythingOpen / commandPaletteOpen / gotoSymbolOpen / findInFilesOpen` | 浮层都升到 store，让命令面板能触发 |
+| 浮层 | `settingsOpen / gotoAnythingOpen / commandPaletteOpen / gotoSymbolOpen / findInFilesOpen` | 浮层都升到 store，让命令面板能触发（FindInFiles 同时承担 Find & Replace） |
 | 状态栏 | `activeSelectionLength` | 选区字符数实时显示 |
 
 **Tab 形状**：
@@ -202,6 +217,7 @@ FileTree click / Cmd+P / Cmd+O / drag
      ├─ 图片    → invoke("read_binary_as_base64") → data:image/...    [<img>]
      ├─ PDF     → 同上                              data:application/pdf [<iframe>]
      ├─ 音/视频 → 同上                              data:audio|video/... [<audio>/<video>]
+     ├─ .xmind  → 同上                              data:application/vnd.xmind.workbook [XmindView → XmindCanvas]
      └─ hex     → 同上                              data:application/octet-stream [HexView]
 ```
 
@@ -254,16 +270,20 @@ Settings 切语言 / 切某条快捷键开关
 
 ### CodeMirror 集成
 
-**单 view + Compartments**：每个可热切换的 extension 用独立 Compartment 包，运行时 `dispatch(compartment.reconfigure(newExt))`。当前 5 个：
+**单 view + Compartments**：每个可热切换的 extension 用独立 Compartment 包，运行时 `dispatch(compartment.reconfigure(newExt))`。当前 8 个：
 
 | Compartment | 触发源 | 切换内容 |
 | --- | --- | --- |
-| `themeCompartment` | `theme` | `oneDark` / `[]` |
+| `themeCompartment` | `theme` | `islandLight` / `islandDark`（自家 JetBrains 风主题，见 `lib/islandLightTheme.ts` / `islandDarkTheme.ts`） |
 | `langCompartment` | `filePath` | 异步 `LanguageSupport` |
 | `wrapCompartment` | `softWrap` | `EditorView.lineWrapping` / `[]` |
 | `indentCompartment` | `showIndentGuides` | `indentationMarkers()` / `[]` |
 | `whitespaceCompartment` | `showWhitespace` | `highlightWhitespace()` / `[]` |
 | `minimapCompartment` | `showMinimap` | `showMinimap.of({...})` / `[]` |
+| `autoCloseCompartment` | `autoCloseBrackets` | `closeBrackets()` / `[]` |
+| `completionCompartment` | `filePath` | Markdown 文件挂 `codeBlockCompletion` + `autocompletion()`，其它文件挂默认 `autocompletion()` |
+
+**始终挂载（不进 Compartment）**：`colorPreview()`（仅文本类文件）、`inspectionMarkers()`、Markdown 表格 keymap（仅 `.md`）。
 
 **自定义 keymap**：在 `keymap.of(...)` 里加在默认前面。所有自定义条目（多光标 / 全选匹配 / Bookmarks）的 `run` 函数会读 store 的 shortcuts 表，禁用时返回 `false` 让按键透出。
 
@@ -287,13 +307,14 @@ Settings 切语言 / 切某条快捷键开关
 | --- | --- |
 | Goto Anything 索引 | 50k 文件硬上限；每次打开重新走 DFS（典型项目 < 50ms） |
 | Find in Files | 5k hits / 1MB per file / NUL-byte 二进制探测 |
+| Replace in Files | 复用 Find in Files 的命中点位（同一限制） |
 | Hex View | 256 KB 上限；超过部分截断 |
 | 文件 mtime 轮询 | 3 秒，每次最多查所有 named tab 的 mtime（一次 IPC 批量） |
 | localStorage 配额 | 二进制 tab 不写 content；超额自动降级到元数据-only |
 | Editor 重挂载 | `key={tab.id}` 每次切 tab 卸载 + mount。state.toJSON 缓存让感知上"无缝" |
 | Vite chunk warning | `dist/index-*.js` 1.3MB（gzip 455KB）—— Shiki 把所有语法包打到一起，预期 |
 
-## 已实现功能（截至 2026-04-27）
+## 已实现功能（截至 2026-05-02）
 
 **编辑器内核**
 
@@ -303,6 +324,10 @@ Settings 切语言 / 切某条快捷键开关
 - **切 Tab 保留撤销栈**（state.toJSON({history}) 缓存）
 - Bookmarks（F2 / F8 / Shift+F8 / Cmd+Shift+F2）随编辑漂移
 - 自动保存：关 / 失焦时 / 停止编辑 1.5s 后
+- **JetBrains 风格 Island 主题**（自带 light / dark，替代默认 oneDark）
+- **颜色字面量预览色块**（hex / rgb / hsl 行内 swatch widget）+ **右侧 Inspection Strip**（bookmark 等位置等比打点 + 点击跳行）
+- **自动闭合括号 / 引号**（`autoCloseBrackets`，可在设置中关）
+- **代码块 fenced 语言名补全**（Markdown ` ``` ` 后弹候选，mermaid / plantuml 优先）
 
 **文件操作**
 
@@ -312,35 +337,46 @@ Settings 切语言 / 切某条快捷键开关
 - 导出 HTML / PDF（.md 可见）
 - **外部变更检测**（3s 轮询 mtime，clean 静默重载、dirty 弹横幅）
 - 文件对比（Select for Compare → 另一个文件 Compare with → 双栏 diff）
+- **OS 最近打开列表注入**（`add_recent_document`，macOS Dock / Windows Jump List 同步）
+- **Prettier 一键格式化**（`lib/format.ts`，懒加载 parser；JS/TS/JSON/CSS/HTML/MD/YAML 等）
 
 **预览能力**
 
 - Markdown 分栏实时预览（仅 .md/.markdown/.mdx），编辑↔预览滚动联动
-- markdown-it + Shiki + PlantUML（需联网）
+- markdown-it + Shiki + **PlantUML（需联网）+ Mermaid（懒加载）**
+- **本地图片在预览里能直接显示**（`localImgHydrate`：相对路径 → asset:// URL）
 - 图片 / PDF / 音视频内嵌预览
+- **.xmind 思维导图**（`XmindView`，read-only 渲染 + edit 模式 mind-elixir 编辑回写，保留 XMind-only 字段如 notes / labels / structureClass）
 - Office / 压缩包 / 可执行文件等二进制 → hex dump（256KB 上限）
+
+**编辑辅助工具条**
+
+- **MarkdownToolbar**（仅 .md）：B / I / 代码 / 链接 / 列表 / 引用 / 表格 / 分隔线 / 任务列表 / 字号 等
+- **JsonToolbar**（仅 .json / .jsonc / .json5）：smart-format（容忍 JSON5 + Python `repr`） / compact / sort keys
+- **Markdown 表格 keymap**：Tab / Shift+Tab 跨格、Enter 加新行、对齐分隔行重排
 
 **导航 / 搜索**
 
 - **Cmd+P Goto Anything**：跨工作区模糊文件搜索（fuzzy.ts，50k 文件上限）
-- **Cmd+Shift+P 命令面板**：13 条命令模糊搜索 + 执行
+- **Cmd+Shift+P 命令面板**：模糊搜索 + 执行（commands.ts 注册表）
 - **Cmd+R Goto Symbol**：当前文件大纲（regex-based，支持 MD/JS/TS/Py/Rust/Go/Ruby/PHP/Shell）
-- **Cmd+Shift+F Find in Files**：全工作区文本搜索（NUL byte 跳二进制，结果按文件分组）
+- **Cmd+Shift+F Find in Files**：全工作区文本搜索（NUL byte 跳二进制，结果按文件分组）+ **Replace in Files**（全工作区批量替换）
 - **Cmd+Alt+G Goto Line** / **Cmd+G 找下一个匹配** / Cmd+F 当前文件查找
 
 **UI / 体验**
 
 - 文件树侧栏：懒加载、`~` 展开、展开状态持久化、右键 (新建/重命名/删除/Reveal in Finder/对比)
 - 亮/暗主题（持久化、跟随系统初始）+ 中英文 UI 切换（实时）
-- **Cmd+, 设置对话框**：通用（主题/语言/字号/自动保存）+ 编辑器（5 个开关）+ 快捷键（每条都可禁用）
+- **Cmd+, 设置对话框**：通用（主题/语言/字号/自动保存）+ 编辑器（开关组）+ 快捷键（每条都可禁用）
 - **Cmd+K 专注模式**（Zen）+ **Cmd+\\ 分屏编辑**（同 tab 双视图独立光标/滚动）
 - macOS / Windows 原生菜单栏（中英文 i18n，**objc2 清掉 AppKit 注入的 Start Dictation / AutoFill / Emoji 等**）
 - StatusBar：行/列、选区字符数、EOL（LF/CRLF）、UTF-8、语言、行/字数
+- 统一 Button 组件（`ui/Button.tsx`，4 variant × 4 size，pressed 状态用于切换按钮）
 
 **架构 / 工程**
 
-- localStorage v3 持久化（tabs / 工作区 / 主题 / 字号 / 5 个编辑器开关 / 快捷键表 / 自动保存模式 / ...）
-- 语言品牌 logo（Simple Icons / Lucide / Font Awesome）+ 字母 badge 兜底
+- localStorage v3 持久化（tabs / 工作区 / 主题 / 字号 / 编辑器开关组 / 快捷键表 / 自动保存模式 / ...）
+- 语言品牌 logo（Simple Icons / Lucide / Font Awesome）+ 字母 badge 兜底（`LangIcon`）
 - 完整日志（Rust panic hook + 前端 error/rejection 转发，10MB 滚动）
 
 ## 路线图（按优先级，从上往下做）
@@ -374,20 +410,43 @@ Settings 切语言 / 切某条快捷键开关
 - [x] **D.2 Soft wrap 开关**：Compartment 运行时切，Settings 勾选
 - [x] **D.3 自动保存 / 失焦自动保存**：`saveAllDirty()` 工具 + App.tsx 监听 blur / 1.5s debounce，三档可选（关 / 失焦 / 停止编辑后）
 
-**全部已完成**。后续如有新需求，从下面的 "其它已搁置" 里挑或者另起。
+**E. 0.6.0 — 格式化 + 工具条**
+
+- [x] **E.1 Prettier 一键格式化**：`lib/format.ts` 包装 prettier/standalone，按 ext 选 parser，所有 plugin 懒加载（JS/TS/JSON/CSS/HTML/MD/YAML 等）
+- [x] **E.2 Markdown 表格 keymap**：`lib/markdownTable.ts`，Tab/Shift+Tab 跨格、Enter 加新行、对齐分隔行重排
+- [x] **E.3 JSON / Markdown 工具条**：`JsonToolbar` (smart-format 兼容 JSON5 + Python repr / compact / sort keys) + `MarkdownToolbar`（粗斜体/列表/链接/表格/字号等）
+- [x] **E.4 Find & Replace in Files**：Rust `replace_in_files` + 前端面板复用 FindInFiles
+- [x] **E.5 OS 最近打开列表**：`add_recent_document` 注入 macOS Dock / Windows Jump List
+
+**F. 0.7.0 — JetBrains 化**
+
+- [x] **F.1 Island Light/Dark 主题**：`lib/islandLightTheme.ts` / `islandDarkTheme.ts`（替代 oneDark）
+- [x] **F.2 颜色字面量行内色块**：`lib/colorPreview.ts` ViewPlugin，仅可见行渲染 hex/rgb/hsl swatch
+- [x] **F.3 Inspection Strip**：`lib/inspectionMarkers.ts` 把 bookmarks 在文件高度上等比打点 + 点击跳行
+- [x] **F.4 统一 Button 组件**：`components/ui/Button.tsx`，4 variant × 4 size + pressed 状态
+- [x] **F.5 LangIcon**：抽出语言图标渲染（Simple Icons + Lucide + 字母 badge 兜底）
+- [x] **F.6 .xmind 预览 + 编辑**：`lib/xmind/{parse,edit,layout}.ts` + `XmindView` + `XmindCanvas`，read 模式锁交互、edit 模式 mind-elixir，回写时保留 XMind-only 字段
+- [x] **F.7 自动闭合括号 + 代码块语言补全**：`closeBrackets()` + `lib/codeBlockComplete.ts`
+- [x] **F.8 Markdown 预览本地图片**：`lib/localImgHydrate.ts` + `lib/pathUtil.ts`，相对路径 → asset:// URL
+- [x] **F.9 Mermaid 渲染**：`lib/mermaidHydrate.ts` 懒加载（mermaid ~700KB）
+
+**0.7.0 / 0.8.0 之后续做主要是细节打磨**（StatusBar 行为、Editor 主题色微调、JsonToolbar 文案、TitleBar 视觉等）。
 
 **其它已搁置**（按需再开）：
 
-- KaTeX 数学公式 / Mermaid 图表
-- 大纲（TOC）侧栏（A.3 Goto Symbol 完成后再考虑常驻面板）
+- KaTeX 数学公式
+- 大纲（TOC）侧栏（Goto Symbol 完成后再考虑常驻面板）
 - 文件树搜索框
 - WYSIWYG 模式
 
 ## 启动 / 打包 / 清理
 
 ```sh
-./scripts/start.sh           # 开发（mac/linux），自动检 toolchain + npm i + tauri dev
-.\scripts\start.ps1          # Windows 等价
+./scripts/start.sh              # 开发（mac/linux）：默认先清 node_modules/.vite + ~/Library/WebKit/com.deditor.app，再 npm i + tauri dev
+                                # （DEditor 必须先退，否则报错；如不想清缓存加 --no-reset）
+./scripts/start.sh --no-reset   # 跳过清缓存（启动快，但可能撞到旧状态）
+.\scripts\start.ps1             # Windows 等价（默认也清 %LOCALAPPDATA%\com.deditor.app\EBWebView）
+.\scripts\start.ps1 -NoReset    # Windows: 跳过清缓存
 
 ./scripts/build-mac.sh       # 出 .dmg（自动复制到 scripts/）
 ./scripts/build-mac.sh --universal   # arm64 + x64 通用包
@@ -466,7 +525,7 @@ SetFile -a C "$DMG"                        # 标记 "Has Custom Icon"
 | Tauri 配置 | `src-tauri/tauri.conf.json` |
 | 前端入口 | `src/main.tsx` → `src/App.tsx` |
 | Zustand store | `src/store/editor.ts`（导出 `DEFAULT_CONTENT` 欢迎文档常量） |
-| 持久化 | `src/lib/persistence.ts`（localStorage key `deditor:state:v1`） |
+| 持久化 | `src/lib/persistence.ts`（localStorage key `deditor:state:v3`，旧 v1/v2 自动迁移） |
 | .dmg 最终位置 | `scripts/DEditor_<ver>_<arch>.dmg`（build-mac.sh 自动 cp） |
 | .dmg 原始位置 | `src-tauri/target/release/bundle/dmg/...` |
 | Cargo target（4GB+） | `src-tauri/target/`（clean.sh 删这个） |
@@ -487,7 +546,14 @@ SetFile -a C "$DMG"                        # 标记 "Has Custom Icon"
 | 加新命令面板命令 | `src/lib/commands.ts` 的 `COMMANDS` 数组追加，必要时加 `cmd.*` i18n key |
 | 加 Markdown 插件 | `src/lib/markdown.ts` 里 `md.use(...)` |
 | 加菜单项 / 改菜单标签 | `src-tauri/src/lib.rs` 的 `MenuLabels` + `build_and_set_menu`，前端 `App.tsx` 的 `menu-action` 监听 |
-| 改主题色 | `src/styles.css` 顶部 `:root` 和 `.dark` 的 CSS 变量 |
+| 改主题色（UI） | `src/styles.css` 顶部 `:root` 和 `.dark` 的 CSS 变量 |
+| 改 CodeMirror 主题 | `src/lib/islandLightTheme.ts` / `islandDarkTheme.ts` 顶部 `PALETTE` 常量 |
+| 加 Markdown 工具条按钮 | `src/components/MarkdownToolbar.tsx`（用 `editorBridge` 的 `wrapSelection` / `prefixLines` / `insertText`） |
+| 加 JSON 格式化算子 | `src/lib/jsonFormat.ts` 加导出函数 + `src/components/JsonToolbar.tsx` 加按钮 |
+| 加 Prettier 支持的扩展名 | `src/lib/format.ts` 的 parser map |
+| 加 .xmind 字段保留 | `src/lib/xmind/edit.ts` 的 `_xmind` 字段；read 模型在 `parse.ts` |
+| 加颜色字面量识别 | `src/lib/colorPreview.ts` 的正则 |
+| 加 Inspection Strip 标记类型 | `src/lib/inspectionMarkers.ts`（接入新的 StateField）|
 | 改 Tab 形状 / store 字段 | `src/store/editor.ts` + `src/lib/persistence.ts`（v3 schema 加可选字段，read 时合并默认）|
 | 改窗口大小 / 标题 / identifier | `src-tauri/tauri.conf.json` |
 | 改启动 / 打包 | `scripts/` 下对应平台脚本 |
