@@ -362,6 +362,15 @@ body,
   background: var(--accent);
 }
 
+/* Collapsed-sidebar rail — clickable column anywhere along its height. */
+.sidebar-rail {
+  transition: background 0.12s;
+}
+.sidebar-rail:hover {
+  background: var(--hover-bg) !important;
+  color: var(--text) !important;
+}
+
 /* TabBar scroll strip — hide scrollbar but keep scrollable */
 .tab-strip::-webkit-scrollbar {
   display: none;

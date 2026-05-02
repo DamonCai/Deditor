@@ -41,6 +41,7 @@ import { Button } from "./components/ui/Button";
 type DragKind = "sidebar" | "preview" | null;
 
 export default function App() {
+  const t = useT();
   const { theme, showPreview, previewMaximized, showSidebar, editorFontSize, setContent, language } =
     useEditorStore();
   const active = useActiveTab();
@@ -368,6 +369,28 @@ export default function App() {
               }}
             />
           </>
+        )}
+        {!zenMode && !showSidebar && (
+          <div
+            role="button"
+            tabIndex={0}
+            title={t("filetree.expand")}
+            onClick={() => useEditorStore.getState().toggleSidebar()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                useEditorStore.getState().toggleSidebar();
+              }
+            }}
+            className="sidebar-rail"
+            style={{
+              width: 8,
+              flexShrink: 0,
+              borderRight: "1px solid var(--border)",
+              background: "var(--bg-soft)",
+              cursor: "pointer",
+            }}
+          />
         )}
         <div className="flex flex-col flex-1 min-w-0">
           {!zenMode && <TabBar />}
