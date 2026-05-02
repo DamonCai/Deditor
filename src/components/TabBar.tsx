@@ -7,6 +7,7 @@ import { useT, tStatic } from "../lib/i18n";
 import LangIcon from "./LangIcon";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
 import { Button } from "./ui/Button";
+import { useFileGitStatus, gitStatusColor } from "../lib/git";
 
 function basename(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
@@ -278,6 +279,8 @@ function TabItem({
     : tab.filePath
     ? tab.filePath.split(/[\\/]/).pop()
     : untitled;
+  const gitStatus = useFileGitStatus(tab.filePath);
+  const gitColor = gitStatusColor(gitStatus);
   const tooltip = tab.diff
     ? `${tab.diff.leftPath}\n↔\n${tab.diff.rightPath}`
     : tab.filePath ?? untitled;
@@ -320,7 +323,15 @@ function TabItem({
       )}
       <span
         className="truncate"
-        style={{ maxWidth: 160, color: dirty && !active ? "var(--accent)" : undefined }}
+        style={{
+          maxWidth: 160,
+          // Priority: git color > dirty accent > default. Dirty stays visible
+          // even on git-clean files because dirty just means "unsaved buffer"
+          // — the user still wants the visual cue.
+          color:
+            gitColor ?? (dirty && !active ? "var(--accent)" : undefined),
+          textDecoration: gitStatus === "D" ? "line-through" : undefined,
+        }}
       >
         {name}
       </span>

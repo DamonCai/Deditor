@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useEditorStore } from "../store/editor";
 import {
+  compareWithHead,
   createDir,
   createFile,
   deletePath,
@@ -22,6 +23,8 @@ import { logError } from "../lib/logger";
 import { useT, tStatic } from "../lib/i18n";
 import { FiFolder, FiFolderPlus, FiChevronsLeft } from "react-icons/fi";
 import { Button } from "./ui/Button";
+import { useFileGitStatus, gitStatusColor, workspaceOf } from "../lib/git";
+import { invoke } from "@tauri-apps/api/core";
 
 const FOLDER_COLOR = "#dcb67a"; // soft amber, matches VSCode default folder icon
 
@@ -185,6 +188,7 @@ export default function FileTree() {
               }
               onFileContextMenu={(e, file) => {
                 const marked = compareMarkPath;
+                const ws = workspaceOf(file, workspaces);
                 const items: MenuItem[] = [
                   {
                     label: t("filetree.revealInFinder"),
@@ -211,6 +215,26 @@ export default function FileTree() {
                         onClick: () => setCompareMarkPath(file),
                       },
                 );
+                if (ws) {
+                  items.push(
+                    { divider: true },
+                    {
+                      label: t("git.menu.compareHead"),
+                      onClick: () => void compareWithHead(ws, file),
+                    },
+                    {
+                      label: t("git.menu.copyRelpath"),
+                      onClick: () => {
+                        invoke<string>("git_repo_relpath", {
+                          workspace: ws,
+                          path: file,
+                        })
+                          .then((p) => navigator.clipboard.writeText(p))
+                          .catch(() => {});
+                      },
+                    },
+                  );
+                }
                 items.push(
                   { divider: true },
                   {
@@ -565,6 +589,12 @@ function FileNode({
 }) {
   const active = entry.path === activePath;
   const marked = useEditorStore((s) => s.compareMarkPath === entry.path);
+  const gitStatus = useFileGitStatus(entry.path);
+  // JetBrains/IDEA convention: name color encodes git state. Active row
+  // selection still wins (rendered as bg, not text), so the mapping is just
+  // text color + optional badge. Skip "I" (ignored) — too noisy.
+  const nameColor = gitStatusColor(gitStatus);
+  const badge = gitStatus && gitStatus !== "I" ? gitStatus : null;
   return (
     <Row
       depth={depth}
@@ -576,7 +606,33 @@ function FileNode({
     >
       <span style={{ width: 12, display: "inline-block", flexShrink: 0 }} />
       <LangIcon filePath={entry.path} />
-      <span className="truncate" style={{ minWidth: 0, flex: 1 }}>{entry.name}</span>
+      <span
+        className="truncate"
+        style={{
+          minWidth: 0,
+          flex: 1,
+          color: nameColor ?? undefined,
+          textDecoration: gitStatus === "D" ? "line-through" : undefined,
+        }}
+      >
+        {entry.name}
+      </span>
+      {badge && (
+        <span
+          aria-label={`git: ${badge}`}
+          style={{
+            fontSize: 10,
+            fontWeight: 600,
+            color: nameColor ?? "var(--text-soft)",
+            flexShrink: 0,
+            width: 12,
+            textAlign: "center",
+            lineHeight: 1,
+          }}
+        >
+          {badge}
+        </span>
+      )}
     </Row>
   );
 }

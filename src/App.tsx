@@ -17,6 +17,8 @@ import GotoSymbol from "./components/GotoSymbol";
 import FindInFiles from "./components/FindInFiles";
 import SettingsDialog from "./components/SettingsDialog";
 import CommandPalette from "./components/CommandPalette";
+import TerminalPane from "./components/Terminal";
+import { FiX, FiMaximize2, FiMinimize2 } from "react-icons/fi";
 import { isEnabled, SHORTCUTS } from "./lib/shortcuts";
 import { useEditorStore, useActiveTab } from "./store/editor";
 import { isMarkdown, isJson } from "./lib/lang";
@@ -36,9 +38,24 @@ import {
 } from "./lib/fileio";
 import { loadPersisted, schedulePersist } from "./lib/persistence";
 import { useFileWatch } from "./lib/fileWatch";
+import { refreshGit, refreshGitAll, workspaceOf } from "./lib/git";
+import { onTerminalCommand } from "./components/Terminal";
 import { Button } from "./components/ui/Button";
 
-type DragKind = "sidebar" | "preview" | null;
+type DragKind = "sidebar" | "preview" | "terminal" | null;
+
+const iconBtn: React.CSSProperties = {
+  width: 22,
+  height: 22,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "transparent",
+  border: "none",
+  borderRadius: 3,
+  color: "var(--text-soft)",
+  cursor: "pointer",
+};
 
 export default function App() {
   const { theme, showPreview, previewMaximized, showSidebar, editorFontSize, setContent, language } =
@@ -59,6 +76,7 @@ export default function App() {
 
   const [sidebarPx, setSidebarPx] = useState(240);
   const [previewPct, setPreviewPct] = useState(50);
+  const [terminalPx, setTerminalPx] = useState(240);
   // Editor↔Preview scroll sync. We track the latest line + which side originated
   // the scroll so each side only reacts to scrolls coming from the OTHER side.
   const [scrollSync, setScrollSync] = useState<
@@ -68,6 +86,10 @@ export default function App() {
   const zenMode = useEditorStore((s) => s.zenMode);
   const autoSave = useEditorStore((s) => s.autoSave);
   const splitEditor = useEditorStore((s) => s.splitEditor);
+  const terminalOpen = useEditorStore((s) => s.terminalOpen);
+  const terminalMaximized = useEditorStore((s) => s.terminalMaximized);
+  const toggleTerminal = useEditorStore((s) => s.toggleTerminal);
+  const setTerminalMaximized = useEditorStore((s) => s.setTerminalMaximized);
   const gotoOpen = useEditorStore((s) => s.gotoAnythingOpen);
   const setGotoOpen = useEditorStore((s) => s.setGotoAnythingOpen);
   const settingsOpen = useEditorStore((s) => s.settingsOpen);
@@ -80,8 +102,8 @@ export default function App() {
   const setFindInFilesOpen = useEditorStore((s) => s.setFindInFilesOpen);
   const shortcuts = useEditorStore((s) => s.shortcuts);
   const dragRef = useRef<DragKind>(null);
-  const uiRef = useRef({ sidebarPx, previewPct });
-  uiRef.current = { sidebarPx, previewPct };
+  const uiRef = useRef({ sidebarPx, previewPct, terminalPx });
+  uiRef.current = { sidebarPx, previewPct, terminalPx };
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
@@ -106,6 +128,7 @@ export default function App() {
       .then((extra) => {
         if (extra?.sidebarPx) setSidebarPx(extra.sidebarPx);
         if (extra?.previewPct) setPreviewPct(extra.previewPct);
+        if (extra?.terminalPx) setTerminalPx(extra.terminalPx);
       })
       .finally(() => setHydrated(true));
   }, []);
@@ -122,10 +145,60 @@ export default function App() {
   // Also persist when UI extras (sidebar/preview width) change
   useEffect(() => {
     if (!hydrated) return;
-    schedulePersist({ sidebarPx, previewPct });
-  }, [hydrated, sidebarPx, previewPct]);
+    schedulePersist({ sidebarPx, previewPct, terminalPx });
+  }, [hydrated, sidebarPx, previewPct, terminalPx]);
 
   useFileWatch();
+
+  // ----- Git refresh wiring -----
+  // Sources of truth that should trigger a re-poll of git status / branch:
+  //   1. Workspace list changes (add/remove a root)
+  //   2. Window regains focus (user might've committed in another terminal)
+  //   3. A save lands (savedContent diff per tab)
+  //   4. The integrated terminal sees an Enter (any command might mutate
+  //      working tree — `npm install`, `make`, `git commit`, etc.)
+  // The lib/git.ts module already debounces by 250 ms per workspace, so
+  // firing all four signals in tight succession safely collapses to one
+  // git invocation.
+  const workspaces = useEditorStore((s) => s.workspaces);
+  useEffect(() => {
+    if (!hydrated || workspaces.length === 0) return;
+    refreshGitAll(workspaces);
+    const onFocus = () => refreshGitAll(workspaces);
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [hydrated, workspaces]);
+  useEffect(() => {
+    if (!hydrated) return;
+    let lastSaved = new Map<string, string>();
+    return useEditorStore.subscribe((s) => {
+      const cur = new Map(s.tabs.map((t) => [t.id, t.savedContent]));
+      let changedTab: { id: string; filePath: string | null } | null = null;
+      for (const [id, content] of cur) {
+        const prev = lastSaved.get(id);
+        if (prev !== undefined && prev !== content) {
+          const tab = s.tabs.find((t) => t.id === id);
+          changedTab = { id, filePath: tab?.filePath ?? null };
+          break;
+        }
+      }
+      lastSaved = cur;
+      if (changedTab) {
+        const ws =
+          workspaceOf(changedTab.filePath, s.workspaces) ?? s.workspaces[0];
+        if (ws) refreshGit(ws);
+      }
+    });
+  }, [hydrated]);
+  useEffect(() => {
+    if (!hydrated) return;
+    return onTerminalCommand(() => {
+      // Any submitted command can mutate the working tree. Refresh all
+      // workspaces — the debounce keeps this cheap.
+      const ws = useEditorStore.getState().workspaces;
+      if (ws.length > 0) refreshGitAll(ws);
+    });
+  }, [hydrated]);
 
   // Auto-save on window blur. Subscribes only when the user opted in via
   // Settings — avoids spurious writes on every alt-tab.
@@ -216,6 +289,11 @@ export default function App() {
         if (!isEnabled(prefs, "app_split_editor")) return;
         e.preventDefault();
         useEditorStore.getState().toggleSplitEditor();
+      } else if (e.key === "`" && !e.shiftKey && !e.altKey) {
+        // Ctrl+` → toggle integrated terminal (VSCode/JetBrains parity).
+        // macOS Cmd+` is OS window-cycle and never reaches us.
+        e.preventDefault();
+        useEditorStore.getState().toggleTerminal();
       }
     };
     // Capture phase: WKWebView (and Chromium in some setups) treats certain
@@ -326,6 +404,11 @@ export default function App() {
       if (!kind) return;
       if (kind === "sidebar") {
         setSidebarPx(Math.min(500, Math.max(140, e.clientX)));
+      } else if (kind === "terminal") {
+        // Bottom-anchored: dragging up ↑ enlarges. Cap so the editor never
+        // shrinks below ~200 px (statusbar + a few visible lines).
+        const px = window.innerHeight - e.clientY;
+        setTerminalPx(Math.min(window.innerHeight - 200, Math.max(80, px)));
       } else {
         const sidebar = showSidebar ? sidebarPx : 0;
         const remaining = window.innerWidth - sidebar;
@@ -351,7 +434,17 @@ export default function App() {
   return (
     <div className="flex flex-col h-full">
       {!zenMode && <TitleBar />}
-      <div className="flex flex-1 min-h-0">
+      <div className="flex flex-col flex-1 min-h-0">
+      <div
+        className="flex min-h-0"
+        style={{
+          // When the terminal is maximized it takes the entire body so the
+          // editor row collapses to 0. Otherwise editor takes whatever the
+          // terminal panel doesn't.
+          flex: terminalOpen && terminalMaximized ? "0 0 0" : "1 1 0",
+          display: terminalOpen && terminalMaximized ? "none" : "flex",
+        }}
+      >
         {!zenMode && showSidebar && (
           <>
             <div
@@ -469,6 +562,81 @@ export default function App() {
             )}
           </div>
         </div>
+      </div>
+      {!zenMode && terminalOpen && (
+        <>
+          {!terminalMaximized && (
+            <div
+              onMouseDown={() => {
+                dragRef.current = "terminal";
+                document.body.style.cursor = "row-resize";
+              }}
+              style={{
+                height: 4,
+                cursor: "row-resize",
+                background: "transparent",
+                flexShrink: 0,
+              }}
+              className="hover:bg-[color:var(--accent)]"
+            />
+          )}
+          <div
+            style={{
+              height: terminalMaximized ? "100%" : terminalPx,
+              flexShrink: 0,
+              display: "flex",
+              flexDirection: "column",
+              background: theme === "dark" ? "#1e1f22" : "#ffffff",
+              borderTop: terminalMaximized ? "none" : "1px solid var(--border)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                height: 26,
+                padding: "0 8px 0 12px",
+                fontSize: 11,
+                letterSpacing: "0.05em",
+                fontWeight: 600,
+                color: "var(--text-soft)",
+                background: "var(--bg-soft)",
+                borderBottom: "1px solid var(--border)",
+                flexShrink: 0,
+                userSelect: "none",
+              }}
+            >
+              <span>TERMINAL</span>
+              <div className="flex items-center" style={{ gap: 2 }}>
+                <button
+                  onClick={() => setTerminalMaximized(!terminalMaximized)}
+                  title={terminalMaximized ? "Restore" : "Maximize"}
+                  className="deditor-btn"
+                  data-variant="ghost"
+                  style={iconBtn}
+                >
+                  {terminalMaximized ? (
+                    <FiMinimize2 size={12} />
+                  ) : (
+                    <FiMaximize2 size={12} />
+                  )}
+                </button>
+                <button
+                  onClick={() => toggleTerminal()}
+                  title="Close (Ctrl+`)"
+                  className="deditor-btn"
+                  data-variant="ghost"
+                  style={iconBtn}
+                >
+                  <FiX size={13} />
+                </button>
+              </div>
+            </div>
+            <TerminalPane visible={terminalOpen} />
+          </div>
+        </>
+      )}
       </div>
       {!zenMode && <StatusBar />}
       <ConfirmDialog />

@@ -1,9 +1,13 @@
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
+use std::collections::HashMap;
 use std::fs;
+use std::io::{Read, Write};
 use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
+use std::thread;
 use tauri::menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
-use tauri::{Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_log::{Target, TargetKind};
 
 #[derive(serde::Serialize)]
@@ -671,6 +675,361 @@ fn note_recent_document(path: &str) {
     controller.noteNewRecentDocumentURL(&url);
 }
 
+// ---------------------------------------------------------------------------
+// Git read-only inspection
+// ---------------------------------------------------------------------------
+//
+// We shell out to `git` instead of pulling in `gix` so we don't add a heavy
+// dependency for what is fundamentally a few subprocess calls. All commands
+// are read-only — DEditor doesn't ship a git client; users run mutations in
+// the integrated terminal.
+
+#[derive(serde::Serialize)]
+struct GitStatusEntry {
+    path: String,
+    /// Single uppercase letter — the porcelain XY pair reduced to its
+    /// dominant axis. `M / A / D / U / C / ?`.
+    status: char,
+}
+
+/// `git status --porcelain=v1 --no-renames -z`. `-z` keeps NUL-separated
+/// output so paths with spaces / non-ASCII bytes survive. Returns an empty
+/// vec when not inside a git repo (silent no-op for the UI).
+#[tauri::command]
+fn git_status(workspace: String) -> Result<Vec<GitStatusEntry>, String> {
+    use std::process::Command;
+    let root = expand(&workspace);
+    let out = Command::new("git")
+        .args([
+            "-C",
+            &root.to_string_lossy(),
+            "status",
+            "--porcelain=v1",
+            "--no-renames",
+            "-z",
+        ])
+        .output()
+        .map_err(|e| {
+            log::warn!("git_status spawn failed: {}", e);
+            e.to_string()
+        })?;
+    if !out.status.success() {
+        return Ok(vec![]);
+    }
+    let mut entries = Vec::new();
+    let bytes = &out.stdout;
+    let mut i = 0;
+    while i + 3 < bytes.len() {
+        let xy = (bytes[i], bytes[i + 1]);
+        // i+2 is the space separator; the path runs i+3..NUL.
+        let mut j = i + 3;
+        while j < bytes.len() && bytes[j] != 0 {
+            j += 1;
+        }
+        let rel = String::from_utf8_lossy(&bytes[i + 3..j]).to_string();
+        let abs = root.join(&rel).to_string_lossy().to_string();
+        entries.push(GitStatusEntry {
+            path: abs,
+            status: reduce_git_status(xy.0, xy.1),
+        });
+        i = j + 1;
+    }
+    Ok(entries)
+}
+
+/// Collapse porcelain XY (index, working tree) to one dominant char so the
+/// file tree can render at most one badge per row.
+fn reduce_git_status(x: u8, y: u8) -> char {
+    let xy = (x as char, y as char);
+    match xy {
+        ('?', '?') => 'U',
+        ('!', '!') => 'I',
+        _ if xy.0 == 'U' || xy.1 == 'U' => 'C',
+        _ if xy.0 == 'D' || xy.1 == 'D' => 'D',
+        _ if xy.0 == 'A' || xy.1 == 'A' => 'A',
+        _ if xy.0 == 'M' || xy.1 == 'M' => 'M',
+        _ => '?',
+    }
+}
+
+/// Current branch name, or short SHA when HEAD is detached, or empty string
+/// when not in a git repo.
+#[tauri::command]
+fn git_branch(workspace: String) -> Result<String, String> {
+    use std::process::Command;
+    let root = expand(&workspace);
+    let out = Command::new("git")
+        .args([
+            "-C",
+            &root.to_string_lossy(),
+            "rev-parse",
+            "--abbrev-ref",
+            "HEAD",
+        ])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Ok(String::new());
+    }
+    let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if name == "HEAD" {
+        let sha = Command::new("git")
+            .args([
+                "-C",
+                &root.to_string_lossy(),
+                "rev-parse",
+                "--short",
+                "HEAD",
+            ])
+            .output()
+            .map_err(|e| e.to_string())?;
+        if sha.status.success() {
+            return Ok(String::from_utf8_lossy(&sha.stdout).trim().to_string());
+        }
+    }
+    Ok(name)
+}
+
+/// Recent local branches (`for-each-ref` sorted by committerdate, limit 10),
+/// excluding the current one. Used by the branch popover.
+#[tauri::command]
+fn git_recent_branches(workspace: String) -> Result<Vec<String>, String> {
+    use std::process::Command;
+    let root = expand(&workspace);
+    let out = Command::new("git")
+        .args([
+            "-C",
+            &root.to_string_lossy(),
+            "for-each-ref",
+            "--sort=-committerdate",
+            "--count=10",
+            "--format=%(refname:short)",
+            "refs/heads/",
+        ])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Ok(vec![]);
+    }
+    let cur = git_branch(workspace).unwrap_or_default();
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|l| l.to_string())
+        .filter(|n| !n.is_empty() && n != &cur)
+        .collect())
+}
+
+/// Read a file's contents at HEAD (`git show HEAD:<rel-path>`). Used by the
+/// "Compare with HEAD" right-click action — feed both buffers into the
+/// existing diff view.
+#[tauri::command]
+fn git_show_head(workspace: String, path: String) -> Result<String, String> {
+    use std::process::Command;
+    let root = expand(&workspace);
+    let abs = expand(&path);
+    let rel = abs
+        .strip_prefix(&root)
+        .map_err(|_| "path is not inside the workspace".to_string())?
+        .to_string_lossy()
+        .to_string();
+    // Normalize separators for git on Windows.
+    let rel_posix = rel.replace('\\', "/");
+    let out = Command::new("git")
+        .args([
+            "-C",
+            &root.to_string_lossy(),
+            "show",
+            &format!("HEAD:{}", rel_posix),
+        ])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+/// Return the path relative to the workspace root, POSIX-separated. Useful
+/// for "Copy git path" clipboard action.
+#[tauri::command]
+fn git_repo_relpath(workspace: String, path: String) -> Result<String, String> {
+    let root = expand(&workspace);
+    let abs = expand(&path);
+    let rel = abs
+        .strip_prefix(&root)
+        .map_err(|_| "path is not inside the workspace".to_string())?
+        .to_string_lossy()
+        .to_string();
+    Ok(rel.replace('\\', "/"))
+}
+
+// ---------------------------------------------------------------------------
+// Integrated terminal (portable-pty backend)
+// ---------------------------------------------------------------------------
+//
+// Each session keeps:
+//   - the master PTY handle (kept alive so resize works without grabbing a
+//     fresh writer lock)
+//   - the writer half (used by term_write)
+//
+// The slave is consumed by spawn_command and dropped; the child + reader live
+// inside a dedicated background thread that pumps PTY output to the JS side
+// via per-session events.
+struct PtySession {
+    writer: Box<dyn Write + Send>,
+    master: Box<dyn portable_pty::MasterPty + Send>,
+}
+
+static PTY_SESSIONS: OnceLock<Mutex<HashMap<String, PtySession>>> = OnceLock::new();
+
+fn pty_sessions() -> &'static Mutex<HashMap<String, PtySession>> {
+    PTY_SESSIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[derive(serde::Deserialize)]
+struct TermOpenArgs {
+    rows: u16,
+    cols: u16,
+    cwd: Option<String>,
+    /// Optional override; falls back to $SHELL / %COMSPEC% when None.
+    shell: Option<String>,
+}
+
+/// Spawn a shell inside a PTY and return a session id. Subsequent calls use
+/// that id for write / resize / close. The frontend subscribes to two events:
+/// `term:<id>:data` (UTF-8 lossy bytes) and `term:<id>:exit` (u32 exit code).
+#[tauri::command]
+fn term_open(app: AppHandle, args: TermOpenArgs) -> Result<String, String> {
+    use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(PtySize {
+            rows: args.rows.max(1),
+            cols: args.cols.max(1),
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| {
+            log::error!("openpty failed: {}", e);
+            e.to_string()
+        })?;
+
+    // Default shell selection. SHELL/COMSPEC let users override via env.
+    let shell = args.shell.clone().unwrap_or_else(|| {
+        if cfg!(target_os = "windows") {
+            std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string())
+        } else {
+            std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string())
+        }
+    });
+    let mut cmd = CommandBuilder::new(&shell);
+    if !cfg!(target_os = "windows") {
+        // -l = login shell. zsh/bash will source ~/.zshrc / ~/.bash_profile so
+        // the user's PATH and aliases are picked up. Without this the in-app
+        // terminal feels broken next to iTerm/Terminal.app.
+        cmd.arg("-l");
+    }
+    if let Some(d) = args.cwd.as_deref() {
+        let p = expand(d);
+        if p.is_dir() {
+            cmd.cwd(p);
+        }
+    }
+    // xterm.js advertises xterm-256color; matching it lets vim/htop/git use
+    // colour and resize handling correctly.
+    cmd.env("TERM", "xterm-256color");
+
+    let mut child = pair
+        .slave
+        .spawn_command(cmd)
+        .map_err(|e| {
+            log::error!("spawn_command failed: {}", e);
+            e.to_string()
+        })?;
+    drop(pair.slave);
+
+    let id = uuid::Uuid::new_v4().to_string();
+    let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
+    let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
+
+    pty_sessions().lock().unwrap().insert(
+        id.clone(),
+        PtySession {
+            writer,
+            master: pair.master,
+        },
+    );
+
+    {
+        let id = id.clone();
+        let app = app.clone();
+        thread::spawn(move || {
+            let mut buf = [0u8; 4096];
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        let s = String::from_utf8_lossy(&buf[..n]).to_string();
+                        let _ = app.emit(&format!("term:{}:data", id), s);
+                    }
+                    Err(_) => break,
+                }
+            }
+            // Reap the child so we report a clean exit code instead of leaving
+            // a zombie process behind.
+            let code = child
+                .wait()
+                .ok()
+                .and_then(|s| s.exit_code().try_into().ok())
+                .unwrap_or(0u32);
+            let _ = app.emit(&format!("term:{}:exit", id), code);
+            pty_sessions().lock().unwrap().remove(&id);
+        });
+    }
+
+    log::info!("term_open: id={} shell={}", id, shell);
+    Ok(id)
+}
+
+#[tauri::command]
+fn term_write(id: String, data: String) -> Result<(), String> {
+    let mut map = pty_sessions().lock().unwrap();
+    let s = map
+        .get_mut(&id)
+        .ok_or_else(|| "terminal not found".to_string())?;
+    s.writer.write_all(data.as_bytes()).map_err(|e| e.to_string())?;
+    s.writer.flush().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn term_resize(id: String, rows: u16, cols: u16) -> Result<(), String> {
+    use portable_pty::PtySize;
+    let map = pty_sessions().lock().unwrap();
+    let s = map
+        .get(&id)
+        .ok_or_else(|| "terminal not found".to_string())?;
+    s.master
+        .resize(PtySize {
+            rows: rows.max(1),
+            cols: cols.max(1),
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn term_close(id: String) -> Result<(), String> {
+    // Dropping the master sends EOF to the slave; the reader thread breaks out
+    // on its next read, emits the exit event, and removes the entry itself.
+    // Removing here is idempotent with that path.
+    pty_sessions().lock().unwrap().remove(&id);
+    Ok(())
+}
+
 /// Tell the frontend whether a path is a file, a directory, or missing.
 /// Used by the OS-drop handler to route dragged folders to `addWorkspace`
 /// instead of trying to open them as a file.
@@ -1138,6 +1497,15 @@ pub fn run() {
             file_mtimes,
             find_in_files,
             replace_in_files,
+            term_open,
+            term_write,
+            term_resize,
+            term_close,
+            git_status,
+            git_branch,
+            git_recent_branches,
+            git_show_head,
+            git_repo_relpath,
             add_recent_document
         ])
         .build(tauri::generate_context!())

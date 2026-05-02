@@ -173,6 +173,34 @@ export async function openCompare(leftPath: string, rightPath: string): Promise<
   }
 }
 
+/** Open a diff tab comparing a file's working-copy content to the version
+ *  recorded in `HEAD`. The left side is virtual (label `HEAD:<rel>`); we read
+ *  it via `git show HEAD:<rel>` rather than touching the filesystem. */
+export async function compareWithHead(
+  workspace: string,
+  filePath: string,
+): Promise<void> {
+  try {
+    const [rightContent, leftContent, rel] = await Promise.all([
+      invoke<string>("read_text_file", { path: filePath }),
+      invoke<string>("git_show_head", { workspace, path: filePath }),
+      invoke<string>("git_repo_relpath", { workspace, path: filePath }),
+    ]);
+    const leftLabel = `HEAD:${rel}`;
+    useEditorStore.getState().openDiffTab({
+      leftPath: leftLabel,
+      rightPath: filePath,
+      leftContent,
+      rightContent,
+    });
+    logInfo(`compare with HEAD: ${filePath}`);
+  } catch (err) {
+    logError(`compareWithHead failed: ${filePath}`, err);
+    const msg = err instanceof Error ? err.message : String(err);
+    alert(tStatic("git.menu.compareFailed", { err: msg }));
+  }
+}
+
 /** Read a binary file (image / PDF / audio / video) and open it as a tab whose
  *  content is a `data:` URL. The renderer in Editor.tsx branches on file type
  *  to pick the right element (<img>, <iframe>, <audio>, <video>). */

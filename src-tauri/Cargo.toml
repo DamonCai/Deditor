@@ -25,6 +25,11 @@ tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-window-state = "2"
 base64 = "0.22"
+# Cross-platform PTY backend for the integrated terminal. Wezterm's portable-pty
+# wraps openpty / ConPTY so the same code path works on macOS, Linux, Windows.
+portable-pty = "0.8"
+# UUID for per-terminal session ids passed across the IPC bridge.
+uuid = { version = "1", features = ["v4"] }
 
 # macOS-only: used to strip AppKit's auto-injected Edit-menu items
 # ("Start Dictation…", "Emoji & Symbols", "AutoFill", Speech submenu, …)

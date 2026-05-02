@@ -114,6 +114,13 @@ interface EditorState {
    *  bar — only the editor (and Markdown preview if active) remain. Toggled
    *  via Cmd+K Z (matches VSCode "Zen Mode") or via the command palette. */
   zenMode: boolean;
+  /** Show the bottom integrated-terminal panel. Toggled via Ctrl+`. */
+  terminalOpen: boolean;
+  /** Maximize the terminal panel — when true, it occupies the full editor
+   *  area instead of just the bottom strip. Independent from terminalOpen. */
+  terminalMaximized: boolean;
+  /** Optional shell override; empty string means "use $SHELL / %COMSPEC%". */
+  terminalShell: string;
   /** Auto-save: "off" | "onBlur" | "afterDelay". afterDelay debounces 1.5s
    *  after the user stops typing. onBlur saves when the window loses focus. */
   autoSave: "off" | "onBlur" | "afterDelay";
@@ -150,6 +157,10 @@ interface EditorState {
   setShowMinimap: (on: boolean) => void;
   setAutoCloseBrackets: (on: boolean) => void;
   toggleSplitEditor: () => void;
+  setTerminalOpen: (v: boolean) => void;
+  toggleTerminal: () => void;
+  setTerminalMaximized: (v: boolean) => void;
+  setTerminalShell: (s: string) => void;
   setSplitEditor: (on: boolean) => void;
   toggleZenMode: () => void;
   setZenMode: (on: boolean) => void;
@@ -381,6 +392,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   autoCloseBrackets: true,
   splitEditor: false,
   zenMode: false,
+  terminalOpen: false,
+  terminalMaximized: false,
+  terminalShell: "",
   autoSave: "off",
   formatOnSave: false,
 
@@ -483,6 +497,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setAutoCloseBrackets: (on) => set({ autoCloseBrackets: on }),
   toggleSplitEditor: () => set({ splitEditor: !get().splitEditor }),
   setSplitEditor: (on) => set({ splitEditor: on }),
+  setTerminalOpen: (v) => set({ terminalOpen: v }),
+  toggleTerminal: () => set({ terminalOpen: !get().terminalOpen }),
+  setTerminalMaximized: (v) => set({ terminalMaximized: v }),
+  setTerminalShell: (s) => set({ terminalShell: s }),
   toggleZenMode: () => set({ zenMode: !get().zenMode }),
   setZenMode: (on) => set({ zenMode: on }),
   setAutoSave: (mode) => set({ autoSave: mode }),

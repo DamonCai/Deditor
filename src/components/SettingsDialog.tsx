@@ -36,6 +36,8 @@ export default function SettingsDialog({ open, onClose }: Props) {
   const setAutoSave = useEditorStore((s) => s.setAutoSave);
   const formatOnSave = useEditorStore((s) => s.formatOnSave);
   const setFormatOnSave = useEditorStore((s) => s.setFormatOnSave);
+  const terminalShell = useEditorStore((s) => s.terminalShell);
+  const setTerminalShell = useEditorStore((s) => s.setTerminalShell);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -198,6 +200,22 @@ export default function SettingsDialog({ open, onClose }: Props) {
             </div>
           </section>
 
+          {/* Terminal section — currently just a shell-path override. We
+              intentionally avoid font-size + color customization here to keep
+              the integrated terminal visually consistent with the editor. */}
+          <section style={{ marginBottom: 16 }}>
+            <h3 style={sectionH3}>{t("settings.terminal.heading")}</h3>
+            <div style={sectionBox}>
+              <TextRow
+                label={t("settings.terminal.shell")}
+                value={terminalShell}
+                placeholder={t("settings.terminal.shellPlaceholder")}
+                onChange={setTerminalShell}
+                hint={t("settings.terminal.shellHint")}
+              />
+            </div>
+          </section>
+
           <div
             style={{
               fontSize: 13,
@@ -306,6 +324,62 @@ export default function SettingsDialog({ open, onClose }: Props) {
           </Button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function TextRow({
+  label,
+  value,
+  placeholder,
+  onChange,
+  hint,
+  topBorder,
+}: {
+  label: string;
+  value: string;
+  placeholder?: string;
+  onChange: (v: string) => void;
+  hint?: string;
+  topBorder?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 4,
+        padding: "8px 12px",
+        borderTop: topBorder ? "1px solid var(--border)" : undefined,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <span style={{ fontSize: 13, color: "var(--text)", flex: 1 }}>
+          {label}
+        </span>
+        <input
+          type="text"
+          value={value}
+          placeholder={placeholder}
+          onChange={(e) => onChange(e.target.value)}
+          spellCheck={false}
+          style={{
+            width: 280,
+            padding: "4px 8px",
+            fontSize: 12,
+            background: "var(--bg)",
+            border: "1px solid var(--border)",
+            borderRadius: 3,
+            color: "var(--text)",
+            outline: "none",
+            fontFamily:
+              "var(--font-mono, ui-monospace, 'JetBrains Mono', monospace)",
+          }}
+        />
+      </div>
+      {hint && (
+        <span style={{ fontSize: 11, color: "var(--text-soft)" }}>{hint}</span>
+      )}
     </div>
   );
 }

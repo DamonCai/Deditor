@@ -40,6 +40,18 @@ const ZH: Record<string, string> = {
   "statusbar.cursor": "光标位置（行号, 列号）",
   "statusbar.eol": "行尾符（LF=Unix / CRLF=Windows）",
   "statusbar.encoding": "文件编码",
+  "statusbar.branch": "Git 分支（点击切换）",
+
+  // git
+  "git.popover.current": "当前分支",
+  "git.popover.recent": "最近分支",
+  "git.popover.checkoutHint": "在终端切换到 {branch}",
+  "git.popover.checkoutInTerminal": "在终端中切换分支…",
+  "git.popover.refresh": "刷新",
+  "git.menu.compareHead": "与 HEAD 对比",
+  "git.menu.copyRelpath": "复制 git 路径",
+  "git.menu.compareFailed": "无法获取 HEAD 版本：{err}",
+  "git.menu.notInRepo": "文件不在 git 仓库中",
 
   // settings dialog
   "settings.title": "设置",
@@ -62,6 +74,11 @@ const ZH: Record<string, string> = {
   "settings.editor.whitespace": "显示空白字符（· 表示空格，→ 表示制表符）",
   "settings.editor.minimap": "显示右侧迷你地图（minimap）",
   "settings.editor.autoCloseBrackets": "自动配对括号 / 引号 / 反引号",
+  "settings.terminal.heading": "终端",
+  "settings.terminal.shell": "Shell 路径",
+  "settings.terminal.shellPlaceholder": "（默认使用 $SHELL）",
+  "settings.terminal.shellHint":
+    "留空使用系统默认 shell。指定可执行路径覆盖（例如 /opt/homebrew/bin/fish）。改动只对下次打开的终端生效。",
   "settings.shortcuts.intro": "在这里关闭与你系统/输入法/其他应用冲突的快捷键。菜单项即使关闭快捷键也可以继续点击使用。",
   "settings.shortcuts.builtinNote": "标准编辑快捷键（Cmd/Ctrl+Z 撤销、Cmd/Ctrl+F 查找、Cmd/Ctrl+D 选下一个匹配等）由 CodeMirror 提供，无法在此关闭。",
   "settings.shortcuts.group.file": "文件",
@@ -317,6 +334,18 @@ const EN: Record<string, string> = {
   "statusbar.cursor": "Cursor position (line, column)",
   "statusbar.eol": "Line ending (LF=Unix / CRLF=Windows)",
   "statusbar.encoding": "File encoding",
+  "statusbar.branch": "Git branch (click to switch)",
+
+  // git
+  "git.popover.current": "Current branch",
+  "git.popover.recent": "Recent branches",
+  "git.popover.checkoutHint": "Switch to {branch} in terminal",
+  "git.popover.checkoutInTerminal": "Switch branch in terminal…",
+  "git.popover.refresh": "Refresh",
+  "git.menu.compareHead": "Compare with HEAD",
+  "git.menu.copyRelpath": "Copy git path",
+  "git.menu.compareFailed": "Cannot read HEAD version: {err}",
+  "git.menu.notInRepo": "File is not in a git repository",
 
   // settings dialog
   "settings.title": "Settings",
@@ -339,6 +368,11 @@ const EN: Record<string, string> = {
   "settings.editor.whitespace": "Show whitespace markers (· for space, → for tab)",
   "settings.editor.minimap": "Show minimap on the right",
   "settings.editor.autoCloseBrackets": "Auto-close brackets / quotes / backticks",
+  "settings.terminal.heading": "Terminal",
+  "settings.terminal.shell": "Shell path",
+  "settings.terminal.shellPlaceholder": "(defaults to $SHELL)",
+  "settings.terminal.shellHint":
+    "Leave blank to use the system default. Provide an executable path to override (e.g. /opt/homebrew/bin/fish). Takes effect on the next terminal you open.",
   "settings.shortcuts.intro": "Disable any shortcut that conflicts with your OS, IME, or another app. Menu items remain clickable even when the accelerator is turned off.",
   "settings.shortcuts.builtinNote": "Standard editor shortcuts (Cmd/Ctrl+Z undo, Cmd/Ctrl+F find, Cmd/Ctrl+D select next match, …) come from CodeMirror and can't be toggled here.",
   "settings.shortcuts.group.file": "File",

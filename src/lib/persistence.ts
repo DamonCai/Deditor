@@ -48,8 +48,14 @@ interface PersistedV3 {
   autoCloseBrackets?: boolean;
   autoSave?: "off" | "onBlur" | "afterDelay";
   formatOnSave?: boolean;
+  /** Integrated terminal state — whether the panel is open at startup, its
+   *  height in pixels, and any user shell override. */
+  terminalOpen?: boolean;
+  terminalPx?: number;
+  terminalShell?: string;
   // Legacy git fields kept in the type so old snapshots still parse safely;
-  // unused since the git feature was removed.
+  // unused since the inline git panel feature was removed (Phase 4 0.7.0
+  // ships read-only signals instead).
   gitPanelOpen?: boolean;
   gitPanelHeight?: number;
   gitPanelTab?: "commit" | "log";
@@ -121,6 +127,7 @@ function newId(): string {
 export interface UiExtras {
   sidebarPx: number;
   previewPct: number;
+  terminalPx?: number;
 }
 
 export async function loadPersisted(): Promise<UiExtras | null> {
@@ -290,9 +297,20 @@ export async function loadPersisted(): Promise<UiExtras | null> {
     `persistence restored: ${restored.length} tab(s), ${data.workspaces?.length ?? 0} workspace(s)`,
   );
 
+  // Restore terminal panel state — open / height / shell override. We don't
+  // restore an actual PTY session (its child process is long gone); the new
+  // session spawns when the panel mounts.
+  if (typeof data.terminalOpen === "boolean") {
+    useEditorStore.setState({ terminalOpen: data.terminalOpen });
+  }
+  if (typeof data.terminalShell === "string") {
+    useEditorStore.setState({ terminalShell: data.terminalShell });
+  }
+
   return {
     sidebarPx: data.sidebarPx,
     previewPct: data.previewPct,
+    terminalPx: data.terminalPx,
   };
 }
 
@@ -345,6 +363,9 @@ function doSave(extras: UiExtras): void {
     autoCloseBrackets: s.autoCloseBrackets,
     autoSave: s.autoSave,
     formatOnSave: s.formatOnSave,
+    terminalOpen: s.terminalOpen,
+    terminalPx: extras.terminalPx,
+    terminalShell: s.terminalShell,
   };
   try {
     localStorage.setItem(KEY_V3, JSON.stringify(base));

@@ -1,7 +1,11 @@
+import { useState, useRef } from "react";
 import { useActiveTab, isTabDirty, useEditorStore } from "../store/editor";
 import { detectLang } from "../lib/lang";
 import { useT } from "../lib/i18n";
 import LangIcon from "./LangIcon";
+import { useGitBranch, workspaceOf } from "../lib/git";
+import { FiGitBranch } from "react-icons/fi";
+import BranchPopover from "./BranchPopover";
 
 /** Convert a flat char offset into 1-based (line, column). Counts UTF-16
  *  code units, which is what CodeMirror's selection offsets use. Tab is
@@ -44,6 +48,11 @@ export default function StatusBar() {
   const lang = detectLang(filePath);
   const { line, col } = offsetToLineCol(content, cursorOffset);
   const eol = detectEol(content);
+  const workspaces = useEditorStore((s) => s.workspaces);
+  const branchOwner = workspaceOf(filePath, workspaces) ?? workspaces[0] ?? null;
+  const branch = useGitBranch(branchOwner);
+  const [branchPopoverOpen, setBranchPopoverOpen] = useState(false);
+  const branchAnchor = useRef<HTMLButtonElement>(null);
 
   return (
     <div
@@ -67,6 +76,42 @@ export default function StatusBar() {
         {dirty && <span style={{ color: "var(--accent)" }}>●</span>}
       </div>
       <div className="flex items-center gap-4 flex-shrink-0">
+        {branch && branchOwner && (
+          <>
+            <button
+              ref={branchAnchor}
+              onClick={() => setBranchPopoverOpen((o) => !o)}
+              title={t("statusbar.branch")}
+              className="deditor-btn"
+              data-variant="ghost"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                background: "transparent",
+                border: "none",
+                color: "var(--text-soft)",
+                padding: "0 4px",
+                height: 18,
+                fontSize: 11,
+                cursor: "pointer",
+                borderRadius: 3,
+              }}
+            >
+              <FiGitBranch size={11} />
+              <span className="truncate" style={{ maxWidth: 160 }}>
+                {branch}
+              </span>
+            </button>
+            {branchPopoverOpen && (
+              <BranchPopover
+                workspace={branchOwner}
+                anchor={branchAnchor}
+                onClose={() => setBranchPopoverOpen(false)}
+              />
+            )}
+          </>
+        )}
         <span className="tabular-nums" title={t("statusbar.cursor")}>
           {t("statusbar.lnCol", { line: String(line), col: String(col) })}
           {selectionLen > 0 && (
