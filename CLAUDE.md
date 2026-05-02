@@ -134,6 +134,7 @@ DEditor 项目的协作上下文。Claude Code 在这个目录工作时自动加
 | `update_menu_state` | 重建原生菜单（语言变化或快捷键开关变化时调） |
 | `read_app_state` / `write_app_state` | UI state 文件持久化（`<app_data_dir>/state.json`，stage-and-rename 原子写） |
 | `frontend_log` | 前端日志桥转发到 Rust log |
+| **62 个 `git_*` 命令** | 见下方"Git 子系统"章节 — 单独成节列出 |
 
 **Rust 侧关键设计**：
 - 所有路径过 `expand()`：先 `~` 展开、再 transparent 处理。命令签名都是 `String`，前端不传 `PathBuf`
@@ -296,6 +297,155 @@ Settings 切语言 / 切某条快捷键开关
 **自定义 keymap**：在 `keymap.of(...)` 里加在默认前面。所有自定义条目（多光标 / 全选匹配 / Bookmarks）的 `run` 函数会读 store 的 shortcuts 表，禁用时返回 `false` 让按键透出。
 
 **Bookmarks 设计**：用 `StateField<DecorationSet>` + `Decoration.line()`。每个书签是 `[pos, pos]` 0 长度 range。`set.map(tr.changes)` 自动让位置跟编辑漂移。
+
+### Git 子系统
+
+DEditor 的 git 能力按 JetBrains IntelliJ 一比一对齐。所有 git 操作走 Rust 端的 `git CLI` 子进程（不依赖 libgit2），**62 个** `#[tauri::command]` 命令分类如下。
+
+**仓库状态 / 分支元数据**
+
+| 命令 | 用途 |
+| --- | --- |
+| `git_status` | porcelain v1 → 单字符 dominant 状态（M/A/D/U/C/?） |
+| `git_changed_files` | 提交面板用，保留 index/worktree 双栏状态 |
+| `git_repo_state` | 检测 merging / rebasing / cherry-picking / reverting / bisecting + 冲突计数 |
+| `git_branch` | 当前分支名（detached HEAD 返回 short SHA） |
+| `git_recent_branches` | 最近 10 个本地分支（按 committerdate） |
+| `git_list_branches` | 完整 local + remote 列表 |
+| `git_ahead_behind` | upstream `…` 比较，返回 `{ahead, behind, upstream}` |
+| `git_origin_web_url` | 推断 origin 的网页 URL（GitHub/GitLab/Bitbucket SSH→HTTPS 归一化） |
+| `git_repo_relpath` | 路径相对 workspace 根的 POSIX 形式 |
+| `git_get_user` / `git_set_user` | `user.name` / `user.email` 读写（默认 --local） |
+
+**diff / blame / 文件历史**
+
+| 命令 | 用途 |
+| --- | --- |
+| `git_show_head` / `git_show_at` | 任意 rev 的文件内容 |
+| `git_blame` | porcelain blame → per-line `{author, time, sha, summary}` |
+| `git_file_diff_lines` | `git diff -U0` → hunk 列表 `{kind:A/D/M, start, end}`（编辑器 gutter 用） |
+| `git_line_history` | `git log -L start,end:path` |
+
+**stage / commit / push / pull / fetch**
+
+| 命令 | 用途 |
+| --- | --- |
+| `git_stage_paths` / `git_unstage_paths` | `git add` / `git reset HEAD --` |
+| `git_rollback_paths` | `git checkout HEAD --` |
+| `git_commit` | 含 `--amend` / `--signoff` / `--allow-empty` / `--author` 选项 |
+| `git_push` / `git_push_advanced` | 简单 push / 含 `--force` / `--force-with-lease` / `--tags` / `--set-upstream` |
+| `git_unpushed_commits` | `@{u}..HEAD` log，PushDialog 预览用 |
+| `git_fetch_silent` | `git fetch --all --prune`（后台定时调用） |
+| `git_undo_last_commit` | `git reset --soft HEAD^` |
+| `git_update_project` | 多 workspace 串行 `git pull --ff-only`，返回每个仓库的成功/失败 |
+
+**Log（提交历史）**
+
+| 命令 | 用途 |
+| --- | --- |
+| `git_log` | 多过滤器（grep/author/since/until/path/limit/skip），unit-separator 自定义格式解析 |
+| `git_commit_files` | 单 commit 的改动文件列表（含 `--name-status` 和 `--numstat` 合并） |
+
+**重写历史 / commit 操作**
+
+| 命令 | 用途 |
+| --- | --- |
+| `git_cherry_pick` | `git cherry-pick HASH` |
+| `git_revert` | `git revert HASH`（可选 `--no-commit`） |
+| `git_reset_to` | `git reset --soft/mixed/hard HASH` |
+| `git_create_branch_at` | 在指定 commit 建分支（可选 `-b` checkout） |
+| `git_create_tag_at` | 在指定 commit 建 tag（含 message → annotated，否则 lightweight） |
+| `git_reword_commit` | HEAD 走 `--amend`；旧提交走脚本化 `rebase -i`（用 `GIT_SEQUENCE_EDITOR` + `GIT_EDITOR` 替换） |
+| `git_drop_commit` | HEAD 走 `reset --hard HEAD^`；旧提交走 `rebase --onto PARENT HASH` |
+| `git_squash_with_parent` | 脚本化 `rebase -i` 把 `pick` 改 `squash` |
+| `git_format_patch` | `git format-patch -1 --stdout HASH`（Copy as Patch） |
+
+**冲突 / 三栏 merge**
+
+| 命令 | 用途 |
+| --- | --- |
+| `git_conflicts` | 列出冲突文件 + kind（both modified / deleted by us / etc.） |
+| `git_conflict_side` | `git show :STAGE:path`（stage 1=base, 2=ours, 3=theirs） |
+| `git_mark_resolved` | `git add -- path` |
+| `git_abort_op` / `git_continue_op` | 根据 repo state 调对应的 `--abort` / `--continue` |
+
+**stash**
+
+| 命令 | 用途 |
+| --- | --- |
+| `git_stash_list` | `git stash list --format=%gd|%ct|%gs` 解析 |
+| `git_stash_push` | `git stash push -u/--keep-index/-m MSG` |
+| `git_stash_apply` / `git_stash_pop` / `git_stash_drop` / `git_stash_show` | `git stash apply/pop/drop/show -p` |
+
+**remotes / tags**
+
+| 命令 | 用途 |
+| --- | --- |
+| `git_remote_list/add/remove/rename/set_url` | 完整 remote CRUD（set_url 含 `--push`） |
+| `git_list_tags` | `for-each-ref refs/tags/` 含 annotated message |
+| `git_delete_tag` / `git_push_tag` / `git_push_all_tags` | 标签管理 |
+
+**init / clone / patch**
+
+| 命令 | 用途 |
+| --- | --- |
+| `git_init` | `git init`（idempotent，自动 mkdir） |
+| `git_clone` | `git clone --progress`，stderr 作为进度返回 |
+| `git_create_patch` / `git_create_patch_for_path` | 整仓库 / 单文件 unified diff |
+| `git_apply_patch` | 含 `--check` 预校验的 stdin pipe 应用 |
+
+**通用 helper**
+
+- `run_git(workspace, args)` — 执行 + 失败返回 stderr
+- `run_git_capture(workspace, args)` — 同上但返回 stdout
+
+---
+
+**前端 git 表面**
+
+| 入口 | 实现位置 |
+| --- | --- |
+| `lib/git.ts` | per-workspace zustand 缓存（branches / statuses / branchLists / recentBranches）+ 250ms coalesce 的 `refreshGit` + `requestBranchPopover` 总线 + `useGitLog`/`fetchCommitFiles`/`fetchFileAt` |
+| `lib/gitMenu.ts` | FileTree 右键的 `Git ›` 子菜单（24 项，1:1 还原 JetBrains） |
+| `lib/vcsGutter.ts` | CodeMirror StateField + Decoration：左侧改动条（绿+/蓝M/红D）+ 当前行末 inline blame widget |
+| `components/BranchPopover.tsx` | TitleBar 分支按钮 → Cascading 菜单（搜索 + Local/Remote 分组 + per-row submenu：Checkout / Compare / Merge / Rebase / Pull rebase or merge / Update / Push / Rename / Delete） |
+| `components/CommitPanel.tsx` | 左侧 sidebar（ActivityBar 第二个图标 / Cmd+K）：tree 视图 + tri-state checkbox + 文件行右键菜单（11 项 + Git 子菜单） |
+| `components/LogPanel.tsx` | Editor-area tab：filter toolbar / commit list / detail / 12 项右键（含 Cherry-Pick / Revert / Reset / Reword / Squash / Drop / Open on Remote / Compare Selected） |
+| `components/PushDialog.tsx` | commit preview + force-with-lease + tags + set-upstream |
+| `components/StashDialog.tsx` | list / apply / pop / drop / show diff / new with options |
+| `components/ConflictResolutionDialog.tsx` | 左侧文件列表 + 右侧 Local/Base/Remote 三栏 + Accept Yours/Theirs + Mark Resolved + Continue/Abort |
+| `components/ManageRemotesDialog.tsx` | CRUD remotes |
+| `components/ResetHeadDialog.tsx` | target ref + 3 张 mode 卡（soft/mixed/hard，hard 红色） |
+| `components/TagsDialog.tsx` | list / push / push all / delete / new |
+| `components/InitRepoDialog.tsx` / `CloneRepoDialog.tsx` | 替代 paste-to-terminal |
+| `components/PatchDialog.tsx` | Create / Apply patch（stdin pipe + clipboard） |
+| `components/TitleBar.tsx` | 顶部分支按钮 + repo-state 警告 chip（MERGING/REBASING/etc）+ ahead/behind chip（↑3↓2，点 push 弹 PushDialog） |
+
+**Editor 内联**
+
+- 编辑器左侧 gutter：3px 色条，绿=新增 / 蓝=修改 / 红=删除（per-line，hunk 数据来自 `git_file_diff_lines`）
+- 当前行末：`Author · 2d ago · sha` dim italic widget（来自 `git_blame`）
+- 切换由 Settings → Git 控制；保存或 file path 变化时 debounced refetch
+
+**Diff Viewer 工具栏**
+
+Side-by-side / Unified 切换 · Ignore whitespace（none/leading/all）· Highlight words · Collapse unchanged fragments（threshold=6, context=3）· Shiki 语法高亮（按 `rightPath` 检测语言）
+
+**后台 fetch**
+
+`useBgFetch()` 在 App 启动 5s 后开始按 `bgFetchIntervalMin` 跑 `git_fetch_silent`，每个 workspace 一遍，失败静默；新拉到的 commits 通过 ahead/behind chip 暴露给用户。
+
+**未做（JetBrains 独有概念，git 无原生映射）**
+
+- Changelist（命名变更集；JetBrains 用 `.idea/workspace.xml` 私有）
+- Shelf（不同于 git stash 的本地 shelve）
+- Show Local Changes as UML（UML 图）
+- Local History（JetBrains 的本地历史，独立于 git）
+- New Merge Request（需 GitHub/GitLab API）
+- Per-hunk staging（DiffView 块布局重构 + patch synthesis；DiffView 当前是表格行）
+- 多 lane branch graph（拓扑算法，当前是单 lane dot+line）
+- Pre-commit hook 输出捕获（commit 流目前只看 git CLI 退出码）
+- GPG sign / verify、Submodule 管理、Sparse checkout
 
 ### 国际化（i18n）
 

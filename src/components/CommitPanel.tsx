@@ -243,6 +243,18 @@ export default function CommitPanel() {
               setErr(String(err));
             }
           },
+          unstage: async () => {
+            try {
+              await invoke("git_unstage_paths", {
+                workspace,
+                paths: [c.rel],
+              });
+              await refresh();
+              refreshGit(workspace);
+            } catch (err) {
+              setErr(String(err));
+            }
+          },
           addToGitignore: async () => {
             try {
               await appendToGitignore(workspace, c.rel);
@@ -1553,6 +1565,7 @@ function buildFileMenu(
     commitFile: () => void;
     rollback: () => void;
     addToVcs: () => void;
+    unstage: () => void;
     addToGitignore: () => void;
     createPatch: () => void;
     copyPatch: () => void;
@@ -1587,6 +1600,12 @@ function buildFileMenu(
       // Only meaningful when the file isn't already tracked.
       disabled: !isUntracked,
       onClick: handlers.addToVcs,
+    },
+    {
+      label: tStatic("commit.row.unstage"),
+      // Only when something IS in the index for this path.
+      disabled: c.index_status.trim() === "" || c.index_status === "?",
+      onClick: handlers.unstage,
     },
     {
       label: tStatic("commit.row.addToGitignore"),
