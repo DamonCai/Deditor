@@ -58,10 +58,11 @@ interface PersistedV3 {
   terminalPx?: number;
   terminalShell?: string;
   /** Active left-side tool window. Optional for backward compat. */
-  leftPanel?: "files" | "commit";
   /** Draft commit messages keyed by workspace. Persisted so a user editing
    *  a commit message at quit time finds it again next launch. */
   commitDrafts?: Record<string, string>;
+  /** Active sidebar panel — Project (file tree) or Commit. */
+  leftPanel?: "files" | "commit";
   /** Per-workspace commit options (signoff / allowEmpty / authorOverride). */
   commitOptions?: Record<
     string,
@@ -347,11 +348,11 @@ export async function loadPersisted(): Promise<UiExtras | null> {
   if (typeof data.terminalShell === "string") {
     useEditorStore.setState({ terminalShell: data.terminalShell });
   }
-  if (data.leftPanel === "files" || data.leftPanel === "commit") {
-    useEditorStore.setState({ leftPanel: data.leftPanel });
-  }
   if (data.commitDrafts && typeof data.commitDrafts === "object") {
     useEditorStore.setState({ commitDrafts: { ...data.commitDrafts } });
+  }
+  if (data.leftPanel === "files" || data.leftPanel === "commit") {
+    useEditorStore.setState({ leftPanel: data.leftPanel });
   }
   if (data.commitOptions && typeof data.commitOptions === "object") {
     useEditorStore.setState({ commitOptions: { ...data.commitOptions } });
@@ -417,7 +418,9 @@ function doSave(extras: UiExtras): void {
   const s = useEditorStore.getState();
   // Diff tabs are ephemeral — drop them before persisting so they don't show
   // up empty on next launch.
-  const persistableTabs = s.tabs.filter((t) => !t.diff);
+  // Diff / Log tabs are ephemeral — they re-derive from git state when
+  // reopened and shouldn't pin sessions.
+  const persistableTabs = s.tabs.filter((t) => !t.diff && !t.log);
   const activeIdx0 = persistableTabs.findIndex((t) => t.id === s.activeId);
   const activeIndex = activeIdx0 < 0 ? 0 : activeIdx0;
   const base: Persisted = {
@@ -458,8 +461,8 @@ function doSave(extras: UiExtras): void {
     terminalOpen: s.terminalOpen,
     terminalPx: extras.terminalPx,
     terminalShell: s.terminalShell,
-    leftPanel: s.leftPanel,
     commitDrafts: s.commitDrafts,
+    leftPanel: s.leftPanel,
     commitOptions: s.commitOptions,
     commitMessageHistory: s.commitMessageHistory,
     commitViewMode: s.commitViewMode,

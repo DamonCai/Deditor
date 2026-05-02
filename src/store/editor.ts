@@ -35,6 +35,7 @@ export interface LogSpec {
   initialPath?: string;
 }
 
+
 export interface Tab {
   id: string;
   filePath: string | null;
@@ -81,9 +82,6 @@ interface EditorState {
    *  workspace, which is wrong when the user navigates folders without
    *  opening a file. Reset to null when a workspace is removed. */
   focusedWorkspace: string | null;
-  /** Which left-side tool window is showing — Project (file tree) or Commit
-   *  (changes list + commit message). Switched via the ActivityBar. */
-  leftPanel: "files" | "commit";
   /** Per-workspace draft commit message. Persisted so closing/reopening the
    *  app doesn't lose a half-written message. */
   commitDrafts: Record<string, string>;
@@ -129,6 +127,11 @@ interface EditorState {
    *  focus (Cmd+K, Git menu's "Commit Directory…", etc.). The panel
    *  subscribes and re-focuses its message textarea on change. */
   commitFocusVersion: number;
+  /** Which tool window is shown in the left sidebar — Project (file tree)
+   *  or Commit (changes list + message). No ActivityBar exists; users flip
+   *  via Cmd+K (→ commit) and a "back" button inside the CommitPanel
+   *  header (→ files). */
+  leftPanel: "files" | "commit";
   /** Phase 3 modal dialogs. Single open-at-a-time slot — opening one
    *  closes whichever was previously open. Each dialog reads its own
    *  workspace from `focusedWorkspace` (or, for resetHead, an explicit
@@ -235,7 +238,6 @@ interface EditorState {
   openLogTab: (spec: LogSpec) => string;
   setCompareMarkPath: (path: string | null) => void;
   setFocusedWorkspace: (path: string | null) => void;
-  setLeftPanel: (p: "files" | "commit") => void;
   setCommitDraft: (workspace: string, message: string) => void;
   setCommitAmend: (workspace: string, on: boolean) => void;
   setCommitChecked: (workspace: string, rel: string, checked: boolean) => void;
@@ -267,6 +269,7 @@ interface EditorState {
    *  window to commit, and bumps the focus counter so the panel grabs
    *  focus on its message textarea. */
   openCommitPanel: () => void;
+  setLeftPanel: (p: "files" | "commit") => void;
   openGitDialog: (
     spec: NonNullable<EditorState["gitDialog"]>,
   ) => void;
@@ -535,11 +538,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   editorFontSize: 14,
   compareMarkPath: null,
   focusedWorkspace: null,
-  leftPanel: "files",
   commitDrafts: {},
   commitAmend: {},
   commitUnchecked: {},
   commitFocusVersion: 0,
+  leftPanel: "files",
   gitDialog: null,
   commitOptions: {},
   commitMessageHistory: [],
@@ -658,7 +661,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   setCompareMarkPath: (path) => set({ compareMarkPath: path }),
   setFocusedWorkspace: (path) => set({ focusedWorkspace: path }),
-  setLeftPanel: (p) => set({ leftPanel: p }),
   setCommitDraft: (workspace, message) => {
     const { commitDrafts } = get();
     set({ commitDrafts: { ...commitDrafts, [workspace]: message } });
@@ -687,6 +689,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       commitFocusVersion: s.commitFocusVersion + 1,
     });
   },
+  setLeftPanel: (p) => set({ leftPanel: p }),
   openGitDialog: (spec) => set({ gitDialog: spec }),
   closeGitDialog: () => set({ gitDialog: null }),
   setCommitOption: (workspace, patch) => {
@@ -1050,5 +1053,8 @@ export function useActiveTab(): Tab | null {
 }
 
 export function isTabDirty(t: Tab): boolean {
+  // Diff / Log tabs are virtual — they have nothing to save and shouldn't
+  // show the dirty indicator.
+  if (t.diff || t.log) return false;
   return t.content !== t.savedContent;
 }

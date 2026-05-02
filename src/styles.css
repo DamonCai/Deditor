@@ -362,13 +362,30 @@ body,
   background: var(--accent);
 }
 
-/* Collapsed-sidebar rail — clickable column anywhere along its height. */
+/* Collapsed-sidebar rail — thin clickable column. Shows nothing by default
+ * (matches user preference: no permanent indicator), but reveals a `›`
+ * chevron + brighter background on hover so it's discoverable. */
 .sidebar-rail {
+  position: relative;
   transition: background 0.12s;
+}
+.sidebar-rail::after {
+  content: "›";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 14px;
+  color: var(--text-soft);
+  opacity: 0;
+  transition: opacity 0.12s;
+  pointer-events: none;
 }
 .sidebar-rail:hover {
   background: var(--hover-bg) !important;
-  color: var(--text) !important;
+}
+.sidebar-rail:hover::after {
+  opacity: 1;
 }
 
 /* Branch popover thin section separator. */

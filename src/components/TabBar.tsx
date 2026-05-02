@@ -290,14 +290,18 @@ function TabItem({
   const untitled = tStatic("common.untitled");
   const name = tab.diff
     ? formatDiffTitle(tab.diff.leftPath, tab.diff.rightPath)
-    : tab.filePath
-    ? tab.filePath.split(/[\\/]/).pop()
-    : untitled;
+    : tab.log
+      ? `Log: ${basename(tab.log.workspace)}${tab.log.initialPath ? ` — ${tab.log.initialPath}` : ""}`
+      : tab.filePath
+        ? tab.filePath.split(/[\\/]/).pop()
+        : untitled;
   const gitStatus = useFileGitStatus(tab.filePath);
   const gitColor = gitStatusColor(gitStatus);
   const tooltip = tab.diff
     ? `${tab.diff.leftPath}\n↔\n${tab.diff.rightPath}`
-    : tab.filePath ?? untitled;
+    : tab.log
+      ? `Git Log — ${tab.log.workspace}`
+      : tab.filePath ?? untitled;
   return (
     <div
       data-tab-id={tab.id}
@@ -433,7 +437,9 @@ function OverflowDropdown({
   const labelOf = (tb: Tab): string =>
     tb.diff
       ? formatDiffTitle(tb.diff.leftPath, tb.diff.rightPath)
-      : tb.filePath ?? untitled;
+      : tb.log
+        ? `Log: ${basename(tb.log.workspace)}`
+        : tb.filePath ?? untitled;
   const filtered = filter
     ? tabs.filter((tb) => labelOf(tb).toLowerCase().includes(filter.toLowerCase()))
     : tabs;

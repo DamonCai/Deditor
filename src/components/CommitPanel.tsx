@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
+  FiArrowLeft,
   FiCheck,
   FiCheckSquare,
   FiChevronDown,
@@ -410,6 +411,12 @@ export default function CommitPanel() {
           color: "var(--text)",
         }}
       >
+        <ToolbarBtn
+          onClick={() => useEditorStore.getState().setLeftPanel("files")}
+          title={t("commit.backToProject")}
+        >
+          <FiArrowLeft size={13} />
+        </ToolbarBtn>
         <span style={{ flex: 1 }}>{t("commit.title")}</span>
         <ViewModeMenu
           mode={viewMode}

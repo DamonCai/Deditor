@@ -8,7 +8,6 @@ import Preview from "./components/Preview";
 import TitleBar from "./components/TitleBar";
 import StatusBar from "./components/StatusBar";
 import FileTree from "./components/FileTree";
-import ActivityBar from "./components/ActivityBar";
 import CommitPanel from "./components/CommitPanel";
 import PushDialog from "./components/PushDialog";
 import StashDialog from "./components/StashDialog";
@@ -492,7 +491,6 @@ export default function App() {
           display: terminalOpen && terminalMaximized ? "none" : "flex",
         }}
       >
-        {!zenMode && <ActivityBar />}
         {!zenMode && showSidebar && (
           <>
             <div
@@ -524,7 +522,7 @@ export default function App() {
             }}
             className="sidebar-rail"
             style={{
-              width: 8,
+              width: 14,
               flexShrink: 0,
               borderRight: "1px solid var(--border)",
               background: "var(--bg-soft)",
@@ -868,8 +866,9 @@ function useBgFetch(): void {
   }, [enabled, intervalMin, workspaces]);
 }
 
-/** Switches the sidebar between Project (FileTree) and Commit (CommitPanel)
- *  based on store.leftPanel. Kept tiny so the parent layout stays readable. */
+/** Sidebar content router — Project tree by default, switches to Commit
+ *  when the user invokes Cmd+K (or Git → Commit Directory). The header
+ *  inside CommitPanel offers a "back to project" link that flips it back. */
 function LeftToolWindow() {
   const leftPanel = useEditorStore((s) => s.leftPanel);
   return leftPanel === "commit" ? <CommitPanel /> : <FileTree />;
