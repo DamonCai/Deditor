@@ -20,6 +20,8 @@ import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 import { markdownTableKeymap } from "../lib/markdownTable";
 import { colorPreview } from "../lib/colorPreview";
 import { inspectionMarkers } from "../lib/inspectionMarkers";
+import { refreshVcsForView, vcsExtensions } from "../lib/vcsGutter";
+import { workspaceOf } from "../lib/git";
 import {
   syntaxHighlighting,
   defaultHighlightStyle,
@@ -34,6 +36,9 @@ import { islandLight } from "../lib/islandLightTheme";
 import { detectLang, isMarkdown, isImageFile, isPdfFile, isAudioFile, isVideoFile, isHexFile, isXmindFile } from "../lib/lang";
 import { useEditorStore, type DiffSpec } from "../store/editor";
 import DiffView from "./DiffView";
+import LogPanel from "./LogPanel";
+import type { LogSpec } from "../store/editor";
+import { invoke } from "@tauri-apps/api/core";
 import XmindView from "./XmindView";
 import { isEnabled } from "../lib/shortcuts";
 import {
@@ -105,6 +110,9 @@ interface Props {
   /** When set, the active tab is a side-by-side file comparison; we short-
    *  circuit and render DiffView, ignoring CodeMirror entirely. */
   diff?: DiffSpec;
+  /** When set, the tab renders the Git Log panel for this workspace. Same
+   *  short-circuit pattern as `diff` — CodeMirror never mounts. */
+  log?: LogSpec;
   /** Caret offset to restore on mount (only read once, when this Editor mounts). */
   initialCursor?: number;
   /** First-visible line (1-based) to restore on mount. */
@@ -139,6 +147,7 @@ export default function Editor({
   tabId,
   noStateCache,
   diff,
+  log,
   initialCursor,
   initialScrollLine,
   externalScrollLine,
@@ -153,6 +162,10 @@ export default function Editor({
   // Diff tab — render the side-by-side comparison.
   if (diff) {
     return <DiffView spec={diff} />;
+  }
+  // Log tab — render the Git Log panel.
+  if (log) {
+    return <LogPanel workspace={log.workspace} initialPath={log.initialPath} />;
   }
   // Image preview — render a data URL directly as <img>.
   if (isImageFile(filePath) && value.startsWith("data:")) {
@@ -316,6 +329,7 @@ export default function Editor({
         colorPreviewSupported(filePath) ? colorPreview() : [],
         bookmarkExtension(),
         inspectionMarkers(),
+        vcsExtensions(),
         EditorView.updateListener.of((u) => {
           if (u.docChanged) onChangeRef.current(u.state.doc.toString());
           if (u.selectionSet || u.docChanged) {
@@ -573,6 +587,22 @@ export default function Editor({
     });
   }, [filePath]);
 
+  // VCS gutter + inline blame — refresh on file path change AND when the
+  // doc returns to its on-disk state (debounced via savedContent prop).
+  // Both are no-ops if the user disabled the corresponding setting.
+  const gutterEnabled = useEditorStore((s) => s.gutterMarkers);
+  const blameEnabled = useEditorStore((s) => s.inlineBlame);
+  useEffect(() => {
+    if (!viewRef.current || !filePath) return;
+    const workspaces = useEditorStore.getState().workspaces;
+    const ws = workspaceOf(filePath, workspaces);
+    if (!ws) return;
+    void refreshVcsForView(viewRef.current, ws, filePath, {
+      gutterEnabled,
+      blameEnabled,
+    });
+  }, [filePath, gutterEnabled, blameEnabled, value]);
+
   const buildCtxItems = (): MenuItem[] => {
     const view = viewRef.current;
     const sel = view?.state.selection.main;
@@ -603,6 +633,37 @@ export default function Editor({
         onClick: () => view && openSearchPanel(view),
       },
     ];
+    if (filePath && hasSelection && view) {
+      const workspaces = useEditorStore.getState().workspaces;
+      const ws = workspaceOf(filePath, workspaces);
+      if (ws) {
+        const startLine = view.state.doc.lineAt(sel!.from).number;
+        const endLine = view.state.doc.lineAt(sel!.to).number;
+        items.push({ divider: true });
+        items.push({
+          label: t("gitMenu.showLineHistory"),
+          onClick: async () => {
+            try {
+              const out = await invoke<string>("git_line_history", {
+                workspace: ws,
+                path: filePath,
+                start: startLine,
+                end: endLine,
+              });
+              useEditorStore.getState().openDiffTab({
+                leftPath: `line-history:${startLine}-${endLine}`,
+                rightPath: filePath,
+                leftContent: "",
+                rightContent: out,
+              });
+            } catch (e) {
+              // eslint-disable-next-line no-alert
+              alert(String(e));
+            }
+          },
+        });
+      }
+    }
     if (isMarkdown(filePath)) {
       const { showPreview, togglePreview } = useEditorStore.getState();
       items.push({ divider: true });

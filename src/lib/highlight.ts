@@ -63,3 +63,31 @@ export async function ensureLanguage(
   }
   return "text";
 }
+
+/** One token from shiki's tokenizer — `content` is the substring, `color`
+ *  is the hex string the active theme assigns. */
+export interface ShikiTok {
+  content: string;
+  color?: string;
+}
+
+/** Tokenize a whole document into lines × tokens. Returns null until both
+ *  Shiki and the requested language have loaded. Caller passes the SHIKI
+ *  language id (from LangDef.shiki) and a theme name ("github-light" /
+ *  "one-dark-pro"). */
+export async function tokenizeLines(
+  text: string,
+  lang: string,
+  theme: "github-light" | "one-dark-pro",
+): Promise<ShikiTok[][]> {
+  const hl = await getHighlighter();
+  const resolvedLang = await ensureLanguage(hl, lang);
+  // codeToTokensBase: ThemedToken[][] — outer = lines, inner = tokens.
+  const tokens = hl.codeToTokensBase(text, {
+    lang: resolvedLang as BundledLanguage,
+    theme,
+  });
+  return tokens.map((line) =>
+    line.map((tok) => ({ content: tok.content, color: tok.color })),
+  );
+}

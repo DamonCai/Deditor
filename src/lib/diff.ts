@@ -1,6 +1,27 @@
-import { diffLines, type Change } from "diff";
+import { diffLines, diffWordsWithSpace, type Change } from "diff";
 
 export type ChangeType = "eq" | "del" | "add" | "mod";
+
+/** How to normalize whitespace before line diffing — mirrors JetBrains'
+ *  "Do not ignore / Trim trailing / Ignore whitespaces" dropdown plus
+ *  "Ignore all whitespaces". */
+export type WhitespaceMode = "none" | "leading" | "all";
+
+function normalize(text: string, mode: WhitespaceMode): string {
+  if (mode === "none") return text;
+  return text
+    .split(/\r?\n/)
+    .map((line) => {
+      if (mode === "leading") {
+        // Trim trailing spaces; preserve indentation.
+        return line.replace(/\s+$/g, "");
+      }
+      // "all" — collapse runs of whitespace to single space, drop leading/
+      // trailing. Matches `git diff -w` semantics.
+      return line.replace(/\s+/g, " ").trim();
+    })
+    .join("\n");
+}
 
 export interface DiffRow {
   left: string | null;
@@ -23,9 +44,25 @@ export interface DiffResult {
 
 /** Run a line-level diff and convert jsdiff's hunk output into row-aligned form
  *  suitable for a side-by-side view. Adjacent removed+added chunks are paired
- *  so a "modified line" shows up on the same row on both sides. */
-export function computeDiff(left: string, right: string): DiffResult {
-  const parts: Change[] = diffLines(left, right);
+ *  so a "modified line" shows up on the same row on both sides.
+ *
+ *  Whitespace handling: when `whitespace !== "none"` we normalize BOTH sides
+ *  before diffing but write the ORIGINAL lines to the rows (otherwise the
+ *  preview would show stripped strings). */
+export function computeDiff(
+  left: string,
+  right: string,
+  whitespace: WhitespaceMode = "none",
+): DiffResult {
+  // For whitespace-insensitive diffing, run jsdiff on normalized text but
+  // index back into the original via line count. Both sides have the same
+  // line count after splitting (jsdiff reads strings, line breaks survive).
+  const parts: Change[] =
+    whitespace === "none"
+      ? diffLines(left, right)
+      : diffLines(normalize(left, whitespace), normalize(right, whitespace));
+  const origLeftLines = left.split(/\r?\n/);
+  const origRightLines = right.split(/\r?\n/);
   const rows: DiffRow[] = [];
   let leftLine = 1;
   let rightLine = 1;
@@ -40,26 +77,29 @@ export function computeDiff(left: string, right: string): DiffResult {
     if (p.removed) {
       const next = parts[i + 1];
       if (next?.added) {
-        // Pair removed+added: same row, both sides shown.
         const nextLines = splitChunk(next.value);
         const max = Math.max(lines.length, nextLines.length);
         for (let j = 0; j < max; j++) {
-          const l = lines[j];
-          const r = nextLines[j];
+          // When whitespace is normalized, swap in the original line content
+          // so the visual diff still shows the user's actual text.
+          const lOrig =
+            j < lines.length ? origLeftLines[leftLine - 1] : undefined;
+          const rOrig =
+            j < nextLines.length ? origRightLines[rightLine - 1] : undefined;
           rows.push({
-            left: l ?? null,
-            right: r ?? null,
-            leftLineNum: l != null ? leftLine++ : null,
-            rightLineNum: r != null ? rightLine++ : null,
+            left: lOrig ?? null,
+            right: rOrig ?? null,
+            leftLineNum: j < lines.length ? leftLine++ : null,
+            rightLineNum: j < nextLines.length ? rightLine++ : null,
             changeType: "mod",
           });
           modified++;
         }
-        i++; // consumed the paired added chunk
+        i++;
       } else {
-        for (const line of lines) {
+        for (let j = 0; j < lines.length; j++) {
           rows.push({
-            left: line,
+            left: origLeftLines[leftLine - 1] ?? lines[j],
             right: null,
             leftLineNum: leftLine++,
             rightLineNum: null,
@@ -69,10 +109,10 @@ export function computeDiff(left: string, right: string): DiffResult {
         }
       }
     } else if (p.added) {
-      for (const line of lines) {
+      for (let j = 0; j < lines.length; j++) {
         rows.push({
           left: null,
-          right: line,
+          right: origRightLines[rightLine - 1] ?? lines[j],
           leftLineNum: null,
           rightLineNum: rightLine++,
           changeType: "add",
@@ -80,10 +120,11 @@ export function computeDiff(left: string, right: string): DiffResult {
         added++;
       }
     } else {
-      for (const line of lines) {
+      for (let j = 0; j < lines.length; j++) {
+        const text = origLeftLines[leftLine - 1] ?? lines[j];
         rows.push({
-          left: line,
-          right: line,
+          left: text,
+          right: text,
           leftLineNum: leftLine++,
           rightLineNum: rightLine++,
           changeType: "eq",
@@ -102,4 +143,33 @@ function splitChunk(value: string): string[] {
   const lines = value.split(/\r?\n/);
   if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
   return lines;
+}
+
+/** Word-level diff for a `mod` row pair. Returns runs that the renderer
+ *  can colorize: each segment carries its text + which side(s) it appears
+ *  on. Used for "Highlight words" toggle in the diff toolbar. */
+export interface WordSeg {
+  text: string;
+  /** "eq" — same on both sides; "del" — only left; "add" — only right. */
+  kind: "eq" | "del" | "add";
+}
+
+export function diffWords(
+  left: string,
+  right: string,
+): { left: WordSeg[]; right: WordSeg[] } {
+  const parts = diffWordsWithSpace(left, right);
+  const lefts: WordSeg[] = [];
+  const rights: WordSeg[] = [];
+  for (const p of parts) {
+    if (p.removed) {
+      lefts.push({ text: p.value, kind: "del" });
+    } else if (p.added) {
+      rights.push({ text: p.value, kind: "add" });
+    } else {
+      lefts.push({ text: p.value, kind: "eq" });
+      rights.push({ text: p.value, kind: "eq" });
+    }
+  }
+  return { left: lefts, right: rights };
 }

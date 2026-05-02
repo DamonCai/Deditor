@@ -34,7 +34,10 @@ export default function Preview({ source, filePath, theme, scrollLine, onScroll 
   const [html, setHtml] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
   const isMd = isMarkdown(filePath);
-  const { previewMaximized, togglePreviewMaximized } = useEditorStore();
+  const previewMaximized = useEditorStore((s) => s.previewMaximized);
+  const togglePreviewMaximized = useEditorStore(
+    (s) => s.togglePreviewMaximized,
+  );
   // Suppress outgoing scroll events for this many ms after a programmatic scroll
   // (set when applying incoming scrollLine from editor).
   const suppressOutgoingUntil = useRef(0);

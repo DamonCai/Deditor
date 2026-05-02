@@ -7,6 +7,17 @@ import Preview from "./components/Preview";
 import TitleBar from "./components/TitleBar";
 import StatusBar from "./components/StatusBar";
 import FileTree from "./components/FileTree";
+import ActivityBar from "./components/ActivityBar";
+import CommitPanel from "./components/CommitPanel";
+import PushDialog from "./components/PushDialog";
+import StashDialog from "./components/StashDialog";
+import ManageRemotesDialog from "./components/ManageRemotesDialog";
+import ResetHeadDialog from "./components/ResetHeadDialog";
+import ConflictResolutionDialog from "./components/ConflictResolutionDialog";
+import InitRepoDialog from "./components/InitRepoDialog";
+import CloneRepoDialog from "./components/CloneRepoDialog";
+import TagsDialog from "./components/TagsDialog";
+import { ApplyPatchDialog, CreatePatchDialog } from "./components/PatchDialog";
 import ConfirmDialog from "./components/ConfirmDialog";
 import PromptDialog from "./components/PromptDialog";
 import TabBar from "./components/TabBar";
@@ -18,7 +29,7 @@ import FindInFiles from "./components/FindInFiles";
 import SettingsDialog from "./components/SettingsDialog";
 import CommandPalette from "./components/CommandPalette";
 import TerminalPane from "./components/Terminal";
-import { FiX, FiMaximize2, FiMinimize2 } from "react-icons/fi";
+import { FiX, FiMaximize2, FiMinimize2, FiPlus } from "react-icons/fi";
 import { isEnabled, SHORTCUTS } from "./lib/shortcuts";
 import { useEditorStore, useActiveTab } from "./store/editor";
 import { isMarkdown, isJson } from "./lib/lang";
@@ -38,7 +49,12 @@ import {
 } from "./lib/fileio";
 import { loadPersisted, schedulePersist } from "./lib/persistence";
 import { useFileWatch } from "./lib/fileWatch";
-import { refreshGit, refreshGitAll, workspaceOf } from "./lib/git";
+import {
+  backgroundFetch,
+  refreshGit,
+  refreshGitAll,
+  workspaceOf,
+} from "./lib/git";
 import { onTerminalCommand } from "./components/Terminal";
 import { Button } from "./components/ui/Button";
 
@@ -59,15 +75,29 @@ const iconBtn: React.CSSProperties = {
 
 export default function App() {
   const t = useT();
-  const { theme, showPreview, previewMaximized, showSidebar, editorFontSize, setContent, language } =
-    useEditorStore();
+  // Per-field selectors — destructuring the whole store re-renders App on
+  // every store change (viewMode toggle, every keystroke in the commit
+  // message, etc.) which then re-renders the entire layout including a
+  // 1000-line DiffView. Slicing per field keeps App quiet unless the
+  // specific values it actually consumes change.
+  const theme = useEditorStore((s) => s.theme);
+  const showPreview = useEditorStore((s) => s.showPreview);
+  const previewMaximized = useEditorStore((s) => s.previewMaximized);
+  const showSidebar = useEditorStore((s) => s.showSidebar);
+  const editorFontSize = useEditorStore((s) => s.editorFontSize);
+  const setContent = useEditorStore((s) => s.setContent);
+  const language = useEditorStore((s) => s.language);
   const active = useActiveTab();
   const filePath = active?.filePath ?? null;
   const content = active?.content ?? "";
   // Diff tabs disable the markdown preview pane and skip the markdown/json
   // toolbars — there's nothing to preview when we're showing a comparison.
+  // Diff and Log tabs both bypass the markdown / JSON toolbars and the
+  // preview pane — they own the entire editor area.
   const isDiffTab = !!active?.diff;
-  const previewEnabled = !isDiffTab && showPreview && isMarkdown(filePath);
+  const isLogTab = !!active?.log;
+  const isSpecialTab = isDiffTab || isLogTab;
+  const previewEnabled = !isSpecialTab && showPreview && isMarkdown(filePath);
   // Initial caret + scroll for the active tab. Read imperatively so subscribing
   // components don't re-render every cursor move; Editor only consumes these
   // on mount (a fresh instance is created via `key={tab.id}` per active tab).
@@ -91,6 +121,12 @@ export default function App() {
   const terminalMaximized = useEditorStore((s) => s.terminalMaximized);
   const toggleTerminal = useEditorStore((s) => s.toggleTerminal);
   const setTerminalMaximized = useEditorStore((s) => s.setTerminalMaximized);
+  const terminalSessions = useEditorStore((s) => s.terminalSessions);
+  const activeTerminalId = useEditorStore((s) => s.activeTerminalId);
+  const terminalSessionCwds = useEditorStore((s) => s.terminalSessionCwds);
+  const addTerminalSession = useEditorStore((s) => s.addTerminalSession);
+  const closeTerminalSession = useEditorStore((s) => s.closeTerminalSession);
+  const setActiveTerminal = useEditorStore((s) => s.setActiveTerminal);
   const gotoOpen = useEditorStore((s) => s.gotoAnythingOpen);
   const setGotoOpen = useEditorStore((s) => s.setGotoAnythingOpen);
   const settingsOpen = useEditorStore((s) => s.settingsOpen);
@@ -150,6 +186,7 @@ export default function App() {
   }, [hydrated, sidebarPx, previewPct, terminalPx]);
 
   useFileWatch();
+  useBgFetch();
 
   // ----- Git refresh wiring -----
   // Sources of truth that should trigger a re-poll of git status / branch:
@@ -280,8 +317,15 @@ export default function App() {
         e.preventDefault();
         setGotoSymbolOpen(true);
       } else if (k === "k" && !e.shiftKey && !e.altKey) {
-        // Cmd/Ctrl+K → toggle distraction-free (zen) mode. Single keystroke
-        // rather than the VSCode chord — chords are clumsy in WebView.
+        // Cmd/Ctrl+K → open the Commit panel (JetBrains parity). Forces the
+        // sidebar visible, switches the active tool window to Commit, and
+        // focuses the message textarea so the user can start typing.
+        if (!isEnabled(prefs, "app_open_commit")) return;
+        e.preventDefault();
+        useEditorStore.getState().openCommitPanel();
+      } else if (k === "k" && e.shiftKey && !e.altKey) {
+        // Cmd/Ctrl+Shift+K → toggle distraction-free (zen) mode. Moved off
+        // bare Cmd+K so JetBrains' Commit shortcut wins the conflict.
         if (!isEnabled(prefs, "app_zen_mode")) return;
         e.preventDefault();
         useEditorStore.getState().toggleZenMode();
@@ -446,13 +490,14 @@ export default function App() {
           display: terminalOpen && terminalMaximized ? "none" : "flex",
         }}
       >
+        {!zenMode && <ActivityBar />}
         {!zenMode && showSidebar && (
           <>
             <div
               style={{ width: sidebarPx, flexShrink: 0 }}
               className="min-w-0"
             >
-              <FileTree />
+              <LeftToolWindow />
             </div>
             <div
               className="splitter"
@@ -506,8 +551,8 @@ export default function App() {
                   style={{ width: previewEnabled ? `${editorPct}%` : "100%" }}
                   className="min-w-0 flex-1 flex flex-col"
                 >
-                  {!isDiffTab && isMarkdown(filePath) && <MarkdownToolbar />}
-                  {!isDiffTab && isJson(filePath) && <JsonToolbar />}
+                  {!isSpecialTab && isMarkdown(filePath) && <MarkdownToolbar />}
+                  {!isSpecialTab && isJson(filePath) && <JsonToolbar />}
                   {active?.externalChange != null && (
                     <ExternalChangeBanner tab={active} />
                   )}
@@ -519,6 +564,7 @@ export default function App() {
                         value={content}
                         filePath={filePath}
                         diff={active?.diff}
+                        log={active?.log}
                         theme={theme}
                         fontSize={editorFontSize}
                         initialCursor={initialPos?.cursor}
@@ -535,7 +581,7 @@ export default function App() {
                         }}
                       />
                     </div>
-                    {splitEditor && !isDiffTab && (
+                    {splitEditor && !isSpecialTab && (
                       <>
                         <div style={{ width: 1, background: "var(--border)", flexShrink: 0 }} />
                         <div style={{ flex: 1, minWidth: 0 }}>
@@ -616,21 +662,84 @@ export default function App() {
             <div
               style={{
                 display: "flex",
-                alignItems: "center",
+                alignItems: "stretch",
                 justifyContent: "space-between",
                 height: 26,
-                padding: "0 8px 0 12px",
+                padding: "0 8px 0 8px",
                 fontSize: 11,
-                letterSpacing: "0.05em",
-                fontWeight: 600,
                 color: "var(--text-soft)",
                 background: "var(--bg-soft)",
                 borderBottom: "1px solid var(--border)",
                 flexShrink: 0,
                 userSelect: "none",
+                overflow: "hidden",
               }}
             >
-              <span>TERMINAL</span>
+              <div
+                className="flex items-center"
+                style={{ gap: 0, minWidth: 0, overflowX: "auto" }}
+              >
+                {terminalSessions.map((key, i) => {
+                  const isActive = key === activeTerminalId;
+                  return (
+                    <div
+                      key={key}
+                      onClick={() => setActiveTerminal(key)}
+                      title={`Terminal ${i + 1}`}
+                      className="flex items-center"
+                      style={{
+                        gap: 4,
+                        padding: "0 8px",
+                        height: "100%",
+                        cursor: "pointer",
+                        background: isActive
+                          ? theme === "dark"
+                            ? "#1e1f22"
+                            : "#ffffff"
+                          : "transparent",
+                        color: isActive ? "var(--text)" : "var(--text-soft)",
+                        borderRight: "1px solid var(--border)",
+                        fontWeight: isActive ? 600 : 400,
+                        flexShrink: 0,
+                      }}
+                    >
+                      <span>Terminal {i + 1}</span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          closeTerminalSession(key);
+                        }}
+                        title="Close session"
+                        className="deditor-btn"
+                        data-variant="ghost"
+                        style={{
+                          ...iconBtn,
+                          width: 16,
+                          height: 16,
+                          marginLeft: 2,
+                        }}
+                      >
+                        <FiX size={11} />
+                      </button>
+                    </div>
+                  );
+                })}
+                <button
+                  onClick={() => addTerminalSession()}
+                  title="New terminal session"
+                  className="deditor-btn"
+                  data-variant="ghost"
+                  style={{
+                    ...iconBtn,
+                    width: 22,
+                    height: 22,
+                    marginLeft: 4,
+                    flexShrink: 0,
+                  }}
+                >
+                  <FiPlus size={13} />
+                </button>
+              </div>
               <div className="flex items-center" style={{ gap: 2 }}>
                 <button
                   onClick={() => setTerminalMaximized(!terminalMaximized)}
@@ -647,7 +756,7 @@ export default function App() {
                 </button>
                 <button
                   onClick={() => toggleTerminal()}
-                  title="Close (Ctrl+`)"
+                  title="Close panel (Ctrl+`)"
                   className="deditor-btn"
                   data-variant="ghost"
                   style={iconBtn}
@@ -656,7 +765,28 @@ export default function App() {
                 </button>
               </div>
             </div>
-            <TerminalPane visible={terminalOpen} />
+            <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
+              {terminalSessions.map((key) => {
+                const isActive = key === activeTerminalId;
+                return (
+                  <div
+                    key={key}
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      display: isActive ? "flex" : "none",
+                      flexDirection: "column",
+                    }}
+                  >
+                    <TerminalPane
+                      sessionKey={key}
+                      initialCwd={terminalSessionCwds[key]}
+                      visible={isActive && terminalOpen}
+                    />
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </>
       )}
@@ -669,8 +799,89 @@ export default function App() {
       <GotoSymbol open={gotoSymbolOpen} onClose={() => setGotoSymbolOpen(false)} />
       <FindInFiles open={findInFilesOpen} onClose={() => setFindInFilesOpen(false)} />
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <GitDialogHost />
     </div>
   );
+}
+
+/** Routes the single open-at-a-time `gitDialog` slot from store to the
+ *  matching component (Push / Stash / Remotes / Reset HEAD / Conflict).
+ *  Kept inline so the App layout doesn't have to thread five booleans. */
+function GitDialogHost() {
+  const dlg = useEditorStore((s) => s.gitDialog);
+  const close = useEditorStore((s) => s.closeGitDialog);
+  if (!dlg) return null;
+  switch (dlg.kind) {
+    case "push":
+      return <PushDialog workspace={dlg.workspace} open onClose={close} />;
+    case "stash":
+      return <StashDialog workspace={dlg.workspace} open onClose={close} />;
+    case "remotes":
+      return (
+        <ManageRemotesDialog workspace={dlg.workspace} open onClose={close} />
+      );
+    case "resetHead":
+      return (
+        <ResetHeadDialog
+          workspace={dlg.workspace}
+          initialRef={dlg.initialRef}
+          open
+          onClose={close}
+        />
+      );
+    case "conflicts":
+      return (
+        <ConflictResolutionDialog
+          workspace={dlg.workspace}
+          state={dlg.state}
+          open
+          onClose={close}
+        />
+      );
+    case "init":
+      return <InitRepoDialog open onClose={close} />;
+    case "clone":
+      return <CloneRepoDialog open onClose={close} />;
+    case "tags":
+      return <TagsDialog workspace={dlg.workspace} open onClose={close} />;
+    case "createPatch":
+      return (
+        <CreatePatchDialog workspace={dlg.workspace} open onClose={close} />
+      );
+    case "applyPatch":
+      return (
+        <ApplyPatchDialog workspace={dlg.workspace} open onClose={close} />
+      );
+  }
+}
+
+/** Background `git fetch --all --prune` for every open workspace, on the
+ *  user-configured interval. Cheap (network-bound, no UI lock); errors are
+ *  swallowed inside backgroundFetch. */
+function useBgFetch(): void {
+  const enabled = useEditorStore((s) => s.bgFetchEnabled);
+  const intervalMin = useEditorStore((s) => s.bgFetchIntervalMin);
+  const workspaces = useEditorStore((s) => s.workspaces);
+  useEffect(() => {
+    if (!enabled || workspaces.length === 0) return;
+    const tick = () => {
+      for (const w of workspaces) void backgroundFetch(w);
+    };
+    // Defer first run by 5s so app startup isn't slowed by network IO.
+    const initial = window.setTimeout(tick, 5000);
+    const id = window.setInterval(tick, Math.max(60, intervalMin * 60) * 1000);
+    return () => {
+      window.clearTimeout(initial);
+      window.clearInterval(id);
+    };
+  }, [enabled, intervalMin, workspaces]);
+}
+
+/** Switches the sidebar between Project (FileTree) and Commit (CommitPanel)
+ *  based on store.leftPanel. Kept tiny so the parent layout stays readable. */
+function LeftToolWindow() {
+  const leftPanel = useEditorStore((s) => s.leftPanel);
+  return leftPanel === "commit" ? <CommitPanel /> : <FileTree />;
 }
 
 function ExternalChangeBanner({ tab }: { tab: { id: string; externalChange?: string } }) {

@@ -10,9 +10,18 @@ import { useEditorStore } from "../store/editor";
 import { logError } from "../lib/logger";
 
 interface Props {
-  /** Whether the panel is currently rendered. We use it to re-fit the
-   *  terminal when the panel transitions hidden → visible (otherwise
-   *  cached dimensions stick). */
+  /** Stable React key — distinguishes tabs in the multi-session strip. Used
+   *  only for diagnostics here; the PTY id Rust hands back is what we track
+   *  internally for term_write / term_resize / term_close. */
+  sessionKey: string;
+  /** Override for the initial cwd. When set, takes precedence over the
+   *  focusedWorkspace / active-tab-workspace heuristics in pickInitialCwd.
+   *  Set by the BranchPopover so a "checkout in terminal" lands in the
+   *  workspace the popover was anchored to, not whatever was last clicked. */
+  initialCwd?: string;
+  /** Whether THIS pane is the visible one. Hidden panes stay mounted so their
+   *  PTY keeps streaming into xterm's buffer. We re-fit on hidden→visible
+   *  transitions because cached cell metrics go stale at 0×0. */
   visible: boolean;
 }
 
@@ -20,12 +29,17 @@ interface Props {
  *
  *  Opens once on mount, lives until unmount. CWD = active file's directory
  *  (most recent), falls back to the first workspace, then HOME. */
-export default function TerminalPane({ visible }: Props) {
+export default function TerminalPane({ sessionKey: _sessionKey, initialCwd, visible }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const sessionRef = useRef<string | null>(null);
+  const handleRef = useRef<TerminalHandle | null>(null);
   const lineBufferRef = useRef<string>("");
+  // Pastes that arrived before term_open resolved. Flushed when sessionRef
+  // becomes non-null. Without this, the BranchPopover's "checkout in terminal"
+  // can race the PTY spawn and silently drop the command.
+  const pendingPasteRef = useRef<string[]>([]);
   // Pull only the values we need to KICK an effect; the actual values are
   // also read fresh inside async callbacks via `.getState()` to avoid stale
   // closures.
@@ -41,6 +55,28 @@ export default function TerminalPane({ visible }: Props) {
     let cancelled = false;
     let unlistenData: UnlistenFn | undefined;
     let unlistenExit: UnlistenFn | undefined;
+
+    // Append `text` to the in-progress line buffer and dispatch
+    // `dispatchTerminalCommand` for each newline-terminated chunk. Mirrors
+    // the parsing in term.onData below; called from the imperative paste
+    // handle so external pastes (BranchPopover "Checkout", etc.) also
+    // notify the git layer when they include a trailing \n.
+    const flushPasteAsCommands = (text: string) => {
+      let buf = lineBufferRef.current;
+      for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        if (ch === "\r" || ch === "\n") {
+          const submitted = buf.trim();
+          buf = "";
+          if (submitted.length > 0) dispatchTerminalCommand(submitted);
+        } else {
+          buf += ch;
+        }
+      }
+      // Cap the buffer so a long paste without newlines doesn't grow forever.
+      if (buf.length > 4096) buf = buf.slice(-4096);
+      lineBufferRef.current = buf;
+    };
 
     const term = new Terminal({
       fontFamily: '"JetBrains Mono", "SF Mono", Menlo, Consolas, monospace',
@@ -64,7 +100,7 @@ export default function TerminalPane({ visible }: Props) {
     (async () => {
       try {
         const { rows, cols } = term;
-        const cwd = pickInitialCwd();
+        const cwd = initialCwd ?? pickInitialCwd();
         const shell = shellOverride.trim() || null;
         const id = await invoke<string>("term_open", {
           args: { rows, cols, cwd, shell },
@@ -74,6 +110,15 @@ export default function TerminalPane({ visible }: Props) {
           return;
         }
         sessionRef.current = id;
+        // Drain any pastes queued before term_open resolved.
+        if (pendingPasteRef.current.length > 0) {
+          for (const text of pendingPasteRef.current) {
+            invoke("term_write", { id, data: text }).catch((err) =>
+              logError("term_write (deferred) failed", err),
+            );
+          }
+          pendingPasteRef.current = [];
+        }
 
         unlistenData = await listen<string>(`term:${id}:data`, (e) => {
           term.write(e.payload);
@@ -124,18 +169,30 @@ export default function TerminalPane({ visible }: Props) {
       }
     })();
 
-    // Expose an imperative handle so the rest of the app can paste text or
-    // focus the terminal (used by the git branch popover's "checkout in
-    // terminal" action).
-    setTerminalHandle({
+    // Per-pane imperative handle. Registered/unregistered as `visible` flips
+    // so external callers (git popover "checkout in terminal" etc.) always
+    // hit the pane the user is actually looking at.
+    handleRef.current = {
       paste: (text: string) => {
+        // Mirror what term.onData does for typed input so paste-driven
+        // commands also fire the Enter notification — the git layer relies
+        // on this to refresh branch / status after a `git checkout` etc.
+        // Without it the status bar branch label stays stale until the user
+        // happens to press Enter manually. We dispatch unconditionally
+        // (even if the PTY isn't open yet) — the refresh listener debounces
+        // and the actual git command will run once the queued bytes flush.
+        flushPasteAsCommands(text);
         const id = sessionRef.current;
-        if (!id) return;
+        if (!id) {
+          // PTY isn't open yet — queue and let the term_open callback flush.
+          pendingPasteRef.current.push(text);
+          return;
+        }
         invoke("term_write", { id, data: text }).catch(() => {});
         term.focus();
       },
       focus: () => term.focus(),
-    });
+    };
 
     return () => {
       cancelled = true;
@@ -149,7 +206,10 @@ export default function TerminalPane({ visible }: Props) {
       termRef.current = null;
       fitRef.current = null;
       sessionRef.current = null;
-      setTerminalHandle(null);
+      // Only relinquish the global handle if we were the one holding it —
+      // otherwise we'd accidentally clear a sibling pane's handle.
+      if (activeHandle === handleRef.current) setTerminalHandle(null);
+      handleRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -169,9 +229,12 @@ export default function TerminalPane({ visible }: Props) {
   }, []);
 
   // Force a fit when the panel becomes visible — without this, opening for
-  // the first time after a hide leaves rows/cols stale.
+  // the first time after a hide leaves rows/cols stale. Also (re-)claim the
+  // global imperative handle so the visible pane is the one external callers
+  // target.
   useEffect(() => {
     if (visible) {
+      if (handleRef.current) setTerminalHandle(handleRef.current);
       requestAnimationFrame(() => {
         try {
           fitRef.current?.fit();
@@ -226,18 +289,32 @@ function themeColors(theme: "light" | "dark") {
   };
 }
 
-/** Smart CWD: prefer the directory of the file currently being edited so
- *  `git status` / `ls` reflects what the user is looking at. Fall back to
- *  the first workspace, then HOME. */
-function pickInitialCwd(): string | null {
+/** Smart CWD priority:
+ *
+ *   1. `focusedWorkspace` — the workspace the user just engaged with in the
+ *      file tree (clicked the workspace header or a folder under it). Lets
+ *      "click folder, hit + in terminal" land in that folder's repo root.
+ *   2. Workspace root containing the active file — so build/git commands
+ *      (`npm run`, `cargo build`, `git status`) work without a `cd`. We use
+ *      the workspace root, NOT the file's own dir, because most of those
+ *      commands look at the project root.
+ *   3. HOME (`~`) — neutral fallback when neither hint exists. We send the
+ *      literal "~" string and let Rust's `expand()` resolve it; without a
+ *      cwd hint, the spawned shell would inherit the Tauri parent process's
+ *      cwd (often the repo root in dev), which is the surprising default
+ *      this function exists to avoid. */
+function pickInitialCwd(): string {
   const state = useEditorStore.getState();
+  if (state.focusedWorkspace) return state.focusedWorkspace;
   const active = state.tabs.find((t) => t.id === state.activeId);
   if (active?.filePath) {
-    const idx = active.filePath.replace(/\\/g, "/").lastIndexOf("/");
-    if (idx > 0) return active.filePath.slice(0, idx);
+    const filePath = active.filePath.replace(/\\/g, "/");
+    for (const w of state.workspaces) {
+      const wn = w.replace(/\\/g, "/");
+      if (filePath === wn || filePath.startsWith(wn + "/")) return w;
+    }
   }
-  if (state.workspaces.length > 0) return state.workspaces[0];
-  return null;
+  return "~";
 }
 
 // ----- imperative handle -----------------------------------------------------

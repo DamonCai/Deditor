@@ -13,6 +13,16 @@ function basename(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
 }
 
+/** Diff tab title: JetBrains-style "Commit: filename" when the left side is
+ *  the magic `HEAD:<rel>` ref produced by the Commit panel; falls back to
+ *  the generic two-name layout otherwise. */
+function formatDiffTitle(leftPath: string, rightPath: string): string {
+  if (leftPath.startsWith("HEAD:")) {
+    return `Commit: ${basename(rightPath)}`;
+  }
+  return `${basename(leftPath)} ↔ ${basename(rightPath)}`;
+}
+
 /** Percent-encode each path segment so spaces and unicode survive a paste
  *  into a markdown link / URL field. Separators are preserved so the result
  *  is still a recognizable absolute path. */
@@ -26,7 +36,11 @@ function toEncodedPath(path: string): string {
 
 export default function TabBar() {
   const t = useT();
-  const { tabs, activeId, setActive, closeOthers, reorderTabs } = useEditorStore();
+  const tabs = useEditorStore((s) => s.tabs);
+  const activeId = useEditorStore((s) => s.activeId);
+  const setActive = useEditorStore((s) => s.setActive);
+  const closeOthers = useEditorStore((s) => s.closeOthers);
+  const reorderTabs = useEditorStore((s) => s.reorderTabs);
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const stripRef = useRef<HTMLDivElement>(null);
@@ -275,7 +289,7 @@ function TabItem({
   const dirty = isTabDirty(tab);
   const untitled = tStatic("common.untitled");
   const name = tab.diff
-    ? `${basename(tab.diff.leftPath)} ↔ ${basename(tab.diff.rightPath)}`
+    ? formatDiffTitle(tab.diff.leftPath, tab.diff.rightPath)
     : tab.filePath
     ? tab.filePath.split(/[\\/]/).pop()
     : untitled;
@@ -418,7 +432,7 @@ function OverflowDropdown({
 
   const labelOf = (tb: Tab): string =>
     tb.diff
-      ? `${basename(tb.diff.leftPath)} ↔ ${basename(tb.diff.rightPath)}`
+      ? formatDiffTitle(tb.diff.leftPath, tb.diff.rightPath)
       : tb.filePath ?? untitled;
   const filtered = filter
     ? tabs.filter((tb) => labelOf(tb).toLowerCase().includes(filter.toLowerCase()))

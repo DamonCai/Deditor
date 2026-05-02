@@ -34,6 +34,7 @@ export type ShortcutId =
   | "app_open_settings"
   | "app_zen_mode"
   | "app_split_editor"
+  | "app_open_commit"
   // editor (CodeMirror custom keymap)
   | "editor_add_cursor_above"
   | "editor_add_cursor_below"
@@ -69,7 +70,8 @@ export const SHORTCUTS: ShortcutMeta[] = [
   { id: "app_reopen_closed_tab", display: "Cmd/Ctrl+Shift+T", labelKey: "shortcut.file.reopen",       layer: "app", group: "file" },
   { id: "app_toggle_sidebar",  display: "Cmd/Ctrl+B",       labelKey: "shortcut.nav.toggleSidebar",  layer: "app", group: "nav" },
   { id: "app_open_settings",   display: "Cmd/Ctrl+,",       labelKey: "shortcut.nav.openSettings",   layer: "app", group: "nav" },
-  { id: "app_zen_mode",        display: "Cmd/Ctrl+K",       labelKey: "shortcut.nav.zenMode",        layer: "app", group: "nav" },
+  { id: "app_open_commit",     display: "Cmd/Ctrl+K",       labelKey: "shortcut.nav.openCommit",     layer: "app", group: "nav" },
+  { id: "app_zen_mode",        display: "Cmd/Ctrl+Shift+K", labelKey: "shortcut.nav.zenMode",        layer: "app", group: "nav" },
   { id: "app_split_editor",    display: "Cmd/Ctrl+\\",      labelKey: "shortcut.nav.splitEditor",    layer: "app", group: "nav" },
 
   // Editor

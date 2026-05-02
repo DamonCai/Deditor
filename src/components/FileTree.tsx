@@ -24,6 +24,7 @@ import { useT, tStatic } from "../lib/i18n";
 import { FiFolder, FiFolderPlus, FiChevronsLeft } from "react-icons/fi";
 import { Button } from "./ui/Button";
 import { useFileGitStatus, gitStatusColor, workspaceOf } from "../lib/git";
+import { buildGitSubmenu } from "../lib/gitMenu";
 import { invoke } from "@tauri-apps/api/core";
 
 const FOLDER_COLOR = "#dcb67a"; // soft amber, matches VSCode default folder icon
@@ -36,7 +37,9 @@ interface MenuState {
 
 export default function FileTree() {
   const t = useT();
-  const { workspaces, removeWorkspace, toggleSidebar } = useEditorStore();
+  const workspaces = useEditorStore((s) => s.workspaces);
+  const removeWorkspace = useEditorStore((s) => s.removeWorkspace);
+  const toggleSidebar = useEditorStore((s) => s.toggleSidebar);
   const filePath = useEditorStore(
     (s) => s.tabs.find((t) => t.id === s.activeId)?.filePath ?? null,
   );
@@ -155,12 +158,18 @@ export default function FileTree() {
                   },
                   { divider: true },
                   {
+                    label: t("gitMenu.root"),
+                    submenu: buildGitSubmenu(w, w),
+                  },
+                  { divider: true },
+                  {
                     label: t("filetree.removeFromWs", { name: shortName(w) }),
                     onClick: () => removeWorkspace(w),
                   },
                 ])
               }
-              onFolderContextMenu={(e, dir) =>
+              onFolderContextMenu={(e, dir) => {
+                const ws = workspaceOf(dir, workspaces) ?? w;
                 openMenu(e, [
                   {
                     label: t("filetree.newFile"),
@@ -177,6 +186,11 @@ export default function FileTree() {
                   },
                   { divider: true },
                   {
+                    label: t("gitMenu.root"),
+                    submenu: buildGitSubmenu(ws, dir),
+                  },
+                  { divider: true },
+                  {
                     label: t("filetree.renameDir"),
                     onClick: () => promptRename(dir, true),
                   },
@@ -184,8 +198,8 @@ export default function FileTree() {
                     label: t("filetree.deleteDir"),
                     onClick: () => promptDelete(dir, true),
                   },
-                ])
-              }
+                ]);
+              }}
               onFileContextMenu={(e, file) => {
                 const marked = compareMarkPath;
                 const ws = workspaceOf(file, workspaces);
@@ -232,6 +246,10 @@ export default function FileTree() {
                           .then((p) => navigator.clipboard.writeText(p))
                           .catch(() => {});
                       },
+                    },
+                    {
+                      label: t("gitMenu.root"),
+                      submenu: buildGitSubmenu(ws, file),
                     },
                   );
                 }
@@ -356,10 +374,14 @@ function WorkspaceSection({
   // still see their workspaces expanded on first launch.
   const open = useEditorStore((s) => s.expandedDirs[path] !== false);
   const setDirExpanded = useEditorStore((s) => s.setDirExpanded);
+  const setFocusedWorkspace = useEditorStore((s) => s.setFocusedWorkspace);
   return (
     <div style={{ marginBottom: 4 }}>
       <div
-        onClick={() => setDirExpanded(path, !open)}
+        onClick={() => {
+          setFocusedWorkspace(path);
+          setDirExpanded(path, !open);
+        }}
         onContextMenu={onContextMenu}
         title={path}
         className="flex items-center gap-1 cursor-pointer"
@@ -506,6 +528,8 @@ function DirNode({
   // just because it once existed.
   const open = useEditorStore((s) => s.expandedDirs[entry.path] === true);
   const setDirExpanded = useEditorStore((s) => s.setDirExpanded);
+  const setFocusedWorkspace = useEditorStore((s) => s.setFocusedWorkspace);
+  const workspaces = useEditorStore((s) => s.workspaces);
   const [entries, setEntries] = useState<DirEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -537,7 +561,11 @@ function DirNode({
       <Row
         depth={depth}
         active={false}
-        onClick={() => setDirExpanded(entry.path, !open)}
+        onClick={() => {
+          const ws = workspaceOf(entry.path, workspaces);
+          if (ws) setFocusedWorkspace(ws);
+          setDirExpanded(entry.path, !open);
+        }}
         onContextMenu={(e) => onFolderContextMenu(e, entry.path)}
         title={entry.path}
       >

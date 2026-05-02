@@ -20,6 +20,12 @@ interface GitStatusEntry {
   status: GitStatusCode;
 }
 
+interface BranchList {
+  current: string;
+  local: string[];
+  remote: string[];
+}
+
 interface GitState {
   /** workspace path → branch name (empty string = not a git repo) */
   branches: Record<string, string>;
@@ -27,12 +33,16 @@ interface GitState {
   statuses: Record<string, GitStatusCode>;
   /** workspace path → list of recent branch names (popover cache) */
   recentBranches: Record<string, string[]>;
+  /** workspace path → full local + remote branch list (popover cache).
+   *  Refreshed on the same throttle as branches/statuses. */
+  branchLists: Record<string, BranchList>;
 }
 
 const useGitStore = create<GitState>(() => ({
   branches: {},
   statuses: {},
   recentBranches: {},
+  branchLists: {},
 }));
 
 // Throttle: coalesce rapid refresh requests onto one execution per workspace.
@@ -69,8 +79,9 @@ async function doRefresh(workspace: string): Promise<void> {
     const branchP = invoke<string>("git_branch", { workspace });
     const entriesP = invoke<GitStatusEntry[]>("git_status", { workspace });
     const recentP = invoke<string[]>("git_recent_branches", { workspace });
-    const [branch, entries, recent] = await withTimeout(
-      Promise.all([branchP, entriesP, recentP]),
+    const listP = invoke<BranchList>("git_list_branches", { workspace });
+    const [branch, entries, recent, list] = await withTimeout(
+      Promise.all([branchP, entriesP, recentP, listP]),
       REFRESH_TIMEOUT_MS,
     );
     useGitStore.setState((s) => {
@@ -84,6 +95,7 @@ async function doRefresh(workspace: string): Promise<void> {
       return {
         branches: { ...s.branches, [workspace]: branch },
         recentBranches: { ...s.recentBranches, [workspace]: recent },
+        branchLists: { ...s.branchLists, [workspace]: list },
         statuses: fresh,
       };
     });
@@ -136,6 +148,125 @@ export function useRecentBranches(workspace: string | null): string[] {
   return useGitStore((s) =>
     workspace ? s.recentBranches[workspace] ?? [] : [],
   );
+}
+
+export function useBranchList(workspace: string | null): BranchList {
+  return useGitStore((s) =>
+    workspace
+      ? s.branchLists[workspace] ?? { current: "", local: [], remote: [] }
+      : { current: "", local: [], remote: [] },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Branch popover request bus
+//
+// The Git context menu (`Branches…`) needs to open the StatusBar's branch
+// popover from far away. Plumbing a ref through every caller is noisy; a
+// tiny pub/sub keeps the StatusBar in charge of rendering the popover but
+// lets anyone trigger it.
+
+type BranchPopoverListener = (workspace: string) => void;
+const branchPopoverListeners = new Set<BranchPopoverListener>();
+
+export function requestBranchPopover(workspace: string): void {
+  for (const fn of branchPopoverListeners) {
+    try {
+      fn(workspace);
+    } catch {
+      /* listener errors shouldn't break the bus */
+    }
+  }
+}
+
+export function onBranchPopoverRequest(fn: BranchPopoverListener): () => void {
+  branchPopoverListeners.add(fn);
+  return () => branchPopoverListeners.delete(fn);
+}
+
+// ---------------------------------------------------------------------------
+// Git Log (Phase 2)
+//
+// Each log result lives in its own short-lived state, NOT in useGitStore —
+// the log can be tens of thousands of commits and isn't shared with the
+// per-workspace branch cache. Components fetch via fetchGitLog() and own
+// the result lifecycle.
+
+export interface GitCommit {
+  hash: string;
+  short_hash: string;
+  parents: string[];
+  author_name: string;
+  author_email: string;
+  author_date: number; // unix seconds
+  committer_name: string;
+  committer_date: number;
+  subject: string;
+  body: string;
+  /** Symbolic refs attached to this commit (e.g. "HEAD -> main",
+   *  "origin/main", "tag: v1.0"). The frontend can split on " -> " to
+   *  identify the active head. */
+  refs: string[];
+}
+
+export interface GitLogFilters {
+  /** Refs to traverse. Empty array → `--all`. */
+  revs?: string[];
+  grep?: string;
+  author?: string;
+  since?: string;
+  until?: string;
+  /** Restrict to commits touching this path (workspace-relative). Drives
+   *  "Show File History" — same panel, just with path pre-filled. */
+  path?: string;
+  limit?: number;
+  skip?: number;
+}
+
+export async function fetchGitLog(
+  workspace: string,
+  filters: GitLogFilters = {},
+): Promise<GitCommit[]> {
+  return invoke<GitCommit[]>("git_log", {
+    args: { workspace, ...filters },
+  });
+}
+
+export interface GitCommitFile {
+  rel: string;
+  status: string; // 'A' / 'M' / 'D' / 'R' / 'C' / 'T' / 'U'
+  old_rel: string | null;
+  additions: number;
+  deletions: number;
+}
+
+export async function fetchCommitFiles(
+  workspace: string,
+  hash: string,
+): Promise<GitCommitFile[]> {
+  return invoke<GitCommitFile[]>("git_commit_files", { workspace, hash });
+}
+
+export async function fetchFileAt(
+  workspace: string,
+  rev: string,
+  path: string,
+): Promise<string> {
+  return invoke<string>("git_show_at", { workspace, rev, path });
+}
+
+/** Fire-and-forget background fetch for one workspace. Errors swallowed
+ *  silently — there's no useful UI we can show for "the network was flaky"
+ *  on a 5-minute timer. The next refresh tick will pick up new state. */
+export async function backgroundFetch(workspace: string): Promise<void> {
+  try {
+    await invoke("git_fetch_silent", { workspace });
+    // After a successful fetch, the per-workspace branch / status caches
+    // may be stale. Schedule a refresh.
+    refreshGit(workspace);
+  } catch {
+    /* offline / no remote — fine */
+  }
 }
 
 /** Find the deepest workspace prefix that owns a given file path. */

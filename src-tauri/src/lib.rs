@@ -807,6 +807,227 @@ fn reduce_git_status(x: u8, y: u8) -> char {
     }
 }
 
+/// Per-file change record for the Commit panel. Splits the porcelain XY
+/// pair so the UI can render two-state info: index (staged) vs worktree
+/// (unstaged). The CommitPanel uses this to drive the checkbox state and
+/// to know what diff to show on click.
+#[derive(serde::Serialize)]
+struct GitChange {
+    /// Absolute path on disk.
+    path: String,
+    /// Path relative to the workspace root, with forward slashes (consistent
+    /// across platforms; Rust git accepts both).
+    rel: String,
+    /// Index-side status (' ' = unmodified, 'M' / 'A' / 'D' / 'R' / 'C' /
+    /// '?' for untracked / 'U' for unmerged).
+    index_status: String,
+    /// Worktree-side status, same alphabet.
+    worktree_status: String,
+    /// Convenience: same one-letter dominant char as `git_status` returns,
+    /// for status-color reuse on the row icon.
+    dominant: char,
+}
+
+/// Detailed change list for the Commit panel — preserves the index/worktree
+/// split that `git_status` collapses. Untracked files surface as ('?', '?')
+/// and the UI treats them as "added (unstaged)".
+#[tauri::command]
+fn git_changed_files(workspace: String) -> Result<Vec<GitChange>, String> {
+    use std::process::Command;
+    let root = expand(&workspace);
+    let out = Command::new("git")
+        .args([
+            "-C",
+            &root.to_string_lossy(),
+            "status",
+            "--porcelain=v1",
+            "--no-renames",
+            "-z",
+        ])
+        .output()
+        .map_err(|e| {
+            log::warn!("git_changed_files spawn failed: {}", e);
+            e.to_string()
+        })?;
+    if !out.status.success() {
+        return Ok(vec![]);
+    }
+    let mut entries = Vec::new();
+    let bytes = &out.stdout;
+    let mut i = 0;
+    while i + 3 < bytes.len() {
+        let x = bytes[i] as char;
+        let y = bytes[i + 1] as char;
+        let mut j = i + 3;
+        while j < bytes.len() && bytes[j] != 0 {
+            j += 1;
+        }
+        let rel = String::from_utf8_lossy(&bytes[i + 3..j]).to_string();
+        let abs = root.join(&rel).to_string_lossy().to_string();
+        let rel_posix = rel.replace('\\', "/");
+        entries.push(GitChange {
+            path: abs,
+            rel: rel_posix,
+            index_status: x.to_string(),
+            worktree_status: y.to_string(),
+            dominant: reduce_git_status(bytes[i], bytes[i + 1]),
+        });
+        i = j + 1;
+    }
+    Ok(entries)
+}
+
+/// `git add -- <paths>` — stages the given paths (workspace-relative or
+/// absolute, git accepts both via `-C`). Returns stderr on failure.
+#[tauri::command]
+fn git_stage_paths(workspace: String, paths: Vec<String>) -> Result<(), String> {
+    run_git_with_paths(&workspace, &["add", "--"], &paths)
+}
+
+/// `git reset HEAD -- <paths>` — unstages without touching the worktree.
+/// Falls back to `git rm --cached` semantics implicitly: if the file isn't
+/// tracked yet, reset is a no-op (which is the correct behavior — there's
+/// nothing in the index to drop).
+#[tauri::command]
+fn git_unstage_paths(workspace: String, paths: Vec<String>) -> Result<(), String> {
+    run_git_with_paths(&workspace, &["reset", "HEAD", "--"], &paths)
+}
+
+/// Discard worktree changes for the given paths — equivalent of JetBrains'
+/// "Rollback" on selected files. Uses `git checkout HEAD --` so untracked
+/// files are NOT touched (different command needed for those).
+#[tauri::command]
+fn git_rollback_paths(workspace: String, paths: Vec<String>) -> Result<(), String> {
+    run_git_with_paths(&workspace, &["checkout", "HEAD", "--"], &paths)
+}
+
+/// Commit. If `paths` is non-empty we stage them first (so the commit is
+/// limited to what the user checked in the panel). Empty `paths` commits
+/// whatever's already staged. `amend` rewrites the previous commit while
+/// keeping its parents — message is required either way.
+#[derive(serde::Deserialize)]
+struct GitCommitArgs {
+    workspace: String,
+    message: String,
+    /// Paths to stage atomically before committing. Empty means commit the
+    /// existing index as-is.
+    paths: Vec<String>,
+    amend: bool,
+    /// Append `Signed-off-by: Name <email>` trailer (--signoff). Off by
+    /// default — many projects don't require DCO sign-off.
+    #[serde(default)]
+    signoff: bool,
+    /// Allow committing with no staged changes (--allow-empty). Useful for
+    /// triggering CI re-runs or marking milestones.
+    #[serde(default)]
+    allow_empty: bool,
+    /// Override commit author (--author "Name <email>"). Empty = use the
+    /// configured user.name / user.email.
+    #[serde(default)]
+    author: Option<String>,
+}
+
+#[tauri::command]
+fn git_commit(args: GitCommitArgs) -> Result<String, String> {
+    use std::process::Command;
+    let GitCommitArgs {
+        workspace,
+        message,
+        paths,
+        amend,
+        signoff,
+        allow_empty,
+        author,
+    } = args;
+    if message.trim().is_empty() && !amend {
+        return Err("commit message is required".to_string());
+    }
+    let root = expand(&workspace);
+    let cwd = root.to_string_lossy().to_string();
+
+    if !paths.is_empty() {
+        run_git_with_paths(&workspace, &["add", "--"], &paths)?;
+    }
+
+    let mut owned: Vec<String> = vec![
+        "-C".into(),
+        cwd,
+        "commit".into(),
+        "-m".into(),
+        message,
+    ];
+    if amend {
+        owned.push("--amend".into());
+    }
+    if signoff {
+        owned.push("--signoff".into());
+    }
+    if allow_empty {
+        owned.push("--allow-empty".into());
+    }
+    if let Some(a) = author.filter(|s| !s.trim().is_empty()) {
+        owned.push("--author".into());
+        owned.push(a);
+    }
+    let cmd_args: Vec<&str> = owned.iter().map(String::as_str).collect();
+    let out = Command::new("git")
+        .args(&cmd_args)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        log::warn!("git_commit failed: {}", err);
+        return Err(err);
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// `git push` against the current branch's upstream. Returns stderr (push
+/// prints progress to stderr by default, so callers can show it as-is on
+/// either success or failure).
+#[tauri::command]
+fn git_push(workspace: String) -> Result<String, String> {
+    use std::process::Command;
+    let root = expand(&workspace);
+    let out = Command::new("git")
+        .args(["-C", &root.to_string_lossy(), "push"])
+        .output()
+        .map_err(|e| e.to_string())?;
+    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    if !out.status.success() {
+        log::warn!("git_push failed: {}", stderr);
+        return Err(stderr);
+    }
+    Ok(stderr)
+}
+
+/// Read a file's worktree contents — small wrapper used by the diff viewer
+/// (it already has read_text_file but symlinking through the same
+/// expand() lets us mirror git_show_head's signature exactly).
+fn run_git_with_paths(workspace: &str, base_args: &[&str], paths: &[String]) -> Result<(), String> {
+    use std::process::Command;
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let root = expand(workspace);
+    let cwd = root.to_string_lossy().to_string();
+    let mut args: Vec<&str> = vec!["-C", &cwd];
+    args.extend(base_args.iter().copied());
+    for p in paths {
+        args.push(p);
+    }
+    let out = Command::new("git")
+        .args(&args)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        log::warn!("git op failed ({:?}): {}", base_args, err);
+        return Err(err);
+    }
+    Ok(())
+}
+
 /// Current branch name, or short SHA when HEAD is detached, or empty string
 /// when not in a git repo.
 #[tauri::command]
@@ -874,6 +1095,78 @@ fn git_recent_branches(workspace: String) -> Result<Vec<String>, String> {
         .collect())
 }
 
+#[derive(serde::Serialize)]
+struct GitBranches {
+    current: String,
+    /// All local heads (current included; the frontend separates current
+    /// out so it can render the "Current Branch" section). Order: by latest
+    /// committerdate, mirroring JetBrains' Branches popup ordering.
+    local: Vec<String>,
+    /// Remote tracking refs minus origin/HEAD. Format: `origin/main` etc.
+    remote: Vec<String>,
+}
+
+/// Local + remote branch list. Used by the JetBrains-style branch popover
+/// to populate Local / Remote sections. The current branch is reported
+/// separately so the UI can pin it at the top.
+#[tauri::command]
+fn git_list_branches(workspace: String) -> Result<GitBranches, String> {
+    use std::process::Command;
+    let root = expand(&workspace);
+    let cwd = root.to_string_lossy().to_string();
+    let current = git_branch(workspace).unwrap_or_default();
+
+    let local_out = Command::new("git")
+        .args([
+            "-C",
+            &cwd,
+            "for-each-ref",
+            "--sort=-committerdate",
+            "--format=%(refname:short)",
+            "refs/heads/",
+        ])
+        .output()
+        .map_err(|e| e.to_string())?;
+    let local = if local_out.status.success() {
+        String::from_utf8_lossy(&local_out.stdout)
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    } else {
+        vec![]
+    };
+
+    let remote_out = Command::new("git")
+        .args([
+            "-C",
+            &cwd,
+            "for-each-ref",
+            "--sort=-committerdate",
+            "--format=%(refname:short)",
+            "refs/remotes/",
+        ])
+        .output()
+        .map_err(|e| e.to_string())?;
+    let remote = if remote_out.status.success() {
+        String::from_utf8_lossy(&remote_out.stdout)
+            .lines()
+            .map(|l| l.trim().to_string())
+            // `origin/HEAD` is a symbolic ref pointing at the default branch;
+            // listing it is noise. Real branches like `origin/main` stay.
+            .filter(|s| !s.is_empty() && !s.ends_with("/HEAD"))
+            .collect()
+    } else {
+        vec![]
+    };
+
+    Ok(GitBranches {
+        current,
+        local,
+        remote,
+    })
+}
+
 /// Read a file's contents at HEAD (`git show HEAD:<rel-path>`). Used by the
 /// "Compare with HEAD" right-click action — feed both buffers into the
 /// existing diff view.
@@ -904,6 +1197,349 @@ fn git_show_head(workspace: String, path: String) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
+/// One commit row for the Log panel. `parents` lets the frontend draw the
+/// branch graph; `refs` are the symbolic names attached to the commit
+/// (branches + tags). `committer_date` is unix seconds — easier to sort /
+/// format on the frontend than handing back human strings.
+#[derive(serde::Serialize)]
+struct GitCommit {
+    hash: String,
+    short_hash: String,
+    parents: Vec<String>,
+    author_name: String,
+    author_email: String,
+    author_date: i64,
+    committer_name: String,
+    committer_date: i64,
+    subject: String,
+    body: String,
+    refs: Vec<String>,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct GitLogArgs {
+    workspace: String,
+    /// Refs to traverse. Empty = `--all`. Useful values: "HEAD",
+    /// "main..feature", "branch1 branch2".
+    #[serde(default)]
+    revs: Vec<String>,
+    /// Substring filter on commit subject (case-insensitive). Empty = no
+    /// filter. Translated to `--grep=...` plus `-i`.
+    #[serde(default)]
+    grep: Option<String>,
+    /// Author substring filter — `--author=...`.
+    #[serde(default)]
+    author: Option<String>,
+    /// `--since=YYYY-MM-DD` / `--until=YYYY-MM-DD`. Either may be empty.
+    #[serde(default)]
+    since: Option<String>,
+    #[serde(default)]
+    until: Option<String>,
+    /// Restrict to commits touching this path (workspace-relative or abs).
+    #[serde(default)]
+    path: Option<String>,
+    /// Hard cap on returned commits; we paginate via repeated calls with
+    /// `skip`. JetBrains defaults to 1000-per-page.
+    #[serde(default = "default_limit")]
+    limit: usize,
+    #[serde(default)]
+    skip: usize,
+}
+
+fn default_limit() -> usize {
+    1000
+}
+
+/// `git log` with structured output. Uses a NUL-separated custom format so
+/// commit subjects with newlines round-trip safely. Returns an empty vec
+/// when the repo has no commits or git itself errors (the UI should show
+/// "no commits" rather than red error states for this).
+#[tauri::command]
+fn git_log(args: GitLogArgs) -> Result<Vec<GitCommit>, String> {
+    use std::process::Command;
+    let root = expand(&args.workspace);
+    let cwd = root.to_string_lossy().to_string();
+
+    // Field order: %H %h %P %an %ae %at %cn %ct %s %D %b
+    // Sep within record = \x1f (Unit Separator), record terminator = \x1e
+    // (Record Separator). Both are ASCII control chars almost no real-world
+    // commit messages contain.
+    let format = "--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%cn%x1f%ct%x1f%s%x1f%D%x1f%b%x1e";
+    let mut cmd_args: Vec<String> = vec![
+        "-C".into(),
+        cwd,
+        "log".into(),
+        format.into(),
+        format!("--max-count={}", args.limit),
+        format!("--skip={}", args.skip),
+    ];
+    if let Some(g) = args.grep.as_deref().filter(|s| !s.is_empty()) {
+        cmd_args.push("-i".into());
+        cmd_args.push(format!("--grep={}", g));
+    }
+    if let Some(a) = args.author.as_deref().filter(|s| !s.is_empty()) {
+        cmd_args.push(format!("--author={}", a));
+    }
+    if let Some(s) = args.since.as_deref().filter(|s| !s.is_empty()) {
+        cmd_args.push(format!("--since={}", s));
+    }
+    if let Some(u) = args.until.as_deref().filter(|s| !s.is_empty()) {
+        cmd_args.push(format!("--until={}", u));
+    }
+    if args.revs.is_empty() {
+        cmd_args.push("--all".into());
+    } else {
+        for r in &args.revs {
+            cmd_args.push(r.clone());
+        }
+    }
+    if let Some(p) = args.path.as_deref().filter(|s| !s.is_empty()) {
+        cmd_args.push("--".into());
+        cmd_args.push(p.to_string());
+    }
+
+    let out = Command::new("git")
+        .args(&cmd_args)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        // Empty repo / unknown ref: don't surface as an error, just return [].
+        log::debug!(
+            "git_log: non-zero exit ({}) — returning empty",
+            out.status.code().unwrap_or(-1),
+        );
+        return Ok(vec![]);
+    }
+    let raw = String::from_utf8_lossy(&out.stdout);
+    let mut commits = Vec::new();
+    for record in raw.split('\x1e') {
+        let record = record.trim_start_matches('\n');
+        if record.is_empty() {
+            continue;
+        }
+        let parts: Vec<&str> = record.split('\x1f').collect();
+        if parts.len() < 11 {
+            continue;
+        }
+        let hash = parts[0].to_string();
+        let short_hash = parts[1].to_string();
+        let parents = parts[2]
+            .split_whitespace()
+            .map(String::from)
+            .collect::<Vec<_>>();
+        let author_name = parts[3].to_string();
+        let author_email = parts[4].to_string();
+        let author_date = parts[5].parse::<i64>().unwrap_or(0);
+        let committer_name = parts[6].to_string();
+        let committer_date = parts[7].parse::<i64>().unwrap_or(0);
+        let subject = parts[8].to_string();
+        // %D outputs e.g. "HEAD -> main, origin/main, tag: v1.0".
+        let refs = parts[9]
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>();
+        let body = parts[10].trim().to_string();
+        commits.push(GitCommit {
+            hash,
+            short_hash,
+            parents,
+            author_name,
+            author_email,
+            author_date,
+            committer_name,
+            committer_date,
+            subject,
+            body,
+            refs,
+        });
+    }
+    Ok(commits)
+}
+
+/// One file changed in a commit, with porcelain-style status letters.
+/// Renames stay raw — the UI can display "old → new" if it wants.
+#[derive(serde::Serialize)]
+struct GitCommitFile {
+    rel: String,
+    /// 'A' / 'M' / 'D' / 'R' / 'C' / 'T' / 'U' (unmerged).
+    status: String,
+    old_rel: Option<String>,
+    additions: u32,
+    deletions: u32,
+}
+
+/// Files changed in a commit — `git show --name-status --numstat`. Used by
+/// the Log panel's right-hand "files in this commit" pane.
+#[tauri::command]
+fn git_commit_files(workspace: String, hash: String) -> Result<Vec<GitCommitFile>, String> {
+    use std::process::Command;
+    let root = expand(&workspace);
+    let cwd = root.to_string_lossy().to_string();
+    // Two passes is simpler than parsing combined output. Both go through
+    // the cache and finish in <50ms each on real repos.
+    let names_out = Command::new("git")
+        .args([
+            "-C",
+            &cwd,
+            "show",
+            "--name-status",
+            "--no-renames=false",
+            "--pretty=format:",
+            "-z",
+            &hash,
+        ])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !names_out.status.success() {
+        return Err(String::from_utf8_lossy(&names_out.stderr).trim().to_string());
+    }
+    let stats_out = Command::new("git")
+        .args([
+            "-C",
+            &cwd,
+            "show",
+            "--numstat",
+            "--pretty=format:",
+            "-z",
+            &hash,
+        ])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    let mut files: Vec<GitCommitFile> = Vec::new();
+    // -z + --name-status format: STATUS\0PATH\0[OLD\0]PATH\0...
+    // Renames/copies emit STATUS_score\0OLD\0NEW\0.
+    let bytes = &names_out.stdout;
+    let mut i = 0;
+    while i < bytes.len() {
+        // Skip leading newlines/empty regions between commit boundaries.
+        if bytes[i] == b'\n' {
+            i += 1;
+            continue;
+        }
+        let st_end = bytes[i..]
+            .iter()
+            .position(|&b| b == 0)
+            .map(|p| i + p)
+            .unwrap_or(bytes.len());
+        let status_token = String::from_utf8_lossy(&bytes[i..st_end]).to_string();
+        i = st_end + 1;
+        if i >= bytes.len() {
+            break;
+        }
+        let p1_end = bytes[i..]
+            .iter()
+            .position(|&b| b == 0)
+            .map(|p| i + p)
+            .unwrap_or(bytes.len());
+        let p1 = String::from_utf8_lossy(&bytes[i..p1_end]).to_string();
+        i = p1_end + 1;
+
+        let status_letter = status_token.chars().next().unwrap_or('?');
+        let (rel, old_rel) = if status_letter == 'R' || status_letter == 'C' {
+            // Rename / Copy carries OLD then NEW.
+            if i >= bytes.len() {
+                break;
+            }
+            let p2_end = bytes[i..]
+                .iter()
+                .position(|&b| b == 0)
+                .map(|p| i + p)
+                .unwrap_or(bytes.len());
+            let p2 = String::from_utf8_lossy(&bytes[i..p2_end]).to_string();
+            i = p2_end + 1;
+            (p2, Some(p1))
+        } else {
+            (p1, None)
+        };
+        files.push(GitCommitFile {
+            rel: rel.replace('\\', "/"),
+            status: status_letter.to_string(),
+            old_rel: old_rel.map(|s| s.replace('\\', "/")),
+            additions: 0,
+            deletions: 0,
+        });
+    }
+
+    if stats_out.status.success() {
+        // numstat is ALSO -z separated when -z is passed. Format per file:
+        //   ADD<TAB>DEL<TAB>PATH\0  (or ADD\tDEL\t\0OLD\0NEW\0 for renames)
+        let bytes = &stats_out.stdout;
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'\n' {
+                i += 1;
+                continue;
+            }
+            let end = bytes[i..]
+                .iter()
+                .position(|&b| b == 0)
+                .map(|p| i + p)
+                .unwrap_or(bytes.len());
+            let chunk = String::from_utf8_lossy(&bytes[i..end]).to_string();
+            i = end + 1;
+            // Rename in numstat ends with TAB and an empty path; the next
+            // two NUL'd fields are old + new. We only need the counts here;
+            // matching numstat-row to file-row by position is fragile, so
+            // skip count attribution for renames (UI shows blank).
+            let mut parts = chunk.splitn(3, '\t');
+            let add = parts.next().unwrap_or("0");
+            let del = parts.next().unwrap_or("0");
+            let path = parts.next().unwrap_or("").trim().to_string();
+            if path.is_empty() {
+                // Rename — skip the OLD then NEW NUL fields.
+                if i < bytes.len() {
+                    let e = bytes[i..]
+                        .iter()
+                        .position(|&b| b == 0)
+                        .map(|p| i + p)
+                        .unwrap_or(bytes.len());
+                    i = e + 1;
+                }
+                if i < bytes.len() {
+                    let e = bytes[i..]
+                        .iter()
+                        .position(|&b| b == 0)
+                        .map(|p| i + p)
+                        .unwrap_or(bytes.len());
+                    i = e + 1;
+                }
+                continue;
+            }
+            let path_posix = path.replace('\\', "/");
+            if let Some(f) = files.iter_mut().find(|f| f.rel == path_posix) {
+                f.additions = add.parse().unwrap_or(0);
+                f.deletions = del.parse().unwrap_or(0);
+            }
+        }
+    }
+
+    Ok(files)
+}
+
+/// File contents at an arbitrary revision. Returns empty string if the file
+/// didn't exist (added in this commit). The Log panel's per-file diff uses
+/// this for both sides of the comparison (parent rev vs this rev).
+#[tauri::command]
+fn git_show_at(workspace: String, rev: String, path: String) -> Result<String, String> {
+    use std::process::Command;
+    let root = expand(&workspace);
+    let cwd = root.to_string_lossy().to_string();
+    let path_posix = path.replace('\\', "/");
+    let out = Command::new("git")
+        .args(["-C", &cwd, "show", &format!("{}:{}", rev, path_posix)])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        // File didn't exist at this revision (added): return empty rather
+        // than propagating the error — the caller treats both sides as
+        // optional and only one side missing is the "addition" case.
+        return Ok(String::new());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
 /// Return the path relative to the workspace root, POSIX-separated. Useful
 /// for "Copy git path" clipboard action.
 #[tauri::command]
@@ -916,6 +1552,1210 @@ fn git_repo_relpath(workspace: String, path: String) -> Result<String, String> {
         .to_string_lossy()
         .to_string();
     Ok(rel.replace('\\', "/"))
+}
+
+// ---------------------------------------------------------------------------
+// Log right-click ops — invoked by the Git Log panel's commit context menu.
+// All return git's stderr (string) on failure so the UI can show the actual
+// reason (conflicts, dirty tree, missing remote) instead of a generic
+// "command failed".
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+fn git_cherry_pick(workspace: String, hash: String) -> Result<(), String> {
+    run_git(&workspace, &["cherry-pick", &hash])
+}
+
+#[tauri::command]
+fn git_revert(workspace: String, hash: String, no_commit: bool) -> Result<(), String> {
+    let mut args: Vec<&str> = vec!["revert"];
+    // JetBrains' "Revert" defaults to creating a commit; we expose
+    // `no_commit=true` so a future dialog can offer the staging-only path.
+    if no_commit {
+        args.push("--no-commit");
+    }
+    args.push(&hash);
+    run_git(&workspace, &args)
+}
+
+/// Reset the current branch to point at `hash`, with the chosen mode.
+/// Modes: "soft" (keep index + worktree), "mixed" (default, reset index),
+/// "hard" (also reset worktree — destructive). The UI must confirm before
+/// firing "hard".
+#[tauri::command]
+fn git_reset_to(workspace: String, hash: String, mode: String) -> Result<(), String> {
+    let m = match mode.as_str() {
+        "soft" | "mixed" | "hard" | "merge" | "keep" => mode,
+        _ => return Err(format!("invalid reset mode: {}", mode)),
+    };
+    let arg = format!("--{}", m);
+    run_git(&workspace, &["reset", &arg, &hash])
+}
+
+#[tauri::command]
+fn git_create_branch_at(
+    workspace: String,
+    hash: String,
+    name: String,
+    checkout: bool,
+) -> Result<(), String> {
+    if checkout {
+        run_git(&workspace, &["checkout", "-b", &name, &hash])
+    } else {
+        run_git(&workspace, &["branch", &name, &hash])
+    }
+}
+
+#[tauri::command]
+fn git_create_tag_at(
+    workspace: String,
+    hash: String,
+    name: String,
+    message: Option<String>,
+) -> Result<(), String> {
+    let msg = message.unwrap_or_default();
+    if msg.trim().is_empty() {
+        run_git(&workspace, &["tag", &name, &hash])
+    } else {
+        // -a creates an annotated tag (preferred for releases).
+        run_git(&workspace, &["tag", "-a", &name, "-m", &msg, &hash])
+    }
+}
+
+/// Reword a commit's message — handles HEAD vs older commits transparently
+/// by switching between `--amend` and an interactive rebase with the
+/// `GIT_SEQUENCE_EDITOR` trick.
+#[tauri::command]
+fn git_reword_commit(
+    workspace: String,
+    hash: String,
+    message: String,
+) -> Result<(), String> {
+    use std::process::Command;
+    let root = expand(&workspace);
+    let cwd = root.to_string_lossy().to_string();
+    // Resolve HEAD; if it equals `hash`, use the cheap --amend path.
+    let head_out = Command::new("git")
+        .args(["-C", &cwd, "rev-parse", "HEAD"])
+        .output()
+        .map_err(|e| e.to_string())?;
+    let head = String::from_utf8_lossy(&head_out.stdout).trim().to_string();
+    if head.starts_with(&hash) || hash.starts_with(&head) {
+        return run_git(&workspace, &["commit", "--amend", "-m", &message]);
+    }
+    // Older commit: scripted interactive rebase. We replace `pick <hash>` with
+    // `reword <hash>`, set the editor to `true` (no-op) and commit-message
+    // editor to a small command that overwrites the message file.
+    let script = format!(
+        "f={{}}; sed -i.bak \"s/^pick {h}/reword {h}/\" \"$f\"",
+        h = &hash[..hash.len().min(40)]
+    );
+    let _ = script; // (we'll use env-var route below instead — clearer)
+    // Pragmatic approach: shell out to git with custom env. Editor is a
+    // shell snippet that no-ops; sequence editor rewrites the todo list.
+    let seq_edit = format!(
+        r#"sed -i.bak "s/^pick {h}/reword {h}/""#,
+        h = &hash[..hash.len().min(40)]
+    );
+    let msg_file = std::env::temp_dir().join(format!(
+        "deditor-reword-{}.txt",
+        std::process::id()
+    ));
+    if let Err(e) = std::fs::write(&msg_file, message.as_bytes()) {
+        return Err(format!("write reword message tmpfile failed: {}", e));
+    }
+    let msg_editor = format!(r#"cp '{}' "$1""#, msg_file.display());
+    let out = Command::new("git")
+        .args([
+            "-C",
+            &cwd,
+            "rebase",
+            "-i",
+            "--autosquash",
+            &format!("{}^", hash),
+        ])
+        .env("GIT_SEQUENCE_EDITOR", &seq_edit)
+        .env("GIT_EDITOR", &msg_editor)
+        .output()
+        .map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_file(&msg_file);
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(())
+}
+
+/// Drop a commit from history (`git rebase --onto <hash>^ <hash>`). For
+/// non-HEAD commits this is destructive — UI must confirm. HEAD case uses
+/// the simpler `git reset --hard HEAD^`.
+#[tauri::command]
+fn git_drop_commit(workspace: String, hash: String) -> Result<(), String> {
+    use std::process::Command;
+    let root = expand(&workspace);
+    let cwd = root.to_string_lossy().to_string();
+    let head_out = Command::new("git")
+        .args(["-C", &cwd, "rev-parse", "HEAD"])
+        .output()
+        .map_err(|e| e.to_string())?;
+    let head = String::from_utf8_lossy(&head_out.stdout).trim().to_string();
+    if head.starts_with(&hash) || hash.starts_with(&head) {
+        return run_git(&workspace, &["reset", "--hard", "HEAD^"]);
+    }
+    let parent = format!("{}^", hash);
+    run_git(&workspace, &["rebase", "--onto", &parent, &hash])
+}
+
+/// Squash the given commit into its parent (`git rebase -i` again, but with
+/// the todo list edited to `pick parent / squash hash`). Body of the new
+/// combined commit is parent + child concatenated by default — JetBrains
+/// pops a message editor; we keep it simple and let the user edit later
+/// via "reword".
+#[tauri::command]
+fn git_squash_with_parent(workspace: String, hash: String) -> Result<(), String> {
+    use std::process::Command;
+    let root = expand(&workspace);
+    let cwd = root.to_string_lossy().to_string();
+    let seq_edit = format!(
+        r#"sed -i.bak "s/^pick {h}/squash {h}/""#,
+        h = &hash[..hash.len().min(40)]
+    );
+    let out = Command::new("git")
+        .args([
+            "-C",
+            &cwd,
+            "rebase",
+            "-i",
+            &format!("{}~1", hash),
+        ])
+        .env("GIT_SEQUENCE_EDITOR", &seq_edit)
+        // Accept whatever combined message git proposes — quickest path; the
+        // user can reword afterwards if they want a cleaner subject.
+        .env("GIT_EDITOR", "true")
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(())
+}
+
+/// Generate a single-commit patch that the UI can dump on the clipboard
+/// (JetBrains' "Copy as Patch" action).
+#[tauri::command]
+fn git_format_patch(workspace: String, hash: String) -> Result<String, String> {
+    use std::process::Command;
+    let root = expand(&workspace);
+    let out = Command::new("git")
+        .args([
+            "-C",
+            &root.to_string_lossy(),
+            "format-patch",
+            "-1",
+            "--stdout",
+            &hash,
+        ])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+fn run_git(workspace: &str, args: &[&str]) -> Result<(), String> {
+    use std::process::Command;
+    let root = expand(workspace);
+    let mut full: Vec<&str> = vec!["-C"];
+    let cwd = root.to_string_lossy().to_string();
+    full.push(&cwd);
+    full.extend(args.iter().copied());
+    let out = Command::new("git")
+        .args(&full)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(())
+}
+
+fn run_git_capture(workspace: &str, args: &[&str]) -> Result<String, String> {
+    use std::process::Command;
+    let root = expand(workspace);
+    let mut full: Vec<&str> = vec!["-C"];
+    let cwd = root.to_string_lossy().to_string();
+    full.push(&cwd);
+    full.extend(args.iter().copied());
+    let out = Command::new("git")
+        .args(&full)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3 — repo-state / conflicts / stash / remotes / push-with-options
+// ---------------------------------------------------------------------------
+
+/// Coarse classification of the working tree's "operation in progress"
+/// state — surfaced as a banner in the title bar so the user notices a
+/// half-done merge / rebase / cherry-pick / bisect that needs finishing.
+#[derive(serde::Serialize)]
+struct RepoState {
+    /// "clean" | "merging" | "rebasing" | "cherry-picking" | "reverting" | "bisecting"
+    state: String,
+    /// Number of unmerged paths (only meaningful when state != "clean").
+    conflict_count: u32,
+}
+
+#[tauri::command]
+fn git_repo_state(workspace: String) -> Result<RepoState, String> {
+    use std::path::Path;
+    let root = expand(&workspace);
+    let git_dir_out = run_git_capture(&workspace, &["rev-parse", "--git-dir"])
+        .unwrap_or_else(|_| ".git".to_string());
+    let git_dir_str = git_dir_out.trim();
+    let git_dir = if Path::new(git_dir_str).is_absolute() {
+        std::path::PathBuf::from(git_dir_str)
+    } else {
+        root.join(git_dir_str)
+    };
+    let state = if git_dir.join("MERGE_HEAD").exists() {
+        "merging"
+    } else if git_dir.join("rebase-merge").exists() || git_dir.join("rebase-apply").exists() {
+        "rebasing"
+    } else if git_dir.join("CHERRY_PICK_HEAD").exists() {
+        "cherry-picking"
+    } else if git_dir.join("REVERT_HEAD").exists() {
+        "reverting"
+    } else if git_dir.join("BISECT_LOG").exists() {
+        "bisecting"
+    } else {
+        "clean"
+    };
+    let conflict_count = if state == "clean" {
+        0
+    } else {
+        run_git_capture(&workspace, &["diff", "--name-only", "--diff-filter=U"])
+            .map(|s| s.lines().filter(|l| !l.trim().is_empty()).count() as u32)
+            .unwrap_or(0)
+    };
+    Ok(RepoState {
+        state: state.to_string(),
+        conflict_count,
+    })
+}
+
+/// One unmerged file, with its three sides retrievable separately so the
+/// 3-way merge UI can render them. Path is workspace-relative POSIX.
+#[derive(serde::Serialize)]
+struct GitConflict {
+    rel: String,
+    path: String,
+    /// "both modified" | "deleted by us" | "deleted by them" | "added by us" |
+    /// "added by them" | "both added" | "both deleted" | other
+    kind: String,
+}
+
+#[tauri::command]
+fn git_conflicts(workspace: String) -> Result<Vec<GitConflict>, String> {
+    let root = expand(&workspace);
+    // `git status --porcelain=v1` carries the unmerged XY pair (any of UU /
+    // DD / AA / UD / DU / AU / UA). Same -z parsing as git_changed_files.
+    let raw = run_git_capture(
+        &workspace,
+        &["status", "--porcelain=v1", "--no-renames", "-z"],
+    )?;
+    let bytes = raw.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i + 3 < bytes.len() {
+        let x = bytes[i] as char;
+        let y = bytes[i + 1] as char;
+        let mut j = i + 3;
+        while j < bytes.len() && bytes[j] != 0 {
+            j += 1;
+        }
+        let rel = String::from_utf8_lossy(&bytes[i + 3..j]).to_string();
+        i = j + 1;
+        let kind = match (x, y) {
+            ('U', 'U') => Some("both modified"),
+            ('A', 'A') => Some("both added"),
+            ('D', 'D') => Some("both deleted"),
+            ('U', 'D') => Some("deleted by them"),
+            ('D', 'U') => Some("deleted by us"),
+            ('U', 'A') => Some("added by them"),
+            ('A', 'U') => Some("added by us"),
+            _ => None,
+        };
+        if let Some(k) = kind {
+            let abs = root.join(&rel).to_string_lossy().to_string();
+            out.push(GitConflict {
+                rel: rel.replace('\\', "/"),
+                path: abs,
+                kind: k.to_string(),
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// One side of a conflicted file. `stage`: 1 = base, 2 = ours, 3 = theirs.
+/// Returns empty string when that stage doesn't exist (e.g. ours = "" when
+/// we deleted the file).
+#[tauri::command]
+fn git_conflict_side(
+    workspace: String,
+    rel: String,
+    stage: u32,
+) -> Result<String, String> {
+    let s = match stage {
+        1 | 2 | 3 => stage.to_string(),
+        _ => return Err("stage must be 1/2/3".to_string()),
+    };
+    let arg = format!(":{}:{}", s, rel.replace('\\', "/"));
+    Ok(run_git_capture(&workspace, &["show", &arg]).unwrap_or_default())
+}
+
+/// Mark a single conflicted file as resolved (`git add`).
+#[tauri::command]
+fn git_mark_resolved(workspace: String, rel: String) -> Result<(), String> {
+    run_git(&workspace, &["add", "--", &rel])
+}
+
+/// Abort the ongoing operation matching `git_repo_state` — caller passes
+/// the current state name and we map to the right command.
+#[tauri::command]
+fn git_abort_op(workspace: String, state: String) -> Result<(), String> {
+    match state.as_str() {
+        "merging" => run_git(&workspace, &["merge", "--abort"]),
+        "rebasing" => run_git(&workspace, &["rebase", "--abort"]),
+        "cherry-picking" => run_git(&workspace, &["cherry-pick", "--abort"]),
+        "reverting" => run_git(&workspace, &["revert", "--abort"]),
+        "bisecting" => run_git(&workspace, &["bisect", "reset"]),
+        _ => Err(format!("nothing to abort (state={})", state)),
+    }
+}
+
+/// Continue the ongoing operation after the user resolves conflicts.
+#[tauri::command]
+fn git_continue_op(workspace: String, state: String) -> Result<(), String> {
+    match state.as_str() {
+        "merging" => run_git(&workspace, &["commit", "--no-edit"]),
+        "rebasing" => run_git(&workspace, &["rebase", "--continue"]),
+        "cherry-picking" => run_git(&workspace, &["cherry-pick", "--continue"]),
+        "reverting" => run_git(&workspace, &["revert", "--continue"]),
+        _ => Err(format!("cannot continue (state={})", state)),
+    }
+}
+
+// ----- Stash -----
+
+#[derive(serde::Serialize)]
+struct GitStash {
+    /// `stash@{N}` reference.
+    stash_ref: String,
+    /// Branch the stash was taken on (parsed from "WIP on <branch>: ...").
+    branch: String,
+    message: String,
+    /// Unix seconds.
+    time: i64,
+}
+
+#[tauri::command]
+fn git_stash_list(workspace: String) -> Result<Vec<GitStash>, String> {
+    // `--format=%gd|%ct|%gs` — gd is "stash@{N}", ct is committer time,
+    // gs is the reflog subject ("WIP on main: ..." / "On main: <msg>").
+    let raw = run_git_capture(
+        &workspace,
+        &["stash", "list", "--format=%gd|%ct|%gs"],
+    )
+    .unwrap_or_default();
+    let mut out = Vec::new();
+    for line in raw.lines() {
+        let parts: Vec<&str> = line.splitn(3, '|').collect();
+        if parts.len() < 3 {
+            continue;
+        }
+        let stash_ref = parts[0].to_string();
+        let time = parts[1].parse::<i64>().unwrap_or(0);
+        let subject = parts[2];
+        // "WIP on main: <hash> <msg>" or "On main: <user msg>"
+        let (branch, message) = parse_stash_subject(subject);
+        out.push(GitStash {
+            stash_ref,
+            branch,
+            message,
+            time,
+        });
+    }
+    Ok(out)
+}
+
+fn parse_stash_subject(s: &str) -> (String, String) {
+    if let Some(rest) = s.strip_prefix("WIP on ") {
+        if let Some(idx) = rest.find(": ") {
+            return (
+                rest[..idx].to_string(),
+                rest[idx + 2..].to_string(),
+            );
+        }
+    } else if let Some(rest) = s.strip_prefix("On ") {
+        if let Some(idx) = rest.find(": ") {
+            return (
+                rest[..idx].to_string(),
+                rest[idx + 2..].to_string(),
+            );
+        }
+    }
+    (String::new(), s.to_string())
+}
+
+#[tauri::command]
+fn git_stash_push(
+    workspace: String,
+    message: Option<String>,
+    include_untracked: bool,
+    keep_index: bool,
+) -> Result<(), String> {
+    let mut args: Vec<String> = vec!["stash".into(), "push".into()];
+    if include_untracked {
+        args.push("-u".into());
+    }
+    if keep_index {
+        args.push("--keep-index".into());
+    }
+    if let Some(m) = message.filter(|s| !s.trim().is_empty()) {
+        args.push("-m".into());
+        args.push(m);
+    }
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    run_git(&workspace, &refs)
+}
+
+#[tauri::command]
+fn git_stash_apply(workspace: String, stash_ref: String) -> Result<(), String> {
+    run_git(&workspace, &["stash", "apply", &stash_ref])
+}
+
+#[tauri::command]
+fn git_stash_pop(workspace: String, stash_ref: String) -> Result<(), String> {
+    run_git(&workspace, &["stash", "pop", &stash_ref])
+}
+
+#[tauri::command]
+fn git_stash_drop(workspace: String, stash_ref: String) -> Result<(), String> {
+    run_git(&workspace, &["stash", "drop", &stash_ref])
+}
+
+#[tauri::command]
+fn git_stash_show(workspace: String, stash_ref: String) -> Result<String, String> {
+    // -p emits a unified diff; --stat could be used for summary only.
+    run_git_capture(&workspace, &["stash", "show", "-p", &stash_ref])
+}
+
+// ----- Remotes -----
+
+#[derive(serde::Serialize)]
+struct GitRemote {
+    name: String,
+    fetch_url: String,
+    push_url: String,
+}
+
+#[tauri::command]
+fn git_remote_list(workspace: String) -> Result<Vec<GitRemote>, String> {
+    let raw = run_git_capture(&workspace, &["remote", "-v"]).unwrap_or_default();
+    let mut by_name: std::collections::BTreeMap<String, GitRemote> =
+        std::collections::BTreeMap::new();
+    for line in raw.lines() {
+        // Format: "<name>\t<url> (fetch|push)"
+        let mut parts = line.splitn(2, '\t');
+        let name = parts.next().unwrap_or("").trim().to_string();
+        let rest = parts.next().unwrap_or("");
+        if name.is_empty() || rest.is_empty() {
+            continue;
+        }
+        let mut split = rest.rsplitn(2, ' ');
+        let kind = split.next().unwrap_or("");
+        let url = split.next().unwrap_or("").trim().to_string();
+        let entry = by_name.entry(name.clone()).or_insert(GitRemote {
+            name: name.clone(),
+            fetch_url: String::new(),
+            push_url: String::new(),
+        });
+        if kind == "(fetch)" {
+            entry.fetch_url = url;
+        } else if kind == "(push)" {
+            entry.push_url = url;
+        }
+    }
+    Ok(by_name.into_values().collect())
+}
+
+#[tauri::command]
+fn git_remote_add(workspace: String, name: String, url: String) -> Result<(), String> {
+    run_git(&workspace, &["remote", "add", &name, &url])
+}
+
+#[tauri::command]
+fn git_remote_remove(workspace: String, name: String) -> Result<(), String> {
+    run_git(&workspace, &["remote", "remove", &name])
+}
+
+#[tauri::command]
+fn git_remote_rename(
+    workspace: String,
+    old_name: String,
+    new_name: String,
+) -> Result<(), String> {
+    run_git(&workspace, &["remote", "rename", &old_name, &new_name])
+}
+
+#[tauri::command]
+fn git_remote_set_url(
+    workspace: String,
+    name: String,
+    url: String,
+    push: bool,
+) -> Result<(), String> {
+    if push {
+        run_git(&workspace, &["remote", "set-url", "--push", &name, &url])
+    } else {
+        run_git(&workspace, &["remote", "set-url", &name, &url])
+    }
+}
+
+// ----- Push (advanced) -----
+
+#[derive(serde::Deserialize)]
+struct GitPushAdvancedArgs {
+    workspace: String,
+    /// Optional remote name (default: current branch's upstream).
+    remote: Option<String>,
+    /// Optional remote branch ref (default: same as local).
+    branch: Option<String>,
+    #[serde(default)]
+    force: bool,
+    #[serde(default)]
+    force_with_lease: bool,
+    #[serde(default)]
+    push_tags: bool,
+    /// `--set-upstream` — only meaningful on first push of a new branch.
+    #[serde(default)]
+    set_upstream: bool,
+}
+
+#[tauri::command]
+fn git_push_advanced(args: GitPushAdvancedArgs) -> Result<String, String> {
+    let GitPushAdvancedArgs {
+        workspace,
+        remote,
+        branch,
+        force,
+        force_with_lease,
+        push_tags,
+        set_upstream,
+    } = args;
+    let mut cmd: Vec<String> = vec!["push".into()];
+    // force-with-lease takes precedence over plain force when both are set.
+    if force_with_lease {
+        cmd.push("--force-with-lease".into());
+    } else if force {
+        cmd.push("--force".into());
+    }
+    if push_tags {
+        cmd.push("--tags".into());
+    }
+    if set_upstream {
+        cmd.push("-u".into());
+    }
+    if let Some(r) = remote.filter(|s| !s.is_empty()) {
+        cmd.push(r);
+        if let Some(b) = branch.filter(|s| !s.is_empty()) {
+            cmd.push(b);
+        }
+    }
+    let refs: Vec<&str> = cmd.iter().map(String::as_str).collect();
+    // Capture stdout AND stderr — git push streams progress on stderr even
+    // on success; the UI shows the trailing lines.
+    use std::process::Command;
+    let root = expand(&workspace);
+    let mut full: Vec<&str> = vec!["-C"];
+    let cwd = root.to_string_lossy().to_string();
+    full.push(&cwd);
+    full.extend(refs.iter().copied());
+    let out = Command::new("git")
+        .args(&full)
+        .output()
+        .map_err(|e| e.to_string())?;
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    if !out.status.success() {
+        return Err(combined.trim().to_string());
+    }
+    Ok(combined.trim().to_string())
+}
+
+/// Commits on the current branch that aren't on its upstream — drives the
+/// PushDialog's commit preview.
+#[tauri::command]
+fn git_unpushed_commits(workspace: String) -> Result<Vec<GitCommit>, String> {
+    // @{u}..HEAD = "commits in HEAD not in upstream". Empty range when no
+    // upstream is configured → return [].
+    let upstream = run_git_capture(
+        &workspace,
+        &["rev-parse", "--abbrev-ref", "@{u}"],
+    );
+    if upstream.is_err() {
+        // No upstream — surface every commit reachable from HEAD as
+        // "unpushed" (the dialog can show all and ask for --set-upstream).
+        return git_log(GitLogArgs {
+            workspace,
+            revs: vec!["HEAD".to_string()],
+            limit: 50,
+            ..Default::default()
+        });
+    }
+    git_log(GitLogArgs {
+        workspace,
+        revs: vec!["@{u}..HEAD".to_string()],
+        limit: 200,
+        ..Default::default()
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4 — editor decorations + ahead/behind + background fetch
+// ---------------------------------------------------------------------------
+
+#[derive(serde::Serialize)]
+struct GitAheadBehind {
+    ahead: u32,
+    behind: u32,
+    /// Empty when the branch has no upstream configured.
+    upstream: String,
+}
+
+/// Compare HEAD with its upstream — returns (ahead, behind) like
+/// `git rev-list --left-right --count @{u}...HEAD`.
+#[tauri::command]
+fn git_ahead_behind(workspace: String) -> Result<GitAheadBehind, String> {
+    let upstream = run_git_capture(
+        &workspace,
+        &["rev-parse", "--abbrev-ref", "@{u}"],
+    )
+    .ok()
+    .map(|s| s.trim().to_string())
+    .unwrap_or_default();
+    if upstream.is_empty() {
+        return Ok(GitAheadBehind {
+            ahead: 0,
+            behind: 0,
+            upstream,
+        });
+    }
+    // Output is "BEHIND\tAHEAD" — left-right counts, left side = upstream.
+    let raw = run_git_capture(
+        &workspace,
+        &["rev-list", "--left-right", "--count", "@{u}...HEAD"],
+    )
+    .unwrap_or_default();
+    let mut parts = raw.split_whitespace();
+    let behind = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let ahead = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    Ok(GitAheadBehind {
+        ahead,
+        behind,
+        upstream,
+    })
+}
+
+/// `git reset --soft HEAD^` — the JetBrains "Undo Commit" action. Keeps
+/// the working tree and index intact so the user can re-commit with a
+/// tweaked message or different file selection.
+#[tauri::command]
+fn git_undo_last_commit(workspace: String) -> Result<(), String> {
+    run_git(&workspace, &["reset", "--soft", "HEAD^"])
+}
+
+/// `git pull` against every supplied workspace, in parallel-style sequence
+/// (one at a time, but no early bail). Returns per-workspace status so the
+/// UI can render a summary toast.
+#[derive(serde::Serialize)]
+struct UpdateProjectResult {
+    workspace: String,
+    ok: bool,
+    output: String,
+}
+
+#[tauri::command]
+fn git_update_project(workspaces: Vec<String>) -> Vec<UpdateProjectResult> {
+    let mut out = Vec::new();
+    for w in workspaces {
+        let res = run_git_capture(&w, &["pull", "--ff-only"]);
+        out.push(match res {
+            Ok(s) => UpdateProjectResult {
+                workspace: w,
+                ok: true,
+                output: s.trim().to_string(),
+            },
+            Err(e) => UpdateProjectResult {
+                workspace: w,
+                ok: false,
+                output: e,
+            },
+        });
+    }
+    out
+}
+
+/// Build a unified-diff patch of the working tree (or `--cached` for the
+/// index) and return it as a string for the user to save / paste.
+#[tauri::command]
+fn git_create_patch(workspace: String, staged: bool) -> Result<String, String> {
+    let args: Vec<&str> = if staged {
+        vec!["diff", "--cached"]
+    } else {
+        vec!["diff"]
+    };
+    run_git_capture(&workspace, &args)
+}
+
+/// `git apply` a patch passed as text. Validates first via `--check`. The
+/// `index` flag forwards `--index` so changes land in both worktree + index.
+#[tauri::command]
+fn git_apply_patch(
+    workspace: String,
+    patch: String,
+    index: bool,
+) -> Result<(), String> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let root = expand(&workspace);
+    let cwd = root.to_string_lossy().to_string();
+
+    // Stage 1: --check so we fail early with a useful error.
+    let mut check_args: Vec<&str> = vec!["-C", &cwd, "apply", "--check"];
+    if index {
+        check_args.push("--index");
+    }
+    let mut check = Command::new("git")
+        .args(&check_args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    if let Some(mut sin) = check.stdin.take() {
+        sin.write_all(patch.as_bytes()).map_err(|e| e.to_string())?;
+    }
+    let check_out = check.wait_with_output().map_err(|e| e.to_string())?;
+    if !check_out.status.success() {
+        return Err(String::from_utf8_lossy(&check_out.stderr).trim().to_string());
+    }
+
+    // Stage 2: actual apply.
+    let mut apply_args: Vec<&str> = vec!["-C", &cwd, "apply"];
+    if index {
+        apply_args.push("--index");
+    }
+    let mut apply = Command::new("git")
+        .args(&apply_args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    if let Some(mut sin) = apply.stdin.take() {
+        sin.write_all(patch.as_bytes()).map_err(|e| e.to_string())?;
+    }
+    let out = apply.wait_with_output().map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(())
+}
+
+/// `git log -L start,end:path` — line history for a region. Returns the
+/// raw output (the hunks include diffs) — UI shows it as a virtual diff
+/// tab for now; future work could parse it into commit-by-commit blocks.
+#[tauri::command]
+fn git_line_history(
+    workspace: String,
+    path: String,
+    start: u32,
+    end: u32,
+) -> Result<String, String> {
+    let arg = format!("-L{},{}:{}", start, end, path.replace('\\', "/"));
+    run_git_capture(&workspace, &[&arg])
+}
+
+#[derive(serde::Serialize)]
+struct GitUserConfig {
+    name: String,
+    email: String,
+}
+
+/// Read `user.name` / `user.email` from the workspace's git config (falls
+/// back to global config when not set locally — that's `git config`'s
+/// default behavior).
+#[tauri::command]
+fn git_get_user(workspace: String) -> Result<GitUserConfig, String> {
+    let name = run_git_capture(&workspace, &["config", "user.name"])
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let email = run_git_capture(&workspace, &["config", "user.email"])
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    Ok(GitUserConfig { name, email })
+}
+
+#[tauri::command]
+fn git_set_user(
+    workspace: String,
+    name: String,
+    email: String,
+    global: bool,
+) -> Result<(), String> {
+    let scope = if global { "--global" } else { "--local" };
+    run_git(&workspace, &["config", scope, "user.name", &name])?;
+    run_git(&workspace, &["config", scope, "user.email", &email])?;
+    Ok(())
+}
+
+#[derive(serde::Serialize)]
+struct GitTag {
+    name: String,
+    /// Short hash this tag points at (peeled).
+    target: String,
+    /// Annotated message; lightweight tags return empty string.
+    message: String,
+}
+
+/// `git for-each-ref refs/tags/` — both lightweight and annotated. Sorted
+/// by creation date desc to match JetBrains' "newest first" default.
+#[tauri::command]
+fn git_list_tags(workspace: String) -> Result<Vec<GitTag>, String> {
+    let raw = run_git_capture(
+        &workspace,
+        &[
+            "for-each-ref",
+            "--sort=-creatordate",
+            "--format=%(refname:short)|%(*objectname:short)|%(objectname:short)|%(contents:subject)",
+            "refs/tags/",
+        ],
+    )
+    .unwrap_or_default();
+    let mut out = Vec::new();
+    for line in raw.lines() {
+        let parts: Vec<&str> = line.splitn(4, '|').collect();
+        if parts.len() < 4 {
+            continue;
+        }
+        let name = parts[0].to_string();
+        // For annotated tags `*objectname:short` resolves to the commit;
+        // for lightweight, it's empty and `objectname:short` is already
+        // the commit.
+        let target = if !parts[1].is_empty() {
+            parts[1].to_string()
+        } else {
+            parts[2].to_string()
+        };
+        out.push(GitTag {
+            name,
+            target,
+            message: parts[3].to_string(),
+        });
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+fn git_delete_tag(workspace: String, name: String) -> Result<(), String> {
+    run_git(&workspace, &["tag", "-d", &name])
+}
+
+#[tauri::command]
+fn git_push_tag(workspace: String, name: String) -> Result<(), String> {
+    run_git(&workspace, &["push", "origin", &name])
+}
+
+#[tauri::command]
+fn git_push_all_tags(workspace: String) -> Result<(), String> {
+    run_git(&workspace, &["push", "--tags"])
+}
+
+/// `git init` in the given directory. Idempotent — safe to call on a dir
+/// that's already a repo (git is a no-op then).
+#[tauri::command]
+fn git_init(dir: String) -> Result<(), String> {
+    use std::process::Command;
+    let p = expand(&dir);
+    if !p.exists() {
+        std::fs::create_dir_all(&p).map_err(|e| e.to_string())?;
+    }
+    let out = Command::new("git")
+        .args(["-C", &p.to_string_lossy(), "init"])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(())
+}
+
+/// `git clone <url> <dir>` — the dir is the new repo root (not parent).
+/// Returns clone stderr (which carries progress lines we display).
+#[tauri::command]
+fn git_clone(url: String, dir: String) -> Result<String, String> {
+    use std::process::Command;
+    let p = expand(&dir);
+    // git clone refuses to clone into an existing non-empty dir, so let it
+    // create the leaf — caller picks a fresh path.
+    if let Some(parent) = p.parent() {
+        if !parent.exists() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+    }
+    let out = Command::new("git")
+        .args(["clone", "--progress", &url, &p.to_string_lossy()])
+        .output()
+        .map_err(|e| e.to_string())?;
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    if !out.status.success() {
+        return Err(combined.trim().to_string());
+    }
+    Ok(combined.trim().to_string())
+}
+
+/// Best-effort detection of a web base URL from the `origin` remote. Maps
+/// SSH and HTTPS URLs from GitHub / GitLab / Bitbucket / Gitee to their
+/// HTTPS browse base. Returns empty string when no convertible remote
+/// exists (caller hides the "Open on Remote" action).
+#[tauri::command]
+fn git_origin_web_url(workspace: String) -> Result<String, String> {
+    let url = run_git_capture(&workspace, &["remote", "get-url", "origin"])
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if url.is_empty() {
+        return Ok(String::new());
+    }
+    // Normalize SSH form `git@host:owner/repo.git` → `https://host/owner/repo`.
+    let normalized = if let Some(rest) = url.strip_prefix("git@") {
+        if let Some(idx) = rest.find(':') {
+            let host = &rest[..idx];
+            let path = &rest[idx + 1..];
+            format!("https://{}/{}", host, path.trim_end_matches(".git"))
+        } else {
+            url
+        }
+    } else if let Some(rest) = url.strip_prefix("ssh://") {
+        // ssh://git@host[:port]/owner/repo[.git]
+        let body = rest.trim_start_matches("git@");
+        let body = body.split_once('/').map(|(host, path)| {
+            let host = host.split(':').next().unwrap_or(host);
+            format!("https://{}/{}", host, path.trim_end_matches(".git"))
+        });
+        body.unwrap_or(url)
+    } else if url.starts_with("http://") || url.starts_with("https://") {
+        url.trim_end_matches(".git").to_string()
+    } else {
+        url
+    };
+    Ok(normalized)
+}
+
+#[tauri::command]
+fn git_fetch_silent(workspace: String) -> Result<(), String> {
+    // --all → fetch from every remote; --prune → drop local refs of branches
+    // that disappeared upstream. Both are JetBrains' default.
+    run_git(&workspace, &["fetch", "--all", "--prune"])
+}
+
+#[derive(serde::Serialize)]
+struct GitBlameLine {
+    /// 1-based line number (matches CodeMirror's display).
+    line: u32,
+    short_hash: String,
+    author: String,
+    /// Unix seconds.
+    time: i64,
+    summary: String,
+}
+
+/// `git blame --porcelain` parser. Returns one entry per line. Falls back
+/// to empty Vec for files with no commits / not in repo.
+#[tauri::command]
+fn git_blame(workspace: String, path: String) -> Result<Vec<GitBlameLine>, String> {
+    let raw = run_git_capture(
+        &workspace,
+        &["blame", "--porcelain", "--", &path.replace('\\', "/")],
+    );
+    let raw = match raw {
+        Ok(s) => s,
+        Err(_) => return Ok(vec![]),
+    };
+    // Porcelain format groups commit metadata then "\t" + the line content.
+    // We track the latest commit's metadata and emit a row whenever we see
+    // a "\t<content>" line.
+    let mut by_hash: std::collections::HashMap<String, (String, String, i64, String)> =
+        std::collections::HashMap::new();
+    let mut current_hash = String::new();
+    let mut author = String::new();
+    let mut author_time: i64 = 0;
+    let mut summary = String::new();
+    let mut out: Vec<GitBlameLine> = Vec::new();
+    let mut next_line: u32 = 0;
+    for line in raw.lines() {
+        if let Some(rest) = line.strip_prefix('\t') {
+            // Content line — emit row.
+            let _ = rest;
+            out.push(GitBlameLine {
+                line: next_line,
+                short_hash: current_hash[..current_hash.len().min(8)].to_string(),
+                author: author.clone(),
+                time: author_time,
+                summary: summary.clone(),
+            });
+        } else if let Some(au) = line.strip_prefix("author ") {
+            author = au.to_string();
+        } else if let Some(at) = line.strip_prefix("author-time ") {
+            author_time = at.parse().unwrap_or(0);
+        } else if let Some(s) = line.strip_prefix("summary ") {
+            summary = s.to_string();
+        } else if !line.is_empty() && !line.starts_with(' ') {
+            // Header line: "<sha> <orig> <final> [<count>]"
+            let mut parts = line.split_whitespace();
+            if let (Some(sha), Some(_orig), Some(final_str)) =
+                (parts.next(), parts.next(), parts.next())
+            {
+                if sha.len() >= 4 {
+                    current_hash = sha.to_string();
+                    next_line = final_str.parse().unwrap_or(0);
+                    // Cache so subsequent appearances of the same commit can
+                    // reuse author / time without parsing again.
+                    if let Some(cached) = by_hash.get(&current_hash) {
+                        author = cached.0.clone();
+                        let _ = cached.1.clone();
+                        author_time = cached.2;
+                        summary = cached.3.clone();
+                    } else {
+                        author.clear();
+                        author_time = 0;
+                        summary.clear();
+                    }
+                }
+            }
+        }
+        // Cache populated metadata at first appearance.
+        if !current_hash.is_empty()
+            && !author.is_empty()
+            && !by_hash.contains_key(&current_hash)
+        {
+            by_hash.insert(
+                current_hash.clone(),
+                (
+                    author.clone(),
+                    String::new(),
+                    author_time,
+                    summary.clone(),
+                ),
+            );
+        }
+    }
+    Ok(out)
+}
+
+#[derive(serde::Serialize)]
+struct GitDiffHunk {
+    /// 'A' added / 'D' deleted / 'M' modified.
+    kind: char,
+    /// 1-based start line (in the new file). For pure deletions, this is
+    /// the line BEFORE which the deletion happened (clamped to >=1).
+    start: u32,
+    /// Inclusive end line.
+    end: u32,
+}
+
+/// Parse `git diff --no-color -U0` into a flat list of hunks the gutter
+/// extension can index by line number. Compares working tree vs HEAD by
+/// default — pass `vs_index=true` to compare working vs index instead.
+#[tauri::command]
+fn git_file_diff_lines(
+    workspace: String,
+    path: String,
+    vs_index: bool,
+) -> Result<Vec<GitDiffHunk>, String> {
+    let path_posix = path.replace('\\', "/");
+    let mut args: Vec<&str> = vec!["diff", "--no-color", "-U0"];
+    if !vs_index {
+        args.push("HEAD");
+    }
+    args.push("--");
+    args.push(&path_posix);
+    let raw = run_git_capture(&workspace, &args).unwrap_or_default();
+    let mut hunks = Vec::new();
+    for line in raw.lines() {
+        if !line.starts_with("@@") {
+            continue;
+        }
+        // Format: "@@ -<oldStart>[,<oldCount>] +<newStart>[,<newCount>] @@"
+        let close = match line[2..].find("@@") {
+            Some(p) => p + 2,
+            None => continue,
+        };
+        let header = &line[2..close];
+        let parts: Vec<&str> = header.trim().split_whitespace().collect();
+        if parts.len() < 2 {
+            continue;
+        }
+        let old_part = parts[0]; // -1,0
+        let new_part = parts[1]; // +5,3
+        let (old_start, old_count) = parse_range(old_part);
+        let (new_start, new_count) = parse_range(new_part);
+        let kind = if old_count == 0 {
+            'A'
+        } else if new_count == 0 {
+            'D'
+        } else {
+            'M'
+        };
+        let (start, end) = if kind == 'D' {
+            // Pure deletion — mark the line position where rows were removed
+            // so the gutter shows a marker between two surviving rows.
+            let s = new_start.max(1);
+            (s, s)
+        } else {
+            let s = new_start.max(1);
+            let e = (new_start + new_count - 1).max(s);
+            (s, e)
+        };
+        let _ = old_start;
+        hunks.push(GitDiffHunk { kind, start, end });
+    }
+    Ok(hunks)
+}
+
+fn parse_range(s: &str) -> (u32, u32) {
+    let body = s.trim_start_matches('-').trim_start_matches('+');
+    let mut parts = body.splitn(2, ',');
+    let start = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0u32);
+    let count = parts.next().and_then(|s| s.parse().ok()).unwrap_or(1u32);
+    (start, count)
 }
 
 // ---------------------------------------------------------------------------
@@ -1560,9 +3400,65 @@ pub fn run() {
             term_resize,
             term_close,
             git_status,
+            git_changed_files,
+            git_stage_paths,
+            git_unstage_paths,
+            git_rollback_paths,
+            git_commit,
+            git_push,
             git_branch,
             git_recent_branches,
+            git_list_branches,
             git_show_head,
+            git_log,
+            git_commit_files,
+            git_show_at,
+            git_cherry_pick,
+            git_revert,
+            git_reset_to,
+            git_create_branch_at,
+            git_create_tag_at,
+            git_reword_commit,
+            git_drop_commit,
+            git_squash_with_parent,
+            git_format_patch,
+            git_repo_state,
+            git_conflicts,
+            git_conflict_side,
+            git_mark_resolved,
+            git_abort_op,
+            git_continue_op,
+            git_stash_list,
+            git_stash_push,
+            git_stash_apply,
+            git_stash_pop,
+            git_stash_drop,
+            git_stash_show,
+            git_remote_list,
+            git_remote_add,
+            git_remote_remove,
+            git_remote_rename,
+            git_remote_set_url,
+            git_push_advanced,
+            git_unpushed_commits,
+            git_ahead_behind,
+            git_fetch_silent,
+            git_origin_web_url,
+            git_init,
+            git_clone,
+            git_list_tags,
+            git_delete_tag,
+            git_push_tag,
+            git_push_all_tags,
+            git_get_user,
+            git_set_user,
+            git_undo_last_commit,
+            git_update_project,
+            git_create_patch,
+            git_apply_patch,
+            git_line_history,
+            git_blame,
+            git_file_diff_lines,
             git_repo_relpath
         ])
         .build(tauri::generate_context!())

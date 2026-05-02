@@ -371,6 +371,20 @@ body,
   color: var(--text) !important;
 }
 
+/* Branch popover thin section separator. */
+.git-popover-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
+/* Spinner keyframe — used by CommitPanel's "Committing…" / "Pushing…"
+ * indicator (animation declared inline in the component). */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 /* TabBar scroll strip — hide scrollbar but keep scrollable */
 .tab-strip::-webkit-scrollbar {
   display: none;

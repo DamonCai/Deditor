@@ -57,6 +57,27 @@ interface PersistedV3 {
   terminalOpen?: boolean;
   terminalPx?: number;
   terminalShell?: string;
+  /** Active left-side tool window. Optional for backward compat. */
+  leftPanel?: "files" | "commit";
+  /** Draft commit messages keyed by workspace. Persisted so a user editing
+   *  a commit message at quit time finds it again next launch. */
+  commitDrafts?: Record<string, string>;
+  /** Per-workspace commit options (signoff / allowEmpty / authorOverride). */
+  commitOptions?: Record<
+    string,
+    { signoff?: boolean; allowEmpty?: boolean; authorOverride?: string }
+  >;
+  /** Recent commit messages, most-recent-first, for Cmd+↑ recall. */
+  commitMessageHistory?: string[];
+  commitViewMode?: "tree" | "flat";
+  diffViewMode?: "side" | "unified";
+  diffIgnoreWhitespace?: "none" | "leading" | "all";
+  diffHighlightWords?: boolean;
+  diffCollapseUnchanged?: boolean;
+  gutterMarkers?: boolean;
+  inlineBlame?: boolean;
+  bgFetchEnabled?: boolean;
+  bgFetchIntervalMin?: number;
   // Legacy git fields kept in the type so old snapshots still parse safely;
   // unused since the inline git panel feature was removed (Phase 4 0.7.0
   // ships read-only signals instead).
@@ -326,6 +347,57 @@ export async function loadPersisted(): Promise<UiExtras | null> {
   if (typeof data.terminalShell === "string") {
     useEditorStore.setState({ terminalShell: data.terminalShell });
   }
+  if (data.leftPanel === "files" || data.leftPanel === "commit") {
+    useEditorStore.setState({ leftPanel: data.leftPanel });
+  }
+  if (data.commitDrafts && typeof data.commitDrafts === "object") {
+    useEditorStore.setState({ commitDrafts: { ...data.commitDrafts } });
+  }
+  if (data.commitOptions && typeof data.commitOptions === "object") {
+    useEditorStore.setState({ commitOptions: { ...data.commitOptions } });
+  }
+  if (Array.isArray(data.commitMessageHistory)) {
+    useEditorStore.setState({
+      commitMessageHistory: data.commitMessageHistory.filter(
+        (s) => typeof s === "string",
+      ),
+    });
+  }
+  if (data.commitViewMode === "tree" || data.commitViewMode === "flat") {
+    useEditorStore.setState({ commitViewMode: data.commitViewMode });
+  }
+  if (data.diffViewMode === "side" || data.diffViewMode === "unified") {
+    useEditorStore.setState({ diffViewMode: data.diffViewMode });
+  }
+  if (
+    data.diffIgnoreWhitespace === "none" ||
+    data.diffIgnoreWhitespace === "leading" ||
+    data.diffIgnoreWhitespace === "all"
+  ) {
+    useEditorStore.setState({ diffIgnoreWhitespace: data.diffIgnoreWhitespace });
+  }
+  if (typeof data.diffHighlightWords === "boolean") {
+    useEditorStore.setState({ diffHighlightWords: data.diffHighlightWords });
+  }
+  if (typeof data.diffCollapseUnchanged === "boolean") {
+    useEditorStore.setState({
+      diffCollapseUnchanged: data.diffCollapseUnchanged,
+    });
+  }
+  if (typeof data.gutterMarkers === "boolean") {
+    useEditorStore.setState({ gutterMarkers: data.gutterMarkers });
+  }
+  if (typeof data.inlineBlame === "boolean") {
+    useEditorStore.setState({ inlineBlame: data.inlineBlame });
+  }
+  if (typeof data.bgFetchEnabled === "boolean") {
+    useEditorStore.setState({ bgFetchEnabled: data.bgFetchEnabled });
+  }
+  if (typeof data.bgFetchIntervalMin === "number") {
+    useEditorStore.setState({
+      bgFetchIntervalMin: Math.max(1, Math.min(60, data.bgFetchIntervalMin)),
+    });
+  }
 
   return {
     sidebarPx: data.sidebarPx,
@@ -386,6 +458,19 @@ function doSave(extras: UiExtras): void {
     terminalOpen: s.terminalOpen,
     terminalPx: extras.terminalPx,
     terminalShell: s.terminalShell,
+    leftPanel: s.leftPanel,
+    commitDrafts: s.commitDrafts,
+    commitOptions: s.commitOptions,
+    commitMessageHistory: s.commitMessageHistory,
+    commitViewMode: s.commitViewMode,
+    diffViewMode: s.diffViewMode,
+    diffIgnoreWhitespace: s.diffIgnoreWhitespace,
+    diffHighlightWords: s.diffHighlightWords,
+    diffCollapseUnchanged: s.diffCollapseUnchanged,
+    gutterMarkers: s.gutterMarkers,
+    inlineBlame: s.inlineBlame,
+    bgFetchEnabled: s.bgFetchEnabled,
+    bgFetchIntervalMin: s.bgFetchIntervalMin,
   };
   invoke("write_app_state", { content: JSON.stringify(base) })
     .then(() => {

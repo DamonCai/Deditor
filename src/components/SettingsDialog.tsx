@@ -1,4 +1,6 @@
+import * as React from "react";
 import { useEffect, useRef } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useEditorStore } from "../store/editor";
 import { SHORTCUTS, type ShortcutMeta } from "../lib/shortcuts";
 import { useT } from "../lib/i18n";
@@ -38,6 +40,14 @@ export default function SettingsDialog({ open, onClose }: Props) {
   const setFormatOnSave = useEditorStore((s) => s.setFormatOnSave);
   const terminalShell = useEditorStore((s) => s.terminalShell);
   const setTerminalShell = useEditorStore((s) => s.setTerminalShell);
+  const gutterMarkers = useEditorStore((s) => s.gutterMarkers);
+  const setGutterMarkers = useEditorStore((s) => s.setGutterMarkers);
+  const inlineBlame = useEditorStore((s) => s.inlineBlame);
+  const setInlineBlame = useEditorStore((s) => s.setInlineBlame);
+  const bgFetchEnabled = useEditorStore((s) => s.bgFetchEnabled);
+  const setBgFetchEnabled = useEditorStore((s) => s.setBgFetchEnabled);
+  const bgFetchIntervalMin = useEditorStore((s) => s.bgFetchIntervalMin);
+  const setBgFetchIntervalMin = useEditorStore((s) => s.setBgFetchIntervalMin);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -212,6 +222,42 @@ export default function SettingsDialog({ open, onClose }: Props) {
                 placeholder={t("settings.terminal.shellPlaceholder")}
                 onChange={setTerminalShell}
                 hint={t("settings.terminal.shellHint")}
+              />
+            </div>
+          </section>
+
+          {/* VCS identity — user.name / user.email per workspace. Reads on
+              open, writes on blur via git_set_user. */}
+          <VcsIdentitySection />
+
+          {/* Git section — VCS gutter / blame / background fetch. */}
+          <section style={{ marginBottom: 16 }}>
+            <h3 style={sectionH3}>{t("settings.git.heading")}</h3>
+            <div style={sectionBox}>
+              <CheckRow
+                checked={gutterMarkers}
+                onChange={setGutterMarkers}
+                label={t("settings.git.gutterMarkers")}
+              />
+              <CheckRow
+                checked={inlineBlame}
+                onChange={setInlineBlame}
+                label={t("settings.git.inlineBlame")}
+                topBorder
+              />
+              <CheckRow
+                checked={bgFetchEnabled}
+                onChange={setBgFetchEnabled}
+                label={t("settings.git.bgFetch")}
+                topBorder
+              />
+              <SliderRow
+                label={t("settings.git.bgFetchInterval")}
+                value={bgFetchIntervalMin}
+                min={1}
+                max={60}
+                onChange={setBgFetchIntervalMin}
+                topBorder
               />
             </div>
           </section>
@@ -547,3 +593,96 @@ const sectionBox: React.CSSProperties = {
   borderRadius: 6,
   overflow: "hidden",
 };
+
+function VcsIdentitySection() {
+  const t = useT();
+  const workspaces = useEditorStore((s) => s.workspaces);
+  const focused = useEditorStore((s) => s.focusedWorkspace);
+  const [workspace, setWorkspace] = React.useState(focused ?? workspaces[0] ?? "");
+  const [name, setName] = React.useState("");
+  const [email, setEmail] = React.useState("");
+
+  React.useEffect(() => {
+    if (!workspace) return;
+    void invoke<{ name: string; email: string }>("git_get_user", { workspace })
+      .then((c) => {
+        setName(c.name);
+        setEmail(c.email);
+      })
+      .catch(() => {
+        setName("");
+        setEmail("");
+      });
+  }, [workspace]);
+
+  const persist = (n: string, e: string) => {
+    if (!workspace) return;
+    void invoke("git_set_user", {
+      workspace,
+      name: n,
+      email: e,
+      global: false,
+    }).catch(() => {});
+  };
+
+  if (workspaces.length === 0) return null;
+
+  return (
+    <section style={{ marginBottom: 16 }}>
+      <h3 style={sectionH3}>{t("settings.vcs.heading")}</h3>
+      <div style={sectionBox}>
+        {workspaces.length > 1 && (
+          <div
+            style={{
+              padding: "8px 12px",
+              borderBottom: "1px solid var(--border)",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <span style={{ fontSize: 13, color: "var(--text)", flex: 1 }}>
+              {t("settings.vcs.workspaceLabel")}
+            </span>
+            <select
+              value={workspace}
+              onChange={(ev) => setWorkspace(ev.target.value)}
+              style={{
+                background: "var(--bg-soft)",
+                color: "var(--text)",
+                border: "1px solid var(--border)",
+                borderRadius: 3,
+                padding: "3px 6px",
+                fontSize: 12,
+              }}
+            >
+              {workspaces.map((w) => (
+                <option key={w} value={w}>
+                  {w.split(/[\\/]/).pop() ?? w}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        <TextRow
+          label={t("settings.vcs.userName")}
+          value={name}
+          placeholder="Your Name"
+          onChange={(v) => {
+            setName(v);
+            persist(v, email);
+          }}
+        />
+        <TextRow
+          label={t("settings.vcs.userEmail")}
+          value={email}
+          placeholder="you@example.com"
+          onChange={(v) => {
+            setEmail(v);
+            persist(name, v);
+          }}
+        />
+      </div>
+    </section>
+  );
+}

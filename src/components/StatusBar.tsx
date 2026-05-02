@@ -1,11 +1,8 @@
-import { useState, useRef } from "react";
 import { useActiveTab, isTabDirty, useEditorStore } from "../store/editor";
 import { detectLang } from "../lib/lang";
 import { useT } from "../lib/i18n";
 import LangIcon from "./LangIcon";
-import { useGitBranch, workspaceOf } from "../lib/git";
-import { FiGitBranch } from "react-icons/fi";
-import BranchPopover from "./BranchPopover";
+import { FiTerminal } from "react-icons/fi";
 
 /** Convert a flat char offset into 1-based (line, column). Counts UTF-16
  *  code units, which is what CodeMirror's selection offsets use. Tab is
@@ -40,19 +37,24 @@ export default function StatusBar() {
     active ? s.tabPositions[active.id]?.cursor ?? 0 : 0,
   );
   const selectionLen = useEditorStore((s) => s.activeSelectionLength);
-  const filePath = active?.filePath ?? null;
-  const content = active?.content ?? "";
-  const dirty = active ? isTabDirty(active) : false;
+  // For a diff tab the visible buffer is the right side (Your version).
+  // Use that for status bar so language / EOL / counts match what the user
+  // is actually looking at instead of falling back to "Markdown" / 0 chars.
+  const isDiffTab = !!active?.diff;
+  const filePath = isDiffTab
+    ? active!.diff!.rightPath.replace(/^HEAD:/, "")
+    : (active?.filePath ?? null);
+  const content = isDiffTab ? active!.diff!.rightContent : (active?.content ?? "");
+  const dirty = active && !isDiffTab ? isTabDirty(active) : false;
   const lines = content.split("\n").length;
   const chars = content.length;
   const lang = detectLang(filePath);
   const { line, col } = offsetToLineCol(content, cursorOffset);
   const eol = detectEol(content);
-  const workspaces = useEditorStore((s) => s.workspaces);
-  const branchOwner = workspaceOf(filePath, workspaces) ?? workspaces[0] ?? null;
-  const branch = useGitBranch(branchOwner);
-  const [branchPopoverOpen, setBranchPopoverOpen] = useState(false);
-  const branchAnchor = useRef<HTMLButtonElement>(null);
+  // Branch UI moved to TitleBar (JetBrains-style); StatusBar keeps only
+  // editor-state info now.
+  const terminalOpen = useEditorStore((s) => s.terminalOpen);
+  const toggleTerminal = useEditorStore((s) => s.toggleTerminal);
 
   return (
     <div
@@ -76,42 +78,6 @@ export default function StatusBar() {
         {dirty && <span style={{ color: "var(--accent)" }}>●</span>}
       </div>
       <div className="flex items-center gap-4 flex-shrink-0">
-        {branch && branchOwner && (
-          <>
-            <button
-              ref={branchAnchor}
-              onClick={() => setBranchPopoverOpen((o) => !o)}
-              title={t("statusbar.branch")}
-              className="deditor-btn"
-              data-variant="ghost"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 4,
-                background: "transparent",
-                border: "none",
-                color: "var(--text-soft)",
-                padding: "0 4px",
-                height: 18,
-                fontSize: 11,
-                cursor: "pointer",
-                borderRadius: 3,
-              }}
-            >
-              <FiGitBranch size={11} />
-              <span className="truncate" style={{ maxWidth: 160 }}>
-                {branch}
-              </span>
-            </button>
-            {branchPopoverOpen && (
-              <BranchPopover
-                workspace={branchOwner}
-                anchor={branchAnchor}
-                onClose={() => setBranchPopoverOpen(false)}
-              />
-            )}
-          </>
-        )}
         <span className="tabular-nums" title={t("statusbar.cursor")}>
           {t("statusbar.lnCol", { line: String(line), col: String(col) })}
           {selectionLen > 0 && (
@@ -126,6 +92,26 @@ export default function StatusBar() {
         <span>
           {lines} {t("statusbar.lines")} · {chars} {t("statusbar.chars")}
         </span>
+        <button
+          onClick={toggleTerminal}
+          title={t("statusbar.terminal")}
+          className="deditor-btn"
+          data-variant="ghost"
+          data-pressed={terminalOpen ? "true" : undefined}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            background: terminalOpen ? "var(--bg-mute)" : "transparent",
+            border: "none",
+            color: terminalOpen ? "var(--text)" : "var(--text-soft)",
+            padding: "0 5px",
+            height: 18,
+            cursor: "pointer",
+            borderRadius: 3,
+          }}
+        >
+          <FiTerminal size={11} />
+        </button>
       </div>
     </div>
   );

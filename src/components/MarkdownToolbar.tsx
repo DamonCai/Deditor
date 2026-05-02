@@ -28,7 +28,8 @@ import { Button } from "./ui/Button";
 
 export default function MarkdownToolbar() {
   const t = useT();
-  const { editorFontSize, setEditorFontSize } = useEditorStore();
+  const editorFontSize = useEditorStore((s) => s.editorFontSize);
+  const setEditorFontSize = useEditorStore((s) => s.setEditorFontSize);
 
   const onLink = async () => {
     const url = await promptInput({

@@ -173,6 +173,40 @@ export async function openCompare(leftPath: string, rightPath: string): Promise<
   }
 }
 
+/** Open a diff tab comparing a file's working content to its HEAD version,
+ *  tolerating files that don't exist on either side (untracked → no HEAD;
+ *  deleted → no working). The left side label is `HEAD:<rel>` so the user
+ *  immediately sees which baseline they're looking at. Used by the Commit
+ *  panel's row-click. */
+export async function openCommitDiff(
+  workspace: string,
+  filePath: string,
+  rel: string,
+  isUntracked: boolean,
+  isDeleted: boolean,
+): Promise<void> {
+  try {
+    const [rightContent, leftContent] = await Promise.all([
+      isDeleted
+        ? Promise.resolve("")
+        : invoke<string>("read_text_file", { path: filePath }).catch(() => ""),
+      isUntracked
+        ? Promise.resolve("")
+        : invoke<string>("git_show_head", { workspace, path: filePath }).catch(
+            () => "",
+          ),
+    ]);
+    useEditorStore.getState().openDiffTab({
+      leftPath: `HEAD:${rel}`,
+      rightPath: filePath,
+      leftContent,
+      rightContent,
+    });
+  } catch (err) {
+    logError(`openCommitDiff failed: ${filePath}`, err);
+  }
+}
+
 /** Open a diff tab comparing a file's working-copy content to the version
  *  recorded in `HEAD`. The left side is virtual (label `HEAD:<rel>`); we read
  *  it via `git show HEAD:<rel>` rather than touching the filesystem. */
