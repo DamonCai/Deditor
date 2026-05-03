@@ -53,6 +53,7 @@ import { exportHtml, exportPdf } from "../lib/export";
 import { codeBlockCompletion } from "../lib/codeBlockComplete";
 import { logError, logInfo } from "../lib/logger";
 import { setActiveView } from "../lib/editorBridge";
+import { pushStatusInfo as statusInfoPush, detectEol } from "../lib/statusInfo";
 import { tStatic, useT } from "../lib/i18n";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
 
@@ -99,6 +100,11 @@ interface Props {
   filePath: string | null;
   theme: "light" | "dark";
   fontSize: number;
+  /** Whether this Editor is the user-visible (active) one. Multiple Editors
+   *  can be mounted in EditorHost (one per visited tab); only the active one
+   *  should drive shared status/EditorBridge state. Defaults to true so the
+   *  split-editor and other single-instance callers work without passing it. */
+  active?: boolean;
   /** Active tab id. Used to look up / save the per-tab CodeMirror state JSON
    *  so undo/redo history survives switching to another tab and back. */
   tabId?: string;
@@ -144,6 +150,7 @@ export default function Editor({
   filePath,
   theme,
   fontSize,
+  active = true,
   tabId,
   noStateCache,
   diff,
@@ -213,6 +220,14 @@ export default function Editor({
   const minimapCompartment = useRef(new Compartment());
   const completionCompartment = useRef(new Compartment());
   const autoCloseCompartment = useRef(new Compartment());
+  // Compartments for "decorations not on the critical paint path".
+  // Mounted empty; reconfigured to their real contents in the next animation
+  // frame so the editor paints first and these layers fade in milliseconds
+  // later. Each is a moderate cost: minimap measures the doc, color/inspection
+  // walk visible lines for swatches/markers, codeBlockCompletion sets up
+  // autocomplete state.
+  const colorPreviewCompartment = useRef(new Compartment());
+  const inspectionCompartment = useRef(new Compartment());
   const softWrap = useEditorStore((s) => s.softWrap);
   const showIndentGuides = useEditorStore((s) => s.showIndentGuides);
   const showWhitespace = useEditorStore((s) => s.showWhitespace);
@@ -230,6 +245,13 @@ export default function Editor({
     scrollTopLine: Math.max(1, initialScrollLine ?? 1),
   });
   const positionFlushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Set to `true` whenever this Editor's own updateListener emits a docChange
+  // (i.e., the user typed). The next [value] effect tick is then expected
+  // to receive that same content back from the parent (because setContent
+  // round-trips through the store). We skip the doc.toString() compare in
+  // that case — for a multi-MB doc that toString is the most expensive thing
+  // on the keystroke path.
+  const valueEcho = useRef(false);
   onChangeRef.current = onChange;
   onScrollRef.current = onScroll;
   onPositionChangeRef.current = onPositionChange;
@@ -318,20 +340,25 @@ export default function Editor({
         wrapCompartment.current.of(softWrap ? EditorView.lineWrapping : []),
         indentCompartment.current.of(showIndentGuides ? indentationMarkers() : []),
         whitespaceCompartment.current.of(showWhitespace ? highlightWhitespace() : []),
-        minimapCompartment.current.of(showMinimap ? buildMinimap() : []),
+        // Defer: minimap measures the entire doc on init, which is the
+        // single biggest spike on first tab open for large files.
+        minimapCompartment.current.of([]),
         autoCloseCompartment.current.of(autoCloseBrackets ? closeBrackets() : []),
-        completionCompartment.current.of(
-          isMarkdown(filePath) ? codeBlockCompletion() : [],
-        ),
-        // Color swatch widgets — only enabled for languages where color
-        // literals appear naturally. Enabling globally would noisily decorate
-        // identifiers like `rgb(...)` in unrelated code that happens to match.
-        colorPreviewSupported(filePath) ? colorPreview() : [],
+        // Defer: codeBlockCompletion installs autocomplete state, which is
+        // moderate work and irrelevant until the user types ` ``` `.
+        completionCompartment.current.of([]),
+        // Defer: ViewPlugins that scan visible lines for swatches/markers.
+        // Moved into Compartments so the heavy initial visit can happen in
+        // the next frame rather than during the critical mount paint.
+        colorPreviewCompartment.current.of([]),
+        inspectionCompartment.current.of([]),
         bookmarkExtension(),
-        inspectionMarkers(),
         vcsExtensions(),
         EditorView.updateListener.of((u) => {
-          if (u.docChanged) onChangeRef.current(u.state.doc.toString());
+          if (u.docChanged) {
+            valueEcho.current = true;
+            onChangeRef.current(u.state.doc.toString());
+          }
           if (u.selectionSet || u.docChanged) {
             positionRef.current.cursor = u.state.selection.main.head;
             schedulePositionFlush();
@@ -340,6 +367,21 @@ export default function Editor({
             let selLen = 0;
             for (const r of u.state.selection.ranges) selLen += r.to - r.from;
             useEditorStore.getState().setActiveSelectionLength(selLen);
+          }
+          // StatusBar info — push line/col + totals from CodeMirror's own
+          // O(log n) line index so the status bar doesn't re-scan the doc on
+          // every keystroke. Push happens on every relevant update; the
+          // statusInfo store has its own change-detector, so unchanged
+          // values don't broadcast.
+          if (u.selectionSet || u.docChanged) {
+            const head = u.state.selection.main.head;
+            const lineObj = u.state.doc.lineAt(head);
+            statusInfoPush({
+              line: lineObj.number,
+              col: head - lineObj.from + 1,
+              totalLines: u.state.doc.lines,
+              charCount: u.state.doc.length,
+            });
           }
         }),
         themeCompartment.current.of(theme === "dark" ? islandDark : islandLight),
@@ -408,6 +450,31 @@ export default function Editor({
     viewRef.current = view;
     setActiveView(view);
 
+    // Stage 2 of mount: enhance the editor with the heavy decorations once
+    // it has painted. Without this, opening a tab synchronously runs minimap
+    // measurement + autocomplete state setup + view-plugin scans inside the
+    // click handler. Splitting them across an animation frame makes the
+    // editor visible to the user within ~16ms; decorations follow shortly
+    // after. The reconfigure is a single atomic transaction so the view
+    // doesn't flicker through partial states.
+    const enhanceHandle = requestAnimationFrame(() => {
+      if (viewRef.current !== view) return;
+      view.dispatch({
+        effects: [
+          minimapCompartment.current.reconfigure(
+            showMinimap ? buildMinimap() : [],
+          ),
+          completionCompartment.current.reconfigure(
+            isMarkdown(filePath) ? codeBlockCompletion() : [],
+          ),
+          colorPreviewCompartment.current.reconfigure(
+            colorPreviewSupported(filePath) ? colorPreview() : [],
+          ),
+          inspectionCompartment.current.reconfigure(inspectionMarkers()),
+        ],
+      });
+    });
+
     // Restore first-visible line. Defer to next frame so CM has measured layout.
     if (initialScrollLine != null && initialScrollLine > 1) {
       const target = initialScrollLine;
@@ -454,6 +521,7 @@ export default function Editor({
     return () => {
       view.scrollDOM.removeEventListener("scroll", onScrollEvt);
       if (scrollRafId) cancelAnimationFrame(scrollRafId);
+      cancelAnimationFrame(enhanceHandle);
       // Final flush so the very last position isn't lost on tab switch / unmount.
       if (positionFlushTimer.current) {
         clearTimeout(positionFlushTimer.current);
@@ -499,6 +567,14 @@ export default function Editor({
   }, [externalScrollLine]);
 
   useEffect(() => {
+    // Echo of our own updateListener-driven setContent → store → prop loop.
+    // Skip the (potentially-MB-allocating) doc.toString() comparison and
+    // bail. External-origin changes (autosave reload, file watch, etc.)
+    // bypass this guard because they don't go through CodeMirror first.
+    if (valueEcho.current) {
+      valueEcho.current = false;
+      return;
+    }
     const view = viewRef.current;
     if (!view) return;
     if (view.state.doc.toString() === value) return;
@@ -555,6 +631,33 @@ export default function Editor({
     });
   }, [autoCloseBrackets]);
 
+  // Push initial status info whenever this Editor becomes the active one
+  // (so the StatusBar updates instantly on tab switch instead of waiting
+  // for the next user keystroke). Also runs once on mount of the active
+  // editor. Reads from the live view, so the values match exactly.
+  useEffect(() => {
+    if (!active) return;
+    const view = viewRef.current;
+    if (!view) return;
+    const head = view.state.selection.main.head;
+    const lineObj = view.state.doc.lineAt(head);
+    statusInfoPush({
+      line: lineObj.number,
+      col: head - lineObj.from + 1,
+      totalLines: view.state.doc.lines,
+      charCount: view.state.doc.length,
+    });
+  }, [active]);
+
+  // EOL: detected once per file load / save, not per keystroke. The CRLF /
+  // LF distinction comes from the on-disk content, which only updates here
+  // when `value` changes from outside (file load, save, external reload).
+  useEffect(() => {
+    if (!active) return;
+    statusInfoPush({ eol: detectEol(value) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, filePath]);
+
   useEffect(() => {
     let cancelled = false;
     const def = detectLang(filePath);
@@ -588,10 +691,14 @@ export default function Editor({
   }, [filePath]);
 
   // VCS gutter + inline blame — refresh on file path change AND when the
-  // doc returns to its on-disk state (debounced via savedContent prop).
-  // Both are no-ops if the user disabled the corresponding setting.
+  // file is saved (or externally reloaded). Triggering on `value` instead
+  // would re-arm this on every keystroke; using `savedContent` matches the
+  // actual cadence at which hunks-vs-HEAD becomes meaningful to refresh.
   const gutterEnabled = useEditorStore((s) => s.gutterMarkers);
   const blameEnabled = useEditorStore((s) => s.inlineBlame);
+  const savedContent = useEditorStore((s) =>
+    tabId ? s.tabs.find((t) => t.id === tabId)?.savedContent : undefined,
+  );
   useEffect(() => {
     if (!viewRef.current || !filePath) return;
     const workspaces = useEditorStore.getState().workspaces;
@@ -623,7 +730,7 @@ export default function Editor({
       if (ric && cic) cic(handle);
       else window.clearTimeout(handle);
     };
-  }, [filePath, gutterEnabled, blameEnabled, value]);
+  }, [filePath, gutterEnabled, blameEnabled, savedContent]);
 
   const buildCtxItems = (): MenuItem[] => {
     const view = viewRef.current;

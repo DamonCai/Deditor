@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { emitScroll, useExternalScrollLine } from "./lib/scrollSync";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
@@ -31,7 +32,8 @@ import CommandPalette from "./components/CommandPalette";
 import TerminalPane from "./components/Terminal";
 import { FiX, FiMaximize2, FiMinimize2, FiPlus } from "react-icons/fi";
 import { isEnabled, SHORTCUTS } from "./lib/shortcuts";
-import { useEditorStore, useActiveTab } from "./store/editor";
+import { useEditorStore } from "./store/editor";
+import { useShallow } from "zustand/shallow";
 import { isMarkdown, isJson } from "./lib/lang";
 import { useT } from "./lib/i18n";
 import {
@@ -47,7 +49,7 @@ import {
   saveAllDirty,
   reopenLastClosedTab,
 } from "./lib/fileio";
-import { loadPersisted, schedulePersist } from "./lib/persistence";
+import { loadPersisted, persistRelevantChanged, schedulePersist } from "./lib/persistence";
 import { useFileWatch } from "./lib/fileWatch";
 import {
   backgroundFetch,
@@ -87,20 +89,32 @@ export default function App() {
   const editorFontSize = useEditorStore((s) => s.editorFontSize);
   const setContent = useEditorStore((s) => s.setContent);
   const language = useEditorStore((s) => s.language);
-  // Tabs list — needed by EditorHost so it can keep visited tabs mounted.
-  // Subscribing to the array reference re-renders App on tab open/close +
-  // any in-place tab mutation. Cheap; the heavy DOM work belongs to the
-  // CodeMirror instances which themselves stay alive.
-  const tabs = useEditorStore((s) => s.tabs);
-  const active = useActiveTab();
-  const filePath = active?.filePath ?? null;
-  const content = active?.content ?? "";
-  // Diff tabs disable the markdown preview pane and skip the markdown/json
-  // toolbars — there's nothing to preview when we're showing a comparison.
-  // Diff and Log tabs both bypass the markdown / JSON toolbars and the
-  // preview pane — they own the entire editor area.
-  const isDiffTab = !!active?.diff;
-  const isLogTab = !!active?.log;
+  // Tabs structure — only the IDs and order matter at this level. Used by
+  // EditorHost to know which tabs to keep mounted. Using `useShallow`
+  // means a content edit on any tab (which reuses the same id list) does
+  // NOT re-render App; only open/close/reorder does. This is the central
+  // perf fix: typing in the editor used to re-render App + the entire file
+  // tree on every keystroke because we subscribed to the full `tabs` array.
+  const tabIds = useEditorStore(useShallow((s) => s.tabs.map((t) => t.id)));
+  // Active-tab structural metadata. Excludes `content` so keystrokes don't
+  // wake App. Components that need content (Preview, EditorSlot, the split
+  // editor, ExternalChangeBanner reload) subscribe to it themselves.
+  const activeMeta = useEditorStore(
+    useShallow((s) => {
+      const t = s.tabs.find((x) => x.id === s.activeId);
+      if (!t) return null;
+      return {
+        id: t.id,
+        filePath: t.filePath,
+        isDiff: !!t.diff,
+        isLog: !!t.log,
+        hasExternalChange: t.externalChange != null,
+      };
+    }),
+  );
+  const filePath = activeMeta?.filePath ?? null;
+  const isDiffTab = !!activeMeta?.isDiff;
+  const isLogTab = !!activeMeta?.isLog;
   const isSpecialTab = isDiffTab || isLogTab;
   const previewEnabled = !isSpecialTab && showPreview && isMarkdown(filePath);
   // EditorHost handles initial cursor / scroll restoration per-tab now —
@@ -109,11 +123,9 @@ export default function App() {
   const [sidebarPx, setSidebarPx] = useState(240);
   const [previewPct, setPreviewPct] = useState(50);
   const [terminalPx, setTerminalPx] = useState(240);
-  // Editor↔Preview scroll sync. We track the latest line + which side originated
-  // the scroll so each side only reacts to scrolls coming from the OTHER side.
-  const [scrollSync, setScrollSync] = useState<
-    { line: number; from: "editor" | "preview" } | null
-  >(null);
+  // Editor↔Preview scroll sync moved to lib/scrollSync — its own micro-store
+  // so high-frequency scroll events don't go through App's render path.
+  // Editor and Preview subscribe directly via useExternalScrollLine.
   const [hydrated, setHydrated] = useState(false);
   const zenMode = useEditorStore((s) => s.zenMode);
   const autoSave = useEditorStore((s) => s.autoSave);
@@ -171,11 +183,19 @@ export default function App() {
       .finally(() => setHydrated(true));
   }, []);
 
-  // Persist on any store change (debounced 500ms).
+  // Persist only when fields that actually end up in state.json change
+  // (debounced 500ms). A no-selector subscribe would re-arm the timer on
+  // every cursor move / keystroke (setActiveSelectionLength, tabPositions
+  // flush, dialog open/close, …) — cheap individually, but the eventual
+  // doSave does a full JSON.stringify of every tab's content, which spikes
+  // for users with dozens of tabs open. The whitelist mirrors the fields
+  // doSave reads.
   useEffect(() => {
     if (!hydrated) return;
-    const unsub = useEditorStore.subscribe(() => {
-      schedulePersist(uiRef.current);
+    const unsub = useEditorStore.subscribe((s, prev) => {
+      if (persistRelevantChanged(prev, s)) {
+        schedulePersist(uiRef.current);
+      }
     });
     return unsub;
   }, [hydrated]);
@@ -535,15 +555,7 @@ export default function App() {
           <div className="flex flex-1 min-h-0">
             {previewEnabled && previewMaximized ? (
               <div className="flex-1 min-w-0">
-                <Preview
-                  source={content}
-                  filePath={filePath}
-                  theme={theme}
-                  scrollLine={
-                    scrollSync?.from === "editor" ? scrollSync.line : undefined
-                  }
-                  onScroll={(line) => setScrollSync({ line, from: "preview" })}
-                />
+                <ActivePreview filePath={filePath} theme={theme} />
               </div>
             ) : (
               <>
@@ -553,32 +565,25 @@ export default function App() {
                 >
                   {!isSpecialTab && isMarkdown(filePath) && <MarkdownToolbar />}
                   {!isSpecialTab && isJson(filePath) && <JsonToolbar />}
-                  {active?.externalChange != null && (
-                    <ExternalChangeBanner tab={active} />
+                  {activeMeta?.hasExternalChange && (
+                    <ExternalChangeBanner tabId={activeMeta.id} />
                   )}
                   <div className="flex-1 min-h-0 flex">
                     <div style={{ flex: 1, minWidth: 0, display: "flex" }}>
                       <EditorHost
-                        tabs={tabs}
-                        activeId={active?.id ?? null}
+                        tabIds={tabIds}
+                        activeId={activeMeta?.id ?? null}
                         theme={theme}
                         fontSize={editorFontSize}
-                        externalScrollLine={
-                          scrollSync?.from === "preview" ? scrollSync.line : undefined
-                        }
                         onChange={setContent}
-                        onScroll={(line) => setScrollSync({ line, from: "editor" })}
                       />
                     </div>
-                    {splitEditor && !isSpecialTab && (
+                    {splitEditor && !isSpecialTab && activeMeta && (
                       <>
                         <div style={{ width: 1, background: "var(--border)", flexShrink: 0 }} />
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <Editor
-                            key={(active?.id ?? "no-tab") + "::split"}
-                            tabId={active?.id}
-                            noStateCache
-                            value={content}
+                          <SplitEditorPane
+                            tabId={activeMeta.id}
                             filePath={filePath}
                             theme={theme}
                             fontSize={editorFontSize}
@@ -602,17 +607,7 @@ export default function App() {
                       style={{ width: `${previewPct}%` }}
                       className="min-w-0"
                     >
-                      <Preview
-                        source={content}
-                        filePath={filePath}
-                        theme={theme}
-                        scrollLine={
-                          scrollSync?.from === "editor" ? scrollSync.line : undefined
-                        }
-                        onScroll={(line) =>
-                          setScrollSync({ line, from: "preview" })
-                        }
-                      />
+                      <ActivePreview filePath={filePath} theme={theme} />
                     </div>
                   </>
                 )}
@@ -874,21 +869,22 @@ function LeftToolWindow() {
   return leftPanel === "commit" ? <CommitPanel /> : <FileTree />;
 }
 
-function ExternalChangeBanner({ tab }: { tab: { id: string; externalChange?: string } }) {
+function ExternalChangeBanner({ tabId }: { tabId: string }) {
   const t = useT();
   const reload = () => {
-    if (tab.externalChange == null) return;
+    const tab = useEditorStore.getState().tabs.find((x) => x.id === tabId);
+    if (!tab || tab.externalChange == null) return;
     const fresh = tab.externalChange;
     useEditorStore.setState({
       tabs: useEditorStore.getState().tabs.map((x) =>
-        x.id === tab.id ? { ...x, content: fresh, savedContent: fresh, externalChange: undefined } : x,
+        x.id === tabId ? { ...x, content: fresh, savedContent: fresh, externalChange: undefined } : x,
       ),
     });
   };
   const dismiss = () => {
     useEditorStore.setState({
       tabs: useEditorStore.getState().tabs.map((x) =>
-        x.id === tab.id ? { ...x, externalChange: undefined } : x,
+        x.id === tabId ? { ...x, externalChange: undefined } : x,
       ),
     });
   };
@@ -912,5 +908,67 @@ function ExternalChangeBanner({ tab }: { tab: { id: string; externalChange?: str
         {t("watch.keepMine")}
       </Button>
     </div>
+  );
+}
+
+/** Subscribes to the active tab's content directly so a keystroke doesn't
+ *  re-render App. Also pulls scroll-sync from the dedicated scrollSync
+ *  store — keeping that out of App means scroll wheel events never bubble
+ *  up here either. Only mounted when previewEnabled is true (markdown file
+ *  with the preview pane on). */
+function ActivePreview({
+  filePath,
+  theme,
+}: {
+  filePath: string | null;
+  theme: "light" | "dark";
+}) {
+  const source = useEditorStore(
+    (s) => s.tabs.find((t) => t.id === s.activeId)?.content ?? "",
+  );
+  const scrollLine = useExternalScrollLine("preview");
+  const onScroll = useCallback((line: number) => emitScroll(line, "preview"), []);
+  return (
+    <Preview
+      source={source}
+      filePath={filePath}
+      theme={theme}
+      scrollLine={scrollLine}
+      onScroll={onScroll}
+    />
+  );
+}
+
+/** Right pane of the split-editor. Subscribes to the active tab's content
+ *  on its own so App stays out of the keystroke path. The host EditorHost on
+ *  the left handles the primary CodeMirror instance — this is the secondary
+ *  view sharing the same tab. */
+function SplitEditorPane({
+  tabId,
+  filePath,
+  theme,
+  fontSize,
+  onChange,
+}: {
+  tabId: string;
+  filePath: string | null;
+  theme: "light" | "dark";
+  fontSize: number;
+  onChange: (value: string) => void;
+}) {
+  const value = useEditorStore(
+    (s) => s.tabs.find((t) => t.id === tabId)?.content ?? "",
+  );
+  return (
+    <Editor
+      key={tabId + "::split"}
+      tabId={tabId}
+      noStateCache
+      value={value}
+      filePath={filePath}
+      theme={theme}
+      fontSize={fontSize}
+      onChange={onChange}
+    />
   );
 }

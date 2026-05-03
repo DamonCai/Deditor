@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { useActiveTab, isTabDirty } from "../store/editor";
 import { useEditorStore } from "../store/editor";
+import { useShallow } from "zustand/shallow";
 import { useT } from "../lib/i18n";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
@@ -83,7 +83,21 @@ function repoStateLabelKey(state: string): string {
 
 export default function TitleBar() {
   const t = useT();
-  const active = useActiveTab();
+  // Narrow active-tab subscription: only filePath + dirty boolean. Skips
+  // re-render on every keystroke (which used to wake TitleBar via
+  // useActiveTab returning a fresh Tab ref). Dirty toggles once per
+  // editing session so this re-renders rarely.
+  const active = useEditorStore(
+    useShallow((s) => {
+      const t = s.tabs.find((x) => x.id === s.activeId);
+      if (!t) return null;
+      const isVirtual = !!(t.diff || t.log);
+      return {
+        filePath: t.filePath,
+        dirty: !isVirtual && t.content !== t.savedContent,
+      };
+    }),
+  );
   const setSettingsOpen = useEditorStore((s) => s.setSettingsOpen);
   const setGotoAnythingOpen = useEditorStore((s) => s.setGotoAnythingOpen);
   const theme = useEditorStore((s) => s.theme);
@@ -185,7 +199,7 @@ export default function TitleBar() {
   const name = active?.filePath
     ? active.filePath.split(/[\\/]/).pop()
     : t("common.untitled");
-  const dirty = active ? isTabDirty(active) : false;
+  const dirty = active?.dirty ?? false;
 
   return (
     <div

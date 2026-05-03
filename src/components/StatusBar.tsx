@@ -1,56 +1,63 @@
-import { useActiveTab, isTabDirty, useEditorStore } from "../store/editor";
+import { useEditorStore } from "../store/editor";
+import { useShallow } from "zustand/shallow";
+import { useStatusInfoStore, detectEol } from "../lib/statusInfo";
 import { detectLang } from "../lib/lang";
 import { useT } from "../lib/i18n";
 import LangIcon from "./LangIcon";
 import { FiTerminal } from "react-icons/fi";
 
-/** Convert a flat char offset into 1-based (line, column). Counts UTF-16
- *  code units, which is what CodeMirror's selection offsets use. Tab is
- *  treated as one column — Sublime / VSCode show actual column number, not
- *  visual column, by default, and matching that keeps the math cheap. */
-function offsetToLineCol(text: string, offset: number): { line: number; col: number } {
-  const safe = Math.max(0, Math.min(offset, text.length));
-  let line = 1;
-  let lastBreak = -1;
-  for (let i = 0; i < safe; i++) {
-    if (text.charCodeAt(i) === 10 /* \n */) {
-      line++;
-      lastBreak = i;
-    }
-  }
-  return { line, col: safe - lastBreak };
-}
-
-/** Detect dominant line ending. Uses the first occurrence so a file freshly
- *  read from disk reports its on-disk EOL even if the user has since added
- *  lines via the editor (CodeMirror inserts \n). */
-function detectEol(text: string): "CRLF" | "LF" {
-  const firstNl = text.indexOf("\n");
-  if (firstNl > 0 && text.charCodeAt(firstNl - 1) === 13 /* \r */) return "CRLF";
-  return "LF";
-}
-
 export default function StatusBar() {
   const t = useT();
-  const active = useActiveTab();
-  const cursorOffset = useEditorStore((s) =>
-    active ? s.tabPositions[active.id]?.cursor ?? 0 : 0,
+  // Narrowed structural metadata: shallow-equal so we don't re-render when
+  // unrelated tab fields change. Live editor metrics (line/col/totals/eol)
+  // come from the dedicated statusInfo micro-store below — Editor pushes
+  // them via CodeMirror's O(log n) line index, so StatusBar never has to
+  // scan the doc itself even on multi-MB files.
+  const meta = useEditorStore(
+    useShallow((s) => {
+      const active = s.tabs.find((x) => x.id === s.activeId);
+      if (!active) return null;
+      const isDiff = !!active.diff;
+      return {
+        id: active.id,
+        isDiff,
+        filePath: isDiff
+          ? active.diff!.rightPath.replace(/^HEAD:/, "")
+          : active.filePath,
+        // Diff content never mutates after creation; capture it here and
+        // skip the live subscription path entirely for diff tabs.
+        diffContent: active.diff?.rightContent,
+        dirty: !isDiff && active.content !== active.savedContent,
+      };
+    }),
   );
   const selectionLen = useEditorStore((s) => s.activeSelectionLength);
-  // For a diff tab the visible buffer is the right side (Your version).
-  // Use that for status bar so language / EOL / counts match what the user
-  // is actually looking at instead of falling back to "Markdown" / 0 chars.
-  const isDiffTab = !!active?.diff;
-  const filePath = isDiffTab
-    ? active!.diff!.rightPath.replace(/^HEAD:/, "")
-    : (active?.filePath ?? null);
-  const content = isDiffTab ? active!.diff!.rightContent : (active?.content ?? "");
-  const dirty = active && !isDiffTab ? isTabDirty(active) : false;
-  const lines = content.split("\n").length;
-  const chars = content.length;
+  const liveInfo = useStatusInfoStore((s) => s.info);
+  // Diff tabs aren't backed by a CodeMirror Editor that pushes statusInfo,
+  // so derive their stats directly from the (immutable) right-side content.
+  // For non-diff tabs use the pushed values — already line-indexed by CM.
+  const filePath = meta?.filePath ?? null;
+  let line: number;
+  let col: number;
+  let lines: number;
+  let chars: number;
+  let eol: "CRLF" | "LF";
+  if (meta?.isDiff) {
+    const c = meta.diffContent ?? "";
+    line = 1;
+    col = 1;
+    lines = c.split("\n").length;
+    chars = c.length;
+    eol = detectEol(c);
+  } else {
+    line = liveInfo.line;
+    col = liveInfo.col;
+    lines = liveInfo.totalLines;
+    chars = liveInfo.charCount;
+    eol = liveInfo.eol;
+  }
+  const dirty = meta?.dirty ?? false;
   const lang = detectLang(filePath);
-  const { line, col } = offsetToLineCol(content, cursorOffset);
-  const eol = detectEol(content);
   // Branch UI moved to TitleBar (JetBrains-style); StatusBar keeps only
   // editor-state info now.
   const terminalOpen = useEditorStore((s) => s.terminalOpen);
@@ -75,7 +82,7 @@ export default function StatusBar() {
         ) : (
           <span className="truncate">{t("statusbar.untitled")}</span>
         )}
-        {dirty && <span style={{ color: "var(--accent)" }}>●</span>}
+        {dirty && !meta?.isDiff && <span style={{ color: "var(--accent)" }}>●</span>}
       </div>
       <div className="flex items-center gap-4 flex-shrink-0">
         <span className="tabular-nums" title={t("statusbar.cursor")}>

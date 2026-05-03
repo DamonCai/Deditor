@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useActiveTab } from "../store/editor";
+import { useEditorStore } from "../store/editor";
 import { extractSymbols, type Symbol } from "../lib/symbols";
 import { fuzzyMatch } from "../lib/fuzzy";
 import { useT } from "../lib/i18n";
@@ -20,35 +20,59 @@ const MAX_RESULTS = 200;
 
 export default function GotoSymbol({ open, onClose }: Props) {
   const t = useT();
-  const active = useActiveTab();
-  const content = active?.content ?? "";
-  const filePath = active?.filePath ?? null;
+  // Snapshot the active tab's content once when the modal opens — we don't
+  // want the live `useActiveTab()` subscription, which would re-render this
+  // modal on every keystroke from anywhere else and (more importantly) keep
+  // re-running extractSymbols on every keystroke into the underlying editor.
+  // Snapshot also lets us defer the scan to a microtask so opening the modal
+  // is instant even for huge files.
+  const [symbols, setSymbols] = useState<Symbol[]>([]);
   const [query, setQuery] = useState("");
+  const [committedQuery, setCommittedQuery] = useState("");
   const [selectedIdx, setSelectedIdx] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const symbols = useMemo(
-    () => extractSymbols(filePath, content),
-    [filePath, content],
-  );
-
   useEffect(() => {
     if (!open) {
       setQuery("");
+      setCommittedQuery("");
       setSelectedIdx(0);
+      setSymbols([]);
       return;
     }
+    const s = useEditorStore.getState();
+    const tab = s.tabs.find((x) => x.id === s.activeId);
+    const fp = tab?.filePath ?? null;
+    const ct = tab?.content ?? "";
     requestAnimationFrame(() => inputRef.current?.focus());
+    // Defer the symbol scan one frame so the modal paints empty first; for
+    // a huge file the regex pass might cost ~50ms and we don't want that on
+    // the open path.
+    let cancelled = false;
+    const handle = requestAnimationFrame(() => {
+      if (cancelled) return;
+      setSymbols(extractSymbols(fp, ct));
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(handle);
+    };
   }, [open]);
 
+  // Debounce search query — same reasoning as GotoAnything.
+  useEffect(() => {
+    const id = setTimeout(() => setCommittedQuery(query), 50);
+    return () => clearTimeout(id);
+  }, [query]);
+
   const results: Ranked[] = useMemo(() => {
-    if (!query.trim()) {
+    if (!committedQuery.trim()) {
       return symbols
         .map((s) => ({ sym: s, score: 0, matchedIdx: [] }))
         .slice(0, MAX_RESULTS);
     }
-    const q = query.trim();
+    const q = committedQuery.trim();
     const out: Ranked[] = [];
     for (const s of symbols) {
       const m = fuzzyMatch(q, s.name);
@@ -56,7 +80,7 @@ export default function GotoSymbol({ open, onClose }: Props) {
     }
     out.sort((a, b) => b.score - a.score);
     return out.slice(0, MAX_RESULTS);
-  }, [symbols, query]);
+  }, [symbols, committedQuery]);
 
   useEffect(() => {
     if (selectedIdx >= results.length) setSelectedIdx(0);

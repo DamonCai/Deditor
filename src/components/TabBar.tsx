@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { FiChevronDown, FiPlus, FiX } from "react-icons/fi";
 import { LuGitCompare } from "react-icons/lu";
+import { useShallow } from "zustand/shallow";
 import { useEditorStore, isTabDirty, type Tab } from "../store/editor";
 import { closeTabById, newFile, revealInFinder } from "../lib/fileio";
 import { useT, tStatic } from "../lib/i18n";
@@ -36,8 +37,15 @@ function toEncodedPath(path: string): string {
 
 export default function TabBar() {
   const t = useT();
-  const tabs = useEditorStore((s) => s.tabs);
+  // Subscribe to tab ids only (shallow primitive array): structural changes
+  // (open / close / reorder) re-render TabBar, but a content edit on any
+  // single tab does not. Each TabItem then subscribes to its own Tab
+  // object — the per-tab `setContent` mutation reuses unchanged Tab refs
+  // (see store/editor.ts), so only the touched tab's selector returns a
+  // new value.
+  const tabIds = useEditorStore(useShallow((s) => s.tabs.map((t) => t.id)));
   const activeId = useEditorStore((s) => s.activeId);
+  const tabCount = tabIds.length;
   const setActive = useEditorStore((s) => s.setActive);
   const closeOthers = useEditorStore((s) => s.closeOthers);
   const reorderTabs = useEditorStore((s) => s.reorderTabs);
@@ -128,45 +136,66 @@ export default function TabBar() {
     if (el) el.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [activeId]);
 
-  const onTabContextMenu = (e: React.MouseEvent, tab: Tab) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const items: MenuItem[] = [];
-    if (tab.filePath) {
-      const path = tab.filePath;
-      const name = basename(path);
+  // Stable across re-renders so memo'd TabItems don't see a new prop ref.
+  // Reads the latest Tab via getState() at click time — no stale capture.
+  const onTabContextMenu = useCallback(
+    (e: React.MouseEvent, tabId: string) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const tab = useEditorStore.getState().tabs.find((x) => x.id === tabId);
+      if (!tab) return;
+      const items: MenuItem[] = [];
+      if (tab.filePath) {
+        const path = tab.filePath;
+        const name = basename(path);
+        items.push({
+          label: t("tabbar.copyPath"),
+          onClick: () => {
+            navigator.clipboard.writeText(path).catch(() => {});
+          },
+        });
+        items.push({
+          label: t("tabbar.copyEncodedPath"),
+          onClick: () => {
+            navigator.clipboard.writeText(toEncodedPath(path)).catch(() => {});
+          },
+        });
+        items.push({
+          label: t("tabbar.copyName"),
+          onClick: () => {
+            navigator.clipboard.writeText(name).catch(() => {});
+          },
+        });
+        items.push({
+          label: t("filetree.revealInFinder"),
+          onClick: () => revealInFinder(path),
+        });
+        items.push({ divider: true });
+      }
+      items.push({ label: t("tabbar.close"), onClick: () => closeTabById(tab.id) });
       items.push({
-        label: t("tabbar.copyPath"),
-        onClick: () => {
-          navigator.clipboard.writeText(path).catch(() => {});
-        },
+        label: t("tabbar.closeOthers"),
+        onClick: () => closeOthers(tab.id),
+        disabled: useEditorStore.getState().tabs.length <= 1,
       });
-      items.push({
-        label: t("tabbar.copyEncodedPath"),
-        onClick: () => {
-          navigator.clipboard.writeText(toEncodedPath(path)).catch(() => {});
-        },
-      });
-      items.push({
-        label: t("tabbar.copyName"),
-        onClick: () => {
-          navigator.clipboard.writeText(name).catch(() => {});
-        },
-      });
-      items.push({
-        label: t("filetree.revealInFinder"),
-        onClick: () => revealInFinder(path),
-      });
-      items.push({ divider: true });
-    }
-    items.push({ label: t("tabbar.close"), onClick: () => closeTabById(tab.id) });
-    items.push({
-      label: t("tabbar.closeOthers"),
-      onClick: () => closeOthers(tab.id),
-      disabled: tabs.length <= 1,
-    });
-    setMenu({ x: e.clientX, y: e.clientY, items });
-  };
+      setMenu({ x: e.clientX, y: e.clientY, items });
+    },
+    [closeOthers, t],
+  );
+
+  // Click handler is stable too — memo'd children won't see a new ref each
+  // render. Looks up the tab id via the wrapper's bound argument.
+  const onTabClick = useCallback(
+    (tabId: string) => {
+      if (preventClick.current) {
+        preventClick.current = false;
+        return;
+      }
+      setActive(tabId);
+    },
+    [setActive],
+  );
+  const onTabClose = useCallback((tabId: string) => closeTabById(tabId), []);
 
   return (
     <div
@@ -189,18 +218,16 @@ export default function TabBar() {
           scrollbarWidth: "none",
         }}
       >
-        {tabs.map((tab, idx) => (
+        {tabIds.map((id, idx) => (
           <TabItem
-            key={tab.id}
-            tab={tab}
-            active={tab.id === activeId}
-            onClick={() => {
-              if (preventClick.current) { preventClick.current = false; return; }
-              setActive(tab.id);
-            }}
-            onClose={() => closeTabById(tab.id)}
-            onContextMenu={(e) => onTabContextMenu(e, tab)}
-            onMouseDown={(e) => onMouseDownTab(e, idx)}
+            key={id}
+            tabId={id}
+            index={idx}
+            active={id === activeId}
+            onClick={onTabClick}
+            onClose={onTabClose}
+            onContextMenu={onTabContextMenu}
+            onMouseDown={onMouseDownTab}
           />
         ))}
       </div>
@@ -216,7 +243,7 @@ export default function TabBar() {
         ref={overflowBtnRef}
         variant="ghost"
         onClick={() => setOverflowOpen((v) => !v)}
-        title={t("tabbar.allTabs", { n: tabs.length })}
+        title={t("tabbar.allTabs", { n: tabCount })}
         style={{ ...iconBtnStyle, position: "relative" }}
       >
         <FiChevronDown size={14} />
@@ -230,12 +257,11 @@ export default function TabBar() {
             lineHeight: 1,
           }}
         >
-          {tabs.length}
+          {tabCount}
         </span>
       </Button>
       {overflowOpen && (
         <OverflowDropdown
-          tabs={tabs}
           activeId={activeId}
           anchorRef={overflowBtnRef}
           onPick={(id) => {
@@ -271,21 +297,51 @@ const iconBtnStyle: React.CSSProperties = {
   borderBottom: "none",
 };
 
-function TabItem({
-  tab,
+interface TabItemProps {
+  tabId: string;
+  index: number;
+  active: boolean;
+  onClick: (tabId: string) => void;
+  onClose: (tabId: string) => void;
+  onContextMenu: (e: React.MouseEvent, tabId: string) => void;
+  onMouseDown: (e: React.MouseEvent, idx: number) => void;
+}
+
+const TabItem = memo(function TabItem({
+  tabId,
+  index,
   active,
   onClick,
   onClose,
   onContextMenu,
   onMouseDown,
-}: {
-  tab: Tab;
-  active: boolean;
-  onClick: () => void;
-  onClose: () => void;
-  onContextMenu?: (e: React.MouseEvent) => void;
-  onMouseDown: (e: React.MouseEvent) => void;
-}) {
+}: TabItemProps) {
+  // Per-tab subscription. Returns the same Tab ref as long as `setContent`
+  // didn't target this tab — so a keystroke in another tab leaves this
+  // selector unchanged → no re-render. Dirty / git status / name are
+  // derived from the tab and re-evaluated only when the tab itself changes.
+  const tab = useEditorStore((s) => s.tabs.find((x) => x.id === tabId));
+  const handleClick = useCallback(() => onClick(tabId), [onClick, tabId]);
+  const handleClose = useCallback(() => onClose(tabId), [onClose, tabId]);
+  const handleCtx = useCallback(
+    (e: React.MouseEvent) => onContextMenu(e, tabId),
+    [onContextMenu, tabId],
+  );
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (e.button === 1) {
+        e.preventDefault();
+        handleClose();
+        return;
+      }
+      onMouseDown(e, index);
+    },
+    [handleClose, onMouseDown, index],
+  );
+  // gitStatus subscription belongs above the early return so hook order
+  // stays consistent across renders.
+  const gitStatus = useFileGitStatus(tab?.filePath ?? null);
+  if (!tab) return null;
   const dirty = isTabDirty(tab);
   const untitled = tStatic("common.untitled");
   const name = tab.diff
@@ -295,7 +351,6 @@ function TabItem({
       : tab.filePath
         ? tab.filePath.split(/[\\/]/).pop()
         : untitled;
-  const gitStatus = useFileGitStatus(tab.filePath);
   const gitColor = gitStatusColor(gitStatus);
   const tooltip = tab.diff
     ? `${tab.diff.leftPath}\n↔\n${tab.diff.rightPath}`
@@ -305,16 +360,9 @@ function TabItem({
   return (
     <div
       data-tab-id={tab.id}
-      onClick={onClick}
-      onContextMenu={onContextMenu}
-      onMouseDown={(e) => {
-        if (e.button === 1) {
-          e.preventDefault();
-          onClose();
-          return;
-        }
-        onMouseDown(e);
-      }}
+      onClick={handleClick}
+      onContextMenu={handleCtx}
+      onMouseDown={handleMouseDown}
       title={tooltip}
       style={{
         display: "flex",
@@ -356,7 +404,7 @@ function TabItem({
       <span
         onClick={(e) => {
           e.stopPropagation();
-          onClose();
+          handleClose();
         }}
         title={tStatic("tabbar.closeShortcut")}
         style={{
@@ -383,17 +431,15 @@ function TabItem({
       </span>
     </div>
   );
-}
+});
 
 function OverflowDropdown({
-  tabs,
   activeId,
   anchorRef,
   onPick,
   onClose,
   onDismiss,
 }: {
-  tabs: Tab[];
   activeId: string | null;
   anchorRef: React.RefObject<HTMLButtonElement>;
   onPick: (id: string) => void;
@@ -402,6 +448,10 @@ function OverflowDropdown({
 }) {
   const t = useT();
   const untitled = t("common.untitled");
+  // Subscribe to the full tab list only while the dropdown is mounted —
+  // closing the dropdown unsubscribes, so this never contributes to the
+  // keystroke-time subscriber set.
+  const tabs = useEditorStore((s) => s.tabs);
   const [filter, setFilter] = useState("");
   const [pos, setPos] = useState<{ top: number; right: number }>({ top: 0, right: 0 });
 

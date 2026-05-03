@@ -8,13 +8,23 @@ const POLL_MS = 3000;
 
 /** Poll mtimes of every open named tab and reload (or flag conflict) when a
  *  file changed outside DEditor. Initial mtime is captured on first sight,
- *  so opening a file doesn't trigger an immediate "external change" alert. */
+ *  so opening a file doesn't trigger an immediate "external change" alert.
+ *
+ *  Two power-saving rules: (1) skip the tick entirely when the document is
+ *  hidden (background tab / minimized window) — nothing the user can see
+ *  needs refreshing, and (2) catch up immediately on visibilitychange so the
+ *  refocus feels instant. */
 export function useFileWatch(): void {
   useEffect(() => {
     const lastMtimes = new Map<string, number>();
     let stopped = false;
 
     const tick = async () => {
+      // Skip work entirely when the document is hidden. The next focus
+      // (visibilitychange listener below) will run a fresh tick — so an
+      // external edit caught up to the moment the user refocuses without
+      // burning IPCs in the background.
+      if (typeof document !== "undefined" && document.hidden) return;
       const tabs = useEditorStore.getState().tabs;
       const paths: string[] = [];
       for (const t of tabs) {
@@ -88,9 +98,14 @@ export function useFileWatch(): void {
 
     const iv = setInterval(() => void tick(), POLL_MS);
     void tick();
+    const onVis = () => {
+      if (typeof document !== "undefined" && !document.hidden) void tick();
+    };
+    document.addEventListener("visibilitychange", onVis);
     return () => {
       stopped = true;
       clearInterval(iv);
+      document.removeEventListener("visibilitychange", onVis);
     };
   }, []);
 }

@@ -391,11 +391,19 @@ fn delete_path(path: String) -> Result<(), String> {
     Ok(())
 }
 
+// Per-directory entry cap. The frontend renders one DOM row per entry (even
+// virtualized, the JS array has to hold them all), so a folder with 200k
+// auto-generated files would freeze the tree expand. 5000 is more than any
+// realistic source folder; node_modules / build / generated trees blow past
+// it and get truncated with a marker entry the user can see.
+const MAX_DIR_ENTRIES: usize = 5_000;
+
 #[tauri::command]
 fn list_dir(path: String) -> Result<Vec<DirEntry>, String> {
     let resolved = expand(&path);
     log::debug!("list_dir: {}", resolved.display());
-    let mut out = Vec::new();
+    let mut out: Vec<DirEntry> = Vec::new();
+    let mut truncated = false;
     let read = fs::read_dir(&resolved).map_err(|e| {
         log::warn!("list_dir failed: {} -- {}", resolved.display(), e);
         e.to_string()
@@ -419,6 +427,10 @@ fn list_dir(path: String) -> Result<Vec<DirEntry>, String> {
                 continue;
             }
         }
+        if out.len() >= MAX_DIR_ENTRIES {
+            truncated = true;
+            break;
+        }
         out.push(DirEntry {
             name,
             path: entry.path().to_string_lossy().to_string(),
@@ -430,6 +442,25 @@ fn list_dir(path: String) -> Result<Vec<DirEntry>, String> {
         (false, true) => std::cmp::Ordering::Greater,
         _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
     });
+    if truncated {
+        log::warn!(
+            "list_dir truncated: {} (>{} entries)",
+            resolved.display(),
+            MAX_DIR_ENTRIES
+        );
+        // Append a synthetic marker so the user can see why their tree stops.
+        // The frontend treats files starting with the bell character as a
+        // visible-but-not-clickable hint via its render logic; here we just
+        // give it a name that can't collide with a real file name.
+        out.push(DirEntry {
+            name: format!("… ({}+ entries truncated)", MAX_DIR_ENTRIES),
+            path: format!(
+                "{}/__deditor_truncation_marker__",
+                resolved.display()
+            ),
+            is_dir: false,
+        });
+    }
     Ok(out)
 }
 

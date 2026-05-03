@@ -1,19 +1,22 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Editor from "./Editor";
 import {
   useEditorStore,
-  type Tab,
   type TabPosition,
 } from "../store/editor";
+import { emitScroll, useExternalScrollLine } from "../lib/scrollSync";
 
 interface Props {
-  tabs: Tab[];
+  /** Stable list of currently-open tab ids. Receiving ids (not full Tab
+   *  objects) lets EditorHost stay flat across keystrokes — App subscribes
+   *  to the id list with shallow equality, so a content edit does NOT
+   *  bubble up here. Each EditorSlot then subscribes to its own tab's
+   *  content directly. */
+  tabIds: string[];
   activeId: string | null | undefined;
   theme: "light" | "dark";
   fontSize: number;
-  externalScrollLine?: number;
   onChange: (value: string) => void;
-  onScroll: (line: number) => void;
 }
 
 /** Multi-instance editor host. Each tab the user visits gets its own
@@ -27,14 +30,17 @@ interface Props {
  *  Tabs that have never been activated are NOT mounted, so app startup
  *  cost stays the same as before. Closing a tab unmounts its Editor. */
 export default function EditorHost({
-  tabs,
+  tabIds,
   activeId,
   theme,
   fontSize,
-  externalScrollLine,
   onChange,
-  onScroll,
 }: Props) {
+  // Scroll sync subscription lives here (not in App) so high-frequency
+  // scroll events stay scoped to Editor + Preview. EditorSlot reads it
+  // for its `externalScrollLine`; the active slot also emits via emitScroll.
+  const externalScrollLine = useExternalScrollLine("editor");
+  const onScroll = useCallback((line: number) => emitScroll(line, "editor"), []);
   // Track which tab ids the user has activated. New activations push,
   // closed tabs are pruned in a separate effect.
   const [mounted, setMounted] = useState<Set<string>>(() =>
@@ -50,20 +56,22 @@ export default function EditorHost({
 
   // Prune mounted set when tabs are closed so we don't leak Editor
   // instances + CodeMirror DOM forever.
-  const tabIds = useMemo(() => new Set(tabs.map((t) => t.id)), [tabs]);
+  const tabIdSet = useMemo(() => new Set(tabIds), [tabIds]);
   useEffect(() => {
     setMounted((prev) => {
       let dirty = false;
       const next = new Set<string>();
       for (const id of prev) {
-        if (tabIds.has(id)) next.add(id);
+        if (tabIdSet.has(id)) next.add(id);
         else dirty = true;
       }
       return dirty ? next : prev;
     });
-  }, [tabIds]);
+  }, [tabIdSet]);
 
-  const visible = tabs.filter((t) => mounted.has(t.id));
+  // Render slots in `tabIds` order so DOM order matches tab bar order.
+  // Filter to mounted ids only.
+  const visibleIds = tabIds.filter((id) => mounted.has(id));
 
   return (
     <div
@@ -76,11 +84,11 @@ export default function EditorHost({
         minHeight: 0,
       }}
     >
-      {visible.map((tab) => (
+      {visibleIds.map((id) => (
         <EditorSlot
-          key={tab.id}
-          tab={tab}
-          active={tab.id === activeId}
+          key={id}
+          tabId={id}
+          active={id === activeId}
           theme={theme}
           fontSize={fontSize}
           externalScrollLine={externalScrollLine}
@@ -93,7 +101,7 @@ export default function EditorHost({
 }
 
 interface SlotProps {
-  tab: Tab;
+  tabId: string;
   active: boolean;
   theme: "light" | "dark";
   fontSize: number;
@@ -103,7 +111,7 @@ interface SlotProps {
 }
 
 function EditorSlot({
-  tab,
+  tabId,
   active,
   theme,
   fontSize,
@@ -111,6 +119,13 @@ function EditorSlot({
   onChange,
   onScroll,
 }: SlotProps) {
+  // Per-slot subscription to its own tab. Other slots (not this id) won't
+  // fire even when their tabs change, because zustand's selector compares
+  // by reference and `tabs.map(...)` reuses the original Tab object for
+  // tabs whose id isn't the mutation target. This is the core of the
+  // "App doesn't wake on keystrokes" perf win — only the active slot's
+  // selector returns a new ref.
+  const tab = useEditorStore((s) => s.tabs.find((t) => t.id === tabId));
   // Snapshot the persisted cursor / scroll exactly once at mount time —
   // Editor only reads these on its own mount, so changing the prop later
   // has no effect anyway. Guard with useRef so React strict-mode double
@@ -118,7 +133,7 @@ function EditorSlot({
   const initialPosRef = useRef<TabPosition | undefined>(undefined);
   if (initialPosRef.current === undefined) {
     initialPosRef.current =
-      useEditorStore.getState().tabPositions[tab.id] ?? ({} as TabPosition);
+      useEditorStore.getState().tabPositions[tabId] ?? ({} as TabPosition);
   }
   const initialPos = initialPosRef.current;
 
@@ -132,6 +147,9 @@ function EditorSlot({
     if (active) onScroll(line);
   };
 
+  // Tab vanished mid-render (race during close) — bail out cleanly.
+  if (!tab) return null;
+
   return (
     <div
       style={{
@@ -143,6 +161,7 @@ function EditorSlot({
     >
       <Editor
         tabId={tab.id}
+        active={active}
         value={tab.content}
         filePath={tab.filePath}
         diff={tab.diff}

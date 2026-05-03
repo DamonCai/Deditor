@@ -290,6 +290,10 @@ interface EditorState {
   setGotoSymbolOpen: (open: boolean) => void;
   setFindInFilesOpen: (open: boolean) => void;
   setDirExpanded: (path: string, expanded: boolean) => void;
+  /** One-shot tree click: set the focused workspace AND toggle a directory's
+   *  expansion in a single mutation. Two separate setters fan out to every
+   *  store subscriber twice; this collapses them into one notification. */
+  focusAndExpand: (path: string, workspace: string | null, expanded: boolean) => void;
   setSoftWrap: (on: boolean) => void;
   setShowIndentGuides: (on: boolean) => void;
   setShowWhitespace: (on: boolean) => void;
@@ -752,6 +756,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const cur = get().expandedDirs;
     if (cur[path] === expanded) return;
     set({ expandedDirs: { ...cur, [path]: expanded } });
+  },
+  focusAndExpand: (path, workspace, expanded) => {
+    const { expandedDirs, focusedWorkspace } = get();
+    const expandedNeedsChange = expandedDirs[path] !== expanded;
+    const focusNeedsChange = workspace !== null && focusedWorkspace !== workspace;
+    if (!expandedNeedsChange && !focusNeedsChange) return;
+    const patch: Partial<EditorState> = {};
+    if (expandedNeedsChange) patch.expandedDirs = { ...expandedDirs, [path]: expanded };
+    if (focusNeedsChange) patch.focusedWorkspace = workspace;
+    set(patch);
   },
   setSoftWrap: (on) => set({ softWrap: on }),
   setShowIndentGuides: (on) => set({ showIndentGuides: on }),

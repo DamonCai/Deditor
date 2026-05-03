@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   FiArrowLeft,
@@ -83,13 +83,14 @@ export default function CommitPanel() {
   // the tree shows everything on first open. Rebuilds with tree topology, so
   // the keys are dir paths relative to the workspace ("" = workspace root).
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const toggleCollapsed = (key: string) =>
+  const toggleCollapsed = useCallback((key: string) => {
     setCollapsed((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
       return next;
     });
+  }, []);
 
   // Re-focus message textarea on Cmd+K / "Commit Directory…" / etc.
   useEffect(() => {
@@ -173,16 +174,19 @@ export default function CommitPanel() {
     [workspace, setCommitChecked],
   );
 
-  const onRowClick = (c: GitChange) => {
-    if (!workspace) return;
-    void openCommitDiff(
-      workspace,
-      c.path,
-      c.rel,
-      c.dominant === "U",
-      c.dominant === "D",
-    );
-  };
+  const onRowClick = useCallback(
+    (c: GitChange) => {
+      if (!workspace) return;
+      void openCommitDiff(
+        workspace,
+        c.path,
+        c.rel,
+        c.dominant === "U",
+        c.dominant === "D",
+      );
+    },
+    [workspace],
+  );
 
   // Right-click on a file row → JetBrains-style menu. Per-row state is
   // captured in the closure so the menu items act on the right file.
@@ -1053,11 +1057,9 @@ function DirRow({
               file={child}
               depth={depth + 1}
               checked={!unchecked.has(child.rel)}
-              onToggle={() =>
-                setRangeChecked([child.rel], unchecked.has(child.rel))
-              }
-              onClick={() => onRowClick(child.change)}
-              onContextMenu={(e) => onRowContextMenu(e, child.change)}
+              setRangeChecked={setRangeChecked}
+              onClick={onRowClick}
+              onContextMenu={onRowContextMenu}
               showDirSuffix={flatMode}
             />
           ),
@@ -1066,23 +1068,38 @@ function DirRow({
   );
 }
 
-function FileRow({
-  file,
-  depth,
-  checked,
-  onToggle,
-  onClick,
-  onContextMenu,
-  showDirSuffix,
-}: {
+interface FileRowProps {
   file: TreeFile;
   depth: number;
   checked: boolean;
-  onToggle: () => void;
-  onClick: () => void;
-  onContextMenu: (e: React.MouseEvent) => void;
+  // Stable per-event handlers (parent useCallback'd) — file.change is passed
+  // back so the row never has to bind its own closure. Keeps memo effective
+  // even when CommitPanel re-renders for unrelated reasons (commit message
+  // edits, option toggles, etc.).
+  setRangeChecked: (rels: string[], checked: boolean) => void;
+  onClick: (c: GitChange) => void;
+  onContextMenu: (e: React.MouseEvent, c: GitChange) => void;
   showDirSuffix?: boolean;
-}) {
+}
+
+const FileRow = memo(function FileRow({
+  file,
+  depth,
+  checked,
+  setRangeChecked,
+  onClick,
+  onContextMenu,
+  showDirSuffix,
+}: FileRowProps) {
+  const onToggle = useCallback(
+    () => setRangeChecked([file.change.rel], checked),
+    [setRangeChecked, file.change.rel, checked],
+  );
+  const handleClick = useCallback(() => onClick(file.change), [onClick, file.change]);
+  const handleCtx = useCallback(
+    (e: React.MouseEvent) => onContextMenu(e, file.change),
+    [onContextMenu, file.change],
+  );
   const c = file.change;
   const dom = c.dominant as "M" | "A" | "D" | "U" | "C" | "?" | "I";
   const color = gitStatusColor(dom) ?? "var(--text)";
@@ -1093,8 +1110,8 @@ function FileRow({
       : "";
   return (
     <div
-      onClick={onClick}
-      onContextMenu={onContextMenu}
+      onClick={handleClick}
+      onContextMenu={handleCtx}
       title={c.rel}
       className="flex items-center"
       style={{
@@ -1152,7 +1169,7 @@ function FileRow({
       </span>
     </div>
   );
-}
+});
 
 // ---------------------------------------------------------------------------
 // Tri-state checkbox

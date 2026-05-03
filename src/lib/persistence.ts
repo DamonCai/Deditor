@@ -114,8 +114,6 @@ interface PersistedV1 {
   previewPct: number;
 }
 
-type Persisted = PersistedV3;
-
 function migrate(raw: string): PersistedV3 | null {
   try {
     const parsed = JSON.parse(raw);
@@ -411,35 +409,150 @@ let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function schedulePersist(extras: UiExtras): void {
   if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => doSave(extras), 500);
+  saveTimer = setTimeout(() => runSaveSoon(extras), 500);
+}
+
+/** Yield the actual stringify+IPC to a browser idle slice so the 500ms
+ *  debounce expiring doesn't directly block the keystroke that armed it.
+ *  Falls back to a 0ms timeout on Safari < 16 (no requestIdleCallback). */
+function runSaveSoon(extras: UiExtras): void {
+  type IdleCb = (cb: IdleRequestCallback, opts?: { timeout: number }) => number;
+  const ric = (window as unknown as { requestIdleCallback?: IdleCb })
+    .requestIdleCallback;
+  if (ric) ric(() => doSave(extras), { timeout: 1500 });
+  else setTimeout(() => doSave(extras), 0);
+}
+
+/** Per-tab JSON string cache. doSave checks each tab against this map and
+ *  reuses the cached fragment when the inputs (content / savedContent /
+ *  cursor / scrollTopLine / filePath) match — typing in one tab doesn't
+ *  force a re-stringify of the other 49. */
+interface TabJsonEntry {
+  filePath: string | null;
+  content: string;
+  savedContent: string;
+  cursor: number | undefined;
+  scrollTopLine: number | undefined;
+  json: string;
+}
+const tabJsonCache = new Map<string, TabJsonEntry>();
+
+/** Returns true when any field that ends up in the persisted snapshot has
+ *  changed between two store states. Lets the App-level subscription cheaply
+ *  filter out high-frequency mutations that don't affect persistence
+ *  (cursor moves, selection length, terminal session metadata, dialog state,
+ *  etc.) so we don't re-arm the 500ms persist timer on every keystroke.
+ *
+ *  Intentionally a hand-maintained list — when you add a new field to
+ *  `doSave`'s `base` object, add it here too. */
+export function persistRelevantChanged(
+  prev: ReturnType<typeof useEditorStore.getState>,
+  next: ReturnType<typeof useEditorStore.getState>,
+): boolean {
+  return (
+    prev.tabs !== next.tabs ||
+    prev.activeId !== next.activeId ||
+    prev.tabPositions !== next.tabPositions ||
+    prev.workspaces !== next.workspaces ||
+    prev.theme !== next.theme ||
+    prev.showPreview !== next.showPreview ||
+    prev.showSidebar !== next.showSidebar ||
+    prev.editorFontSize !== next.editorFontSize ||
+    prev.previewMaximized !== next.previewMaximized ||
+    prev.language !== next.language ||
+    prev.shortcuts !== next.shortcuts ||
+    prev.expandedDirs !== next.expandedDirs ||
+    prev.softWrap !== next.softWrap ||
+    prev.showIndentGuides !== next.showIndentGuides ||
+    prev.showWhitespace !== next.showWhitespace ||
+    prev.showMinimap !== next.showMinimap ||
+    prev.autoCloseBrackets !== next.autoCloseBrackets ||
+    prev.autoSave !== next.autoSave ||
+    prev.formatOnSave !== next.formatOnSave ||
+    prev.terminalOpen !== next.terminalOpen ||
+    prev.terminalShell !== next.terminalShell ||
+    prev.commitDrafts !== next.commitDrafts ||
+    prev.leftPanel !== next.leftPanel ||
+    prev.commitOptions !== next.commitOptions ||
+    prev.commitMessageHistory !== next.commitMessageHistory ||
+    prev.commitViewMode !== next.commitViewMode ||
+    prev.diffViewMode !== next.diffViewMode ||
+    prev.diffIgnoreWhitespace !== next.diffIgnoreWhitespace ||
+    prev.diffHighlightWords !== next.diffHighlightWords ||
+    prev.diffCollapseUnchanged !== next.diffCollapseUnchanged ||
+    prev.gutterMarkers !== next.gutterMarkers ||
+    prev.inlineBlame !== next.inlineBlame ||
+    prev.bgFetchEnabled !== next.bgFetchEnabled ||
+    prev.bgFetchIntervalMin !== next.bgFetchIntervalMin
+  );
 }
 
 function doSave(extras: UiExtras): void {
   const s = useEditorStore.getState();
-  // Diff tabs are ephemeral — drop them before persisting so they don't show
-  // up empty on next launch.
   // Diff / Log tabs are ephemeral — they re-derive from git state when
   // reopened and shouldn't pin sessions.
   const persistableTabs = s.tabs.filter((t) => !t.diff && !t.log);
   const activeIdx0 = persistableTabs.findIndex((t) => t.id === s.activeId);
   const activeIndex = activeIdx0 < 0 ? 0 : activeIdx0;
-  const base: Persisted = {
+
+  // Build the tabs portion of the JSON incrementally — reuse cached
+  // per-tab fragments when their inputs are unchanged. With 50 tabs and
+  // editing one of them, this turns N stringify calls into 1.
+  const liveIds = new Set<string>();
+  const tabFragments: string[] = [];
+  for (const t of persistableTabs) {
+    liveIds.add(t.id);
+    const pos = s.tabPositions[t.id];
+    // Binary tabs hold a base64 data URL — easily multi-MB. Persist filePath
+    // only and rehydrate from disk on next launch; keeps state.json small
+    // and skips serializing data we'll re-read anyway.
+    const binary = isBinaryRenderable(t.filePath);
+    const content = binary ? "" : t.content;
+    const savedContent = binary ? "" : t.savedContent;
+    const cursor = pos?.cursor;
+    const scrollTopLine = pos?.scrollTopLine;
+    const cached = tabJsonCache.get(t.id);
+    if (
+      cached &&
+      cached.filePath === t.filePath &&
+      cached.content === content &&
+      cached.savedContent === savedContent &&
+      cached.cursor === cursor &&
+      cached.scrollTopLine === scrollTopLine
+    ) {
+      tabFragments.push(cached.json);
+      continue;
+    }
+    const json = JSON.stringify({
+      filePath: t.filePath,
+      content,
+      savedContent,
+      cursor,
+      scrollTopLine,
+    });
+    tabJsonCache.set(t.id, {
+      filePath: t.filePath,
+      content,
+      savedContent,
+      cursor,
+      scrollTopLine,
+      json,
+    });
+    tabFragments.push(json);
+  }
+  // Evict cache entries for closed tabs so memory doesn't grow unboundedly
+  // for users who churn a lot of tabs in a session.
+  if (tabJsonCache.size > liveIds.size) {
+    for (const id of tabJsonCache.keys()) {
+      if (!liveIds.has(id)) tabJsonCache.delete(id);
+    }
+  }
+
+  // Stringify the rest (everything except `tabs`) in one shot, then splice
+  // the prebuilt tabs array in. This keeps the bulk-of-bytes path cached.
+  const restJson = JSON.stringify({
     v: 3,
     workspaces: s.workspaces,
-    tabs: persistableTabs.map((t) => {
-      const pos = s.tabPositions[t.id];
-      // Binary tabs hold a base64 data URL in `content` — easily multi-MB.
-      // Persist filePath only and rehydrate from disk on next launch; keeps
-      // state.json small and skips serializing data we'll re-read anyway.
-      const binary = isBinaryRenderable(t.filePath);
-      return {
-        filePath: t.filePath,
-        content: binary ? "" : t.content,
-        savedContent: binary ? "" : t.savedContent,
-        cursor: pos?.cursor,
-        scrollTopLine: pos?.scrollTopLine,
-      };
-    }),
     activeIndex,
     theme: s.theme,
     showPreview: s.showPreview,
@@ -474,8 +587,15 @@ function doSave(extras: UiExtras): void {
     inlineBlame: s.inlineBlame,
     bgFetchEnabled: s.bgFetchEnabled,
     bgFetchIntervalMin: s.bgFetchIntervalMin,
-  };
-  invoke("write_app_state", { content: JSON.stringify(base) })
+  });
+  // restJson starts with `{`. Splice `"tabs": [...],` right after it.
+  const tabsArrayJson = `"tabs":[${tabFragments.join(",")}]`;
+  const fullJson =
+    restJson.length === 2 // "{}" — no other fields, shouldn't happen
+      ? `{${tabsArrayJson}}`
+      : `{${tabsArrayJson},${restJson.slice(1, -1)}}`;
+
+  invoke("write_app_state", { content: fullJson })
     .then(() => {
       // Sweep legacy localStorage once we know the file write succeeded —
       // otherwise an interrupted migration could lose the snapshot.
