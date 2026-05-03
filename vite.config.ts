@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react";
 
 const host = process.env.TAURI_DEV_HOST;
 
-export default defineConfig(async () => ({
+export default defineConfig({
   plugins: [react()],
   clearScreen: false,
   server: {
@@ -19,6 +19,6 @@ export default defineConfig(async () => ({
   // (Shiki language packs in lib/shikiWorker.ts). The default IIFE format
   // forbids code-splitting.
   worker: {
-    format: "es",
+    format: "es" as const,
   },
-}));
+});
