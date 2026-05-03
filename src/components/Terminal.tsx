@@ -340,22 +340,9 @@ export function getTerminalHandle(): TerminalHandle | null {
 // ----- command-submitted bus -------------------------------------------------
 //
 // Subscribers (the git refresh hook) get notified ~1.5s after the user
-// presses Enter on a non-empty line. We intentionally don't try to parse
-// what they typed — any command might mutate git state (think `make` running
-// a hook, or `npm install` modifying lockfiles).
-
-type CommandListener = (cmd: string) => void;
-const commandListeners = new Set<CommandListener>();
-
-export function onTerminalCommand(fn: CommandListener): () => void {
-  commandListeners.add(fn);
-  return () => commandListeners.delete(fn);
-}
-
-function dispatchTerminalCommand(cmd: string) {
-  for (const fn of commandListeners) {
-    try {
-      fn(cmd);
-    } catch {}
-  }
-}
+// presses Enter on a non-empty line. The bus lives in lib/terminalBus so
+// subscribers can listen without forcing the heavy xterm.js + Terminal
+// module into the cold-start bundle. Re-export onTerminalCommand for any
+// callers still importing it from the component.
+import { dispatchTerminalCommand } from "../lib/terminalBus";
+export { onTerminalCommand } from "../lib/terminalBus";

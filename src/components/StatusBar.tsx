@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { useEditorStore } from "../store/editor";
 import { useShallow } from "zustand/shallow";
 import { useStatusInfoStore, detectEol } from "../lib/statusInfo";
@@ -127,8 +128,11 @@ export default function StatusBar() {
 /** IntelliJ-style breadcrumb path. Splits on / or \, shows last 3 segments
  *  with `…` to indicate truncation if there are more. The final segment (file
  *  name) is rendered in regular text color, parents in --text-soft. Hovering
- *  a segment lifts it to --text. Pure display — no click-to-navigate yet. */
-function Breadcrumbs({ path }: { path: string }) {
+ *  a segment lifts it to --text. Pure display — no click-to-navigate yet.
+ *
+ *  memo'd because StatusBar re-renders on every cursor move — Breadcrumbs
+ *  always paints the same DOM as long as the file path didn't change. */
+const Breadcrumbs = memo(function Breadcrumbs({ path }: { path: string }) {
   const parts = path.split(/[\\/]/).filter(Boolean);
   const MAX = 3;
   const truncated = parts.length > MAX;
@@ -157,7 +161,7 @@ function Breadcrumbs({ path }: { path: string }) {
       })}
     </span>
   );
-}
+});
 
 function Crumb({ children, dim }: { children: React.ReactNode; dim?: boolean }) {
   return (

@@ -71,23 +71,42 @@ export interface ShikiTok {
   color?: string;
 }
 
-/** Tokenize a whole document into lines × tokens. Returns null until both
- *  Shiki and the requested language have loaded. Caller passes the SHIKI
- *  language id (from LangDef.shiki) and a theme name ("github-light" /
- *  "one-dark-pro"). */
-export async function tokenizeLines(
+// Worker-backed tokenizer for the heavy DiffView path. The worker creates
+// its own Shiki instance — separate memory from the main thread's
+// `getHighlighter()`, but the doc-blocking codeToTokensBase call (150-400ms
+// for big diffs) runs off the renderer thread so the diff stays scrollable
+// while highlights stream in.
+let worker: Worker | null = null;
+let nextId = 1;
+const pending = new Map<number, (toks: ShikiTok[][]) => void>();
+
+function ensureWorker(): Worker {
+  if (worker) return worker;
+  worker = new Worker(new URL("./shikiWorker.ts", import.meta.url), {
+    type: "module",
+  });
+  worker.onmessage = (e: MessageEvent<{ id: number; tokens: ShikiTok[][] }>) => {
+    const cb = pending.get(e.data.id);
+    if (cb) {
+      pending.delete(e.data.id);
+      cb(e.data.tokens);
+    }
+  };
+  return worker;
+}
+
+/** Tokenize a whole document into lines × tokens via the Shiki worker.
+ *  Caller passes the SHIKI language id (from LangDef.shiki) and a theme
+ *  name ("github-light" / "one-dark-pro"). The Promise resolves with `[]`
+ *  on any worker-side error (caller should fall back to plain text). */
+export function tokenizeLines(
   text: string,
   lang: string,
   theme: "github-light" | "one-dark-pro",
 ): Promise<ShikiTok[][]> {
-  const hl = await getHighlighter();
-  const resolvedLang = await ensureLanguage(hl, lang);
-  // codeToTokensBase: ThemedToken[][] — outer = lines, inner = tokens.
-  const tokens = hl.codeToTokensBase(text, {
-    lang: resolvedLang as BundledLanguage,
-    theme,
+  return new Promise((resolve) => {
+    const id = nextId++;
+    pending.set(id, resolve);
+    ensureWorker().postMessage({ id, text, lang, theme });
   });
-  return tokens.map((line) =>
-    line.map((tok) => ({ content: tok.content, color: tok.color })),
-  );
 }

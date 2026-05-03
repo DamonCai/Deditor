@@ -742,31 +742,23 @@ const Row = memo(function Row({
   children,
   title,
 }: RowProps) {
-  const baseBg = marked
-    ? "var(--compare-mark-bg)"
-    : active
-    ? "var(--selection-bg)"
-    : "";
+  const cls =
+    "dr-row flex items-center gap-1 cursor-pointer truncate" +
+    (active ? " is-active" : "") +
+    (marked ? " is-marked" : "");
   return (
     <div
       onClick={onClick}
       onContextMenu={onContextMenu}
       title={title}
-      className="flex items-center gap-1 cursor-pointer truncate"
+      className={cls}
       style={{
         paddingLeft: depth * 14 + 8,
         paddingRight: 8,
         height: ROW_HEIGHT,
         fontSize: 13,
-        background: baseBg || undefined,
         color: "var(--text)",
         boxShadow: marked ? "inset 2px 0 0 var(--accent)" : undefined,
-      }}
-      onMouseEnter={(e) => {
-        if (!marked && !active) e.currentTarget.style.background = "var(--hover-bg)";
-      }}
-      onMouseLeave={(e) => {
-        if (!marked && !active) e.currentTarget.style.background = "";
       }}
     >
       {children}

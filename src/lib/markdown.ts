@@ -127,6 +127,23 @@ export interface RenderOptions {
   theme: "light" | "dark";
 }
 
+// LRU-ish cache of fenced-block HTML keyed by (lang, theme, content). Markdown
+// preview re-renders on every paragraph edit; code blocks rarely change but
+// each used to re-tokenize through Shiki. With 50 code blocks at ~2ms each,
+// caching saves ~100ms off every preview refresh after the first render.
+// Capped so it doesn't grow unbounded across long sessions.
+const FENCE_CACHE_MAX = 256;
+const fenceCache = new Map<string, string>();
+function rememberFence(key: string, html: string): void {
+  if (fenceCache.has(key)) fenceCache.delete(key); // re-insert to mark recent
+  fenceCache.set(key, html);
+  if (fenceCache.size > FENCE_CACHE_MAX) {
+    // Evict oldest entry (Map iterates in insertion order).
+    const oldest = fenceCache.keys().next().value;
+    if (oldest !== undefined) fenceCache.delete(oldest);
+  }
+}
+
 export async function renderMarkdown(
   source: string,
   opts: RenderOptions,
@@ -150,18 +167,24 @@ export async function renderMarkdown(
       highlighted.set(i, renderMermaid(t.content, line));
       continue;
     }
-    const resolved = await ensureLanguage(hl, lang);
-    try {
-      highlighted.set(
-        i,
-        hl.codeToHtml(t.content, { lang: resolved, theme: shikiTheme }),
-      );
-    } catch {
-      highlighted.set(
-        i,
-        hl.codeToHtml(t.content, { lang: "text", theme: shikiTheme }),
-      );
+    const cacheKey = `${shikiTheme}\0${lang}\0${t.content}`;
+    const cached = fenceCache.get(cacheKey);
+    if (cached !== undefined) {
+      highlighted.set(i, cached);
+      // Touch: reinsert to mark as most-recently-used.
+      fenceCache.delete(cacheKey);
+      fenceCache.set(cacheKey, cached);
+      continue;
     }
+    const resolved = await ensureLanguage(hl, lang);
+    let html: string;
+    try {
+      html = hl.codeToHtml(t.content, { lang: resolved, theme: shikiTheme });
+    } catch {
+      html = hl.codeToHtml(t.content, { lang: "text", theme: shikiTheme });
+    }
+    rememberFence(cacheKey, html);
+    highlighted.set(i, html);
   }
 
   return md.renderer.render(tokens, md.options, { __highlighted: highlighted });

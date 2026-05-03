@@ -15,4 +15,10 @@ export default defineConfig(async () => ({
       : undefined,
     watch: { ignored: ["**/src-tauri/**"] },
   },
+  // Workers need ES output because they themselves use dynamic import()
+  // (Shiki language packs in lib/shikiWorker.ts). The default IIFE format
+  // forbids code-splitting.
+  worker: {
+    format: "es",
+  },
 }));

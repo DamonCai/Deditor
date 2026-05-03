@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { invoke } from "@tauri-apps/api/core";
 import {
   FiCopy,
@@ -382,37 +383,17 @@ export default function LogPanel({ workspace, initialPath }: Props) {
           }}
         >
           <CommitListHeader />
-          <div
-            style={{
-              flex: 1,
-              overflowY: "auto",
-              fontSize: 12,
-            }}
-          >
-            {loading && (
-              <div style={{ padding: 12, color: "var(--text-soft)" }}>
-                {t("log.loading")}
-              </div>
-            )}
-            {err && (
-              <div style={{ padding: 12, color: "#e55353" }}>{err}</div>
-            )}
-            {!loading && !err && commits.length === 0 && (
-              <div style={{ padding: 12, color: "var(--text-soft)" }}>
-                {t("log.empty")}
-              </div>
-            )}
-            {visibleCommits.map((c) => (
-              <CommitRow
-                key={c.hash}
-                commit={c}
-                selected={c.hash === selectedHash}
-                multiSelected={multiSelected.has(c.hash)}
-                onClick={(e) => onCommitClick(e, c)}
-                onContextMenu={(e) => onCommitContextMenu(e, c)}
-              />
-            ))}
-          </div>
+          <VirtualCommitList
+            commits={visibleCommits}
+            selectedHash={selectedHash}
+            multiSelected={multiSelected}
+            loading={loading}
+            err={err}
+            emptyLabel={t("log.empty")}
+            loadingLabel={t("log.loading")}
+            onCommitClick={onCommitClick}
+            onCommitContextMenu={onCommitContextMenu}
+          />
         </div>
 
         {/* Detail */}
@@ -472,6 +453,96 @@ function CommitListHeader() {
       <span>{t("log.col.subject")}</span>
       <span>{t("log.col.author")}</span>
       <span>{t("log.col.date")}</span>
+    </div>
+  );
+}
+
+const COMMIT_ROW_HEIGHT = 28;
+
+interface VirtualCommitListProps {
+  commits: GitCommit[];
+  selectedHash: string | null;
+  multiSelected: Set<string>;
+  loading: boolean;
+  err: string | null;
+  emptyLabel: string;
+  loadingLabel: string;
+  onCommitClick: (e: React.MouseEvent, c: GitCommit) => void;
+  onCommitContextMenu: (e: React.MouseEvent, c: GitCommit) => void;
+}
+
+/** Virtualized commit list. Replaces the previous .map over every commit
+ *  in the doc — for repos with thousands of commits, that materialized
+ *  thousands of DOM rows even though only ~30 fit on screen. With the
+ *  virtualizer we render only what's visible (+ a small overscan) and
+ *  scroll smoothly regardless of repo size. */
+function VirtualCommitList({
+  commits,
+  selectedHash,
+  multiSelected,
+  loading,
+  err,
+  emptyLabel,
+  loadingLabel,
+  onCommitClick,
+  onCommitContextMenu,
+}: VirtualCommitListProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: commits.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => COMMIT_ROW_HEIGHT,
+    overscan: 12,
+    getItemKey: (i) => commits[i].hash,
+  });
+  return (
+    <div
+      ref={scrollRef}
+      style={{ flex: 1, overflowY: "auto", fontSize: 12 }}
+    >
+      {loading && (
+        <div style={{ padding: 12, color: "var(--text-soft)" }}>
+          {loadingLabel}
+        </div>
+      )}
+      {err && <div style={{ padding: 12, color: "#e55353" }}>{err}</div>}
+      {!loading && !err && commits.length === 0 && (
+        <div style={{ padding: 12, color: "var(--text-soft)" }}>
+          {emptyLabel}
+        </div>
+      )}
+      <div
+        style={{
+          height: virtualizer.getTotalSize(),
+          width: "100%",
+          position: "relative",
+        }}
+      >
+        {virtualizer.getVirtualItems().map((vi) => {
+          const c = commits[vi.index];
+          return (
+            <div
+              key={vi.key}
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                transform: `translateY(${vi.start}px)`,
+                height: COMMIT_ROW_HEIGHT,
+              }}
+            >
+              <CommitRow
+                commit={c}
+                selected={c.hash === selectedHash}
+                multiSelected={multiSelected.has(c.hash)}
+                onClick={(e) => onCommitClick(e, c)}
+                onContextMenu={(e) => onCommitContextMenu(e, c)}
+              />
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

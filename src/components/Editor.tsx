@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { EditorState, EditorSelection, Compartment } from "@codemirror/state";
 import {
   EditorView,
@@ -35,11 +35,15 @@ import { islandDark } from "../lib/islandDarkTheme";
 import { islandLight } from "../lib/islandLightTheme";
 import { detectLang, isMarkdown, isImageFile, isPdfFile, isAudioFile, isVideoFile, isHexFile, isXmindFile } from "../lib/lang";
 import { useEditorStore, type DiffSpec } from "../store/editor";
-import DiffView from "./DiffView";
-import LogPanel from "./LogPanel";
+// Lazy-loaded: each pulls a heavy dep tree (jsdiff for DiffView, mind-elixir
+// for XmindView, the entire LogPanel + per-commit panels). Default Editor
+// path renders code/text — never needs these. Splitting them off saves
+// ~500KB raw / ~150KB gz from the cold-start chunk.
+const DiffView = lazy(() => import("./DiffView"));
+const LogPanel = lazy(() => import("./LogPanel"));
+const XmindView = lazy(() => import("./XmindView"));
 import type { LogSpec } from "../store/editor";
 import { invoke } from "@tauri-apps/api/core";
-import XmindView from "./XmindView";
 import { isEnabled } from "../lib/shortcuts";
 import {
   bookmarkExtension,
@@ -49,7 +53,10 @@ import {
   clearBookmarks,
 } from "../lib/bookmarks";
 import { saveImage } from "../lib/fileio";
-import { exportHtml, exportPdf } from "../lib/export";
+// Lazy: HTML / PDF export pulls markdown-it + Shiki. Loaded only when the
+// user picks "Export HTML" / "Export PDF" from the right-click menu.
+const exportHtml = () => import("../lib/export").then((m) => m.exportHtml());
+const exportPdf = () => import("../lib/export").then((m) => m.exportPdf());
 import { codeBlockCompletion } from "../lib/codeBlockComplete";
 import { logError, logInfo } from "../lib/logger";
 import { setActiveView } from "../lib/editorBridge";
@@ -168,11 +175,19 @@ export default function Editor({
 
   // Diff tab — render the side-by-side comparison.
   if (diff) {
-    return <DiffView spec={diff} />;
+    return (
+      <Suspense fallback={<LazyFallback />}>
+        <DiffView spec={diff} />
+      </Suspense>
+    );
   }
   // Log tab — render the Git Log panel.
   if (log) {
-    return <LogPanel workspace={log.workspace} initialPath={log.initialPath} />;
+    return (
+      <Suspense fallback={<LazyFallback />}>
+        <LogPanel workspace={log.workspace} initialPath={log.initialPath} />
+      </Suspense>
+    );
   }
   // Image preview — render a data URL directly as <img>.
   if (isImageFile(filePath) && value.startsWith("data:")) {
@@ -203,7 +218,11 @@ export default function Editor({
   }
   // XMind workbook — read-only viewer (and mind-elixir-backed editor).
   if (isXmindFile(filePath) && value.startsWith("data:")) {
-    return <XmindView dataUrl={value} filePath={filePath} tabId={tabId} />;
+    return (
+      <Suspense fallback={<LazyFallback />}>
+        <XmindView dataUrl={value} filePath={filePath} tabId={tabId} />
+      </Suspense>
+    );
   }
   // Binary files we don't have a preview for (Office docs, archives, executables,
   // etc.) — render a hex dump so the user at least sees the raw bytes instead
@@ -340,18 +359,22 @@ export default function Editor({
         wrapCompartment.current.of(softWrap ? EditorView.lineWrapping : []),
         indentCompartment.current.of(showIndentGuides ? indentationMarkers() : []),
         whitespaceCompartment.current.of(showWhitespace ? highlightWhitespace() : []),
-        // Defer: minimap measures the entire doc on init, which is the
-        // single biggest spike on first tab open for large files.
-        minimapCompartment.current.of([]),
+        // Mount eagerly: minimap and inspectionMarkers add sidebar columns,
+        // so deferring them caused the editor width to snap narrower one
+        // frame after first paint — visible flicker when the user clicks
+        // through several files quickly. Pay the small init cost upfront
+        // for a stable layout.
+        minimapCompartment.current.of(showMinimap ? buildMinimap() : []),
         autoCloseCompartment.current.of(autoCloseBrackets ? closeBrackets() : []),
         // Defer: codeBlockCompletion installs autocomplete state, which is
         // moderate work and irrelevant until the user types ` ``` `.
         completionCompartment.current.of([]),
-        // Defer: ViewPlugins that scan visible lines for swatches/markers.
-        // Moved into Compartments so the heavy initial visit can happen in
-        // the next frame rather than during the critical mount paint.
+        // Defer only inline decorations that don't affect layout:
+        // colorPreview adds widgets *inside* lines (no width change). The
+        // inspection strip was moved back to eager init because it's a
+        // sidebar element.
         colorPreviewCompartment.current.of([]),
-        inspectionCompartment.current.of([]),
+        inspectionCompartment.current.of(inspectionMarkers()),
         bookmarkExtension(),
         vcsExtensions(),
         EditorView.updateListener.of((u) => {
@@ -450,27 +473,22 @@ export default function Editor({
     viewRef.current = view;
     setActiveView(view);
 
-    // Stage 2 of mount: enhance the editor with the heavy decorations once
-    // it has painted. Without this, opening a tab synchronously runs minimap
-    // measurement + autocomplete state setup + view-plugin scans inside the
-    // click handler. Splitting them across an animation frame makes the
-    // editor visible to the user within ~16ms; decorations follow shortly
-    // after. The reconfigure is a single atomic transaction so the view
-    // doesn't flicker through partial states.
+    // Stage 2 of mount: enhance the editor with the inline-only decorations
+    // (color swatches inside lines, autocomplete state) once it has painted.
+    // Layout-affecting things (minimap, inspectionMarkers — both sidebar
+    // columns) mount eagerly so the editor width is correct from the very
+    // first frame; deferring them caused a one-frame width snap that read
+    // as flicker when the user clicked through files quickly.
     const enhanceHandle = requestAnimationFrame(() => {
       if (viewRef.current !== view) return;
       view.dispatch({
         effects: [
-          minimapCompartment.current.reconfigure(
-            showMinimap ? buildMinimap() : [],
-          ),
           completionCompartment.current.reconfigure(
             isMarkdown(filePath) ? codeBlockCompletion() : [],
           ),
           colorPreviewCompartment.current.reconfigure(
             colorPreviewSupported(filePath) ? colorPreview() : [],
           ),
-          inspectionCompartment.current.reconfigure(inspectionMarkers()),
         ],
       });
     });
@@ -800,8 +818,8 @@ export default function Editor({
         label: showPreview ? t("tabbar.hidePreview") : t("tabbar.showPreview"),
         onClick: () => togglePreview(),
       });
-      items.push({ label: t("titlebar.exportHtml"), onClick: () => exportHtml() });
-      items.push({ label: t("titlebar.exportPdf"), onClick: () => exportPdf() });
+      items.push({ label: t("titlebar.exportHtml"), onClick: () => void exportHtml() });
+      items.push({ label: t("titlebar.exportPdf"), onClick: () => void exportPdf() });
     }
     return items;
   };
@@ -982,6 +1000,20 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 
 /** Configure the minimap with the create() callback. The minimap container
  *  is a tiny DOM element the package owns; we just hand it a fresh div. */
+/** Suspense placeholder for the lazy-loaded DiffView / LogPanel / XmindView.
+ *  Intentionally blank — the viewer paints quickly enough that any visible
+ *  spinner would just flash. */
+function LazyFallback() {
+  return (
+    <div
+      style={{
+        flex: 1,
+        background: "var(--bg)",
+      }}
+    />
+  );
+}
+
 function buildMinimap() {
   return showMinimapFacet.of({
     create: () => ({ dom: document.createElement("div") }),

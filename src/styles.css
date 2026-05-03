@@ -77,6 +77,35 @@ body,
   overflow: hidden;
 }
 
+/* List-row hover backgrounds — done in CSS so high-volume rows (file tree,
+   tab bar, commit panel) don't pay one inline-style write per mouseenter /
+   mouseleave. The :hover overlay only kicks in when the row isn't already
+   selected / marked, matching the previous JS conditional behavior. */
+.dr-row {
+  background: transparent;
+}
+.dr-row:hover {
+  background: var(--hover-bg);
+}
+.dr-row.is-active,
+.dr-row.is-active:hover {
+  background: var(--selection-bg);
+}
+.dr-row.is-marked,
+.dr-row.is-marked:hover {
+  background: var(--compare-mark-bg);
+}
+
+/* TabBar close-button hover (was a JS handler; now CSS). */
+.dr-tab-close {
+  color: var(--text-soft);
+  border-radius: 3px;
+}
+.dr-tab-close:hover {
+  background: var(--hover-bg);
+  color: var(--text);
+}
+
 /* CodeMirror fills its container */
 .cm-editor {
   height: 100%;

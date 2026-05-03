@@ -375,61 +375,102 @@ export const HEX_EXTS = [
 
 export const SUPPORTED_EXTS = Object.keys(ext);
 
+// Memoize detectLang results by filePath. The function is pure, but it gets
+// called every render of LangIcon / Editor / StatusBar / TabBar — easily
+// hundreds of times per second across the app. Caching turns those into Map
+// lookups. The map is bounded by the set of file paths the user has touched
+// in this session, so it stays small.
+const detectLangCache = new Map<string, LangDef>();
+const NULL_LANG_KEY = "\0null";
+
 export function detectLang(filePath: string | null): LangDef {
-  if (!filePath) return ext.md;
-  const base = filePath.split(/[\\/]/).pop() || "";
-  if (FILENAME_MAP[base]) return FILENAME_MAP[base];
-  const dot = base.lastIndexOf(".");
-  if (dot < 0) return FALLBACK;
-  const e = base.slice(dot + 1).toLowerCase();
-  return ext[e] ?? { ...FALLBACK, icon: I(e.slice(0, 3).toUpperCase() || "·", FALLBACK.icon.color) };
+  const key = filePath ?? NULL_LANG_KEY;
+  const hit = detectLangCache.get(key);
+  if (hit) return hit;
+  let result: LangDef;
+  if (!filePath) {
+    result = ext.md;
+  } else {
+    const base = filePath.split(/[\\/]/).pop() || "";
+    if (FILENAME_MAP[base]) {
+      result = FILENAME_MAP[base];
+    } else {
+      const dot = base.lastIndexOf(".");
+      if (dot < 0) {
+        result = FALLBACK;
+      } else {
+        const e = base.slice(dot + 1).toLowerCase();
+        result =
+          ext[e] ??
+          {
+            ...FALLBACK,
+            icon: I(e.slice(0, 3).toUpperCase() || "·", FALLBACK.icon.color),
+          };
+      }
+    }
+  }
+  detectLangCache.set(key, result);
+  return result;
+}
+
+// Cheap ext extractor — same path-split shared by isMarkdown / isJson /
+// isImageFile / etc. The original code did a separate `.split('.').pop()`
+// inside every helper; moving the work behind a tiny memo turns the per-call
+// cost into a Map lookup.
+const extCache = new Map<string, string>();
+function getExt(filePath: string | null): string {
+  if (!filePath) return "";
+  const hit = extCache.get(filePath);
+  if (hit !== undefined) return hit;
+  const e = filePath.split(".").pop()?.toLowerCase() ?? "";
+  extCache.set(filePath, e);
+  return e;
 }
 
 export function isMarkdown(filePath: string | null): boolean {
   if (!filePath) return true;
-  const e = filePath.split(".").pop()?.toLowerCase() ?? "";
+  const e = getExt(filePath);
   return e === "md" || e === "markdown" || e === "mdx";
 }
 
 export function isJson(filePath: string | null): boolean {
-  if (!filePath) return false;
-  const e = filePath.split(".").pop()?.toLowerCase() ?? "";
+  const e = getExt(filePath);
   return e === "json" || e === "jsonc" || e === "json5";
 }
 
 export function isImageFile(filePath: string | null): boolean {
-  if (!filePath) return false;
-  const e = filePath.split(".").pop()?.toLowerCase() ?? "";
+  const e = getExt(filePath);
+  if (!e) return false;
   return IMAGE_EXTS.includes(e);
 }
 
 export function isPdfFile(filePath: string | null): boolean {
-  if (!filePath) return false;
-  const e = filePath.split(".").pop()?.toLowerCase() ?? "";
+  const e = getExt(filePath);
+  if (!e) return false;
   return e === "pdf";
 }
 
 export function isAudioFile(filePath: string | null): boolean {
-  if (!filePath) return false;
-  const e = filePath.split(".").pop()?.toLowerCase() ?? "";
+  const e = getExt(filePath);
+  if (!e) return false;
   return AUDIO_EXTS.includes(e);
 }
 
 export function isVideoFile(filePath: string | null): boolean {
-  if (!filePath) return false;
-  const e = filePath.split(".").pop()?.toLowerCase() ?? "";
+  const e = getExt(filePath);
+  if (!e) return false;
   return VIDEO_EXTS.includes(e);
 }
 
 export function isHexFile(filePath: string | null): boolean {
-  if (!filePath) return false;
-  const e = filePath.split(".").pop()?.toLowerCase() ?? "";
+  const e = getExt(filePath);
+  if (!e) return false;
   return HEX_EXTS.includes(e);
 }
 
 export function isXmindFile(filePath: string | null): boolean {
-  if (!filePath) return false;
-  const e = filePath.split(".").pop()?.toLowerCase() ?? "";
+  const e = getExt(filePath);
+  if (!e) return false;
   return e === "xmind";
 }
 

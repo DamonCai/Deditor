@@ -1,35 +1,53 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { emitScroll, useExternalScrollLine } from "./lib/scrollSync";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import Editor from "./components/Editor";
 import EditorHost from "./components/EditorHost";
-import Preview from "./components/Preview";
+// Lazy: Preview pulls markdown-it + Shiki engine + the heavy hydrators
+// (mermaid, plantuml, local-image). None of that is needed until the user
+// opens a .md file with the preview pane on. Cuts a substantial chunk
+// off the cold-start bundle.
+const Preview = lazy(() => import("./components/Preview"));
 import TitleBar from "./components/TitleBar";
 import StatusBar from "./components/StatusBar";
 import FileTree from "./components/FileTree";
-import CommitPanel from "./components/CommitPanel";
-import PushDialog from "./components/PushDialog";
-import StashDialog from "./components/StashDialog";
-import ManageRemotesDialog from "./components/ManageRemotesDialog";
-import ResetHeadDialog from "./components/ResetHeadDialog";
-import ConflictResolutionDialog from "./components/ConflictResolutionDialog";
-import InitRepoDialog from "./components/InitRepoDialog";
-import CloneRepoDialog from "./components/CloneRepoDialog";
-import TagsDialog from "./components/TagsDialog";
-import { ApplyPatchDialog, CreatePatchDialog } from "./components/PatchDialog";
+// Lazy: CommitPanel is only mounted when the user opens the Commit
+// tool window (Cmd+K). Pulls in moderate code; loading on-demand keeps
+// it out of the cold-start path.
+const CommitPanel = lazy(() => import("./components/CommitPanel"));
+// All git dialogs + the file-action dialogs are lazy. Each is one or two
+// hundred lines that only mounts when its trigger fires (gitDialog state
+// flips, ConfirmDialog imperative API resolves a Promise, etc.). Lazy
+// loading them keeps cold start fast.
+const PushDialog = lazy(() => import("./components/PushDialog"));
+const StashDialog = lazy(() => import("./components/StashDialog"));
+const ManageRemotesDialog = lazy(() => import("./components/ManageRemotesDialog"));
+const ResetHeadDialog = lazy(() => import("./components/ResetHeadDialog"));
+const ConflictResolutionDialog = lazy(() => import("./components/ConflictResolutionDialog"));
+const InitRepoDialog = lazy(() => import("./components/InitRepoDialog"));
+const CloneRepoDialog = lazy(() => import("./components/CloneRepoDialog"));
+const TagsDialog = lazy(() => import("./components/TagsDialog"));
+const ApplyPatchDialog = lazy(() =>
+  import("./components/PatchDialog").then((m) => ({ default: m.ApplyPatchDialog })),
+);
+const CreatePatchDialog = lazy(() =>
+  import("./components/PatchDialog").then((m) => ({ default: m.CreatePatchDialog })),
+);
 import ConfirmDialog from "./components/ConfirmDialog";
 import PromptDialog from "./components/PromptDialog";
 import TabBar from "./components/TabBar";
 import MarkdownToolbar from "./components/MarkdownToolbar";
 import JsonToolbar from "./components/JsonToolbar";
-import GotoAnything from "./components/GotoAnything";
-import GotoSymbol from "./components/GotoSymbol";
-import FindInFiles from "./components/FindInFiles";
-import SettingsDialog from "./components/SettingsDialog";
-import CommandPalette from "./components/CommandPalette";
-import TerminalPane from "./components/Terminal";
+// Modals + terminal are lazy: each only mounts when its open flag flips
+// true. Cold start doesn't need any of them.
+const GotoAnything = lazy(() => import("./components/GotoAnything"));
+const GotoSymbol = lazy(() => import("./components/GotoSymbol"));
+const FindInFiles = lazy(() => import("./components/FindInFiles"));
+const SettingsDialog = lazy(() => import("./components/SettingsDialog"));
+const CommandPalette = lazy(() => import("./components/CommandPalette"));
+const TerminalPane = lazy(() => import("./components/Terminal"));
 import { FiX, FiMaximize2, FiMinimize2, FiPlus } from "react-icons/fi";
 import { isEnabled, SHORTCUTS } from "./lib/shortcuts";
 import { useEditorStore } from "./store/editor";
@@ -57,7 +75,7 @@ import {
   refreshGitAll,
   workspaceOf,
 } from "./lib/git";
-import { onTerminalCommand } from "./components/Terminal";
+import { onTerminalCommand } from "./lib/terminalBus";
 import { Button } from "./components/ui/Button";
 
 type DragKind = "sidebar" | "preview" | "terminal" | null;
@@ -750,26 +768,28 @@ export default function App() {
               </div>
             </div>
             <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
-              {terminalSessions.map((key) => {
-                const isActive = key === activeTerminalId;
-                return (
-                  <div
-                    key={key}
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      display: isActive ? "flex" : "none",
-                      flexDirection: "column",
-                    }}
-                  >
-                    <TerminalPane
-                      sessionKey={key}
-                      initialCwd={terminalSessionCwds[key]}
-                      visible={isActive && terminalOpen}
-                    />
-                  </div>
-                );
-              })}
+              <Suspense fallback={null}>
+                {terminalSessions.map((key) => {
+                  const isActive = key === activeTerminalId;
+                  return (
+                    <div
+                      key={key}
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        display: isActive ? "flex" : "none",
+                        flexDirection: "column",
+                      }}
+                    >
+                      <TerminalPane
+                        sessionKey={key}
+                        initialCwd={terminalSessionCwds[key]}
+                        visible={isActive && terminalOpen}
+                      />
+                    </div>
+                  );
+                })}
+              </Suspense>
             </div>
           </div>
         </>
@@ -778,12 +798,40 @@ export default function App() {
       {!zenMode && <StatusBar />}
       <ConfirmDialog />
       <PromptDialog />
-      <GotoAnything open={gotoOpen} onClose={() => setGotoOpen(false)} />
-      <CommandPalette open={commandPaletteOpen} onClose={() => setCommandPaletteOpen(false)} />
-      <GotoSymbol open={gotoSymbolOpen} onClose={() => setGotoSymbolOpen(false)} />
-      <FindInFiles open={findInFilesOpen} onClose={() => setFindInFilesOpen(false)} />
-      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-      <GitDialogHost />
+      {/* Mounting these only when their open flag is true means the lazy
+          import doesn't trigger on App's first render — we don't pay for
+          modals the user never uses. Once opened, the chunk stays in the
+          browser cache so subsequent opens are instant. */}
+      <Suspense fallback={null}>
+        {gotoOpen && (
+          <GotoAnything open={gotoOpen} onClose={() => setGotoOpen(false)} />
+        )}
+        {commandPaletteOpen && (
+          <CommandPalette
+            open={commandPaletteOpen}
+            onClose={() => setCommandPaletteOpen(false)}
+          />
+        )}
+        {gotoSymbolOpen && (
+          <GotoSymbol
+            open={gotoSymbolOpen}
+            onClose={() => setGotoSymbolOpen(false)}
+          />
+        )}
+        {findInFilesOpen && (
+          <FindInFiles
+            open={findInFilesOpen}
+            onClose={() => setFindInFilesOpen(false)}
+          />
+        )}
+        {settingsOpen && (
+          <SettingsDialog
+            open={settingsOpen}
+            onClose={() => setSettingsOpen(false)}
+          />
+        )}
+        <GitDialogHost />
+      </Suspense>
     </div>
   );
 }
@@ -866,7 +914,14 @@ function useBgFetch(): void {
  *  inside CommitPanel offers a "back to project" link that flips it back. */
 function LeftToolWindow() {
   const leftPanel = useEditorStore((s) => s.leftPanel);
-  return leftPanel === "commit" ? <CommitPanel /> : <FileTree />;
+  if (leftPanel === "commit") {
+    return (
+      <Suspense fallback={<div style={{ flex: 1, background: "var(--bg-soft)" }} />}>
+        <CommitPanel />
+      </Suspense>
+    );
+  }
+  return <FileTree />;
 }
 
 function ExternalChangeBanner({ tabId }: { tabId: string }) {
@@ -929,13 +984,19 @@ function ActivePreview({
   const scrollLine = useExternalScrollLine("preview");
   const onScroll = useCallback((line: number) => emitScroll(line, "preview"), []);
   return (
-    <Preview
-      source={source}
-      filePath={filePath}
-      theme={theme}
-      scrollLine={scrollLine}
-      onScroll={onScroll}
-    />
+    <Suspense
+      fallback={
+        <div style={{ flex: 1, background: "var(--bg)" }} />
+      }
+    >
+      <Preview
+        source={source}
+        filePath={filePath}
+        theme={theme}
+        scrollLine={scrollLine}
+        onScroll={onScroll}
+      />
+    </Suspense>
   );
 }
 

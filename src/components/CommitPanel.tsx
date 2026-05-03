@@ -993,7 +993,7 @@ function DirRow({
         onClick={() =>
           toggleCollapsed(`dir:${dir.rel || "__root__"}`)
         }
-        className="flex items-center"
+        className="dr-row flex items-center"
         style={{
           padding: "3px 8px",
           paddingLeft: 8 + depth * 14,
@@ -1003,8 +1003,6 @@ function DirRow({
           cursor: "pointer",
           userSelect: "none",
         }}
-        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--hover-bg)")}
-        onMouseLeave={(e) => (e.currentTarget.style.background = "")}
       >
         <TriCheck
           state={checkState}
@@ -1113,7 +1111,7 @@ const FileRow = memo(function FileRow({
       onClick={handleClick}
       onContextMenu={handleCtx}
       title={c.rel}
-      className="flex items-center"
+      className="dr-row flex items-center"
       style={{
         padding: "3px 8px",
         paddingLeft: 8 + depth * 14,
@@ -1122,8 +1120,6 @@ const FileRow = memo(function FileRow({
         cursor: "pointer",
         userSelect: "none",
       }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--hover-bg)")}
-      onMouseLeave={(e) => (e.currentTarget.style.background = "")}
     >
       <input
         type="checkbox"

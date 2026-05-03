@@ -407,24 +407,15 @@ const TabItem = memo(function TabItem({
           handleClose();
         }}
         title={tStatic("tabbar.closeShortcut")}
+        className="dr-tab-close"
         style={{
           width: 16,
           height: 16,
           display: "inline-flex",
           alignItems: "center",
           justifyContent: "center",
-          borderRadius: 3,
           fontSize: 14,
           lineHeight: 1,
-          color: "var(--text-soft)",
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = "var(--hover-bg)";
-          e.currentTarget.style.color = "var(--text)";
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = "";
-          e.currentTarget.style.color = "var(--text-soft)";
         }}
       >
         {dirty ? "●" : "×"}

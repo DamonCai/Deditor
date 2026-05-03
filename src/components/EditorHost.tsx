@@ -41,37 +41,48 @@ export default function EditorHost({
   // for its `externalScrollLine`; the active slot also emits via emitScroll.
   const externalScrollLine = useExternalScrollLine("editor");
   const onScroll = useCallback((line: number) => emitScroll(line, "editor"), []);
-  // Track which tab ids the user has activated. New activations push,
-  // closed tabs are pruned in a separate effect.
-  const [mounted, setMounted] = useState<Set<string>>(() =>
-    activeId ? new Set([activeId]) : new Set(),
+  // Track which tab ids the user has activated, in MRU order (oldest first
+  // → newest last). Old entries past MOUNTED_LRU_CAP are evicted: each kept-
+  // alive Editor instance is ~5-15MB of CodeMirror state + DOM, and clicking
+  // through 30+ files left enough mounted instances to push macOS into
+  // memory-pressure repaints (visible as flicker). Cap keeps the working
+  // set bounded; previously-evicted tabs just go through a fresh mount on
+  // re-activation, same as the very first visit.
+  const MOUNTED_LRU_CAP = 12;
+  const [mounted, setMounted] = useState<string[]>(() =>
+    activeId ? [activeId] : [],
   );
 
   useEffect(() => {
     if (!activeId) return;
-    setMounted((prev) =>
-      prev.has(activeId) ? prev : new Set(prev).add(activeId),
-    );
+    setMounted((prev) => {
+      // Move to MRU position (or insert if new). Evict from the front when
+      // over cap. Comparing by-content avoids unnecessary state updates.
+      const idx = prev.indexOf(activeId);
+      if (idx === prev.length - 1) return prev;
+      const next = idx >= 0
+        ? [...prev.slice(0, idx), ...prev.slice(idx + 1), activeId]
+        : [...prev, activeId];
+      return next.length > MOUNTED_LRU_CAP
+        ? next.slice(next.length - MOUNTED_LRU_CAP)
+        : next;
+    });
   }, [activeId]);
 
-  // Prune mounted set when tabs are closed so we don't leak Editor
+  // Prune mounted list when tabs are closed so we don't leak Editor
   // instances + CodeMirror DOM forever.
   const tabIdSet = useMemo(() => new Set(tabIds), [tabIds]);
   useEffect(() => {
     setMounted((prev) => {
-      let dirty = false;
-      const next = new Set<string>();
-      for (const id of prev) {
-        if (tabIdSet.has(id)) next.add(id);
-        else dirty = true;
-      }
-      return dirty ? next : prev;
+      const next = prev.filter((id) => tabIdSet.has(id));
+      return next.length === prev.length ? prev : next;
     });
   }, [tabIdSet]);
 
   // Render slots in `tabIds` order so DOM order matches tab bar order.
   // Filter to mounted ids only.
-  const visibleIds = tabIds.filter((id) => mounted.has(id));
+  const mountedSet = useMemo(() => new Set(mounted), [mounted]);
+  const visibleIds = tabIds.filter((id) => mountedSet.has(id));
 
   return (
     <div
