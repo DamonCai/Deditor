@@ -33,10 +33,13 @@ interface AheadBehind {
 }
 
 // macOS draws traffic lights inside our overlay-styled title bar; reserve ~80px
-// on the left so the controls don't overlap the leftmost toolbar content.
+// on the left so the controls don't overlap them. In native fullscreen the OS
+// hides the lights, so we collapse the reservation and let the project identity
+// slide to the edge — same behavior IntelliJ New UI uses.
 const IS_MAC =
   typeof navigator !== "undefined" &&
   /(Mac|iPad|iPhone|iPod)/i.test(navigator.userAgent);
+const TRAFFIC_LIGHT_RESERVE_PX = 84;
 
 // data-tauri-drag-region only fires when the literal mousedown target carries
 // the attribute — it does not bubble. Imperatively starting the drag from a
@@ -153,6 +156,32 @@ export default function TitleBar() {
     });
   }, [setFocusedWorkspace]);
 
+  // Native-fullscreen on macOS hides the traffic lights, so the 84px reserve
+  // on the left becomes dead space. Track the state via the resize event —
+  // every fullscreen toggle fires it — and collapse the reserve when active.
+  // (Tauri 2 has no dedicated enter/exit-fullscreen event; resize is the
+  // canonical signal that everyone polls isFullscreen() against.)
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  useEffect(() => {
+    if (!IS_MAC) return;
+    const win = getCurrentWindow();
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const fs = await win.isFullscreen();
+        if (!cancelled) setIsFullscreen(fs);
+      } catch {
+        /* window may not be ready; next resize will catch it */
+      }
+    };
+    void refresh();
+    const unlistenP = win.onResized(() => void refresh());
+    return () => {
+      cancelled = true;
+      void unlistenP.then((fn) => fn());
+    };
+  }, []);
+
   const name = active?.filePath
     ? active.filePath.split(/[\\/]/).pop()
     : t("common.untitled");
@@ -164,12 +193,12 @@ export default function TitleBar() {
       onMouseDown={onTitleBarMouseDown}
       style={{
         // 40px matches IntelliJ New UI Main Toolbar; traffic-light center
-        // (y=14 + 6 = 20) aligns exactly with content vertical center (40/2).
-        // Keep 84px reserved on macOS even in fullscreen — the OS hides the
-        // traffic lights then, so the gap looks empty but never causes the
-        // overlap we'd get if we tried (and failed) to detect the transition.
+        // (y=13 + 6 = 19) aligns with content vertical center (40/2 = 20).
+        // Reserve 84px for the lights only in windowed mode — fullscreen
+        // hides them, so we collapse the reserve to 12px and let the project
+        // identity slide flush left, the same way IntelliJ New UI behaves.
         height: 40,
-        padding: `0 8px 0 ${IS_MAC ? 84 : 12}px`,
+        padding: `0 8px 0 ${IS_MAC && !isFullscreen ? TRAFFIC_LIGHT_RESERVE_PX : 12}px`,
         fontSize: 12,
         background: "var(--bg-soft)",
         borderBottom: "1px solid var(--border)",

@@ -3191,6 +3191,70 @@ fn build_and_set_menu<R: tauri::Runtime>(
     Ok(())
 }
 
+// Force overlay-style title bar AND inset the traffic lights so they sit on
+// the same baseline as the 40px TitleBar text. Mirrors titleBarStyle=Overlay
+// + trafficLightPosition from tauri.conf.json — kept as a runtime fallback
+// because both only take effect at window creation, so a stale binary would
+// otherwise leave the lights on a row of their own. JetBrains-aligned: with
+// inset (x=14, y=13), button center (~y=20) lines up with the TitleBar's
+// vertical center (40/2 = 20).
+#[cfg(target_os = "macos")]
+fn ensure_overlay_titlebar(window: &tauri::WebviewWindow) {
+    use objc2_app_kit::{NSWindow, NSWindowStyleMask, NSWindowTitleVisibility};
+
+    let Ok(ptr) = window.ns_window() else { return };
+    if ptr.is_null() {
+        return;
+    }
+    unsafe {
+        let ns_window = &*(ptr as *mut NSWindow);
+        ns_window.setTitlebarAppearsTransparent(true);
+        ns_window.setTitleVisibility(NSWindowTitleVisibility::Hidden);
+        let mask = ns_window.styleMask();
+        ns_window.setStyleMask(mask | NSWindowStyleMask::FullSizeContentView);
+        inset_traffic_lights(ns_window, 14.0, 13.0);
+    }
+}
+
+// Reposition the close/min/zoom buttons by (x, y) from the top-left corner
+// of the title bar. Direct port of tao's `inset_traffic_lights` (it's what
+// powers Tauri's `trafficLightPosition` config). Resizing the title bar's
+// container view is what actually moves the buttons down by `y`; only `x`
+// gets applied per-button explicitly.
+#[cfg(target_os = "macos")]
+unsafe fn inset_traffic_lights(window: &objc2_app_kit::NSWindow, x: f64, y: f64) {
+    use objc2_app_kit::NSWindowButton;
+
+    let Some(close) = window.standardWindowButton(NSWindowButton::CloseButton) else { return };
+    let Some(mini) = window.standardWindowButton(NSWindowButton::MiniaturizeButton) else { return };
+    let Some(zoom) = window.standardWindowButton(NSWindowButton::ZoomButton) else { return };
+
+    // Title bar container = button.superview.superview. Resizing it taller by
+    // `y` pushes the buttons down by that amount (they're laid out relative to
+    // the container's bottom edge in Cocoa's bottom-left coordinate space).
+    if let Some(parent) = close.superview() {
+        if let Some(container) = parent.superview() {
+            let close_rect = close.frame();
+            let title_bar_h = close_rect.size.height + y;
+            let mut rect = container.frame();
+            rect.size.height = title_bar_h;
+            rect.origin.y = window.frame().size.height - title_bar_h;
+            container.setFrame(rect);
+        }
+    }
+
+    // Spacing between buttons is whatever AppKit chose for the current macOS
+    // version — read it once, then re-apply with our chosen x offset.
+    let close_rect = close.frame();
+    let mini_rect = mini.frame();
+    let space_between = mini_rect.origin.x - close_rect.origin.x;
+    for (i, button) in [&close, &mini, &zoom].iter().enumerate() {
+        let mut rect = button.frame();
+        rect.origin.x = x + (i as f64 * space_between);
+        button.setFrameOrigin(rect.origin);
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn strip_macos_edit_menu_extras(edit_title: &str) {
     use objc2::sel;
@@ -3389,6 +3453,33 @@ pub fn run() {
                 log::info!("log directory: {}", log_dir.display());
             }
             install_app_menu(app)?;
+
+            // Belt-and-suspenders: tauri.conf.json already requests
+            // titleBarStyle=Overlay + trafficLightPosition, but if the running
+            // binary was launched before those config keys were added (or any
+            // future Tauri quirk drops them), the macOS native title bar shows
+            // above our WebView and the traffic lights end up on a row separate
+            // from the DEditor row. Force the NSWindow into transparent /
+            // full-size-content-view mode and inset the buttons after window
+            // creation so the overlay layout is guaranteed. Also re-apply on
+            // resize — macOS resets the title bar container's frame when
+            // toggling fullscreen / zooming, which would otherwise revert the
+            // inset.
+            #[cfg(target_os = "macos")]
+            if let Some(window) = app.get_webview_window("main") {
+                ensure_overlay_titlebar(&window);
+                let win_for_event = window.clone();
+                window.on_window_event(move |event| {
+                    if matches!(event, tauri::WindowEvent::Resized(_)) {
+                        let win = win_for_event.clone();
+                        let inner = win.clone();
+                        let _ = win.run_on_main_thread(move || {
+                            ensure_overlay_titlebar(&inner);
+                        });
+                    }
+                });
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
