@@ -55,49 +55,80 @@ function noteRecentDocument(path: string): void {
   invoke("add_recent_document", { path }).catch(() => {});
 }
 
+// Monotonic counter — every openFileByPath call grabs the next value at
+// entry. The async chain checks before mutating store; if a newer call has
+// arrived in the meantime, the stale chain bails. Stops rapid file-tree
+// clicks from creating throw-away tabs and stacking up Editor mounts on
+// the main thread (the symptom was cursor-spin during fast click-through).
+let openSeq = 0;
+
 export async function openFileByPath(path: string) {
+  const mySeq = ++openSeq;
+  const isStale = () => mySeq !== openSeq;
+
+  // Already-open shortcut — no IPC, no new tab. Just activate. Fast enough
+  // that even rapid clicks through already-open files stay responsive.
+  // Done before the binary-type dispatch because any of those may also
+  // already be open as a tab.
+  const { tabs } = useEditorStore.getState();
+  if (tabs.some((t) => t.filePath === path)) {
+    if (isStale()) return;
+    useEditorStore.getState().openTab(path, "");
+    noteRecentDocument(path);
+    return;
+  }
+
   if (isImageFile(path)) {
     await openBinaryAsDataUrl(path, "image");
+    if (isStale()) return;
     noteRecentDocument(path);
     return;
   }
   if (isPdfFile(path)) {
     await openBinaryAsDataUrl(path, "pdf");
+    if (isStale()) return;
     noteRecentDocument(path);
     return;
   }
   if (isAudioFile(path)) {
     await openBinaryAsDataUrl(path, "audio");
+    if (isStale()) return;
     noteRecentDocument(path);
     return;
   }
   if (isVideoFile(path)) {
     await openBinaryAsDataUrl(path, "video");
+    if (isStale()) return;
     noteRecentDocument(path);
     return;
   }
   if (isHexFile(path)) {
     await openBinaryAsDataUrl(path, "hex");
+    if (isStale()) return;
     noteRecentDocument(path);
     return;
   }
   if (isXmindFile(path)) {
     await openBinaryAsDataUrl(path, "xmind");
+    if (isStale()) return;
     noteRecentDocument(path);
     return;
   }
-  const { tabs } = useEditorStore.getState();
-  if (tabs.some((t) => t.filePath === path)) {
-    useEditorStore.getState().openTab(path, "");
-    noteRecentDocument(path);
-    return;
-  }
+
   try {
     const content = await invoke<string>("read_text_file", { path });
+    if (isStale()) {
+      // Rapid click-through superseded this open — drop the result instead
+      // of creating a tab the user no longer wants and triggering a
+      // CodeMirror mount that would just block the main thread.
+      logInfo(`open ${path}: superseded by newer click`);
+      return;
+    }
     useEditorStore.getState().openTab(path, content);
     logInfo(`opened file: ${path} (${content.length} chars)`);
     noteRecentDocument(path);
   } catch (err) {
+    if (isStale()) return;
     logError(`open failed for ${path}`, err);
   }
 }

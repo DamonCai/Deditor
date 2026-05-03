@@ -53,20 +53,45 @@ export default function EditorHost({
     activeId ? [activeId] : [],
   );
 
+  // For tabs that are ALREADY mounted, switching to them should be
+  // instantaneous — flush synchronously. For new tabs (which trigger a
+  // fresh CodeMirror mount), schedule the add on the next animation frame
+  // and bail if a newer activeId arrives before the frame fires. This
+  // collapses rapid file-tree click-through into a single mount of the
+  // landing tab, instead of mounting 5 CodeMirror instances back-to-back
+  // and freezing the main thread.
+  const mountedRef = useRef(mounted);
+  mountedRef.current = mounted;
   useEffect(() => {
     if (!activeId) return;
-    setMounted((prev) => {
-      // Move to MRU position (or insert if new). Evict from the front when
-      // over cap. Comparing by-content avoids unnecessary state updates.
-      const idx = prev.indexOf(activeId);
-      if (idx === prev.length - 1) return prev;
-      const next = idx >= 0
-        ? [...prev.slice(0, idx), ...prev.slice(idx + 1), activeId]
-        : [...prev, activeId];
-      return next.length > MOUNTED_LRU_CAP
-        ? next.slice(next.length - MOUNTED_LRU_CAP)
-        : next;
+    const promote = () => {
+      setMounted((prev) => {
+        const idx = prev.indexOf(activeId);
+        if (idx === prev.length - 1) return prev;
+        const next =
+          idx >= 0
+            ? [...prev.slice(0, idx), ...prev.slice(idx + 1), activeId]
+            : [...prev, activeId];
+        return next.length > MOUNTED_LRU_CAP
+          ? next.slice(next.length - MOUNTED_LRU_CAP)
+          : next;
+      });
+    };
+    if (mountedRef.current.includes(activeId)) {
+      // Re-activation of an already-mounted tab: just bump MRU position
+      // synchronously. Display toggle in EditorSlot handles visibility.
+      promote();
+      return;
+    }
+    // Fresh mount: defer one frame so rapid clicks coalesce.
+    let cancelled = false;
+    const handle = requestAnimationFrame(() => {
+      if (!cancelled) promote();
     });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(handle);
+    };
   }, [activeId]);
 
   // Prune mounted list when tabs are closed so we don't leak Editor
