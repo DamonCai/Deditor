@@ -104,10 +104,10 @@ export default function EditorHost({
     });
   }, [tabIdSet]);
 
-  // Render slots in `tabIds` order so DOM order matches tab bar order.
-  // Filter to mounted ids only.
-  const mountedSet = useMemo(() => new Set(mounted), [mounted]);
-  const visibleIds = tabIds.filter((id) => mountedSet.has(id));
+   const mountedSet = useMemo(() => new Set(mounted), [mounted]);
+  const visibleIds = tabIds.filter(
+    (id) => mountedSet.has(id) || id === activeId,
+  );
 
   return (
     <div
