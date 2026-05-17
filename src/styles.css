@@ -116,26 +116,43 @@ body,
   line-height: 1.6;
 }
 
-/* Preview typography */
+/* Preview typography — Typora-inspired (centered narrow column, sans-serif body,
+   GitHub-flavored heading rules). Keeps CSS variables so dark theme still works. */
 .preview {
-  padding: 24px 32px;
-  font-size: 15px;
-  line-height: 1.7;
+  /* Centered column with generous top/bottom breathing room. Typora's signature
+     is the narrow reading column regardless of pane width. */
+  padding: 40px 30px 60px;
+  font-size: 16px;
+  line-height: 1.6;
   color: var(--text);
   overflow-y: auto;
   height: 100%;
   box-sizing: border-box;
+  /* Sans-serif body — Typora's default reading font, not the editor's monospace. */
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.preview > * {
+  /* Center inner content as a narrow reading column; outer pane can be any width. */
+  max-width: 860px;
+  margin-left: auto;
+  margin-right: auto;
 }
 .preview h1,
 .preview h2,
 .preview h3,
-.preview h4 {
-  font-weight: 600;
-  margin: 1.4em 0 0.6em;
+.preview h4,
+.preview h5,
+.preview h6 {
+  font-weight: 700;
+  margin: 1.6em auto 0.8em;
   line-height: 1.3;
 }
 .preview h1 {
-  font-size: 1.9em;
+  font-size: 2em;
   border-bottom: 1px solid var(--border);
   padding-bottom: 0.3em;
 }
@@ -147,8 +164,18 @@ body,
 .preview h3 {
   font-size: 1.25em;
 }
+.preview h4 {
+  font-size: 1em;
+}
+.preview h5 {
+  font-size: 0.9em;
+}
+.preview h6 {
+  font-size: 0.85em;
+  color: var(--text-soft);
+}
 .preview p {
-  margin: 0.8em 0;
+  margin: 0 auto 16px;
 }
 .preview a {
   color: var(--accent);
@@ -157,27 +184,35 @@ body,
 .preview a:hover {
   text-decoration: underline;
 }
+/* Inline code: Typora's signature subdued-pink on muted bg. */
 .preview code {
-  background: var(--bg-mute);
-  padding: 2px 6px;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  color: #c7254e;
+  padding: 0.15em 0.4em;
   border-radius: 4px;
-  font-size: 0.9em;
-  font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
+  font-size: 0.88em;
+  font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+}
+.dark .preview code {
+  color: #ff7a8c;
 }
 .preview pre {
-  margin: 1em 0;
+  margin: 16px auto;
   padding: 0;
-  border-radius: 8px;
+  border-radius: 6px;
   overflow: auto;
   background: var(--bg-soft);
   border: 1px solid var(--border);
 }
+/* pre > code: reset the inline-code coloring inside fenced blocks. */
 .preview pre code {
   background: transparent;
+  color: inherit;
   padding: 16px;
   display: block;
   font-size: 13px;
   line-height: 1.55;
+  border-radius: 0;
 }
 .preview pre.shiki {
   padding: 16px;
@@ -185,17 +220,24 @@ body,
 .preview pre.shiki code {
   padding: 0;
 }
+/* Blockquote: Typora style — no background, gray text, thin left rule. */
 .preview blockquote {
-  margin: 1em 0;
-  padding: 0.4em 1em;
+  margin: 16px auto;
+  padding: 0 1em;
   color: var(--text-soft);
   border-left: 4px solid var(--border);
-  background: var(--bg-soft);
+  background: transparent;
+}
+.preview blockquote > :first-child {
+  margin-top: 0;
+}
+.preview blockquote > :last-child {
+  margin-bottom: 0;
 }
 .preview ul,
 .preview ol {
-  padding-left: 1.6em;
-  margin: 0.6em 0;
+  padding-left: 2em;
+  margin: 0 auto 16px;
 }
 .preview ul {
   list-style: disc outside;
@@ -214,12 +256,6 @@ body,
 .preview li {
   margin: 0.25em 0;
 }
-/* In a loose list each <li> wraps its text in a <p>, which would otherwise
-   inherit the document <p> margins (0.8em top+bottom = ~1.6em between items)
-   and look like an extra blank line between items. Strip those margins so a
-   loose list renders as tightly as the surrounding `.preview li` margin
-   allows — matches the GitHub / VSCode preview cadence. Sibling paragraphs
-   inside the same <li> (continuation paragraph) keep their separator. */
 .preview li > p {
   margin: 0;
 }
@@ -232,34 +268,46 @@ body,
 .preview li.task-list-item,
 .preview li:has(> input[type="checkbox"]) {
   list-style: none;
-  margin-left: -1.2em;
+  margin-left: -1.4em;
 }
+/* Table: GitHub/Typora style — full border, zebra rows. */
 .preview table {
   border-collapse: collapse;
-  margin: 1em 0;
+  margin: 16px auto;
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
 }
 .preview th,
 .preview td {
   border: 1px solid var(--border);
-  padding: 6px 12px;
+  padding: 6px 13px;
 }
 .preview th {
   background: var(--bg-soft);
+  font-weight: 600;
+}
+.preview tr:nth-child(2n) td {
+  background: color-mix(in srgb, var(--text) 3%, transparent);
 }
 .preview hr {
   border: none;
   border-top: 1px solid var(--border);
-  margin: 1.6em 0;
+  margin: 24px auto;
+  height: 0;
 }
 .preview img {
   max-width: 100%;
+  display: block;
+  margin: 16px auto;
 }
 
 /* PlantUML diagram */
 .preview .plantuml-diagram {
   display: flex;
   justify-content: center;
-  margin: 1.2em 0;
+  margin: 1.2em auto;
   padding: 12px;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -306,7 +354,7 @@ body,
 .preview .mermaid-diagram {
   display: flex;
   justify-content: center;
-  margin: 1.2em 0;
+  margin: 1.2em auto;
   padding: 12px;
   background: var(--bg);
   border: 1px solid var(--border);
