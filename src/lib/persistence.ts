@@ -335,14 +335,24 @@ function doSave(extras: UiExtras): void {
     workspaces: s.workspaces,
     tabs: persistableTabs.map((t) => {
       const pos = s.tabPositions[t.id];
-      // Binary tabs hold a base64 data URL in `content` — easily multi-MB.
-      // Persist filePath only and rehydrate from disk on next launch; keeps
-      // state.json small and skips serializing data we'll re-read anyway.
+      // Three cases for tab content persistence:
+      //
+      // 1. Binary tabs hold a base64 data URL in `content` — easily multi-MB.
+      //    Persist filePath only and rehydrate from disk on next launch.
+      // 2. Clean named tabs: content matches what's on disk, so we don't need
+      //    to write it into state.json. On load, we always re-read from disk
+      //    anyway (line ~210). This is the BIG win — without this, 50 open
+      //    files × 100 KB each = serializing ~5 MB on every state change
+      //    (every 500 ms after any UI tweak). Cuts state.json down to KBs.
+      // 3. Dirty named tabs OR untitled tabs: must persist content so the
+      //    user's unsaved edits survive a relaunch.
       const binary = isBinaryRenderable(t.filePath);
+      const dirty = t.content !== t.savedContent;
+      const skipContent = binary || (t.filePath != null && !dirty);
       return {
         filePath: t.filePath,
-        content: binary ? "" : t.content,
-        savedContent: binary ? "" : t.savedContent,
+        content: skipContent ? "" : t.content,
+        savedContent: skipContent ? "" : t.savedContent,
         cursor: pos?.cursor,
         scrollTopLine: pos?.scrollTopLine,
       };

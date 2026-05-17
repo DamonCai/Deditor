@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useEditorStore } from "../store/editor";
 import { openFileByPath } from "../lib/fileio";
@@ -36,6 +36,12 @@ export default function GotoAnything({ open, onClose }: Props) {
   const workspaces = useEditorStore((s) => s.workspaces);
   const [files, setFiles] = useState<WorkspaceFile[] | null>(null);
   const [query, setQuery] = useState("");
+  // useDeferredValue defers the expensive fuzzy-match work until React is
+  // idle. The input stays responsive (renders with the latest `query`) while
+  // the filter runs against `deferredQuery`. On 50k files a single fuzzy
+  // pass costs ~17 ms max — without this, every keystroke would block input
+  // for a frame. With it, only the last keystroke pays the cost.
+  const deferredQuery = useDeferredValue(query);
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [loading, setLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -67,14 +73,14 @@ export default function GotoAnything({ open, onClose }: Props) {
 
   const results: RankedFile[] = useMemo(() => {
     if (!files) return [];
-    if (!query.trim()) {
+    if (!deferredQuery.trim()) {
       // No query: show first MAX_RESULTS files with no highlight, sorted by
       // workspace then path so the list is stable and predictable.
       return files
         .slice(0, MAX_RESULTS)
         .map((f) => ({ file: f, match: { score: 0, matchedIdx: [] }, highlightIdx: [], display: f.rel }));
     }
-    const q = query.trim();
+    const q = deferredQuery.trim();
     const out: RankedFile[] = [];
     for (const f of files) {
       // Match against the rel path, which puts both filename and folder
@@ -85,7 +91,7 @@ export default function GotoAnything({ open, onClose }: Props) {
     }
     out.sort((a, b) => b.match.score - a.match.score);
     return out.slice(0, MAX_RESULTS);
-  }, [files, query]);
+  }, [files, deferredQuery]);
 
   // Keep selection in range whenever the result list shrinks/grows.
   useEffect(() => {

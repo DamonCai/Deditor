@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useActiveTab } from "../store/editor";
 import { extractSymbols, type Symbol } from "../lib/symbols";
 import { fuzzyMatch } from "../lib/fuzzy";
@@ -24,6 +24,8 @@ export default function GotoSymbol({ open, onClose }: Props) {
   const content = active?.content ?? "";
   const filePath = active?.filePath ?? null;
   const [query, setQuery] = useState("");
+  // Defer fuzzy filtering so typing stays responsive on files with many symbols.
+  const deferredQuery = useDeferredValue(query);
   const [selectedIdx, setSelectedIdx] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -43,12 +45,12 @@ export default function GotoSymbol({ open, onClose }: Props) {
   }, [open]);
 
   const results: Ranked[] = useMemo(() => {
-    if (!query.trim()) {
+    if (!deferredQuery.trim()) {
       return symbols
         .map((s) => ({ sym: s, score: 0, matchedIdx: [] }))
         .slice(0, MAX_RESULTS);
     }
-    const q = query.trim();
+    const q = deferredQuery.trim();
     const out: Ranked[] = [];
     for (const s of symbols) {
       const m = fuzzyMatch(q, s.name);
@@ -56,7 +58,7 @@ export default function GotoSymbol({ open, onClose }: Props) {
     }
     out.sort((a, b) => b.score - a.score);
     return out.slice(0, MAX_RESULTS);
-  }, [symbols, query]);
+  }, [symbols, deferredQuery]);
 
   useEffect(() => {
     if (selectedIdx >= results.length) setSelectedIdx(0);

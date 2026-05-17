@@ -20,8 +20,9 @@
     "perf:store": "npx tsx scripts/perf-test.ts",
     "perf:react": "npx tsx scripts/perf-react.tsx",
     "perf:soak": "npx tsx --expose-gc scripts/perf-soak.tsx",
+    "perf:libs": "npx tsx scripts/perf-libs.ts",
     "perf:rust": "cargo test --release --manifest-path src-tauri/Cargo.toml ipc_bench -- --nocapture --test-threads=1",
-    "perf:all": "npm run perf:store && npm run perf:react && npm run perf:soak && npm run perf:rust"
+    "perf:all": "npm run perf:store && npm run perf:react && npm run perf:soak && npm run perf:libs && npm run perf:rust"
   },
   "dependencies": {
     "@codemirror/commands": "^6.7.1",

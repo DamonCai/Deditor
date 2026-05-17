@@ -1370,4 +1370,30 @@ mod ipc_bench {
             times
         );
     }
+
+    #[test]
+    fn find_in_files_5k_files() {
+        // Build 5000 files, ~1 KB each, with the query string in 5% of them.
+        let s = Scratch::new("find_5k");
+        for i in 0..5000 {
+            let body = if i % 20 == 0 {
+                format!("padding\nthe needle is here\nmore padding\n").repeat(20)
+            } else {
+                "padding line that does not match\n".repeat(20)
+            };
+            fs::write(s.0.join(format!("f_{:05}.txt", i)), body).unwrap();
+        }
+        let roots = vec![s.0.to_string_lossy().to_string()];
+        let t = Instant::now();
+        let r = find_in_files(roots, "needle".into(), true).unwrap();
+        let dt = t.elapsed().as_secs_f64() * 1000.0;
+        println!(
+            "[find_in_files 5k files, 5% match]  hits={} truncated={} in {:.1} ms  ← Cmd+Shift+F",
+            r.hits.len(),
+            r.truncated,
+            dt
+        );
+        // Confirm we got hits (~250 files × ~20 lines each = 5000-ish but capped at 5k)
+        assert!(r.hits.len() > 0);
+    }
 }
