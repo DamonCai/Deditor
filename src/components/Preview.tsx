@@ -59,6 +59,13 @@ export default function Preview({ theme, scrollLine, onScroll }: Props) {
   // After every HTML refresh, walk the DOM and replace plantuml placeholders
   // with their rendered SVG (cache → network with short timeout). The returned
   // AbortController cancels in-flight fetches when html changes again.
+  // NOTE: an earlier "optimization" tried to short-circuit these with
+  // `html.includes(...)` before calling querySelectorAll. `perf-hydrate.ts`
+  // proved that wrong: querySelectorAll with a class selector is backed by
+  // an indexed lookup in jsdom (and Chromium) and runs in ~5 µs on an
+  // 8000-element DOM, while String.includes() over a 200 KB html blob is
+  // ~180 µs. Indexed DOM beats linear string scan; the obvious-looking
+  // pre-check made things 30× slower. Don't add it back.
   useEffect(() => {
     if (!containerRef.current) return;
     const ctrl = hydratePlantuml(containerRef.current);

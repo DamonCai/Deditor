@@ -24,7 +24,10 @@ function toEncodedPath(path: string): string {
     .join(sep);
 }
 
-export default function TabBar() {
+// Zero props — wrap default export in memo so App re-renders (scroll-sync,
+// splitter drag) don't re-run TabBar's body. Internal store subscriptions
+// still wake it when relevant fields change.
+function TabBarImpl() {
   const t = useT();
   // Per-field selectors. tabs is shallow-compared so a keystroke (which mutates
   // tabs[].content but keeps the same object identity for all other tabs)
@@ -579,3 +582,6 @@ function OverflowDropdown({
     </div>
   );
 }
+
+const TabBar = memo(TabBarImpl);
+export default TabBar;

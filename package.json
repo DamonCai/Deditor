@@ -24,8 +24,10 @@
     "perf:startup": "npx tsx scripts/perf-startup.ts",
     "perf:dom": "npx tsx scripts/perf-dom.ts",
     "perf:mainsub": "npx tsx scripts/perf-mainsub.ts",
+    "perf:hydrate": "npx tsx scripts/perf-hydrate.ts",
+    "perf:memo": "npx tsx scripts/perf-memo.tsx",
     "perf:rust": "cargo test --release --manifest-path src-tauri/Cargo.toml ipc_bench -- --nocapture --test-threads=1",
-    "perf:all": "npm run perf:store && npm run perf:react && npm run perf:soak && npm run perf:libs && npm run perf:startup && npm run perf:dom && npm run perf:mainsub && npm run perf:rust"
+    "perf:all": "npm run perf:store && npm run perf:react && npm run perf:soak && npm run perf:libs && npm run perf:startup && npm run perf:dom && npm run perf:mainsub && npm run perf:hydrate && npm run perf:memo && npm run perf:rust"
   },
   "dependencies": {
     "@codemirror/commands": "^6.7.1",

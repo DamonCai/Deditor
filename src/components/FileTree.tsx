@@ -32,7 +32,11 @@ interface MenuState {
   items: MenuItem[];
 }
 
-export default function FileTree() {
+// Zero props — wrap default export in memo so App re-renders (scroll-sync,
+// splitter drag) don't re-run FileTree's body. Internal store subscriptions
+// still wake it when relevant fields (workspaces / active filePath /
+// expandedDirs etc.) actually change.
+function FileTreeImpl() {
   const t = useT();
   // Per-field selectors — destructuring the whole store re-renders FileTree
   // (and all its nested rows) on every store change, including every keystroke.
@@ -651,3 +655,6 @@ function ErrorLine({ msg }: { msg: string }) {
     </div>
   );
 }
+
+const FileTree = memo(FileTreeImpl);
+export default FileTree;

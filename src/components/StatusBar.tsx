@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { useActiveTab, isTabDirty, useEditorStore } from "../store/editor";
 import { detectLang } from "../lib/lang";
 import { useT } from "../lib/i18n";
@@ -48,7 +48,11 @@ function detectEol(text: string): "CRLF" | "LF" {
   return "LF";
 }
 
-export default function StatusBar() {
+// Zero props — wrap default export in memo so App re-renders (scroll-sync,
+// splitter drag, etc.) don't re-run StatusBar's hooks. The store
+// subscriptions inside still wake it when content / cursor / selection
+// change, which IS the intended trigger.
+function StatusBarImpl() {
   const t = useT();
   const active = useActiveTab();
   const cursorOffset = useEditorStore((s) =>
@@ -167,3 +171,6 @@ function Sep() {
     </span>
   );
 }
+
+const StatusBar = memo(StatusBarImpl);
+export default StatusBar;

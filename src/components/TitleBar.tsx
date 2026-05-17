@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { useActiveTabHeader } from "../store/editor";
 import { useEditorStore } from "../store/editor";
 import { useT } from "../lib/i18n";
@@ -44,7 +45,11 @@ function onTitleBarMouseDown(e: React.MouseEvent<HTMLDivElement>) {
  *
  *  We don't ship git / run config like IntelliJ does — DEditor isn't an IDE —
  *  so the toolbar stays narrow and uncluttered. */
-export default function TitleBar() {
+// Zero props — wrap in memo so when App re-renders for unrelated reasons
+// (scroll-sync state, splitter drag, etc.) this whole chrome component
+// short-circuits instead of re-running all its hooks. The component's own
+// store subscriptions still wake it when its fields actually change.
+function TitleBarImpl() {
   const t = useT();
   const header = useActiveTabHeader();
   const setSettingsOpen = useEditorStore((s) => s.setSettingsOpen);
@@ -154,3 +159,6 @@ export default function TitleBar() {
     </div>
   );
 }
+
+const TitleBar = memo(TitleBarImpl);
+export default TitleBar;
