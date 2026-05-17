@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 // @tauri-apps/api/webview transitively imports the full Window class (~62 KB).
 // We only need to listen for the file-drop event; subscribe to its raw Tauri
 // event name directly via @tauri-apps/api/event (which is already small +
@@ -10,37 +10,32 @@ interface TauriDragDropPayload {
   paths: string[];
   position: { x: number; y: number };
 }
-// EditorHost transitively pulls all of CodeMirror (~450 KB raw / ~190 KB
-// minified). Loading it lazily lets the rest of the app shell (TitleBar /
-// TabBar / FileTree / StatusBar) parse + paint first, then CodeMirror
-// streams in. Time-to-interactive drops dramatically on cold start.
-const EditorHost = lazy(() => import("./components/EditorHost"));
-const EditorSlot = lazy(() => import("./components/EditorSlot"));
-// Preview drags in markdown-it + the Shiki engine + every hydrator
-// (mermaid, plantuml, local-image rewriting). None of that is needed until
-// the user actually opens a .md file with the preview pane on. Loading
-// lazily cuts ~350 KB off the cold-start bundle.
-const Preview = lazy(() => import("./components/Preview"));
+// Strategy: trade entry-chunk size for instant first-use of every common
+// operation. EditorHost / Preview / toolbars / modals are all eager — by
+// the time the user clicks a file / opens Cmd+P / etc., the code is
+// already parsed and ready. Cold-start cost goes up by ~30-80 ms of
+// parsing; in exchange the first-click / first-keystroke / first-palette
+// open never pauses waiting for a chunk to fetch + parse.
+//
+// Heavier deps that show up rarely (mermaid, katex, prettier, xmind,
+// the diff/log virtual tabs, export-as-HTML/PDF) stay lazy AND are
+// idle-prefetched in the background — see scheduleIdlePrefetch() below.
+import EditorHost from "./components/EditorHost";
+import EditorSlot from "./components/EditorSlot";
+import Preview from "./components/Preview";
 import TitleBar from "./components/TitleBar";
 import StatusBar from "./components/StatusBar";
 import FileTree from "./components/FileTree";
 import ConfirmDialog from "./components/ConfirmDialog";
 import PromptDialog from "./components/PromptDialog";
 import TabBar from "./components/TabBar";
-// Toolbars only mount for their respective file types. Lazy-load to keep
-// JSON5 (~45 KB) and the markdown helpers out of the cold-start bundle for
-// users who aren't editing those file types yet.
-const MarkdownToolbar = lazy(() => import("./components/MarkdownToolbar"));
-const JsonToolbar = lazy(() => import("./components/JsonToolbar"));
-// All five overlay dialogs are mounted at root but only render when their
-// `open` flag flips true. Lazy-loading drops their code (CommandPalette in
-// particular drags in `lib/commands.ts` which pulls @codemirror/commands +
-// editor extensions) out of the cold-start bundle.
-const GotoAnything = lazy(() => import("./components/GotoAnything"));
-const GotoSymbol = lazy(() => import("./components/GotoSymbol"));
-const FindInFiles = lazy(() => import("./components/FindInFiles"));
-const SettingsDialog = lazy(() => import("./components/SettingsDialog"));
-const CommandPalette = lazy(() => import("./components/CommandPalette"));
+import MarkdownToolbar from "./components/MarkdownToolbar";
+import JsonToolbar from "./components/JsonToolbar";
+import GotoAnything from "./components/GotoAnything";
+import GotoSymbol from "./components/GotoSymbol";
+import FindInFiles from "./components/FindInFiles";
+import SettingsDialog from "./components/SettingsDialog";
+import CommandPalette from "./components/CommandPalette";
 import { isEnabled, SHORTCUTS } from "./lib/shortcuts";
 import { useEditorStore, useActiveTabMeta } from "./store/editor";
 import { isMarkdown, isJson } from "./lib/lang";
@@ -60,6 +55,7 @@ import {
 } from "./lib/fileio";
 import { loadPersisted, schedulePersist } from "./lib/persistence";
 import { useFileWatch } from "./lib/fileWatch";
+import { scheduleIdlePrefetch } from "./lib/idlePrefetch";
 import { Button } from "./components/ui/Button";
 
 type DragKind = "sidebar" | "preview" | null;
@@ -140,6 +136,12 @@ export default function App() {
         if (extra?.previewPct) setPreviewPct(extra.previewPct);
       })
       .finally(() => setHydrated(true));
+    // After the app shell has painted, idle-prefetch the heavy lazy chunks
+    // (Shiki engine, markdown-it, mermaid, katex, prettier, export). The
+    // first time the user does any of those operations, the JS is already
+    // parsed and warm — no chunk-load gap. Best-effort: failures are
+    // silently swallowed; the real call sites handle errors themselves.
+    scheduleIdlePrefetch();
   }, []);
 
   // Persist on any store change (debounced 500ms).
@@ -429,23 +431,17 @@ export default function App() {
           {!zenMode && <TabBar />}
           {/* Markdown toolbar is lifted out of the editor pane so it spans the
               full editor+preview row (still shown when preview is maximized). */}
-          {!isDiffTab && isMarkdown(filePath) && (
-            <Suspense fallback={null}>
-              <MarkdownToolbar />
-            </Suspense>
-          )}
+          {!isDiffTab && isMarkdown(filePath) && <MarkdownToolbar />}
           <div className="flex flex-1 min-h-0">
             {previewEnabled && previewMaximized ? (
               <div className="flex-1 min-w-0">
-                <Suspense fallback={null}>
-                  <Preview
-                    theme={theme}
-                    scrollLine={
-                      scrollSync?.from === "editor" ? scrollSync.line : undefined
-                    }
-                    onScroll={(line) => setScrollSync({ line, from: "preview" })}
-                  />
-                </Suspense>
+                <Preview
+                  theme={theme}
+                  scrollLine={
+                    scrollSync?.from === "editor" ? scrollSync.line : undefined
+                  }
+                  onScroll={(line) => setScrollSync({ line, from: "preview" })}
+                />
               </div>
             ) : (
               <>
@@ -453,51 +449,45 @@ export default function App() {
                   style={{ width: previewEnabled ? `${editorPct}%` : "100%" }}
                   className="min-w-0 flex-1 flex flex-col"
                 >
-                  {!isDiffTab && isJson(filePath) && (
-                    <Suspense fallback={null}>
-                      <JsonToolbar />
-                    </Suspense>
-                  )}
+                  {!isDiffTab && isJson(filePath) && <JsonToolbar />}
                   {activeMeta?.hasExternalChange && (
                     <ExternalChangeBanner tabId={activeMeta.id} />
                   )}
                   <div className="flex-1 min-h-0 flex">
-                    <Suspense fallback={<div style={{ flex: 1, background: "var(--bg)" }} />}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <EditorHost
-                          activeId={activeMeta?.id ?? null}
-                          theme={theme}
-                          fontSize={editorFontSize}
-                          initialCursor={initialPos?.cursor}
-                          initialScrollLine={initialPos?.scrollTopLine}
-                          externalScrollLine={
-                            scrollSync?.from === "preview" ? scrollSync.line : undefined
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <EditorHost
+                        activeId={activeMeta?.id ?? null}
+                        theme={theme}
+                        fontSize={editorFontSize}
+                        initialCursor={initialPos?.cursor}
+                        initialScrollLine={initialPos?.scrollTopLine}
+                        externalScrollLine={
+                          scrollSync?.from === "preview" ? scrollSync.line : undefined
+                        }
+                        onScroll={(line) => setScrollSync({ line, from: "editor" })}
+                        onPositionChange={(pos) => {
+                          if (activeMeta) {
+                            useEditorStore
+                              .getState()
+                              .setTabPosition(activeMeta.id, pos);
                           }
-                          onScroll={(line) => setScrollSync({ line, from: "editor" })}
-                          onPositionChange={(pos) => {
-                            if (activeMeta) {
-                              useEditorStore
-                                .getState()
-                                .setTabPosition(activeMeta.id, pos);
-                            }
-                          }}
-                        />
-                      </div>
-                      {splitEditor && !isDiffTab && activeMeta && (
-                        <>
-                          <div style={{ width: 1, background: "var(--border)", flexShrink: 0 }} />
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <EditorSlot
-                              key={activeMeta.id + "::split"}
-                              tabId={activeMeta.id}
-                              noStateCache
-                              theme={theme}
-                              fontSize={editorFontSize}
-                            />
-                          </div>
-                        </>
-                      )}
-                    </Suspense>
+                        }}
+                      />
+                    </div>
+                    {splitEditor && !isDiffTab && activeMeta && (
+                      <>
+                        <div style={{ width: 1, background: "var(--border)", flexShrink: 0 }} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <EditorSlot
+                            key={activeMeta.id + "::split"}
+                            tabId={activeMeta.id}
+                            noStateCache
+                            theme={theme}
+                            fontSize={editorFontSize}
+                          />
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
                 {previewEnabled && (
@@ -513,17 +503,15 @@ export default function App() {
                       style={{ width: `${previewPct}%` }}
                       className="min-w-0"
                     >
-                      <Suspense fallback={null}>
-                        <Preview
-                          theme={theme}
-                          scrollLine={
-                            scrollSync?.from === "editor" ? scrollSync.line : undefined
-                          }
-                          onScroll={(line) =>
-                            setScrollSync({ line, from: "preview" })
-                          }
-                        />
-                      </Suspense>
+                      <Preview
+                        theme={theme}
+                        scrollLine={
+                          scrollSync?.from === "editor" ? scrollSync.line : undefined
+                        }
+                        onScroll={(line) =>
+                          setScrollSync({ line, from: "preview" })
+                        }
+                      />
                     </div>
                   </>
                 )}
@@ -535,19 +523,17 @@ export default function App() {
       {!zenMode && <StatusBar />}
       <ConfirmDialog />
       <PromptDialog />
-      {/* Only mount the lazy chunks when their open flag flips — until then
-          we don't even fetch the JS. Suspense fallback is null because these
-          are overlays; an extra empty wrapper would have no visible impact
-          anyway. */}
-      <Suspense fallback={null}>
-        {gotoOpen && <GotoAnything open onClose={() => setGotoOpen(false)} />}
-        {commandPaletteOpen && (
-          <CommandPalette open onClose={() => setCommandPaletteOpen(false)} />
-        )}
-        {gotoSymbolOpen && <GotoSymbol open onClose={() => setGotoSymbolOpen(false)} />}
-        {findInFilesOpen && <FindInFiles open onClose={() => setFindInFilesOpen(false)} />}
-        {settingsOpen && <SettingsDialog open onClose={() => setSettingsOpen(false)} />}
-      </Suspense>
+      {/* Overlays are mounted at root and only render when their open flag
+          flips. Modules are now eager so opening Cmd+P / Cmd+Shift+P / etc.
+          shows the dialog on the same frame as the keystroke — no chunk
+          fetch lag. */}
+      {gotoOpen && <GotoAnything open onClose={() => setGotoOpen(false)} />}
+      {commandPaletteOpen && (
+        <CommandPalette open onClose={() => setCommandPaletteOpen(false)} />
+      )}
+      {gotoSymbolOpen && <GotoSymbol open onClose={() => setGotoSymbolOpen(false)} />}
+      {findInFilesOpen && <FindInFiles open onClose={() => setFindInFilesOpen(false)} />}
+      {settingsOpen && <SettingsDialog open onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }

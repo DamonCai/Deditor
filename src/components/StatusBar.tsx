@@ -1,23 +1,42 @@
+import { useMemo } from "react";
 import { useActiveTab, isTabDirty, useEditorStore } from "../store/editor";
 import { detectLang } from "../lib/lang";
 import { useT } from "../lib/i18n";
 import LangIcon from "./LangIcon";
 
-/** Convert a flat char offset into 1-based (line, column). Counts UTF-16
- *  code units, which is what CodeMirror's selection offsets use. Tab is
- *  treated as one column — Sublime / VSCode show actual column number, not
- *  visual column, by default, and matching that keeps the math cheap. */
-function offsetToLineCol(text: string, offset: number): { line: number; col: number } {
-  const safe = Math.max(0, Math.min(offset, text.length));
-  let line = 1;
-  let lastBreak = -1;
-  for (let i = 0; i < safe; i++) {
-    if (text.charCodeAt(i) === 10 /* \n */) {
-      line++;
-      lastBreak = i;
-    }
+/** Build a sorted array of `\n` offsets in `text`. With this, line/col
+ *  lookups become O(log lines) via binary search instead of O(offset)
+ *  linear scan — the difference matters on big files where arrow-key
+ *  cursor movement used to scan tens of KB of text per keystroke just to
+ *  redraw the status bar. */
+function buildNewlineOffsets(text: string): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < text.length; i++) {
+    if (text.charCodeAt(i) === 10 /* \n */) out.push(i);
   }
-  return { line, col: safe - lastBreak };
+  return out;
+}
+
+/** O(log lines) line/col from a precomputed newline offset array.
+ *  `breaks[i]` is the index of the i-th `\n`; line i+1 starts at breaks[i-1]+1. */
+function offsetToLineColCached(
+  breaks: number[],
+  textLength: number,
+  offset: number,
+): { line: number; col: number } {
+  const safe = Math.max(0, Math.min(offset, textLength));
+  // Find the largest i such that breaks[i] < safe — that's the index of the
+  // line break ending the previous line; line = i + 2, col = safe - breaks[i].
+  let lo = 0;
+  let hi = breaks.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (breaks[mid] < safe) lo = mid + 1;
+    else hi = mid;
+  }
+  // lo = number of `\n` before `safe`. Line number is lo + 1 (1-based).
+  const prevBreak = lo === 0 ? -1 : breaks[lo - 1];
+  return { line: lo + 1, col: safe - prevBreak };
 }
 
 /** Detect dominant line ending. Uses the first occurrence so a file freshly
@@ -39,11 +58,16 @@ export default function StatusBar() {
   const filePath = active?.filePath ?? null;
   const content = active?.content ?? "";
   const dirty = active ? isTabDirty(active) : false;
-  const lines = content.split("\n").length;
+  // Newline offsets are derived per content change ONLY. Cursor moves don't
+  // invalidate this cache, so arrow-key navigation in a big file no longer
+  // re-scans tens of KB just to recompute line/col for the status bar.
+  // EOL detection also keys off content only — same cache strategy.
+  const newlineOffsets = useMemo(() => buildNewlineOffsets(content), [content]);
+  const lines = newlineOffsets.length + 1;
   const chars = content.length;
   const lang = detectLang(filePath);
-  const { line, col } = offsetToLineCol(content, cursorOffset);
-  const eol = detectEol(content);
+  const { line, col } = offsetToLineColCached(newlineOffsets, content.length, cursorOffset);
+  const eol = useMemo(() => detectEol(content), [content]);
 
   return (
     <div

@@ -594,6 +594,25 @@ SetFile -a C "$DMG"                        # 标记 "Has Custom Icon"
 - **接受工具/框架的标准约定**（Tauri 用 src-tauri、Vite 配置在根、Cargo target 路径等）—— 改这些代价高、收益低
 - 加新功能不要顺手"清理"周边代码，按要求做完为止
 
+### 性能优化的报告格式
+
+任何性能相关改动后，**必须给出对比报告**，三段缺一不可：
+
+1. **测试前（BEFORE）** —— 具体数字，不是形容词
+   - bundle 维度：入口 chunk 大小（KB / MB）
+   - 时延维度：操作的实测毫秒数（用 `npm run perf:*` 套件、`cargo bench`、或贴入 DevTools 的 `DPerf.oneKey()`）
+   - render 维度：重渲次数（用 `perf:react` 的 Profiler 报告）
+
+2. **测试后（AFTER）** —— 同样的指标，同样的工具，同一台机器，**多跑几轮取稳定值**
+
+3. **提升量（DELTA）** —— 绝对值 + 百分比 + 一句"代价是什么"
+   - 例：`入口 chunk 310KB → 1.0MB（+700KB，+225%）。代价：冷启动多 ~80ms 解析；首次点击编辑器 / 首次 .md / 首次 Cmd+P 全瞬间`
+   - 例：`Cmd+Shift+F 5k 文件 107ms → 36ms（-71%，2.9x）。代价：无；rayon 已经在依赖中`
+
+跑回归测试：`npm run perf:all` —— 任何一项失败必须先解释清楚再继续。
+
+`scripts/perf-*` 系列脚本是这套对比的工具箱，新加优化请同时加 / 更新对应的测试用例，跑 `perf:all` 把它接入。
+
 ### 环境
 
 - macOS Darwin Apple Silicon (`aarch64`)

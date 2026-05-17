@@ -218,6 +218,12 @@ export default function Editor({
   const showMinimap = useEditorStore((s) => s.showMinimap);
   const autoCloseBrackets = useEditorStore((s) => s.autoCloseBrackets);
   const onChangeRef = useRef(onChange);
+  // Track the most recent text WE emitted via onChange. The `value` sync
+  // effect below compares against this ref so a keystroke (CodeMirror →
+  // onChange → setContent → store → re-render → new value prop) skips
+  // the O(N) doc.toString() + string-compare path. For a 100 KB markdown
+  // file that was ~200 KB of allocation per keystroke; now zero.
+  const lastEmittedRef = useRef<string | null>(null);
   const onScrollRef = useRef(onScroll);
   const onPositionChangeRef = useRef(onPositionChange);
   // Suppress outgoing scroll events for this many ms after a programmatic scroll,
@@ -332,7 +338,14 @@ export default function Editor({
         bookmarkExtension(),
         inspectionMarkers(),
         EditorView.updateListener.of((u) => {
-          if (u.docChanged) onChangeRef.current(u.state.doc.toString());
+          if (u.docChanged) {
+            const next = u.state.doc.toString();
+            // Stash before notifying upstream so the resulting React render
+            // (which arrives as the `value` prop on the next tick) recognizes
+            // its own echo and skips the sync effect's O(N) compare.
+            lastEmittedRef.current = next;
+            onChangeRef.current(next);
+          }
           if (u.selectionSet || u.docChanged) {
             positionRef.current.cursor = u.state.selection.main.head;
             schedulePositionFlush();
@@ -499,6 +512,13 @@ export default function Editor({
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
+    // Fast path: this `value` is our own echo (we just emitted it via the
+    // updateListener above). Skip the O(N) doc.toString() + string compare
+    // entirely — saves ~200 KB of allocation per keystroke on a 100 KB file.
+    if (lastEmittedRef.current === value) return;
+    // Slow path: external source updated `value` (persistence reload,
+    // external file watch, programmatic setContent). Diff doc against the
+    // new value, replace if different.
     if (view.state.doc.toString() === value) return;
     view.dispatch({
       changes: { from: 0, to: view.state.doc.length, insert: value },
