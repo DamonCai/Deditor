@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import Editor from "./components/Editor";
+import EditorHost from "./components/EditorHost";
+import EditorSlot from "./components/EditorSlot";
 import Preview from "./components/Preview";
 import TitleBar from "./components/TitleBar";
 import StatusBar from "./components/StatusBar";
@@ -18,7 +19,7 @@ import FindInFiles from "./components/FindInFiles";
 import SettingsDialog from "./components/SettingsDialog";
 import CommandPalette from "./components/CommandPalette";
 import { isEnabled, SHORTCUTS } from "./lib/shortcuts";
-import { useEditorStore, useActiveTab } from "./store/editor";
+import { useEditorStore, useActiveTabMeta } from "./store/editor";
 import { isMarkdown, isJson } from "./lib/lang";
 import { useT } from "./lib/i18n";
 import {
@@ -42,20 +43,27 @@ type DragKind = "sidebar" | "preview" | null;
 
 export default function App() {
   const t = useT();
-  const { theme, showPreview, previewMaximized, showSidebar, editorFontSize, setContent, language } =
-    useEditorStore();
-  const active = useActiveTab();
-  const filePath = active?.filePath ?? null;
-  const content = active?.content ?? "";
-  // Diff tabs disable the markdown preview pane and skip the markdown/json
-  // toolbars — there's nothing to preview when we're showing a comparison.
-  const isDiffTab = !!active?.diff;
+  // Per-field selectors only — destructuring the whole store re-renders App
+  // on every store change (every keystroke, every cursor move). Slicing per
+  // field keeps App quiet unless these specific values change.
+  const theme = useEditorStore((s) => s.theme);
+  const showPreview = useEditorStore((s) => s.showPreview);
+  const previewMaximized = useEditorStore((s) => s.previewMaximized);
+  const showSidebar = useEditorStore((s) => s.showSidebar);
+  const editorFontSize = useEditorStore((s) => s.editorFontSize);
+  const language = useEditorStore((s) => s.language);
+  // Only structural metadata at this level. Content lives in EditorHost /
+  // EditorSlot / Preview, which subscribe directly. App no longer re-renders
+  // on every keystroke.
+  const activeMeta = useActiveTabMeta();
+  const filePath = activeMeta?.filePath ?? null;
+  const isDiffTab = !!activeMeta?.isDiff;
   const previewEnabled = !isDiffTab && showPreview && isMarkdown(filePath);
   // Initial caret + scroll for the active tab. Read imperatively so subscribing
   // components don't re-render every cursor move; Editor only consumes these
   // on mount (a fresh instance is created via `key={tab.id}` per active tab).
-  const initialPos = active
-    ? useEditorStore.getState().tabPositions[active.id]
+  const initialPos = activeMeta
+    ? useEditorStore.getState().tabPositions[activeMeta.id]
     : undefined;
 
   const [sidebarPx, setSidebarPx] = useState(240);
@@ -401,8 +409,6 @@ export default function App() {
             {previewEnabled && previewMaximized ? (
               <div className="flex-1 min-w-0">
                 <Preview
-                  source={content}
-                  filePath={filePath}
                   theme={theme}
                   scrollLine={
                     scrollSync?.from === "editor" ? scrollSync.line : undefined
@@ -417,17 +423,13 @@ export default function App() {
                   className="min-w-0 flex-1 flex flex-col"
                 >
                   {!isDiffTab && isJson(filePath) && <JsonToolbar />}
-                  {active?.externalChange != null && (
-                    <ExternalChangeBanner tab={active} />
+                  {activeMeta?.hasExternalChange && (
+                    <ExternalChangeBanner tabId={activeMeta.id} />
                   )}
                   <div className="flex-1 min-h-0 flex">
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <Editor
-                        key={active?.id ?? "no-tab"}
-                        tabId={active?.id}
-                        value={content}
-                        filePath={filePath}
-                        diff={active?.diff}
+                      <EditorHost
+                        activeId={activeMeta?.id ?? null}
                         theme={theme}
                         fontSize={editorFontSize}
                         initialCursor={initialPos?.cursor}
@@ -435,28 +437,26 @@ export default function App() {
                         externalScrollLine={
                           scrollSync?.from === "preview" ? scrollSync.line : undefined
                         }
-                        onChange={setContent}
                         onScroll={(line) => setScrollSync({ line, from: "editor" })}
                         onPositionChange={(pos) => {
-                          if (active) {
-                            useEditorStore.getState().setTabPosition(active.id, pos);
+                          if (activeMeta) {
+                            useEditorStore
+                              .getState()
+                              .setTabPosition(activeMeta.id, pos);
                           }
                         }}
                       />
                     </div>
-                    {splitEditor && !isDiffTab && (
+                    {splitEditor && !isDiffTab && activeMeta && (
                       <>
                         <div style={{ width: 1, background: "var(--border)", flexShrink: 0 }} />
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <Editor
-                            key={(active?.id ?? "no-tab") + "::split"}
-                            tabId={active?.id}
+                          <EditorSlot
+                            key={activeMeta.id + "::split"}
+                            tabId={activeMeta.id}
                             noStateCache
-                            value={content}
-                            filePath={filePath}
                             theme={theme}
                             fontSize={editorFontSize}
-                            onChange={setContent}
                           />
                         </div>
                       </>
@@ -477,8 +477,6 @@ export default function App() {
                       className="min-w-0"
                     >
                       <Preview
-                        source={content}
-                        filePath={filePath}
                         theme={theme}
                         scrollLine={
                           scrollSync?.from === "editor" ? scrollSync.line : undefined
@@ -507,21 +505,22 @@ export default function App() {
   );
 }
 
-function ExternalChangeBanner({ tab }: { tab: { id: string; externalChange?: string } }) {
+function ExternalChangeBanner({ tabId }: { tabId: string }) {
   const t = useT();
   const reload = () => {
-    if (tab.externalChange == null) return;
+    const tab = useEditorStore.getState().tabs.find((x) => x.id === tabId);
+    if (!tab || tab.externalChange == null) return;
     const fresh = tab.externalChange;
     useEditorStore.setState({
       tabs: useEditorStore.getState().tabs.map((x) =>
-        x.id === tab.id ? { ...x, content: fresh, savedContent: fresh, externalChange: undefined } : x,
+        x.id === tabId ? { ...x, content: fresh, savedContent: fresh, externalChange: undefined } : x,
       ),
     });
   };
   const dismiss = () => {
     useEditorStore.setState({
       tabs: useEditorStore.getState().tabs.map((x) =>
-        x.id === tab.id ? { ...x, externalChange: undefined } : x,
+        x.id === tabId ? { ...x, externalChange: undefined } : x,
       ),
     });
   };

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
-import { useEditorStore } from "../store/editor";
+import { memo, useCallback, useEffect, useState } from "react";
+import { useShallow } from "zustand/shallow";
+import { useEditorStore, useActiveTabFilePath } from "../store/editor";
 import {
   createDir,
   createFile,
@@ -33,11 +34,14 @@ interface MenuState {
 
 export default function FileTree() {
   const t = useT();
-  const { workspaces, removeWorkspace, toggleSidebar } = useEditorStore();
-  const filePath = useEditorStore(
-    (s) => s.tabs.find((t) => t.id === s.activeId)?.filePath ?? null,
-  );
-  const compareMarkPath = useEditorStore((s) => s.compareMarkPath);
+  // Per-field selectors — destructuring the whole store re-renders FileTree
+  // (and all its nested rows) on every store change, including every keystroke.
+  // workspaces is shallow-compared so its array reference can change without
+  // waking FileTree when contents match.
+  const workspaces = useEditorStore(useShallow((s) => s.workspaces));
+  const removeWorkspace = useEditorStore((s) => s.removeWorkspace);
+  const toggleSidebar = useEditorStore((s) => s.toggleSidebar);
+  const filePath = useActiveTabFilePath();
   const setCompareMarkPath = useEditorStore((s) => s.setCompareMarkPath);
   const [pathInput, setPathInput] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -59,11 +63,75 @@ export default function FileTree() {
     }
   };
 
-  const openMenu = (e: React.MouseEvent, items: MenuItem[]) => {
+  const openMenu = useCallback((e: React.MouseEvent, items: MenuItem[]) => {
     e.preventDefault();
     e.stopPropagation();
     setMenu({ x: e.clientX, y: e.clientY, items });
-  };
+  }, []);
+
+  // Workspace / folder / file context-menu builders are useCallback'd so the
+  // identity stays stable across renders — React.memo'd row components below
+  // can short-circuit re-renders when the only thing that changed is some
+  // unrelated store field. Deps include the things the menu items close over.
+  const onWorkspaceContextMenu = useCallback(
+    (e: React.MouseEvent, w: string) =>
+      openMenu(e, [
+        { label: t("filetree.newFileInWs"), onClick: () => promptCreate("file", w) },
+        { label: t("filetree.newDirInWs"), onClick: () => promptCreate("dir", w) },
+        { divider: true },
+        { label: t("filetree.revealInFinder"), onClick: () => revealInFinder(w) },
+        { divider: true },
+        {
+          label: t("filetree.removeFromWs", { name: shortName(w) }),
+          onClick: () => removeWorkspace(w),
+        },
+      ]),
+    [t, openMenu, removeWorkspace],
+  );
+  const onFolderContextMenu = useCallback(
+    (e: React.MouseEvent, dir: string) =>
+      openMenu(e, [
+        { label: t("filetree.newFile"), onClick: () => promptCreate("file", dir) },
+        { label: t("filetree.newDir"), onClick: () => promptCreate("dir", dir) },
+        { divider: true },
+        { label: t("filetree.revealInFinder"), onClick: () => revealInFinder(dir) },
+        { divider: true },
+        { label: t("filetree.renameDir"), onClick: () => promptRename(dir, true) },
+        { label: t("filetree.deleteDir"), onClick: () => promptDelete(dir, true) },
+      ]),
+    [t, openMenu],
+  );
+  const onFileContextMenu = useCallback(
+    (e: React.MouseEvent, file: string) => {
+      // Read compareMarkPath imperatively so this handler doesn't need to
+      // re-create when the mark changes — the menu is built on demand.
+      const marked = useEditorStore.getState().compareMarkPath;
+      const items: MenuItem[] = [
+        { label: t("filetree.revealInFinder"), onClick: () => revealInFinder(file) },
+        { divider: true },
+      ];
+      if (marked && marked !== file) {
+        items.push({
+          label: t("filetree.compareWithSelected", {
+            name: marked.split(/[\\/]/).pop() ?? marked,
+          }),
+          onClick: () => void openCompare(marked, file),
+        });
+      }
+      items.push(
+        marked === file
+          ? { label: t("filetree.unmarkForCompare"), onClick: () => setCompareMarkPath(null) }
+          : { label: t("filetree.selectForCompare"), onClick: () => setCompareMarkPath(file) },
+      );
+      items.push(
+        { divider: true },
+        { label: t("filetree.renameFile"), onClick: () => promptRename(file, false) },
+        { label: t("filetree.deleteFile"), onClick: () => promptDelete(file, false) },
+      );
+      openMenu(e, items);
+    },
+    [t, openMenu, setCompareMarkPath],
+  );
 
   return (
     <div
@@ -135,95 +203,9 @@ export default function FileTree() {
               key={w}
               path={w}
               activePath={filePath}
-              onContextMenu={(e) =>
-                openMenu(e, [
-                  {
-                    label: t("filetree.newFileInWs"),
-                    onClick: () => promptCreate("file", w),
-                  },
-                  {
-                    label: t("filetree.newDirInWs"),
-                    onClick: () => promptCreate("dir", w),
-                  },
-                  { divider: true },
-                  {
-                    label: t("filetree.revealInFinder"),
-                    onClick: () => revealInFinder(w),
-                  },
-                  { divider: true },
-                  {
-                    label: t("filetree.removeFromWs", { name: shortName(w) }),
-                    onClick: () => removeWorkspace(w),
-                  },
-                ])
-              }
-              onFolderContextMenu={(e, dir) =>
-                openMenu(e, [
-                  {
-                    label: t("filetree.newFile"),
-                    onClick: () => promptCreate("file", dir),
-                  },
-                  {
-                    label: t("filetree.newDir"),
-                    onClick: () => promptCreate("dir", dir),
-                  },
-                  { divider: true },
-                  {
-                    label: t("filetree.revealInFinder"),
-                    onClick: () => revealInFinder(dir),
-                  },
-                  { divider: true },
-                  {
-                    label: t("filetree.renameDir"),
-                    onClick: () => promptRename(dir, true),
-                  },
-                  {
-                    label: t("filetree.deleteDir"),
-                    onClick: () => promptDelete(dir, true),
-                  },
-                ])
-              }
-              onFileContextMenu={(e, file) => {
-                const marked = compareMarkPath;
-                const items: MenuItem[] = [
-                  {
-                    label: t("filetree.revealInFinder"),
-                    onClick: () => revealInFinder(file),
-                  },
-                  { divider: true },
-                ];
-                if (marked && marked !== file) {
-                  items.push({
-                    label: t("filetree.compareWithSelected", {
-                      name: marked.split(/[\\/]/).pop() ?? marked,
-                    }),
-                    onClick: () => void openCompare(marked, file),
-                  });
-                }
-                items.push(
-                  marked === file
-                    ? {
-                        label: t("filetree.unmarkForCompare"),
-                        onClick: () => setCompareMarkPath(null),
-                      }
-                    : {
-                        label: t("filetree.selectForCompare"),
-                        onClick: () => setCompareMarkPath(file),
-                      },
-                );
-                items.push(
-                  { divider: true },
-                  {
-                    label: t("filetree.renameFile"),
-                    onClick: () => promptRename(file, false),
-                  },
-                  {
-                    label: t("filetree.deleteFile"),
-                    onClick: () => promptDelete(file, false),
-                  },
-                );
-                openMenu(e, items);
-              }}
+              onWorkspaceContextMenu={onWorkspaceContextMenu}
+              onFolderContextMenu={onFolderContextMenu}
+              onFileContextMenu={onFileContextMenu}
             />
           ))
         )}
@@ -314,16 +296,16 @@ function shortName(p: string): string {
   return p.split(/[\\/]/).filter(Boolean).pop() ?? p;
 }
 
-function WorkspaceSection({
+const WorkspaceSection = memo(function WorkspaceSection({
   path,
   activePath,
-  onContextMenu,
+  onWorkspaceContextMenu,
   onFolderContextMenu,
   onFileContextMenu,
 }: {
   path: string;
   activePath: string | null;
-  onContextMenu: (e: React.MouseEvent) => void;
+  onWorkspaceContextMenu: (e: React.MouseEvent, w: string) => void;
   onFolderContextMenu: (e: React.MouseEvent, dir: string) => void;
   onFileContextMenu: (e: React.MouseEvent, file: string) => void;
 }) {
@@ -336,7 +318,7 @@ function WorkspaceSection({
     <div style={{ marginBottom: 4 }}>
       <div
         onClick={() => setDirExpanded(path, !open)}
-        onContextMenu={onContextMenu}
+        onContextMenu={(e) => onWorkspaceContextMenu(e, path)}
         title={path}
         className="flex items-center gap-1 cursor-pointer"
         style={{
@@ -362,9 +344,9 @@ function WorkspaceSection({
       )}
     </div>
   );
-}
+});
 
-function Folder({
+const Folder = memo(function Folder({
   path,
   depth,
   activePath,
@@ -427,9 +409,9 @@ function Folder({
       )}
     </div>
   );
-}
+});
 
-function Entry({
+const Entry = memo(function Entry({
   entry,
   depth,
   activePath,
@@ -458,12 +440,12 @@ function Entry({
       entry={entry}
       depth={depth}
       activePath={activePath}
-      onContextMenu={(e) => onFileContextMenu(e, entry.path)}
+      onFileContextMenu={onFileContextMenu}
     />
   );
-}
+});
 
-function DirNode({
+const DirNode = memo(function DirNode({
   entry,
   depth,
   activePath,
@@ -550,18 +532,18 @@ function DirNode({
       )}
     </div>
   );
-}
+});
 
-function FileNode({
+const FileNode = memo(function FileNode({
   entry,
   depth,
   activePath,
-  onContextMenu,
+  onFileContextMenu,
 }: {
   entry: DirEntry;
   depth: number;
   activePath: string | null;
-  onContextMenu?: (e: React.MouseEvent) => void;
+  onFileContextMenu: (e: React.MouseEvent, file: string) => void;
 }) {
   const active = entry.path === activePath;
   const marked = useEditorStore((s) => s.compareMarkPath === entry.path);
@@ -571,7 +553,7 @@ function FileNode({
       active={active}
       marked={marked}
       onClick={() => void openFileByPath(entry.path)}
-      onContextMenu={onContextMenu}
+      onContextMenu={(e) => onFileContextMenu(e, entry.path)}
       title={marked ? `${entry.path}\n(selected for compare)` : entry.path}
     >
       <span style={{ width: 12, display: "inline-block", flexShrink: 0 }} />
@@ -579,7 +561,7 @@ function FileNode({
       <span className="truncate" style={{ minWidth: 0, flex: 1 }}>{entry.name}</span>
     </Row>
   );
-}
+});
 
 function Row({
   depth,

@@ -8,6 +8,10 @@ import { isMarkdown } from "../lib/lang";
 import { logError } from "../lib/logger";
 import { openFileByPath } from "../lib/fileio";
 import {
+  useActiveTabContent,
+  useActiveTabFilePath,
+} from "../store/editor";
+import {
   dirname,
   isExternalUrl,
   isLocalRef,
@@ -16,8 +20,6 @@ import {
 } from "../lib/pathUtil";
 
 interface Props {
-  source: string;
-  filePath: string | null;
   theme: "light" | "dark";
   /** Editor's current top line — preview will scroll to match. */
   scrollLine?: number;
@@ -25,7 +27,12 @@ interface Props {
   onScroll?: (line: number) => void;
 }
 
-export default function Preview({ source, filePath, theme, scrollLine, onScroll }: Props) {
+export default function Preview({ theme, scrollLine, onScroll }: Props) {
+  // Self-subscribed: Preview owns its content + filePath subscription so App
+  // doesn't have to pass them down (and therefore App doesn't re-render on
+  // every keystroke just to feed the preview).
+  const source = useActiveTabContent();
+  const filePath = useActiveTabFilePath();
   const [html, setHtml] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
   const isMd = isMarkdown(filePath);

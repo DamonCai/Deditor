@@ -1,4 +1,4 @@
-import { useActiveTab, isTabDirty } from "../store/editor";
+import { useActiveTabHeader } from "../store/editor";
 import { useEditorStore } from "../store/editor";
 import { useT } from "../lib/i18n";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -36,15 +36,15 @@ function onTitleBarMouseDown(e: React.MouseEvent<HTMLDivElement>) {
  *  so the toolbar stays narrow and uncluttered. */
 export default function TitleBar() {
   const t = useT();
-  const active = useActiveTab();
+  const header = useActiveTabHeader();
   const setSettingsOpen = useEditorStore((s) => s.setSettingsOpen);
   const setGotoAnythingOpen = useEditorStore((s) => s.setGotoAnythingOpen);
   const theme = useEditorStore((s) => s.theme);
   const setTheme = useEditorStore((s) => s.setTheme);
-  const name = active?.filePath
-    ? active.filePath.split(/[\\/]/).pop()
+  const name = header?.filePath
+    ? header.filePath.split(/[\\/]/).pop()
     : t("common.untitled");
-  const dirty = active ? isTabDirty(active) : false;
+  const dirty = header?.dirty ?? false;
 
   return (
     <div

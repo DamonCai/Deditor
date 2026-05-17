@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useShallow } from "zustand/shallow";
 import { FiChevronDown, FiPlus, FiX } from "react-icons/fi";
 import { LuGitCompare } from "react-icons/lu";
 import { useEditorStore, isTabDirty, type Tab } from "../store/editor";
@@ -25,7 +26,15 @@ function toEncodedPath(path: string): string {
 
 export default function TabBar() {
   const t = useT();
-  const { tabs, activeId, setActive, closeOthers, reorderTabs } = useEditorStore();
+  // Per-field selectors. tabs is shallow-compared so a keystroke (which mutates
+  // tabs[].content but keeps the same object identity for all other tabs)
+  // still re-renders TabBar (the active tab's reference changes), but each
+  // TabItem below is memoized so only the active one actually re-renders.
+  const tabs = useEditorStore(useShallow((s) => s.tabs));
+  const activeId = useEditorStore((s) => s.activeId);
+  const setActive = useEditorStore((s) => s.setActive);
+  const closeOthers = useEditorStore((s) => s.closeOthers);
+  const reorderTabs = useEditorStore((s) => s.reorderTabs);
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const stripRef = useRef<HTMLDivElement>(null);
@@ -113,45 +122,62 @@ export default function TabBar() {
     if (el) el.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [activeId]);
 
-  const onTabContextMenu = (e: React.MouseEvent, tab: Tab) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const items: MenuItem[] = [];
-    if (tab.filePath) {
-      const path = tab.filePath;
-      const name = basename(path);
+  // Stable callbacks so memo'd TabItem children don't all re-render when
+  // some unrelated tab field changes. They receive tab data via params
+  // rather than closure capture.
+  const handleTabClick = useCallback(
+    (tabId: string) => {
+      if (preventClick.current) { preventClick.current = false; return; }
+      setActive(tabId);
+    },
+    [setActive],
+  );
+  const handleTabClose = useCallback((tabId: string) => closeTabById(tabId), []);
+  const handleTabContextMenu = useCallback(
+    (e: React.MouseEvent, tab: Tab) => {
+      e.preventDefault();
+      e.stopPropagation();
+      // Read tabs length imperatively so the handler doesn't have to depend
+      // on tabs (which changes ref on every keystroke).
+      const tabsLen = useEditorStore.getState().tabs.length;
+      const items: MenuItem[] = [];
+      if (tab.filePath) {
+        const path = tab.filePath;
+        const name = basename(path);
+        items.push({
+          label: t("tabbar.copyPath"),
+          onClick: () => {
+            navigator.clipboard.writeText(path).catch(() => {});
+          },
+        });
+        items.push({
+          label: t("tabbar.copyEncodedPath"),
+          onClick: () => {
+            navigator.clipboard.writeText(toEncodedPath(path)).catch(() => {});
+          },
+        });
+        items.push({
+          label: t("tabbar.copyName"),
+          onClick: () => {
+            navigator.clipboard.writeText(name).catch(() => {});
+          },
+        });
+        items.push({
+          label: t("filetree.revealInFinder"),
+          onClick: () => revealInFinder(path),
+        });
+        items.push({ divider: true });
+      }
+      items.push({ label: t("tabbar.close"), onClick: () => closeTabById(tab.id) });
       items.push({
-        label: t("tabbar.copyPath"),
-        onClick: () => {
-          navigator.clipboard.writeText(path).catch(() => {});
-        },
+        label: t("tabbar.closeOthers"),
+        onClick: () => closeOthers(tab.id),
+        disabled: tabsLen <= 1,
       });
-      items.push({
-        label: t("tabbar.copyEncodedPath"),
-        onClick: () => {
-          navigator.clipboard.writeText(toEncodedPath(path)).catch(() => {});
-        },
-      });
-      items.push({
-        label: t("tabbar.copyName"),
-        onClick: () => {
-          navigator.clipboard.writeText(name).catch(() => {});
-        },
-      });
-      items.push({
-        label: t("filetree.revealInFinder"),
-        onClick: () => revealInFinder(path),
-      });
-      items.push({ divider: true });
-    }
-    items.push({ label: t("tabbar.close"), onClick: () => closeTabById(tab.id) });
-    items.push({
-      label: t("tabbar.closeOthers"),
-      onClick: () => closeOthers(tab.id),
-      disabled: tabs.length <= 1,
-    });
-    setMenu({ x: e.clientX, y: e.clientY, items });
-  };
+      setMenu({ x: e.clientX, y: e.clientY, items });
+    },
+    [t, closeOthers],
+  );
 
   return (
     <div
@@ -178,14 +204,12 @@ export default function TabBar() {
           <TabItem
             key={tab.id}
             tab={tab}
+            index={idx}
             active={tab.id === activeId}
-            onClick={() => {
-              if (preventClick.current) { preventClick.current = false; return; }
-              setActive(tab.id);
-            }}
-            onClose={() => closeTabById(tab.id)}
-            onContextMenu={(e) => onTabContextMenu(e, tab)}
-            onMouseDown={(e) => onMouseDownTab(e, idx)}
+            onTabClick={handleTabClick}
+            onTabClose={handleTabClose}
+            onTabContextMenu={handleTabContextMenu}
+            onTabMouseDown={onMouseDownTab}
           />
         ))}
       </div>
@@ -256,20 +280,22 @@ const iconBtnStyle: React.CSSProperties = {
   borderBottom: "none",
 };
 
-function TabItem({
+const TabItem = memo(function TabItem({
   tab,
+  index,
   active,
-  onClick,
-  onClose,
-  onContextMenu,
-  onMouseDown,
+  onTabClick,
+  onTabClose,
+  onTabContextMenu,
+  onTabMouseDown,
 }: {
   tab: Tab;
+  index: number;
   active: boolean;
-  onClick: () => void;
-  onClose: () => void;
-  onContextMenu?: (e: React.MouseEvent) => void;
-  onMouseDown: (e: React.MouseEvent) => void;
+  onTabClick: (tabId: string) => void;
+  onTabClose: (tabId: string) => void;
+  onTabContextMenu?: (e: React.MouseEvent, tab: Tab) => void;
+  onTabMouseDown: (e: React.MouseEvent, idx: number) => void;
 }) {
   const dirty = isTabDirty(tab);
   const untitled = tStatic("common.untitled");
@@ -284,15 +310,15 @@ function TabItem({
   return (
     <div
       data-tab-id={tab.id}
-      onClick={onClick}
-      onContextMenu={onContextMenu}
+      onClick={() => onTabClick(tab.id)}
+      onContextMenu={onTabContextMenu ? (e) => onTabContextMenu(e, tab) : undefined}
       onMouseDown={(e) => {
         if (e.button === 1) {
           e.preventDefault();
-          onClose();
+          onTabClose(tab.id);
           return;
         }
-        onMouseDown(e);
+        onTabMouseDown(e, index);
       }}
       title={tooltip}
       style={{
@@ -327,7 +353,7 @@ function TabItem({
       <span
         onClick={(e) => {
           e.stopPropagation();
-          onClose();
+          onTabClose(tab.id);
         }}
         title={tStatic("tabbar.closeShortcut")}
         style={{
@@ -354,7 +380,7 @@ function TabItem({
       </span>
     </div>
   );
-}
+});
 
 function OverflowDropdown({
   tabs,
