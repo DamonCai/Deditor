@@ -1213,3 +1213,161 @@ pub fn run() {
             }
         });
 }
+
+// ─── Benchmarks ──────────────────────────────────────────────────────────────
+// Run with:  cargo test --release --manifest-path src-tauri/Cargo.toml \
+//            ipc_bench -- --nocapture --test-threads=1
+//
+// These exercise the file-walking codepaths the FileTree and Cmd+P palette
+// hit when the user clicks around. We're not asserting wall-clock budgets
+// (machines differ), just printing real timings so we can spot regressions.
+#[cfg(test)]
+mod ipc_bench {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::Instant;
+
+    /// Per-test scratch dir under the OS tmp dir. Cleaned up at end of test.
+    struct Scratch(PathBuf);
+    impl Scratch {
+        fn new(label: &str) -> Self {
+            let mut p = std::env::temp_dir();
+            p.push(format!("deditor_bench_{}_{}", label, std::process::id()));
+            let _ = fs::remove_dir_all(&p);
+            fs::create_dir_all(&p).unwrap();
+            Self(p)
+        }
+    }
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// Build a flat directory with `n` files. Mirrors what the user sees when
+    /// they expand a folder with many files in it (the user's stated worry).
+    fn build_flat(dir: &PathBuf, n: usize) {
+        for i in 0..n {
+            fs::write(dir.join(format!("file_{:05}.md", i)), b"placeholder").unwrap();
+        }
+    }
+
+    /// Build a nested tree of `depth` levels with `fan` files per level.
+    /// Total files ≈ fan * depth.
+    fn build_nested(root: &PathBuf, depth: usize, fan: usize) -> usize {
+        let mut total = 0usize;
+        let mut cur = root.clone();
+        for d in 0..depth {
+            for i in 0..fan {
+                fs::write(cur.join(format!("f_{}_{}.txt", d, i)), b"x").unwrap();
+                total += 1;
+            }
+            cur = cur.join(format!("sub_{}", d));
+            fs::create_dir_all(&cur).unwrap();
+        }
+        total
+    }
+
+    #[test]
+    fn list_dir_5000_files() {
+        let s = Scratch::new("list_dir_5k");
+        build_flat(&s.0, 5000);
+        let path = s.0.to_string_lossy().to_string();
+        // Warm cache + measure 3 runs
+        let mut times = Vec::new();
+        for _ in 0..3 {
+            let t = Instant::now();
+            let v = list_dir(path.clone()).unwrap();
+            times.push(t.elapsed().as_secs_f64() * 1000.0);
+            assert_eq!(v.len(), 5000);
+        }
+        println!(
+            "[list_dir 5000 flat files]  runs={:?} ms  ← what the file tree pays when you expand a 5k-file folder",
+            times
+        );
+    }
+
+    #[test]
+    fn list_dir_500_files() {
+        // More realistic — a typical project folder
+        let s = Scratch::new("list_dir_500");
+        build_flat(&s.0, 500);
+        let path = s.0.to_string_lossy().to_string();
+        let mut times = Vec::new();
+        for _ in 0..5 {
+            let t = Instant::now();
+            list_dir(path.clone()).unwrap();
+            times.push(t.elapsed().as_secs_f64() * 1000.0);
+        }
+        println!(
+            "[list_dir 500 flat files]  runs={:?} ms  ← typical project folder click",
+            times
+        );
+    }
+
+    #[test]
+    fn list_workspace_files_synthetic_20k() {
+        let s = Scratch::new("list_ws_20k");
+        // 20 nested levels × 1000 files = 20k files
+        let total = build_nested(&s.0, 20, 1000);
+        let roots = vec![s.0.to_string_lossy().to_string()];
+        let mut times = Vec::new();
+        for _ in 0..3 {
+            let t = Instant::now();
+            let v = list_workspace_files(roots.clone()).unwrap();
+            times.push(t.elapsed().as_secs_f64() * 1000.0);
+            assert_eq!(v.len(), total);
+        }
+        println!(
+            "[list_workspace_files 20k files]  runs={:?} ms  ← Cmd+P indexing cost",
+            times
+        );
+    }
+
+    #[test]
+    fn list_workspace_files_hits_cap() {
+        // Verify the 50k cap actually engages (we don't want a runaway loop
+        // on a node_modules-shaped tree).
+        let s = Scratch::new("list_ws_cap");
+        // 60k files: 60 levels × 1000 files
+        let total = build_nested(&s.0, 60, 1000);
+        assert!(total > MAX_WORKSPACE_FILES);
+        let roots = vec![s.0.to_string_lossy().to_string()];
+        let t = Instant::now();
+        let v = list_workspace_files(roots).unwrap();
+        let dt = t.elapsed().as_secs_f64() * 1000.0;
+        // We expect EXACTLY the cap (allow tiny over since the cap check is
+        // per-loop-iteration, not per-file)
+        assert!(
+            v.len() <= MAX_WORKSPACE_FILES + 5,
+            "cap not enforced: got {}",
+            v.len()
+        );
+        println!(
+            "[list_workspace_files cap @ 50k]  count={} in {:.1} ms  ← stops at cap",
+            v.len(),
+            dt
+        );
+    }
+
+    #[test]
+    fn file_mtimes_1000() {
+        let s = Scratch::new("mtimes_1k");
+        build_flat(&s.0, 1000);
+        let paths: Vec<String> = (0..1000)
+            .map(|i| s.0.join(format!("file_{:05}.md", i)).to_string_lossy().to_string())
+            .collect();
+        let mut times = Vec::new();
+        for _ in 0..3 {
+            let t = Instant::now();
+            let v = file_mtimes(paths.clone());
+            times.push(t.elapsed().as_secs_f64() * 1000.0);
+            assert_eq!(v.len(), 1000);
+        }
+        println!(
+            "[file_mtimes 1000 paths]  runs={:?} ms  ← 3s-poll cost when 1000 tabs open",
+            times
+        );
+    }
+}

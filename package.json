@@ -16,7 +16,12 @@
     "clean": "bash scripts/clean.sh",
     "clean:all": "bash scripts/clean.sh --all",
     "clean:win": "powershell -ExecutionPolicy Bypass -File scripts/clean.ps1",
-    "clean:win:all": "powershell -ExecutionPolicy Bypass -File scripts/clean.ps1 -All"
+    "clean:win:all": "powershell -ExecutionPolicy Bypass -File scripts/clean.ps1 -All",
+    "perf:store": "npx tsx scripts/perf-test.ts",
+    "perf:react": "npx tsx scripts/perf-react.tsx",
+    "perf:soak": "npx tsx --expose-gc scripts/perf-soak.tsx",
+    "perf:rust": "cargo test --release --manifest-path src-tauri/Cargo.toml ipc_bench -- --nocapture --test-threads=1",
+    "perf:all": "npm run perf:store && npm run perf:react && npm run perf:soak && npm run perf:rust"
   },
   "dependencies": {
     "@codemirror/commands": "^6.7.1",
@@ -77,6 +82,7 @@
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
+    "jsdom": "^25.0.1",
     "postcss": "^8.5.0",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.2",
