@@ -437,11 +437,10 @@ fn list_dir(path: String) -> Result<Vec<DirEntry>, String> {
             is_dir,
         });
     }
-    out.sort_by(|a, b| match (a.is_dir, b.is_dir) {
-        (true, false) => std::cmp::Ordering::Less,
-        (false, true) => std::cmp::Ordering::Greater,
-        _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-    });
+    // sort_by_cached_key lowercases each name ONCE (not 2*N*log N times like
+    // sort_by would have done with two to_lowercase calls per compare).
+    // Dirs first, then files; both groups alphabetical, case-insensitive.
+    out.sort_by_cached_key(|e| (!e.is_dir, e.name.to_lowercase()));
     if truncated {
         log::warn!(
             "list_dir truncated: {} (>{} entries)",
@@ -493,28 +492,37 @@ fn find_in_files(
     query: String,
     case_sensitive: bool,
 ) -> Result<SearchResult, String> {
+    use rayon::prelude::*;
+
     if query.is_empty() {
         return Ok(SearchResult { hits: vec![], truncated: false, files_scanned: 0 });
     }
     let needle = if case_sensitive { query.clone() } else { query.to_lowercase() };
     let needle_bytes = needle.as_bytes();
-    let mut hits: Vec<SearchHit> = Vec::new();
-    let mut files_scanned = 0usize;
-    let mut truncated = false;
 
-    'outer: for root_str in &roots {
+    // PHASE 1: walk every workspace tree, collecting candidate file paths.
+    // This is fs metadata only — very cheap, kept single-threaded so we can
+    // honor the SEARCH_FILES_CAP early-out cleanly. (A parallel walk would
+    // race on the counter and produce non-deterministic truncation.)
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    let mut walk_truncated = false;
+    'walk: for root_str in &roots {
         let root = expand(root_str);
         let mut stack: Vec<PathBuf> = vec![root.clone()];
         while let Some(dir) = stack.pop() {
-            if hits.len() >= SEARCH_HITS_CAP || files_scanned >= SEARCH_FILES_CAP {
-                truncated = true;
-                break 'outer;
+            if candidates.len() >= SEARCH_FILES_CAP {
+                walk_truncated = true;
+                break 'walk;
             }
             let read = match fs::read_dir(&dir) {
                 Ok(r) => r,
                 Err(_) => continue,
             };
             for entry in read.flatten() {
+                if candidates.len() >= SEARCH_FILES_CAP {
+                    walk_truncated = true;
+                    break 'walk;
+                }
                 let name = entry.file_name().to_string_lossy().to_string();
                 let ft = match entry.file_type() {
                     Ok(t) => t,
@@ -533,56 +541,84 @@ fn find_in_files(
                 {
                     continue;
                 }
-                let path = entry.path();
-                let meta = match path.metadata() {
-                    Ok(m) => m,
-                    Err(_) => continue,
+                candidates.push(entry.path());
+            }
+        }
+    }
+
+    // PHASE 2: scan each candidate in parallel across rayon's thread pool.
+    // The per-file work (read + UTF-8 validate + per-line substring search)
+    // dominates the wall-clock; running it concurrently across N cores is
+    // a near-linear speedup until disk IO saturates. Each thread emits its
+    // own Vec<SearchHit>; we flatten + truncate at the end.
+    let files_scanned = std::sync::atomic::AtomicUsize::new(0);
+    let per_file_hits: Vec<Vec<SearchHit>> = candidates
+        .par_iter()
+        .map(|path| {
+            let meta = match path.metadata() {
+                Ok(m) => m,
+                Err(_) => return Vec::new(),
+            };
+            if meta.len() > SEARCH_FILE_BYTES_CAP { return Vec::new(); }
+            let bytes = match fs::read(path) {
+                Ok(b) => b,
+                Err(_) => return Vec::new(),
+            };
+            // Skip binary: any NUL in the first 8 KB.
+            let probe_end = bytes.len().min(8192);
+            if bytes[..probe_end].iter().any(|&b| b == 0) {
+                return Vec::new();
+            }
+            let text = match std::str::from_utf8(&bytes) {
+                Ok(s) => s,
+                Err(_) => return Vec::new(),
+            };
+            files_scanned.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let path_str = path.to_string_lossy().to_string();
+            // ASCII-only fast path: when the needle is pure ASCII we can do
+            // byte-level case-insensitive search without allocating a
+            // lowercased copy of each line. Most source-code searches stay
+            // here. We just have to verify the LINE is also ASCII for the
+            // fast path to be sound — for Unicode lines fall back to
+            // `to_lowercase` (which IS Unicode-correct for accented Latin
+            // / Greek / etc).
+            let needle_is_ascii = needle.is_ascii();
+            let mut local: Vec<SearchHit> = Vec::new();
+            for (lineno, line) in text.lines().enumerate() {
+                let found = if case_sensitive {
+                    find_subseq(line.as_bytes(), needle_bytes)
+                } else if needle_is_ascii && line.is_ascii() {
+                    // ASCII case-insensitive — no allocation.
+                    find_subseq_ascii_ci(line.as_bytes(), needle_bytes)
+                } else {
+                    let lower = line.to_lowercase();
+                    find_subseq(lower.as_bytes(), needle_bytes)
                 };
-                if meta.len() > SEARCH_FILE_BYTES_CAP { continue; }
-                let bytes = match fs::read(&path) {
-                    Ok(b) => b,
-                    Err(_) => continue,
-                };
-                // Skip binary: any NUL in the first 8 KB.
-                let probe_end = bytes.len().min(8192);
-                if bytes[..probe_end].iter().any(|&b| b == 0) {
-                    continue;
-                }
-                let text = match std::str::from_utf8(&bytes) {
-                    Ok(s) => s,
-                    Err(_) => continue,
-                };
-                files_scanned += 1;
-                let path_str = path.to_string_lossy().to_string();
-                for (lineno, line) in text.lines().enumerate() {
-                    if hits.len() >= SEARCH_HITS_CAP {
-                        truncated = true;
-                        break 'outer;
-                    }
-                    let hay = if case_sensitive { line.as_bytes() } else {
-                        // need to lowercase the line; allocate per match to avoid
-                        // mutating shared state. Most files have very few hits.
-                        let lower = line.to_lowercase();
-                        if let Some(col) = find_subseq(lower.as_bytes(), needle_bytes) {
-                            hits.push(SearchHit {
-                                path: path_str.clone(),
-                                line: (lineno + 1) as u32,
-                                col: (col + 1) as u32,
-                                text: line.to_string(),
-                            });
-                        }
-                        continue;
-                    };
-                    if let Some(col) = find_subseq(hay, needle_bytes) {
-                        hits.push(SearchHit {
-                            path: path_str.clone(),
-                            line: (lineno + 1) as u32,
-                            col: (col + 1) as u32,
-                            text: line.to_string(),
-                        });
-                    }
+                if let Some(col) = found {
+                    local.push(SearchHit {
+                        path: path_str.clone(),
+                        line: (lineno + 1) as u32,
+                        col: (col + 1) as u32,
+                        text: line.to_string(),
+                    });
                 }
             }
+            local
+        })
+        .collect();
+
+    // PHASE 3: flatten + truncate. Order is preserved (par_iter preserves
+    // input order in the collected result), so hits within a file stay
+    // grouped and files come back in walk order.
+    let mut hits: Vec<SearchHit> = Vec::new();
+    let mut truncated = walk_truncated;
+    'collect: for batch in per_file_hits {
+        for h in batch {
+            if hits.len() >= SEARCH_HITS_CAP {
+                truncated = true;
+                break 'collect;
+            }
+            hits.push(h);
         }
     }
 
@@ -590,10 +626,14 @@ fn find_in_files(
         "find_in_files: \"{}\" → {} hits in {} files{}",
         query,
         hits.len(),
-        files_scanned,
+        files_scanned.load(std::sync::atomic::Ordering::Relaxed),
         if truncated { " (truncated)" } else { "" }
     );
-    Ok(SearchResult { hits, truncated, files_scanned })
+    Ok(SearchResult {
+        hits,
+        truncated,
+        files_scanned: files_scanned.load(std::sync::atomic::Ordering::Relaxed),
+    })
 }
 
 fn find_subseq(hay: &[u8], needle: &[u8]) -> Option<usize> {
@@ -601,6 +641,20 @@ fn find_subseq(hay: &[u8], needle: &[u8]) -> Option<usize> {
     let last = hay.len() - needle.len();
     for i in 0..=last {
         if &hay[i..i + needle.len()] == needle {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// ASCII-only case-insensitive substring search. Caller guarantees both
+/// `hay` and `needle` are valid ASCII (no bytes > 127). Compares using
+/// `eq_ignore_ascii_case` on equal-length slices — zero allocation.
+fn find_subseq_ascii_ci(hay: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || needle.len() > hay.len() { return None; }
+    let last = hay.len() - needle.len();
+    for i in 0..=last {
+        if hay[i..i + needle.len()].eq_ignore_ascii_case(needle) {
             return Some(i);
         }
     }
@@ -627,32 +681,44 @@ fn replace_in_files(
     replacement: String,
     case_sensitive: bool,
 ) -> Result<ReplaceResult, String> {
+    use rayon::prelude::*;
     if query.is_empty() {
         return Ok(ReplaceResult { total: 0, files_changed: 0 });
     }
+    // Per-file work: read → match → write. Each file is independent (no
+    // shared mutable state), so we can fan out across rayon's thread pool.
+    // The previous sequential loop was the bottleneck on Replace All
+    // across a hundred-file match set (typical "rename a function across
+    // a workspace" flow).
+    let results: Vec<Result<(u32, bool), String>> = paths
+        .par_iter()
+        .map(|path_str| -> Result<(u32, bool), String> {
+            let path = expand(path_str);
+            let bytes = fs::read(&path)
+                .map_err(|e| format!("read {}: {}", path.display(), e))?;
+            let probe_end = bytes.len().min(8192);
+            if bytes[..probe_end].iter().any(|&b| b == 0) {
+                return Ok((0, false));
+            }
+            let text = match std::str::from_utf8(&bytes) {
+                Ok(s) => s,
+                Err(_) => return Ok((0, false)),
+            };
+            let (next, count) = substring_replace_all(text, &query, &replacement, case_sensitive);
+            if count == 0 {
+                return Ok((0, false));
+            }
+            fs::write(&path, &next)
+                .map_err(|e| format!("write {}: {}", path.display(), e))?;
+            Ok((count, true))
+        })
+        .collect();
     let mut total: u32 = 0;
     let mut files_changed: u32 = 0;
-    for path_str in &paths {
-        let path = expand(path_str);
-        let bytes = match fs::read(&path) {
-            Ok(b) => b,
-            Err(e) => return Err(format!("read {}: {}", path.display(), e)),
-        };
-        let probe_end = bytes.len().min(8192);
-        if bytes[..probe_end].iter().any(|&b| b == 0) {
-            continue;
-        }
-        let text = match std::str::from_utf8(&bytes) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-        let (next, count) = substring_replace_all(text, &query, &replacement, case_sensitive);
-        if count == 0 {
-            continue;
-        }
-        fs::write(&path, &next).map_err(|e| format!("write {}: {}", path.display(), e))?;
+    for r in results {
+        let (count, changed) = r?;
         total = total.saturating_add(count);
-        files_changed = files_changed.saturating_add(1);
+        if changed { files_changed = files_changed.saturating_add(1); }
     }
     log::info!(
         "replace_in_files: \"{}\" → \"{}\" — {} replacements across {} file(s)",
@@ -3618,4 +3684,235 @@ pub fn run() {
                 }
             }
         });
+}
+
+// ─── Benchmarks ──────────────────────────────────────────────────────────────
+// Run with:  cargo test --release --manifest-path src-tauri/Cargo.toml \
+//            ipc_bench -- --nocapture --test-threads=1
+//
+// These exercise the file-walking codepaths the FileTree and Cmd+P palette
+// hit when the user clicks around. We're not asserting wall-clock budgets
+// (machines differ), just printing real timings so we can spot regressions.
+#[cfg(test)]
+mod ipc_bench {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::Instant;
+
+    /// Per-test scratch dir under the OS tmp dir. Cleaned up at end of test.
+    struct Scratch(PathBuf);
+    impl Scratch {
+        fn new(label: &str) -> Self {
+            let mut p = std::env::temp_dir();
+            p.push(format!("deditor_bench_{}_{}", label, std::process::id()));
+            let _ = fs::remove_dir_all(&p);
+            fs::create_dir_all(&p).unwrap();
+            Self(p)
+        }
+    }
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// Build a flat directory with `n` files. Mirrors what the user sees when
+    /// they expand a folder with many files in it (the user's stated worry).
+    fn build_flat(dir: &PathBuf, n: usize) {
+        for i in 0..n {
+            fs::write(dir.join(format!("file_{:05}.md", i)), b"placeholder").unwrap();
+        }
+    }
+
+    /// Build a nested tree of `depth` levels with `fan` files per level.
+    /// Total files ≈ fan * depth.
+    fn build_nested(root: &PathBuf, depth: usize, fan: usize) -> usize {
+        let mut total = 0usize;
+        let mut cur = root.clone();
+        for d in 0..depth {
+            for i in 0..fan {
+                fs::write(cur.join(format!("f_{}_{}.txt", d, i)), b"x").unwrap();
+                total += 1;
+            }
+            cur = cur.join(format!("sub_{}", d));
+            fs::create_dir_all(&cur).unwrap();
+        }
+        total
+    }
+
+    #[test]
+    fn list_dir_5000_files() {
+        let s = Scratch::new("list_dir_5k");
+        build_flat(&s.0, 5000);
+        let path = s.0.to_string_lossy().to_string();
+        // Warm cache + measure 3 runs
+        let mut times = Vec::new();
+        for _ in 0..3 {
+            let t = Instant::now();
+            let v = list_dir(path.clone()).unwrap();
+            times.push(t.elapsed().as_secs_f64() * 1000.0);
+            assert_eq!(v.len(), 5000);
+        }
+        println!(
+            "[list_dir 5000 flat files]  runs={:?} ms  ← what the file tree pays when you expand a 5k-file folder",
+            times
+        );
+    }
+
+    #[test]
+    fn list_dir_500_files() {
+        // More realistic — a typical project folder
+        let s = Scratch::new("list_dir_500");
+        build_flat(&s.0, 500);
+        let path = s.0.to_string_lossy().to_string();
+        let mut times = Vec::new();
+        for _ in 0..5 {
+            let t = Instant::now();
+            list_dir(path.clone()).unwrap();
+            times.push(t.elapsed().as_secs_f64() * 1000.0);
+        }
+        println!(
+            "[list_dir 500 flat files]  runs={:?} ms  ← typical project folder click",
+            times
+        );
+    }
+
+    #[test]
+    fn list_workspace_files_synthetic_20k() {
+        let s = Scratch::new("list_ws_20k");
+        // 20 nested levels × 1000 files = 20k files
+        let total = build_nested(&s.0, 20, 1000);
+        let roots = vec![s.0.to_string_lossy().to_string()];
+        let mut times = Vec::new();
+        for _ in 0..3 {
+            let t = Instant::now();
+            let v = list_workspace_files(roots.clone()).unwrap();
+            times.push(t.elapsed().as_secs_f64() * 1000.0);
+            assert_eq!(v.len(), total);
+        }
+        println!(
+            "[list_workspace_files 20k files]  runs={:?} ms  ← Cmd+P indexing cost",
+            times
+        );
+    }
+
+    #[test]
+    fn list_workspace_files_hits_cap() {
+        // Verify the 50k cap actually engages (we don't want a runaway loop
+        // on a node_modules-shaped tree).
+        let s = Scratch::new("list_ws_cap");
+        // 60k files: 60 levels × 1000 files
+        let total = build_nested(&s.0, 60, 1000);
+        assert!(total > MAX_WORKSPACE_FILES);
+        let roots = vec![s.0.to_string_lossy().to_string()];
+        let t = Instant::now();
+        let v = list_workspace_files(roots).unwrap();
+        let dt = t.elapsed().as_secs_f64() * 1000.0;
+        // We expect EXACTLY the cap (allow tiny over since the cap check is
+        // per-loop-iteration, not per-file)
+        assert!(
+            v.len() <= MAX_WORKSPACE_FILES + 5,
+            "cap not enforced: got {}",
+            v.len()
+        );
+        println!(
+            "[list_workspace_files cap @ 50k]  count={} in {:.1} ms  ← stops at cap",
+            v.len(),
+            dt
+        );
+    }
+
+    #[test]
+    fn file_mtimes_1000() {
+        let s = Scratch::new("mtimes_1k");
+        build_flat(&s.0, 1000);
+        let paths: Vec<String> = (0..1000)
+            .map(|i| s.0.join(format!("file_{:05}.md", i)).to_string_lossy().to_string())
+            .collect();
+        let mut times = Vec::new();
+        for _ in 0..3 {
+            let t = Instant::now();
+            let v = file_mtimes(paths.clone());
+            times.push(t.elapsed().as_secs_f64() * 1000.0);
+            assert_eq!(v.len(), 1000);
+        }
+        println!(
+            "[file_mtimes 1000 paths]  runs={:?} ms  ← 3s-poll cost when 1000 tabs open",
+            times
+        );
+    }
+
+    #[test]
+    fn replace_in_files_500_files() {
+        // 500 files of ~5 KB each, all containing 3 occurrences of "needle".
+        let s = Scratch::new("replace_500");
+        let body = "padding\nthe needle is here\nmore padding\nneedle again\nfinal needle\n".repeat(40);
+        let mut paths = Vec::new();
+        for i in 0..500 {
+            let p = s.0.join(format!("r_{:04}.txt", i));
+            fs::write(&p, &body).unwrap();
+            paths.push(p.to_string_lossy().to_string());
+        }
+        let t = Instant::now();
+        let r = replace_in_files(paths, "needle".into(), "haystack".into(), true).unwrap();
+        let dt = t.elapsed().as_secs_f64() * 1000.0;
+        println!(
+            "[replace_in_files 500 files × ~5KB]  total={} changed={} in {:.1} ms  ← Find & Replace All",
+            r.total, r.files_changed, dt
+        );
+        assert!(r.files_changed > 0);
+    }
+
+    #[test]
+    fn find_in_files_5k_files() {
+        // Build 5000 files, ~1 KB each, with the query string in 5% of them.
+        let s = Scratch::new("find_5k");
+        for i in 0..5000 {
+            let body = if i % 20 == 0 {
+                format!("padding\nthe needle is here\nmore padding\n").repeat(20)
+            } else {
+                "padding line that does not match\n".repeat(20)
+            };
+            fs::write(s.0.join(format!("f_{:05}.txt", i)), body).unwrap();
+        }
+        let roots = vec![s.0.to_string_lossy().to_string()];
+        let t = Instant::now();
+        let r = find_in_files(roots, "needle".into(), true).unwrap();
+        let dt = t.elapsed().as_secs_f64() * 1000.0;
+        println!(
+            "[find_in_files 5k files, 5% match]  hits={} truncated={} in {:.1} ms  ← Cmd+Shift+F",
+            r.hits.len(),
+            r.truncated,
+            dt
+        );
+        // Confirm we got hits (~250 files × ~20 lines each = 5000-ish but capped at 5k)
+        assert!(r.hits.len() > 0);
+    }
+
+    #[test]
+    fn find_in_files_5k_files_case_insensitive() {
+        // Same data, mixed casing in the source so the case-insensitive path
+        // actually has to fold. The ASCII fast path should still find them
+        // without per-line String allocations.
+        let s = Scratch::new("find_5k_ci");
+        for i in 0..5000 {
+            let body = if i % 20 == 0 {
+                "padding\nthe NeEdLe is here\nmore padding\n".repeat(20)
+            } else {
+                "padding line that does not match\n".repeat(20)
+            };
+            fs::write(s.0.join(format!("f_{:05}.txt", i)), body).unwrap();
+        }
+        let roots = vec![s.0.to_string_lossy().to_string()];
+        let t = Instant::now();
+        let r = find_in_files(roots, "NEEDLE".into(), false).unwrap();
+        let dt = t.elapsed().as_secs_f64() * 1000.0;
+        println!(
+            "[find_in_files 5k files, case-insensitive ASCII fast path]  hits={} in {:.1} ms",
+            r.hits.len(),
+            dt
+        );
+        assert!(r.hits.len() > 0);
+    }
 }

@@ -35,6 +35,14 @@ Cargo.lock.bak
 src-tauri/gen/schemas/
 
 # -- Distribution bundles (do NOT commit binaries) ----------------------------
+# Catch them anywhere in the tree — `git add -A` after a build accidentally
+# committed an 11 MB DMG to a merge commit once; the broader glob keeps
+# that from happening regardless of where the bundle gets dropped.
+*.dmg
+*.app
+*.msi
+*.exe
+*.pkg
 scripts/*.dmg
 scripts/*.app
 scripts/*.msi

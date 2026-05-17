@@ -1,8 +1,16 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { emitScroll, useExternalScrollLine } from "./lib/scrollSync";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
+
+// Payload shape for the raw Tauri drag-drop event. Subscribing to the event
+// name directly (instead of via @tauri-apps/api/webview's onDragDropEvent
+// helper) keeps the ~62 KB window/webview barrel out of the cold-start
+// bundle — we only care about the `drop` event, not enter/over/leave.
+interface TauriDragDropPayload {
+  paths: string[];
+  position: { x: number; y: number };
+}
 import Editor from "./components/Editor";
 import EditorHost from "./components/EditorHost";
 // Lazy: Preview pulls markdown-it + Shiki engine + the heavy hydrators
@@ -419,26 +427,28 @@ export default function App() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
-    getCurrentWebview()
-      .onDragDropEvent(async (event) => {
-        if (event.payload.type !== "drop") return;
-        const filePaths: string[] = [];
-        for (const p of event.payload.paths) {
-          let kind = "file";
-          try {
-            kind = await invoke<string>("path_kind", { path: p });
-          } catch {
-            // Treat probe failures as "file" so the existing openMany path
-            // can surface a more useful error.
-          }
-          if (kind === "dir") {
-            await setWorkspaceByPath(p).catch(() => {});
-          } else {
-            filePaths.push(p);
-          }
+    // The full onDragDropEvent helper from @tauri-apps/api/webview also
+    // subscribes to DRAG_ENTER / DRAG_OVER / DRAG_LEAVE (we ignore all of
+    // those); listening directly to just DRAG_DROP is one event subscription
+    // instead of four AND drops the webview barrel from the bundle.
+    listen<TauriDragDropPayload>("tauri://drag-drop", async (event) => {
+      const filePaths: string[] = [];
+      for (const p of event.payload.paths) {
+        let kind = "file";
+        try {
+          kind = await invoke<string>("path_kind", { path: p });
+        } catch {
+          // Treat probe failures as "file" so the existing openMany path
+          // can surface a more useful error.
         }
-        if (filePaths.length > 0) await openMany(filePaths);
-      })
+        if (kind === "dir") {
+          await setWorkspaceByPath(p).catch(() => {});
+        } else {
+          filePaths.push(p);
+        }
+      }
+      if (filePaths.length > 0) await openMany(filePaths);
+    })
       .then((fn) => {
         if (cancelled) fn();
         else unlisten = fn;
@@ -572,7 +582,11 @@ export default function App() {
           {!zenMode && <TabBar />}
           {/* Markdown toolbar is lifted out of the editor pane so it spans the
               full editor+preview row (still shown when preview is maximized). */}
-          {!isDiffTab && isMarkdown(filePath) && <MarkdownToolbar />}
+          {!isDiffTab && isMarkdown(filePath) && (
+            <Suspense fallback={null}>
+              <MarkdownToolbar />
+            </Suspense>
+          )}
           <div className="flex flex-1 min-h-0">
             {previewEnabled && previewMaximized ? (
               <div className="flex-1 min-w-0">

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { useShallow } from "zustand/shallow";
 import { DEFAULT_SHORTCUTS, type ShortcutId } from "../lib/shortcuts";
 import { isBinaryRenderable } from "../lib/lang";
 
@@ -1063,6 +1064,80 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 export function useActiveTab(): Tab | null {
   return useEditorStore(
     (s) => s.tabs.find((t) => t.id === s.activeId) ?? null,
+  );
+}
+
+/** Subscribe to only the active tab's id. Primitive, never changes on keystroke —
+ *  consumers (StatusBar, scroll handlers) won't re-render when the user types. */
+export function useActiveTabId(): string | null {
+  return useEditorStore((s) => s.activeId);
+}
+
+/** Structural metadata for the active tab — id / filePath / kind flags.
+ *  Returned shape is shallow-compared so typing into the editor (which only
+ *  changes `content`) does not re-trigger consumers of this hook. */
+export interface ActiveTabMeta {
+  id: string;
+  filePath: string | null;
+  isDiff: boolean;
+  hasExternalChange: boolean;
+}
+export function useActiveTabMeta(): ActiveTabMeta | null {
+  return useEditorStore(
+    useShallow((s) => {
+      const t = s.tabs.find((x) => x.id === s.activeId);
+      if (!t) return null;
+      return {
+        id: t.id,
+        filePath: t.filePath,
+        isDiff: !!t.diff,
+        hasExternalChange: t.externalChange != null,
+      };
+    }),
+  );
+}
+
+/** Just the active tab's filePath. For TitleBar and other consumers that only
+ *  display the file name. */
+export function useActiveTabFilePath(): string | null {
+  return useEditorStore(
+    (s) => s.tabs.find((x) => x.id === s.activeId)?.filePath ?? null,
+  );
+}
+
+/** filePath + dirty boolean, shallow-compared. TitleBar consumes this — keystrokes
+ *  only wake TitleBar when the dirty boolean actually flips, not every keystroke. */
+export function useActiveTabHeader(): { filePath: string | null; dirty: boolean } | null {
+  return useEditorStore(
+    useShallow((s) => {
+      const t = s.tabs.find((x) => x.id === s.activeId);
+      if (!t) return null;
+      return { filePath: t.filePath, dirty: t.content !== t.savedContent };
+    }),
+  );
+}
+
+/** The active tab's current text content. This DOES change on every keystroke —
+ *  reserve for consumers that genuinely need the live text (Editor host,
+ *  Preview, exports). Other components should prefer useActiveTabMeta. */
+export function useActiveTabContent(): string {
+  return useEditorStore(
+    (s) => s.tabs.find((x) => x.id === s.activeId)?.content ?? "",
+  );
+}
+
+/** Active tab's diff spec (for diff tabs only). Stable when not a diff tab. */
+export function useActiveTabDiff(): DiffSpec | null {
+  return useEditorStore(
+    (s) => s.tabs.find((x) => x.id === s.activeId)?.diff ?? null,
+  );
+}
+
+/** Active tab's externalChange snapshot, or null. Stable while no external
+ *  edit is detected. */
+export function useActiveTabExternalChange(): string | null {
+  return useEditorStore(
+    (s) => s.tabs.find((x) => x.id === s.activeId)?.externalChange ?? null,
   );
 }
 

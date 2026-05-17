@@ -198,7 +198,24 @@ export async function loadPersisted(): Promise<UiExtras | null> {
     }
   };
 
-  for (const t of data.tabs) {
+  // PARALLEL REHYDRATION:
+  // The original code awaited each read_text_file / readAsDataUrl one at a
+  // time. With 30 persisted tabs at ~3 ms per IPC that's a ~100 ms blocking
+  // wall on every cold start. The reads are independent — kick them all off
+  // at once, then build the restored array in original order from the
+  // resolved values. Untitled tabs (no IPC) stay synchronous.
+  const reads = data.tabs.map((t): Promise<string | null> | string | null => {
+    if (!t.filePath) return null;            // untitled — no disk read
+    if (isBinaryRenderable(t.filePath)) {
+      return readAsDataUrl(t.filePath).catch(() => null);
+    }
+    return invoke<string>("read_text_file", { path: t.filePath }).catch(() => null);
+  });
+  const settled = await Promise.all(reads);
+
+  for (let i = 0; i < data.tabs.length; i++) {
+    const t = data.tabs[i];
+    const disk = settled[i];
     if (!t.filePath) {
       // Untitled tab: just restore its content as-is.
       const id = newId();
@@ -211,33 +228,20 @@ export async function loadPersisted(): Promise<UiExtras | null> {
       stashPos(id, t);
       continue;
     }
-    // Binary-rendered files (image / pdf / audio / video) live as data: URLs.
-    // We never persist that base64 to localStorage (would blow the quota), so
-    // we always reload from disk here. If the file is gone, drop the tab.
     if (isBinaryRenderable(t.filePath)) {
-      let dataUrl: string | null = null;
-      try {
-        dataUrl = await readAsDataUrl(t.filePath);
-      } catch {
-        dataUrl = null;
-      }
-      if (dataUrl == null) continue;
+      // Binary-rendered files (image / pdf / audio / video). If the file is
+      // gone, drop the tab.
+      if (disk == null) continue;
       const id = newId();
       restored.push({
         id,
         filePath: t.filePath,
-        content: dataUrl,
-        savedContent: dataUrl,
+        content: disk,
+        savedContent: disk,
       });
       continue;
     }
-    // Named tab: try to read current disk contents.
-    let disk: string | null = null;
-    try {
-      disk = await invoke<string>("read_text_file", { path: t.filePath });
-    } catch {
-      disk = null;
-    }
+    // Named text tab.
     if (disk == null) {
       // File is gone. If user had unsaved edits, demote to untitled to
       // preserve them; otherwise drop the tab.
@@ -503,12 +507,20 @@ function doSave(extras: UiExtras): void {
   for (const t of persistableTabs) {
     liveIds.add(t.id);
     const pos = s.tabPositions[t.id];
-    // Binary tabs hold a base64 data URL — easily multi-MB. Persist filePath
-    // only and rehydrate from disk on next launch; keeps state.json small
-    // and skips serializing data we'll re-read anyway.
+    // Skip content for three cases:
+    //   1. Binary tabs — base64 data URL, easily multi-MB. Rehydrated from
+    //      disk on next launch.
+    //   2. Clean named tabs — content matches what's on disk already; we
+    //      always re-read from disk on load (see loadPersisted's named-tab
+    //      branch). Without this, 50 open files × 100 KB serializes ~5 MB
+    //      every 500 ms after any UI tweak. Cuts state.json down to KBs.
+    //   3. Dirty named tabs OR untitled tabs: KEEP content so unsaved edits
+    //      survive a relaunch.
     const binary = isBinaryRenderable(t.filePath);
-    const content = binary ? "" : t.content;
-    const savedContent = binary ? "" : t.savedContent;
+    const dirty = t.content !== t.savedContent;
+    const skipContent = binary || (t.filePath != null && !dirty);
+    const content = skipContent ? "" : t.content;
+    const savedContent = skipContent ? "" : t.savedContent;
     const cursor = pos?.cursor;
     const scrollTopLine = pos?.scrollTopLine;
     const cached = tabJsonCache.get(t.id);

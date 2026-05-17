@@ -1,20 +1,21 @@
-import { LanguageSupport, StreamLanguage } from "@codemirror/language";
-import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import { languages as codeLangs } from "@codemirror/language-data";
-import { tags as t } from "@lezer/highlight";
+// CodeMirror's language framework (`LanguageSupport`, `StreamLanguage`) and
+// the @lezer/highlight tags are imported LAZILY — inside the async `cm()`
+// thunks below — because `lang.ts` is reached eagerly from `fileio.ts` /
+// `App.tsx` for `detectLang`, `isMarkdown`, `isImageFile` etc. Static imports
+// here would drag @codemirror/language (~90 KB) + @codemirror/state (~140 KB)
+// + @codemirror/view (~450 KB) + @lezer/* into the main bundle for every
+// user. CM is only needed when an Editor actually mounts, which is the lazy
+// EditorHost / EditorSlot chunk. Use `LanguageSupport` only via lazy import.
+import type { LanguageSupport as LanguageSupportT } from "@codemirror/language";
 import type { Tag } from "@lezer/highlight";
 import { LuFileText, LuFileImage, LuFileAudio, LuFileVideo, LuFileCog, LuDatabase, LuType, LuNetwork } from "react-icons/lu";
 import { FaRegFilePdf, FaRegFileWord, FaRegFileExcel, FaRegFilePowerpoint, FaRegFileArchive } from "react-icons/fa";
-// Static imports of legacy stream-mode parsers so Vite bundles them.
-// (Dynamic template-literal imports with @vite-ignore would fail in the browser
-//  because bare specifiers can't be resolved at runtime.)
-import { shell } from "@codemirror/legacy-modes/mode/shell";
-import { toml } from "@codemirror/legacy-modes/mode/toml";
-import { ruby } from "@codemirror/legacy-modes/mode/ruby";
-import { swift } from "@codemirror/legacy-modes/mode/swift";
-import { lua } from "@codemirror/legacy-modes/mode/lua";
-import { dockerFile } from "@codemirror/legacy-modes/mode/dockerfile";
-import { powerShell } from "@codemirror/legacy-modes/mode/powershell";
+// @codemirror/legacy-modes is a ~150 KB combined chunk; we used to static-
+// import 7 modes (shell/toml/ruby/swift/lua/dockerfile/powershell) which
+// dragged the whole thing into main. Vite *does* handle bare-specifier
+// dynamic imports — its module-path resolution rewrites them at build time
+// — so per-file `await import("@codemirror/legacy-modes/mode/X")` ships as
+// its own lazy chunk and only loads when the corresponding file type opens.
 import type { IconType } from "react-icons";
 import {
   SiPython,
@@ -57,67 +58,105 @@ export interface LangIcon {
 export interface LangDef {
   label: string;
   shiki: string;
-  cm: () => Promise<LanguageSupport>;
+  cm: () => Promise<LanguageSupportT>;
   icon: LangIcon;
+}
+
+// Cache the @codemirror/language module's exports so each cm() thunk only
+// pays one import per session. Combined with the per-stream-mode imports,
+// the entire CodeMirror framework stays in Editor's lazy chunk.
+let cmLanguageModulePromise: Promise<typeof import("@codemirror/language")> | null = null;
+function loadCmLanguage() {
+  if (!cmLanguageModulePromise) cmLanguageModulePromise = import("@codemirror/language");
+  return cmLanguageModulePromise;
+}
+// Same for @lezer/highlight tags — only needed for the stream-mode token
+// table, which is itself only reachable through a cm() thunk.
+let lezerHighlightPromise: Promise<typeof import("@lezer/highlight")> | null = null;
+function loadLezerHighlight() {
+  if (!lezerHighlightPromise) lezerHighlightPromise = import("@lezer/highlight");
+  return lezerHighlightPromise;
 }
 
 const lazyJS = (jsx?: boolean, ts?: boolean) => async () =>
   (await import("@codemirror/lang-javascript")).javascript({ jsx, typescript: ts });
 
-type Stream = Parameters<typeof StreamLanguage.define>[0];
+// Build the CM5 → Lezer-highlight tag map. Lives behind the lazy
+// @lezer/highlight import so neither this nor `wrapStream` are reachable
+// without going through a cm() thunk.
+async function buildStreamTokenTable(): Promise<Record<string, Tag>> {
+  const { tags: t } = await loadLezerHighlight();
+  return {
+    keyword: t.keyword,
+    atom: t.atom,
+    number: t.number,
+    string: t.string,
+    string2: t.special(t.string),
+    comment: t.comment,
+    meta: t.meta,
+    operator: t.operator,
+    punctuation: t.punctuation,
+    bracket: t.bracket,
+    tag: t.tagName,
+    attribute: t.attributeName,
+    property: t.propertyName,
+    type: t.typeName,
+    variable: t.variableName,
+    variable2: t.special(t.variableName),
+    variable3: t.local(t.variableName),
+    def: t.definition(t.variableName),
+    builtin: t.standard(t.variableName),
+    qualifier: t.modifier,
+    error: t.invalid,
+    link: t.link,
+    emphasis: t.emphasis,
+    strong: t.strong,
+    heading: t.heading,
+    hr: t.contentSeparator,
+    quote: t.quote,
+  };
+}
 
-// Map CM5-era token names (used by @codemirror/legacy-modes) onto Lezer highlight
-// tags so defaultHighlightStyle actually paints them. Without this, modes like
-// shell / powershell emit tokens like "builtin"/"def"/"variable"/"punctuation"
-// that fall through uncolored.
-const STREAM_TOKEN_TABLE: Record<string, Tag> = {
-  keyword: t.keyword,
-  atom: t.atom,
-  number: t.number,
-  string: t.string,
-  string2: t.special(t.string),
-  comment: t.comment,
-  meta: t.meta,
-  operator: t.operator,
-  punctuation: t.punctuation,
-  bracket: t.bracket,
-  tag: t.tagName,
-  attribute: t.attributeName,
-  property: t.propertyName,
-  type: t.typeName,
-  variable: t.variableName,
-  variable2: t.special(t.variableName),
-  variable3: t.local(t.variableName),
-  def: t.definition(t.variableName),
-  builtin: t.standard(t.variableName),
-  qualifier: t.modifier,
-  error: t.invalid,
-  link: t.link,
-  emphasis: t.emphasis,
-  strong: t.strong,
-  heading: t.heading,
-  hr: t.contentSeparator,
-  quote: t.quote,
-};
+// Cache for the token table so all stream-mode thunks share one resolution.
+let streamTokenTablePromise: Promise<Record<string, Tag>> | null = null;
+function loadStreamTokenTable() {
+  if (!streamTokenTablePromise) streamTokenTablePromise = buildStreamTokenTable();
+  return streamTokenTablePromise;
+}
 
-const fromStream = (mode: Stream) => async () =>
-  new LanguageSupport(
-    StreamLanguage.define({
-      ...mode,
-      tokenTable: { ...STREAM_TOKEN_TABLE, ...((mode as { tokenTable?: Record<string, Tag> }).tokenTable ?? {}) },
-    }),
+// Build a LanguageSupport from a legacy stream-mode export. Imports of
+// @codemirror/language + @lezer/highlight happen lazily inside.
+async function wrapStream(mode: unknown): Promise<LanguageSupportT> {
+  const [{ LanguageSupport, StreamLanguage }, tokenTable] = await Promise.all([
+    loadCmLanguage(),
+    loadStreamTokenTable(),
+  ]);
+  // `mode` here is the legacy stream-mode object; safe to spread.
+  const m = mode as Record<string, unknown>;
+  const modeTokens = (m.tokenTable as Record<string, Tag> | undefined) ?? {};
+  return new LanguageSupport(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    StreamLanguage.define({ ...(m as any), tokenTable: { ...tokenTable, ...modeTokens } }),
   );
+}
 
-const cmShell = fromStream(shell);
-const cmToml = fromStream(toml);
-const cmRuby = fromStream(ruby);
-const cmSwift = fromStream(swift);
-const cmLua = fromStream(lua);
-const cmDocker = fromStream(dockerFile);
-const cmPowerShell = fromStream(powerShell);
+const cmShell = () => import("@codemirror/legacy-modes/mode/shell").then((m) => wrapStream(m.shell));
+const cmToml = () => import("@codemirror/legacy-modes/mode/toml").then((m) => wrapStream(m.toml));
+const cmRuby = () => import("@codemirror/legacy-modes/mode/ruby").then((m) => wrapStream(m.ruby));
+const cmSwift = () => import("@codemirror/legacy-modes/mode/swift").then((m) => wrapStream(m.swift));
+const cmLua = () => import("@codemirror/legacy-modes/mode/lua").then((m) => wrapStream(m.lua));
+const cmDocker = () => import("@codemirror/legacy-modes/mode/dockerfile").then((m) => wrapStream(m.dockerFile));
+const cmPowerShell = () => import("@codemirror/legacy-modes/mode/powershell").then((m) => wrapStream(m.powerShell));
 
-const cmMarkdown = async () =>
-  markdown({ base: markdownLanguage, codeLanguages: codeLangs });
+// @codemirror/lang-markdown drags @lezer/markdown (~85 KB) + @lezer/common.
+// Lazy-import on demand so the cold bundle doesn't include it.
+const cmMarkdown = async () => {
+  const [{ markdown, markdownLanguage }, { languages: codeLangs }] = await Promise.all([
+    import("@codemirror/lang-markdown"),
+    import("@codemirror/language-data"),
+  ]);
+  return markdown({ base: markdownLanguage, codeLanguages: codeLangs });
+};
 
 const I = (short: string, color: string, Logo?: IconType): LangIcon => ({ short, color, Logo });
 

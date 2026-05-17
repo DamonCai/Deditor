@@ -1,15 +1,51 @@
 import MarkdownIt from "markdown-it";
 import anchor from "markdown-it-anchor";
 import taskLists from "markdown-it-task-lists";
-import katex from "@vscode/markdown-it-katex";
-import "katex/dist/katex.min.css";
-import plantumlEncoder from "plantuml-encoder";
 import { ensureLanguage, getHighlighter } from "./highlight";
 import { detectLang } from "./lang";
 import { tStatic } from "./i18n";
 
 const PLANTUML_LANGS = new Set(["plantuml", "puml", "uml"]);
 const MERMAID_LANGS = new Set(["mermaid"]);
+
+// Lazy loaders for the two heavy plugins:
+//   - katex (~628 KB minified) — only docs with `$...$` need this
+//   - plantuml-encoder (~250 KB minified) — only docs with ```plantuml``` need it
+// Eager-importing both at module load adds ~880 KB to the cold-start bundle
+// for every user, including those who never write math or UML.
+// Cache: once loaded, the promise is reused (returns instantly).
+let katexLoaded = false;
+let katexLoading: Promise<void> | null = null;
+async function loadKatex(): Promise<void> {
+  if (katexLoaded) return;
+  if (!katexLoading) {
+    katexLoading = (async () => {
+      const [{ default: katex }] = await Promise.all([
+        import("@vscode/markdown-it-katex"),
+        // The CSS provides the math glyph layout — must be present before
+        // KaTeX HTML is mounted into the preview.
+        import("katex/dist/katex.min.css"),
+      ]);
+      md.use(katex);
+      katexLoaded = true;
+    })();
+  }
+  await katexLoading;
+}
+
+let plantumlEncoderPromise: Promise<typeof import("plantuml-encoder")> | null = null;
+function loadPlantumlEncoder(): Promise<typeof import("plantuml-encoder")> {
+  if (!plantumlEncoderPromise) plantumlEncoderPromise = import("plantuml-encoder");
+  return plantumlEncoderPromise;
+}
+
+// Cheap regex pre-check on the source — only triggers the lazy import when
+// the doc actually contains the relevant syntax. Saves the network round-trip
+// + parse cost on docs that don't.
+const KATEX_HINT_RE = /\$[^$\n]+\$|\$\$/;
+function sourceMaybeHasKatex(src: string): boolean {
+  return KATEX_HINT_RE.test(src);
+}
 
 function escapeAttr(s: string): string {
   return s
@@ -39,16 +75,7 @@ function renderMermaid(source: string, line: number): string {
   );
 }
 
-function renderPlantuml(source: string, line: number): string {
-  let encoded = "";
-  try {
-    encoded = plantumlEncoder.encode(source);
-  } catch (e) {
-    const err = e instanceof Error ? e.message : String(e);
-    return `<div class="plantuml-diagram error" data-line="${line}">${escapeAttr(
-      tStatic("markdown.plantumlError", { error: err }),
-    )}</div>`;
-  }
+function renderPlantumlPlaceholder(source: string, line: number, encoded: string): string {
   return (
     `<div class="plantuml-diagram" data-line="${line}" ` +
     `data-plantuml-encoded="${escapeAttr(encoded)}" ` +
@@ -72,10 +99,8 @@ const md = new MarkdownIt({
 
 md.use(anchor, { permalink: false });
 md.use(taskLists, { enabled: false });
-// `$...$` inline + `$$...$$` block. The plugin defaults to throwOnError=false,
-// so malformed expressions render as a red error instead of breaking the
-// whole Markdown render.
-md.use(katex);
+// KaTeX is registered lazily by renderMarkdown() when the source actually
+// contains math — see loadKatex().
 
 const originalFence = md.renderer.rules.fence!;
 md.renderer.rules.fence = (tokens, idx, options, env, self) => {
@@ -148,8 +173,25 @@ export async function renderMarkdown(
   source: string,
   opts: RenderOptions,
 ): Promise<string> {
+  // Lazy-load KaTeX only if the source LOOKS like it might have math.
+  // Wrong positives (a `$` in code) are harmless — the plugin just won't
+  // find valid expressions to render. The real win is on the 99% of docs
+  // that have no math: we skip 628 KB of parse + load.
+  if (sourceMaybeHasKatex(source)) {
+    await loadKatex();
+  }
   const hl = await getHighlighter();
   const tokens = md.parse(source, {});
+  // Pre-scan for plantuml — if any fence is plantuml, load the encoder once
+  // before the synchronous render pass below.
+  let needsPlantuml = false;
+  for (const t of tokens) {
+    if (t.type !== "fence") continue;
+    const lang = (t.info || "").trim().split(/\s+/)[0].toLowerCase();
+    if (PLANTUML_LANGS.has(lang)) { needsPlantuml = true; break; }
+  }
+  const plantumlEnc = needsPlantuml ? (await loadPlantumlEncoder()).default : null;
+
   const highlighted = new Map<number, string>();
   const shikiTheme = opts.theme === "dark" ? "one-dark-pro" : "github-light";
 
@@ -159,7 +201,20 @@ export async function renderMarkdown(
     const lang = (t.info || "").trim().split(/\s+/)[0].toLowerCase() || "text";
     if (PLANTUML_LANGS.has(lang)) {
       const line = t.map ? t.map[0] + 1 : 0;
-      highlighted.set(i, renderPlantuml(t.content, line));
+      let encoded = "";
+      try {
+        encoded = plantumlEnc!.encode(t.content);
+      } catch (e) {
+        const err = e instanceof Error ? e.message : String(e);
+        highlighted.set(
+          i,
+          `<div class="plantuml-diagram error" data-line="${line}">${escapeAttr(
+            tStatic("markdown.plantumlError", { error: err }),
+          )}</div>`,
+        );
+        continue;
+      }
+      highlighted.set(i, renderPlantumlPlaceholder(t.content, line, encoded));
       continue;
     }
     if (MERMAID_LANGS.has(lang)) {

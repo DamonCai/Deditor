@@ -16,6 +16,9 @@ import {
 } from "../lib/pathUtil";
 
 interface Props {
+  /** Markdown / code source. Passed in by the parent (ActivePreview), which
+   *  subscribes to the active tab's content on its own so App stays off the
+   *  keystroke render path. */
   source: string;
   filePath: string | null;
   theme: "light" | "dark";

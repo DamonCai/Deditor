@@ -46,38 +46,45 @@ export function useFileWatch(): void {
       }
       if (stopped) return;
 
+      // First pass: figure out which paths actually changed, update the
+      // baseline cache for them. We do this before any I/O so we don't
+      // double-read the same path on the next tick if the IPC is in flight.
+      const changedPaths: string[] = [];
       for (let i = 0; i < paths.length; i++) {
         const path = paths[i];
         const mt = mtimes[i];
         if (mt == null) continue;
         const prev = lastMtimes.get(path);
-        // First sighting — just record the baseline; don't react.
         if (prev === undefined) {
           lastMtimes.set(path, mt);
           continue;
         }
         if (prev === mt) continue;
         lastMtimes.set(path, mt);
+        changedPaths.push(path);
+      }
+      if (changedPaths.length === 0) return;
 
-        // mtime changed — read the new content and decide what to do.
-        let fresh: string;
-        try {
-          fresh = await invoke<string>("read_text_file", { path });
-        } catch {
-          continue;
-        }
+      // PARALLEL read of every changed file. Sequential awaits here meant
+      // that 5 simultaneous external changes (e.g. a git pull touching
+      // several open tabs) took 5× the IPC latency to settle.
+      const reads = await Promise.all(
+        changedPaths.map((p) =>
+          invoke<string>("read_text_file", { path: p }).catch(() => null),
+        ),
+      );
+      if (stopped) return;
+
+      for (let i = 0; i < changedPaths.length; i++) {
+        const path = changedPaths[i];
+        const fresh = reads[i];
+        if (fresh == null) continue;
         const cur = useEditorStore.getState().tabs.find((t) => t.filePath === path);
         if (!cur) continue;
-        // Disk content already matches what we have — false alarm
-        // (could be e.g. our own write or a touch with no real change).
         if (fresh === cur.content) continue;
-        // Disk matches what we last saved → it's our own write (the user has
-        // since kept typing, so cur.content drifted from disk). No external
-        // editor was involved; just bump the mtime baseline silently.
         if (fresh === cur.savedContent) continue;
 
         if (cur.content === cur.savedContent) {
-          // Clean tab: silently swap in the new content.
           useEditorStore.setState({
             tabs: useEditorStore.getState().tabs.map((t) =>
               t.id === cur.id ? { ...t, content: fresh, savedContent: fresh, externalChange: undefined } : t,
@@ -85,7 +92,6 @@ export function useFileWatch(): void {
           });
           logInfo(`reloaded externally-changed file: ${path}`);
         } else {
-          // Dirty tab: stash disk content and surface a banner.
           useEditorStore.setState({
             tabs: useEditorStore.getState().tabs.map((t) =>
               t.id === cur.id ? { ...t, externalChange: fresh } : t,

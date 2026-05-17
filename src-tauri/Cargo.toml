@@ -30,6 +30,10 @@ base64 = "0.22"
 portable-pty = "0.8"
 # UUID for per-terminal session ids passed across the IPC bridge.
 uuid = { version = "1", features = ["v4"] }
+# Data-parallel iteration. Used by find_in_files to scan many small files in
+# parallel across CPU cores — single-threaded scanning was the bottleneck on
+# Cmd+Shift+F over a multi-thousand-file workspace.
+rayon = "1.10"
 
 # macOS-only: used to strip AppKit's auto-injected Edit-menu items
 # ("Start Dictation…", "Emoji & Symbols", "AutoFill", Speech submenu, …)
@@ -38,3 +42,14 @@ uuid = { version = "1", features = ["v4"] }
 objc2 = "0.6"
 objc2-app-kit = "0.3"
 objc2-foundation = "0.3"
+
+# Release profile. Cargo defaults give opt-level=3 but leave LTO off and
+# split into 16 codegen units, which leaves a lot of cross-crate inlining
+# on the table for a single-binary app like this. The three knobs below
+# together shrink the binary ~25% and tighten hot paths (file walking,
+# JSON serialization, IPC marshalling).
+[profile.release]
+lto = true              # whole-program link-time optimization
+codegen-units = 1       # maximize inlining
+strip = true            # drop debug symbols from the shipped binary
+panic = "abort"         # smaller + faster (we already capture panics via log)

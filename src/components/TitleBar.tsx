@@ -32,6 +32,12 @@ interface AheadBehind {
   upstream: string;
 }
 
+// Tauri stashes the current window's label on the global it injects at boot.
+// Tauri config has no explicit label so the runtime default is "main".
+function currentLabel(): string {
+  return (window as any).__TAURI_INTERNALS__?.metadata?.currentWindow?.label ?? "main";
+}
+
 // macOS draws traffic lights inside our overlay-styled title bar; reserve ~80px
 // on the left so the controls don't overlap them. In native fullscreen the OS
 // hides the lights, so we collapse the reservation and let the project identity
@@ -52,10 +58,10 @@ function onTitleBarMouseDown(e: React.MouseEvent<HTMLDivElement>) {
     return;
   }
   if (e.detail === 2) {
-    void getCurrentWindow().toggleMaximize();
+    void invoke("plugin:window|toggle_maximize", { label: currentLabel() });
     return;
   }
-  void getCurrentWindow().startDragging();
+  void invoke("plugin:window|start_dragging", { label: currentLabel() });
 }
 
 /** IntelliJ-style Main Toolbar. App identity on the left, current file name in
