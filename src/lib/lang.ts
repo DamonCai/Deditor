@@ -386,6 +386,15 @@ export const IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "i
 export const AUDIO_EXTS = ["mp3", "wav", "ogg", "flac", "m4a", "aac", "opus"];
 export const VIDEO_EXTS = ["mp4", "webm", "mov", "m4v", "ogv"];
 
+// Set mirrors of the arrays above. Used by the per-file-type predicates so
+// extension matching is O(1) (Set.has) instead of O(N) (Array.prototype
+// .includes). Arrays stay exported for any external consumer that might want
+// the ordered list, and they're the single source of truth — the Sets are
+// built from them so updating the arrays automatically updates the Sets.
+const IMAGE_EXTS_SET = new Set(IMAGE_EXTS);
+const AUDIO_EXTS_SET = new Set(AUDIO_EXTS);
+const VIDEO_EXTS_SET = new Set(VIDEO_EXTS);
+
 /** Extensions we render as a hex dump rather than text or any rich preview.
  *  These are binary formats with no native browser viewer (Office docs,
  *  archives, executables, databases, fonts, generic binary). */
@@ -411,12 +420,31 @@ export const HEX_EXTS = [
   // audio formats browsers don't play
   "aiff", "aif", "mka", "ape", "wma",
 ];
+const HEX_EXTS_SET = new Set(HEX_EXTS);
 
 export const SUPPORTED_EXTS = Object.keys(ext);
 
+/** Lower-cased extension (without the dot) for a path. Returns "" for paths
+ *  with no extension or a null path. Splits on the last `.` of the basename
+ *  so `/foo/bar.tar.gz` → "gz" and `~/.config/foo` → "" (no extension on a
+ *  dotfile-named file). Hoisted because every isImageFile / isPdfFile etc.
+ *  used to repeat this work inline. */
+function extOf(filePath: string | null): string {
+  if (!filePath) return "";
+  // Cheaper than `split(/[\\/]/).pop()` — no array alloc, no regex.
+  const slash = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
+  const base = slash >= 0 ? filePath.slice(slash + 1) : filePath;
+  const dot = base.lastIndexOf(".");
+  if (dot < 0) return "";
+  return base.slice(dot + 1).toLowerCase();
+}
+
 export function detectLang(filePath: string | null): LangDef {
   if (!filePath) return ext.md;
-  const base = filePath.split(/[\\/]/).pop() || "";
+  // Same basename extraction as extOf() — but we also need the basename
+  // itself (for FILENAME_MAP), so we don't call extOf and pay the work twice.
+  const slash = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
+  const base = slash >= 0 ? filePath.slice(slash + 1) : filePath;
   if (FILENAME_MAP[base]) return FILENAME_MAP[base];
   const dot = base.lastIndexOf(".");
   if (dot < 0) return FALLBACK;
@@ -424,64 +452,62 @@ export function detectLang(filePath: string | null): LangDef {
   return ext[e] ?? { ...FALLBACK, icon: I(e.slice(0, 3).toUpperCase() || "·", FALLBACK.icon.color) };
 }
 
+// Each predicate uses the shared `extOf` helper (one parse, no array alloc)
+// and a Set membership check (O(1)) instead of Array.prototype.includes
+// (O(N)). Same input → same output as the previous implementation; only
+// internal speed changes.
 export function isMarkdown(filePath: string | null): boolean {
   if (!filePath) return true;
-  const e = filePath.split(".").pop()?.toLowerCase() ?? "";
+  const e = extOf(filePath);
   return e === "md" || e === "markdown" || e === "mdx";
 }
 
 export function isJson(filePath: string | null): boolean {
-  if (!filePath) return false;
-  const e = filePath.split(".").pop()?.toLowerCase() ?? "";
+  const e = extOf(filePath);
   return e === "json" || e === "jsonc" || e === "json5";
 }
 
 export function isImageFile(filePath: string | null): boolean {
-  if (!filePath) return false;
-  const e = filePath.split(".").pop()?.toLowerCase() ?? "";
-  return IMAGE_EXTS.includes(e);
+  return IMAGE_EXTS_SET.has(extOf(filePath));
 }
 
 export function isPdfFile(filePath: string | null): boolean {
-  if (!filePath) return false;
-  const e = filePath.split(".").pop()?.toLowerCase() ?? "";
-  return e === "pdf";
+  return extOf(filePath) === "pdf";
 }
 
 export function isAudioFile(filePath: string | null): boolean {
-  if (!filePath) return false;
-  const e = filePath.split(".").pop()?.toLowerCase() ?? "";
-  return AUDIO_EXTS.includes(e);
+  return AUDIO_EXTS_SET.has(extOf(filePath));
 }
 
 export function isVideoFile(filePath: string | null): boolean {
-  if (!filePath) return false;
-  const e = filePath.split(".").pop()?.toLowerCase() ?? "";
-  return VIDEO_EXTS.includes(e);
+  return VIDEO_EXTS_SET.has(extOf(filePath));
 }
 
 export function isHexFile(filePath: string | null): boolean {
-  if (!filePath) return false;
-  const e = filePath.split(".").pop()?.toLowerCase() ?? "";
-  return HEX_EXTS.includes(e);
+  return HEX_EXTS_SET.has(extOf(filePath));
 }
 
 export function isXmindFile(filePath: string | null): boolean {
-  if (!filePath) return false;
-  const e = filePath.split(".").pop()?.toLowerCase() ?? "";
-  return e === "xmind";
+  return extOf(filePath) === "xmind";
 }
 
 /** True for files we render via a base64 data URL rather than as text.
  *  Persistence treats these specially: we don't write base64 to localStorage,
- *  we re-read from disk on startup. */
+ *  we re-read from disk on startup.
+ *
+ *  Inlined: the original called 5 isX() functions, each re-running the
+ *  path-split + lowercase. Now we parse the extension once and check the
+ *  five Sets / fixed strings against it. Behavior identical. */
 export function isBinaryRenderable(filePath: string | null): boolean {
+  const e = extOf(filePath);
+  if (!e) return false;
   return (
-    isImageFile(filePath) ||
-    isPdfFile(filePath) ||
-    isAudioFile(filePath) ||
-    isVideoFile(filePath) ||
-    isHexFile(filePath) ||
-    isXmindFile(filePath)
+    IMAGE_EXTS_SET.has(e) ||
+    e === "pdf" ||
+    AUDIO_EXTS_SET.has(e) ||
+    VIDEO_EXTS_SET.has(e) ||
+    HEX_EXTS_SET.has(e) ||
+    e === "xmind"
   );
 }
+
