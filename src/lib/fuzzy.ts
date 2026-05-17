@@ -45,25 +45,40 @@ function toLowerCode(c: number): number {
   return isUpper(c) ? c | 0x20 : c;
 }
 
+/** True if every char in s is ASCII (0–127). When BOTH query and target are
+ *  ASCII we can compare via char-code arithmetic; otherwise we need
+ *  String.prototype.toLowerCase, which handles Unicode case folding (é→e,
+ *  Φ→φ, etc.) at the cost of allocating two strings. */
+function isPureAscii(s: string): boolean {
+  for (let i = 0; i < s.length; i++) if (s.charCodeAt(i) > 127) return false;
+  return true;
+}
+
 export function fuzzyMatch(query: string, target: string): FuzzyMatch | null {
   const qlen = query.length;
   if (qlen === 0) return { score: 0, matchedIdx: [] };
   const tlen = target.length;
   if (qlen > tlen) return null;
 
-  // First pass: subsequence check on char codes only, NO allocation. This
-  // is the early-out for the vast majority of (target, query) pairs in
-  // a 50k-file workspace — Cmd+P typing a single char like 't' will hit
-  // many candidates but reject many more, and we want the reject path
-  // to be essentially free (no array alloc, no boundary scoring).
+  // If either side has non-ASCII, fold via toLowerCase so accented Latin
+  // chars (École, naïve, …) still match against ASCII queries. We pay one
+  // allocation per call but only for the (rare) Unicode path.
+  const pureAscii = isPureAscii(query) && isPureAscii(target);
+  const ql = pureAscii ? query : query.toLowerCase();
+  const tl = pureAscii ? target : target.toLowerCase();
+
+  // First pass: subsequence check on char codes only, NO allocation. The
+  // pureAscii path uses `toLowerCode` (ASCII case-fold via | 0x20). The
+  // Unicode path consults already-lowercased strings.
   {
     let qi = 0;
-    let qc = toLowerCode(query.charCodeAt(0));
+    let qc = pureAscii ? toLowerCode(ql.charCodeAt(0)) : ql.charCodeAt(0);
     for (let ti = 0; ti < tlen; ti++) {
-      if (toLowerCode(target.charCodeAt(ti)) === qc) {
+      const tc = pureAscii ? toLowerCode(tl.charCodeAt(ti)) : tl.charCodeAt(ti);
+      if (tc === qc) {
         qi++;
         if (qi === qlen) break;
-        qc = toLowerCode(query.charCodeAt(qi));
+        qc = pureAscii ? toLowerCode(ql.charCodeAt(qi)) : ql.charCodeAt(qi);
       }
     }
     if (qi < qlen) return null;
@@ -73,20 +88,18 @@ export function fuzzyMatch(query: string, target: string): FuzzyMatch | null {
   const matched: number[] = new Array(qlen);
   let mi = 0;
   let qi = 0;
-  let qc = toLowerCode(query.charCodeAt(0));
+  let qc = pureAscii ? toLowerCode(ql.charCodeAt(0)) : ql.charCodeAt(0);
   let qcOrig = query.charCodeAt(0);
   let lastMatchAt = -2;
   let score = 0;
   let streak = 0;
   for (let ti = 0; ti < tlen && qi < qlen; ti++) {
-    const tc = target.charCodeAt(ti);
-    if (toLowerCode(tc) !== qc) continue;
+    const tcOrig = target.charCodeAt(ti);
+    const tc = pureAscii ? toLowerCode(tl.charCodeAt(ti)) : tl.charCodeAt(ti);
+    if (tc !== qc) continue;
     matched[mi++] = ti;
-    // Boundary bonus (the char BEFORE this match is a boundary)
     if (ti === 0 || isBoundaryCode(target.charCodeAt(ti - 1))) score += 10;
-    // Case-exact bonus
-    if (tc === qcOrig) score += 2;
-    // Consecutive bonus, scaled by streak length
+    if (tcOrig === qcOrig) score += 2;
     if (lastMatchAt === ti - 1) {
       streak++;
       score += 4 + streak;
@@ -97,23 +110,23 @@ export function fuzzyMatch(query: string, target: string): FuzzyMatch | null {
     qi++;
     if (qi < qlen) {
       qcOrig = query.charCodeAt(qi);
-      qc = toLowerCode(qcOrig);
+      qc = pureAscii ? toLowerCode(ql.charCodeAt(qi)) : ql.charCodeAt(qi);
     }
   }
 
-  // Whole-prefix bonus (cheap: compare first qlen chars)
+  // Whole-prefix bonus (compare first qlen chars; Unicode-safe via the
+  // lowercased mirrors when needed).
   let isPrefix = true;
   for (let i = 0; i < qlen; i++) {
-    if (toLowerCode(target.charCodeAt(i)) !== toLowerCode(query.charCodeAt(i))) {
+    const a = pureAscii ? toLowerCode(tl.charCodeAt(i)) : tl.charCodeAt(i);
+    const b = pureAscii ? toLowerCode(ql.charCodeAt(i)) : ql.charCodeAt(i);
+    if (a !== b) {
       isPrefix = false;
       break;
     }
   }
   if (isPrefix) score += 30;
-  // Earlier first match is better; later one means the query is buried.
   score -= matched[0] ?? 0;
-  // Slight penalty for very long targets so a 200-char path can't accidentally
-  // outscore a tight match in a short path.
   score -= tlen / 50;
 
   return { score, matchedIdx: matched };

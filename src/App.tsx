@@ -1,7 +1,15 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
+// @tauri-apps/api/webview transitively imports the full Window class (~62 KB).
+// We only need to listen for the file-drop event; subscribe to its raw Tauri
+// event name directly via @tauri-apps/api/event (which is already small +
+// already in the bundle for other listeners we have).
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
+
+interface TauriDragDropPayload {
+  paths: string[];
+  position: { x: number; y: number };
+}
 import EditorHost from "./components/EditorHost";
 import EditorSlot from "./components/EditorSlot";
 // Preview drags in markdown-it + the Shiki engine + every hydrator
@@ -273,26 +281,28 @@ export default function App() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
-    getCurrentWebview()
-      .onDragDropEvent(async (event) => {
-        if (event.payload.type !== "drop") return;
-        const filePaths: string[] = [];
-        for (const p of event.payload.paths) {
-          let kind = "file";
-          try {
-            kind = await invoke<string>("path_kind", { path: p });
-          } catch {
-            // Treat probe failures as "file" so the existing openMany path
-            // can surface a more useful error.
-          }
-          if (kind === "dir") {
-            await setWorkspaceByPath(p).catch(() => {});
-          } else {
-            filePaths.push(p);
-          }
+    // The full onDragDropEvent helper from @tauri-apps/api/webview also
+    // subscribes to DRAG_ENTER / DRAG_OVER / DRAG_LEAVE (we ignore all of
+    // those); listening directly to just DRAG_DROP is one event subscription
+    // instead of four AND drops the webview barrel from the bundle.
+    listen<TauriDragDropPayload>("tauri://drag-drop", async (event) => {
+      const filePaths: string[] = [];
+      for (const p of event.payload.paths) {
+        let kind = "file";
+        try {
+          kind = await invoke<string>("path_kind", { path: p });
+        } catch {
+          // Treat probe failures as "file" so the existing openMany path
+          // can surface a more useful error.
         }
-        if (filePaths.length > 0) await openMany(filePaths);
-      })
+        if (kind === "dir") {
+          await setWorkspaceByPath(p).catch(() => {});
+        } else {
+          filePaths.push(p);
+        }
+      }
+      if (filePaths.length > 0) await openMany(filePaths);
+    })
       .then((fn) => {
         if (cancelled) fn();
         else unlisten = fn;

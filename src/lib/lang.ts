@@ -1,20 +1,17 @@
 import { LanguageSupport, StreamLanguage } from "@codemirror/language";
-import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import { languages as codeLangs } from "@codemirror/language-data";
+// @codemirror/lang-markdown + @lezer/markdown (~85 KB) is loaded lazily —
+// see cmMarkdown below. Static import would drag the markdown parser into
+// the cold-start bundle even for users editing non-Markdown files.
 import { tags as t } from "@lezer/highlight";
 import type { Tag } from "@lezer/highlight";
 import { LuFileText, LuFileImage, LuFileAudio, LuFileVideo, LuFileCog, LuDatabase, LuType, LuNetwork } from "react-icons/lu";
 import { FaRegFilePdf, FaRegFileWord, FaRegFileExcel, FaRegFilePowerpoint, FaRegFileArchive } from "react-icons/fa";
-// Static imports of legacy stream-mode parsers so Vite bundles them.
-// (Dynamic template-literal imports with @vite-ignore would fail in the browser
-//  because bare specifiers can't be resolved at runtime.)
-import { shell } from "@codemirror/legacy-modes/mode/shell";
-import { toml } from "@codemirror/legacy-modes/mode/toml";
-import { ruby } from "@codemirror/legacy-modes/mode/ruby";
-import { swift } from "@codemirror/legacy-modes/mode/swift";
-import { lua } from "@codemirror/legacy-modes/mode/lua";
-import { dockerFile } from "@codemirror/legacy-modes/mode/dockerfile";
-import { powerShell } from "@codemirror/legacy-modes/mode/powershell";
+// @codemirror/legacy-modes is a ~150 KB combined chunk; we used to static-
+// import 7 modes (shell/toml/ruby/swift/lua/dockerfile/powershell) which
+// dragged the whole thing into main. Vite *does* handle bare-specifier
+// dynamic imports — its module-path resolution rewrites them at build time
+// — so per-file `await import("@codemirror/legacy-modes/mode/X")` ships as
+// its own lazy chunk and only loads when the corresponding file type opens.
 import type { IconType } from "react-icons";
 import {
   SiPython,
@@ -100,7 +97,8 @@ const STREAM_TOKEN_TABLE: Record<string, Tag> = {
   quote: t.quote,
 };
 
-const fromStream = (mode: Stream) => async () =>
+// Build a LanguageSupport from an already-imported stream mode.
+const wrapStream = (mode: Stream): LanguageSupport =>
   new LanguageSupport(
     StreamLanguage.define({
       ...mode,
@@ -108,16 +106,26 @@ const fromStream = (mode: Stream) => async () =>
     }),
   );
 
-const cmShell = fromStream(shell);
-const cmToml = fromStream(toml);
-const cmRuby = fromStream(ruby);
-const cmSwift = fromStream(swift);
-const cmLua = fromStream(lua);
-const cmDocker = fromStream(dockerFile);
-const cmPowerShell = fromStream(powerShell);
+// Each helper returns a thunk that dynamically imports the legacy mode +
+// wraps it. The dynamic import becomes its own lazy chunk; the legacy-modes
+// package is no longer in the main bundle.
+const cmShell = () => import("@codemirror/legacy-modes/mode/shell").then((m) => wrapStream(m.shell));
+const cmToml = () => import("@codemirror/legacy-modes/mode/toml").then((m) => wrapStream(m.toml));
+const cmRuby = () => import("@codemirror/legacy-modes/mode/ruby").then((m) => wrapStream(m.ruby));
+const cmSwift = () => import("@codemirror/legacy-modes/mode/swift").then((m) => wrapStream(m.swift));
+const cmLua = () => import("@codemirror/legacy-modes/mode/lua").then((m) => wrapStream(m.lua));
+const cmDocker = () => import("@codemirror/legacy-modes/mode/dockerfile").then((m) => wrapStream(m.dockerFile));
+const cmPowerShell = () => import("@codemirror/legacy-modes/mode/powershell").then((m) => wrapStream(m.powerShell));
 
-const cmMarkdown = async () =>
-  markdown({ base: markdownLanguage, codeLanguages: codeLangs });
+// @codemirror/lang-markdown drags @lezer/markdown (~85 KB) + @lezer/common.
+// Lazy-import on demand so the cold bundle doesn't include it.
+const cmMarkdown = async () => {
+  const [{ markdown, markdownLanguage }, { languages: codeLangs }] = await Promise.all([
+    import("@codemirror/lang-markdown"),
+    import("@codemirror/language-data"),
+  ]);
+  return markdown({ base: markdownLanguage, codeLanguages: codeLangs });
+};
 
 const I = (short: string, color: string, Logo?: IconType): LangIcon => ({ short, color, Logo });
 

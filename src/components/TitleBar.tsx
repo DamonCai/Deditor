@@ -1,9 +1,19 @@
 import { useActiveTabHeader } from "../store/editor";
 import { useEditorStore } from "../store/editor";
 import { useT } from "../lib/i18n";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+// @tauri-apps/api/window is a ~62 KB barrel that ships the full Window class
+// (monitors, position math, dozens of methods we don't use). We only need
+// two calls; invoke them via the plugin protocol directly through the
+// already-bundled core/invoke. Saves the entire barrel from the main chunk.
+import { invoke } from "@tauri-apps/api/core";
 import { FiSettings, FiSearch, FiSun, FiMoon } from "react-icons/fi";
 import { Button } from "./ui/Button";
+
+// Tauri stashes the current window's label on the global it injects at boot.
+// Tauri config has no explicit label so the runtime default is "main".
+function currentLabel(): string {
+  return (window as any).__TAURI_INTERNALS__?.metadata?.currentWindow?.label ?? "main";
+}
 
 // macOS draws traffic lights inside our overlay-styled title bar; reserve ~80px
 // on the left so the controls don't overlap the leftmost toolbar content.
@@ -22,10 +32,10 @@ function onTitleBarMouseDown(e: React.MouseEvent<HTMLDivElement>) {
     return;
   }
   if (e.detail === 2) {
-    void getCurrentWindow().toggleMaximize();
+    void invoke("plugin:window|toggle_maximize", { label: currentLabel() });
     return;
   }
-  void getCurrentWindow().startDragging();
+  void invoke("plugin:window|start_dragging", { label: currentLabel() });
 }
 
 /** IntelliJ-style Main Toolbar. App identity on the left, current file name in

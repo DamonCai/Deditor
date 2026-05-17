@@ -12,7 +12,15 @@ import {
   highlightWhitespace,
 } from "@codemirror/view";
 import { indentationMarkers } from "@replit/codemirror-indentation-markers";
-import { showMinimap as showMinimapFacet } from "@replit/codemirror-minimap";
+// @replit/codemirror-minimap (~45 KB) is only used when the user explicitly
+// enables the minimap in Settings — default is off. Lazy-import via a cached
+// promise; the first mount with showMinimap=true awaits, subsequent toggles
+// hit the cache instantly.
+let minimapModulePromise: Promise<typeof import("@replit/codemirror-minimap")> | null = null;
+function loadMinimap() {
+  if (!minimapModulePromise) minimapModulePromise = import("@replit/codemirror-minimap");
+  return minimapModulePromise;
+}
 import type { Command } from "@codemirror/view";
 import { copyLineDown, defaultKeymap, history, historyField, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { searchKeymap, highlightSelectionMatches, selectSelectionMatches, openSearchPanel } from "@codemirror/search";
@@ -316,7 +324,10 @@ export default function Editor({
         wrapCompartment.current.of(softWrap ? EditorView.lineWrapping : []),
         indentCompartment.current.of(showIndentGuides ? indentationMarkers() : []),
         whitespaceCompartment.current.of(showWhitespace ? highlightWhitespace() : []),
-        minimapCompartment.current.of(showMinimap ? buildMinimap() : []),
+        // Minimap starts out empty — if the user has it enabled, the effect
+        // below dispatches a reconfigure once the module finishes loading.
+        // Avoids blocking initial mount on a 45 KB lazy chunk.
+        minimapCompartment.current.of([]),
         autoCloseCompartment.current.of(autoCloseBrackets ? closeBrackets() : []),
         completionCompartment.current.of(
           isMarkdown(filePath) ? codeBlockCompletion() : [],
@@ -537,11 +548,21 @@ export default function Editor({
   }, [showWhitespace]);
 
   useEffect(() => {
-    viewRef.current?.dispatch({
-      effects: minimapCompartment.current.reconfigure(
-        showMinimap ? buildMinimap() : [],
-      ),
+    if (!showMinimap) {
+      viewRef.current?.dispatch({
+        effects: minimapCompartment.current.reconfigure([]),
+      });
+      return;
+    }
+    // Async: load the minimap module on demand. Cancel if showMinimap flips
+    // off before the module arrives, or if the view was destroyed.
+    let cancelled = false;
+    const v = viewRef.current;
+    void buildMinimapAsync().then((ext) => {
+      if (cancelled || !v || viewRef.current !== v) return;
+      v.dispatch({ effects: minimapCompartment.current.reconfigure(ext) });
     });
+    return () => { cancelled = true; };
   }, [showMinimap]);
 
   useEffect(() => {
@@ -796,9 +817,9 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return btoa(binary);
 }
 
-/** Configure the minimap with the create() callback. The minimap container
- *  is a tiny DOM element the package owns; we just hand it a fresh div. */
-function buildMinimap() {
+/** Resolve the minimap extension lazily; callers await this. */
+async function buildMinimapAsync() {
+  const { showMinimap: showMinimapFacet } = await loadMinimap();
   return showMinimapFacet.of({
     create: () => ({ dom: document.createElement("div") }),
     displayText: "blocks",
