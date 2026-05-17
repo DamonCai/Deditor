@@ -3,7 +3,10 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import { installGlobalLogHandlers } from "./lib/logger";
 import { useEditorStore } from "./store/editor";
-import { dropEditorStateCache } from "./components/Editor";
+// Import the cache module directly (not from components/Editor) so this
+// boot path doesn't pull CodeMirror into the main bundle. Editor is now
+// lazy-loaded; only its compiled chunk depends on @codemirror/*.
+import { dropEditorStateCache } from "./lib/editorStateCache";
 import "./styles.css";
 
 installGlobalLogHandlers();

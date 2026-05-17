@@ -131,20 +131,13 @@ interface Props {
   onPositionChange?: (pos: { cursor: number; scrollTopLine: number }) => void;
 }
 
-/** Per-tab CodeMirror state cache — keyed by the tab id passed in via props.
- *  Module-scoped so it survives Editor remounts (App.tsx remounts Editor on
- *  every tab switch via `key={tab.id}`). We serialize the EditorState as
- *  JSON, including the history field, so undo/redo carries across switches.
- *
- *  Lives only for the current process — not persisted to disk. Sublime is
- *  the same: undo doesn't survive app restart. */
-const editorStateCache = new Map<string, unknown>();
-
-/** Drop the cache entry for a tab that's been closed so the map doesn't
- *  grow forever as the user opens many short-lived tabs. */
-export function dropEditorStateCache(tabId: string): void {
-  editorStateCache.delete(tabId);
-}
+// editorStateCache lives in its own module (lib/editorStateCache.ts) so
+// main.tsx can prune the cache without static-importing this file — which
+// would drag CodeMirror back into the main chunk and undo the lazy split.
+import {
+  getEditorStateCache,
+  setEditorStateCache,
+} from "../lib/editorStateCache";
 
 export default function Editor({
   value,
@@ -382,7 +375,7 @@ export default function Editor({
     // (e.g. file was reloaded externally), bail and start fresh — restoring
     // a stale doc would let the user "undo" into content that doesn't exist
     // on disk anymore.
-    const cachedJSON = tabId && !noStateCache ? editorStateCache.get(tabId) : undefined;
+    const cachedJSON = tabId && !noStateCache ? getEditorStateCache(tabId) : undefined;
     let state: EditorState;
     if (cachedJSON && (cachedJSON as { doc?: string }).doc === value) {
       try {
@@ -471,10 +464,7 @@ export default function Editor({
       // Stash state JSON (incl. undo history) for next mount of the same tab.
       if (tabId && !noStateCache) {
         try {
-          editorStateCache.set(
-            tabId,
-            view.state.toJSON({ history: historyField }),
-          );
+          setEditorStateCache(tabId, view.state.toJSON({ history: historyField }));
         } catch {
           /* defensive: never block unmount on a serialization error */
         }

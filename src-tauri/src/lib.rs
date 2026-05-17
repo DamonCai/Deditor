@@ -421,11 +421,10 @@ fn list_dir(path: String) -> Result<Vec<DirEntry>, String> {
             is_dir,
         });
     }
-    out.sort_by(|a, b| match (a.is_dir, b.is_dir) {
-        (true, false) => std::cmp::Ordering::Less,
-        (false, true) => std::cmp::Ordering::Greater,
-        _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-    });
+    // sort_by_cached_key lowercases each name ONCE (not 2*N*log N times like
+    // sort_by would have done with two to_lowercase calls per compare).
+    // Dirs first, then files; both groups alphabetical, case-insensitive.
+    out.sort_by_cached_key(|e| (!e.is_dir, e.name.to_lowercase()));
     Ok(out)
 }
 
@@ -541,15 +540,22 @@ fn find_in_files(
             };
             files_scanned.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let path_str = path.to_string_lossy().to_string();
+            // ASCII-only fast path: when the needle is pure ASCII we can do
+            // byte-level case-insensitive search without allocating a
+            // lowercased copy of each line. Most source-code searches stay
+            // here. We just have to verify the LINE is also ASCII for the
+            // fast path to be sound — for Unicode lines fall back to
+            // `to_lowercase` (which IS Unicode-correct for accented Latin
+            // / Greek / etc).
+            let needle_is_ascii = needle.is_ascii();
             let mut local: Vec<SearchHit> = Vec::new();
             for (lineno, line) in text.lines().enumerate() {
                 let found = if case_sensitive {
                     find_subseq(line.as_bytes(), needle_bytes)
+                } else if needle_is_ascii && line.is_ascii() {
+                    // ASCII case-insensitive — no allocation.
+                    find_subseq_ascii_ci(line.as_bytes(), needle_bytes)
                 } else {
-                    // Lowercasing each line allocates, but only on lines that
-                    // need scanning; most lines never trigger it. We could
-                    // avoid the alloc with an ASCII-only fast path — leave that
-                    // for a future PR if the profiler points here.
                     let lower = line.to_lowercase();
                     find_subseq(lower.as_bytes(), needle_bytes)
                 };
@@ -600,6 +606,20 @@ fn find_subseq(hay: &[u8], needle: &[u8]) -> Option<usize> {
     let last = hay.len() - needle.len();
     for i in 0..=last {
         if &hay[i..i + needle.len()] == needle {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// ASCII-only case-insensitive substring search. Caller guarantees both
+/// `hay` and `needle` are valid ASCII (no bytes > 127). Compares using
+/// `eq_ignore_ascii_case` on equal-length slices — zero allocation.
+fn find_subseq_ascii_ci(hay: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || needle.len() > hay.len() { return None; }
+    let last = hay.len() - needle.len();
+    for i in 0..=last {
+        if hay[i..i + needle.len()].eq_ignore_ascii_case(needle) {
             return Some(i);
         }
     }
@@ -1461,6 +1481,32 @@ mod ipc_bench {
             dt
         );
         // Confirm we got hits (~250 files × ~20 lines each = 5000-ish but capped at 5k)
+        assert!(r.hits.len() > 0);
+    }
+
+    #[test]
+    fn find_in_files_5k_files_case_insensitive() {
+        // Same data, mixed casing in the source so the case-insensitive path
+        // actually has to fold. The ASCII fast path should still find them
+        // without per-line String allocations.
+        let s = Scratch::new("find_5k_ci");
+        for i in 0..5000 {
+            let body = if i % 20 == 0 {
+                "padding\nthe NeEdLe is here\nmore padding\n".repeat(20)
+            } else {
+                "padding line that does not match\n".repeat(20)
+            };
+            fs::write(s.0.join(format!("f_{:05}.txt", i)), body).unwrap();
+        }
+        let roots = vec![s.0.to_string_lossy().to_string()];
+        let t = Instant::now();
+        let r = find_in_files(roots, "NEEDLE".into(), false).unwrap();
+        let dt = t.elapsed().as_secs_f64() * 1000.0;
+        println!(
+            "[find_in_files 5k files, case-insensitive ASCII fast path]  hits={} in {:.1} ms",
+            r.hits.len(),
+            dt
+        );
         assert!(r.hits.len() > 0);
     }
 }
