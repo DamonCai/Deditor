@@ -17,25 +17,42 @@ const memCache = new Map<string, string>();
 /** De-dupe concurrent fetches for the same encoded source. */
 const inFlight = new Map<string, Promise<string>>();
 
-function loadDisk(): DiskCache {
+// Disk cache lives in localStorage but we mirror it in-memory ONCE on first
+// access. The old code re-read + JSON.parse'd the whole blob on every plantuml
+// block hydration; on a doc with 10 plantuml blocks that meant 10× LS read +
+// 10× JSON.parse of a multi-hundred-KB string. We now read once at boot, mutate
+// the in-memory copy, and flush back to localStorage on a 1 s debounce.
+let diskCache: DiskCache | null = null;
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function getDisk(): DiskCache {
+  if (diskCache !== null) return diskCache;
   try {
     const raw = localStorage.getItem(CACHE_KEY);
-    return raw ? (JSON.parse(raw) as DiskCache) : {};
+    diskCache = raw ? (JSON.parse(raw) as DiskCache) : {};
   } catch {
-    return {};
+    diskCache = {};
   }
+  return diskCache;
 }
 
-function saveDisk(cache: DiskCache): void {
-  try {
-    const entries = Object.entries(cache).sort(
-      (a, b) => b[1].ts - a[1].ts,
-    );
-    const trimmed = Object.fromEntries(entries.slice(0, CACHE_MAX_ENTRIES));
-    localStorage.setItem(CACHE_KEY, JSON.stringify(trimmed));
-  } catch (err) {
-    logWarn("plantuml cache save failed", err);
-  }
+function scheduleDiskFlush(): void {
+  if (saveTimer) return; // already scheduled; nothing to do
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    if (!diskCache) return;
+    try {
+      const entries = Object.entries(diskCache).sort(
+        (a, b) => b[1].ts - a[1].ts,
+      );
+      const trimmed = Object.fromEntries(entries.slice(0, CACHE_MAX_ENTRIES));
+      // Trim in-memory too so the next read is consistent with what we wrote.
+      diskCache = trimmed;
+      localStorage.setItem(CACHE_KEY, JSON.stringify(trimmed));
+    } catch (err) {
+      logWarn("plantuml cache save failed", err);
+    }
+  }, 1000);
 }
 
 async function fetchSvg(
@@ -45,13 +62,16 @@ async function fetchSvg(
   // Fast path: in-memory cache.
   const mem = memCache.get(encoded);
   if (mem) return mem;
-  // Warm from disk on first miss this session.
-  const disk = loadDisk();
+  // Warm from disk on first miss this session — getDisk() reads localStorage
+  // exactly once and caches in-memory thereafter, so subsequent hits don't
+  // re-parse the cache blob.
+  const disk = getDisk();
   if (disk[encoded]) {
     memCache.set(encoded, disk[encoded].svg);
-    // Bump timestamp so frequently-used entries survive eviction.
+    // Bump timestamp so frequently-used entries survive eviction. Flush is
+    // debounced — we don't write to localStorage on every cache hit.
     disk[encoded].ts = Date.now();
-    saveDisk(disk);
+    scheduleDiskFlush();
     return disk[encoded].svg;
   }
   // Offline short-circuit — don't even try the network when the OS says no.
@@ -73,9 +93,9 @@ async function fetchSvg(
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const svg = await res.text();
       memCache.set(encoded, svg);
-      const cur = loadDisk();
+      const cur = getDisk();
       cur[encoded] = { svg, ts: Date.now() };
-      saveDisk(cur);
+      scheduleDiskFlush();
       return svg;
     } finally {
       clearTimeout(timer);

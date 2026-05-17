@@ -121,7 +121,11 @@ function buildFlatRows(
   return rows;
 }
 
-export default function FileTree() {
+// Zero props — wrap default export in memo (see bottom of file) so App's
+// re-renders for unrelated reasons (scroll-sync, splitter drag, terminal
+// open/close) don't re-run FileTree's body. Store subscriptions inside
+// still wake it when workspaces / active filePath / expandedDirs change.
+function FileTreeImpl() {
   const t = useT();
   const workspaces = useEditorStore((s) => s.workspaces);
   const expandedDirs = useEditorStore((s) => s.expandedDirs);
@@ -859,3 +863,6 @@ async function promptRename(path: string, isDir: boolean) {
     );
   }
 }
+
+const FileTree = memo(FileTreeImpl);
+export default FileTree;

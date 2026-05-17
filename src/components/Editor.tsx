@@ -596,6 +596,9 @@ export default function Editor({
     }
     const view = viewRef.current;
     if (!view) return;
+    // Slow path: external source updated `value` (persistence reload,
+    // external file watch, programmatic setContent). Diff doc against the
+    // new value, replace if different.
     if (view.state.doc.toString() === value) return;
     view.dispatch({
       changes: { from: 0, to: view.state.doc.length, insert: value },

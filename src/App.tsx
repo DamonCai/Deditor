@@ -77,6 +77,7 @@ import {
 } from "./lib/fileio";
 import { loadPersisted, persistRelevantChanged, schedulePersist } from "./lib/persistence";
 import { useFileWatch } from "./lib/fileWatch";
+import { scheduleIdlePrefetch } from "./lib/idlePrefetch";
 import {
   backgroundFetch,
   refreshGit,
@@ -207,6 +208,12 @@ export default function App() {
         if (extra?.terminalPx) setTerminalPx(extra.terminalPx);
       })
       .finally(() => setHydrated(true));
+    // After the app shell has painted, idle-prefetch the heavy lazy chunks
+    // (Shiki engine, markdown-it, mermaid, katex, prettier, export). The
+    // first time the user does any of those operations, the JS is already
+    // parsed and warm — no chunk-load gap. Best-effort: failures are
+    // silently swallowed; the real call sites handle errors themselves.
+    scheduleIdlePrefetch();
   }, []);
 
   // Persist only when fields that actually end up in state.json change
@@ -582,11 +589,7 @@ export default function App() {
           {!zenMode && <TabBar />}
           {/* Markdown toolbar is lifted out of the editor pane so it spans the
               full editor+preview row (still shown when preview is maximized). */}
-          {!isDiffTab && isMarkdown(filePath) && (
-            <Suspense fallback={null}>
-              <MarkdownToolbar />
-            </Suspense>
-          )}
+          {!isDiffTab && isMarkdown(filePath) && <MarkdownToolbar />}
           <div className="flex flex-1 min-h-0">
             {previewEnabled && previewMaximized ? (
               <div className="flex-1 min-w-0">

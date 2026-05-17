@@ -7,7 +7,11 @@ import { useT } from "../lib/i18n";
 import LangIcon from "./LangIcon";
 import { FiTerminal } from "react-icons/fi";
 
-export default function StatusBar() {
+// Zero props — wrap default export in memo so App re-renders (scroll-sync,
+// splitter drag, etc.) don't re-run StatusBar's hooks. The store
+// subscriptions inside still wake it when content / cursor / selection
+// change, which IS the intended trigger.
+function StatusBarImpl() {
   const t = useT();
   // Narrowed structural metadata: shallow-equal so we don't re-render when
   // unrelated tab fields change. Live editor metrics (line/col/totals/eol)
@@ -185,3 +189,6 @@ function Sep() {
     </span>
   );
 }
+
+const StatusBar = memo(StatusBarImpl);
+export default StatusBar;

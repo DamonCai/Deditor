@@ -1325,11 +1325,30 @@ export function tStatic(
   return t(key, lang, params);
 }
 
-/** React hook: returns a `t(key, params?)` bound to the current language. */
+// Module-level cache of the per-language `t` closure, so successive useT()
+// calls in the same language all return the SAME function reference. Without
+// this, every render of every component would produce a fresh arrow function,
+// and any downstream useMemo / useEffect / React.memo that closes over `t`
+// would treat it as a changed dependency and re-run unnecessarily.
+const tCache = new Map<Lang, ReturnType<typeof bindT>>();
+function bindT(lang: Lang) {
+  return (key: string, params?: Record<string, string | number>) =>
+    t(key, lang, params);
+}
+
+/** React hook: returns a stable `t(key, params?)` bound to the current
+ *  language. The returned function's identity only changes when the user
+ *  switches between ZH and EN — within one language it's referentially equal
+ *  across every render, so memoized children that depend on `t` don't churn. */
 export function useT(): (
   key: string,
   params?: Record<string, string | number>,
 ) => string {
   const lang = useEditorStore((s) => s.language);
-  return (key, params) => t(key, lang, params);
+  let bound = tCache.get(lang);
+  if (!bound) {
+    bound = bindT(lang);
+    tCache.set(lang, bound);
+  }
+  return bound;
 }

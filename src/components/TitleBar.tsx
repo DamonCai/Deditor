@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useEditorStore } from "../store/editor";
 import { useShallow } from "zustand/shallow";
@@ -87,7 +87,11 @@ function repoStateLabelKey(state: string): string {
   }
 }
 
-export default function TitleBar() {
+// Zero props — wrap in memo (export below) so when App re-renders for
+// unrelated reasons (scroll-sync state, splitter drag, etc.) this whole
+// chrome component short-circuits instead of re-running all its hooks. The
+// component's own store subscriptions still wake it when fields change.
+function TitleBarImpl() {
   const t = useT();
   // Narrow active-tab subscription: only filePath + dirty boolean. Skips
   // re-render on every keystroke (which used to wake TitleBar via
@@ -442,3 +446,6 @@ export default function TitleBar() {
     </div>
   );
 }
+
+const TitleBar = memo(TitleBarImpl);
+export default TitleBar;

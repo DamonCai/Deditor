@@ -386,6 +386,15 @@ export const IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "i
 export const AUDIO_EXTS = ["mp3", "wav", "ogg", "flac", "m4a", "aac", "opus"];
 export const VIDEO_EXTS = ["mp4", "webm", "mov", "m4v", "ogv"];
 
+// Set mirrors of the arrays above. Used by the per-file-type predicates so
+// extension matching is O(1) (Set.has) instead of O(N) (Array.prototype
+// .includes). Arrays stay exported for any external consumer that might want
+// the ordered list, and they're the single source of truth — the Sets are
+// built from them so updating the arrays automatically updates the Sets.
+const IMAGE_EXTS_SET = new Set(IMAGE_EXTS);
+const AUDIO_EXTS_SET = new Set(AUDIO_EXTS);
+const VIDEO_EXTS_SET = new Set(VIDEO_EXTS);
+
 /** Extensions we render as a hex dump rather than text or any rich preview.
  *  These are binary formats with no native browser viewer (Office docs,
  *  archives, executables, databases, fonts, generic binary). */
@@ -411,14 +420,34 @@ export const HEX_EXTS = [
   // audio formats browsers don't play
   "aiff", "aif", "mka", "ape", "wma",
 ];
+const HEX_EXTS_SET = new Set(HEX_EXTS);
 
 export const SUPPORTED_EXTS = Object.keys(ext);
 
-// Memoize detectLang results by filePath. The function is pure, but it gets
-// called every render of LangIcon / Editor / StatusBar / TabBar — easily
-// hundreds of times per second across the app. Caching turns those into Map
-// lookups. The map is bounded by the set of file paths the user has touched
-// in this session, so it stays small.
+/** Lower-cased extension (without the dot) for a path. Returns "" for paths
+ *  with no extension or a null path. Splits on the last `.` of the basename
+ *  so `/foo/bar.tar.gz` → "gz" and `~/.config/foo` → "" (no extension on a
+ *  dotfile-named file). Memoized: same filePath → cached lookup, so the
+ *  per-keystroke / per-render cost across StatusBar / LangIcon / FileTree
+ *  drops to a single Map.get. Map is bounded by the user's session file set. */
+const extCache = new Map<string, string>();
+function extOf(filePath: string | null): string {
+  if (!filePath) return "";
+  const hit = extCache.get(filePath);
+  if (hit !== undefined) return hit;
+  // Cheaper than `split(/[\\/]/).pop()` — no array alloc, no regex.
+  const slash = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
+  const base = slash >= 0 ? filePath.slice(slash + 1) : filePath;
+  const dot = base.lastIndexOf(".");
+  const e = dot < 0 ? "" : base.slice(dot + 1).toLowerCase();
+  extCache.set(filePath, e);
+  return e;
+}
+
+// detectLang result cache — every render of LangIcon / Editor / StatusBar /
+// TabBar / FileTree can ultimately reach this. The function is pure of its
+// input, so caching by filePath is safe. Bounded by the set of paths the
+// user has touched this session, so it stays small.
 const detectLangCache = new Map<string, LangDef>();
 const NULL_LANG_KEY = "\0null";
 
@@ -430,7 +459,8 @@ export function detectLang(filePath: string | null): LangDef {
   if (!filePath) {
     result = ext.md;
   } else {
-    const base = filePath.split(/[\\/]/).pop() || "";
+    const slash = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
+    const base = slash >= 0 ? filePath.slice(slash + 1) : filePath;
     if (FILENAME_MAP[base]) {
       result = FILENAME_MAP[base];
     } else {
@@ -452,77 +482,62 @@ export function detectLang(filePath: string | null): LangDef {
   return result;
 }
 
-// Cheap ext extractor — same path-split shared by isMarkdown / isJson /
-// isImageFile / etc. The original code did a separate `.split('.').pop()`
-// inside every helper; moving the work behind a tiny memo turns the per-call
-// cost into a Map lookup.
-const extCache = new Map<string, string>();
-function getExt(filePath: string | null): string {
-  if (!filePath) return "";
-  const hit = extCache.get(filePath);
-  if (hit !== undefined) return hit;
-  const e = filePath.split(".").pop()?.toLowerCase() ?? "";
-  extCache.set(filePath, e);
-  return e;
-}
-
+// Each predicate uses the shared `extOf` helper (one parse, no array alloc)
+// and a Set membership check (O(1)) instead of Array.prototype.includes
+// (O(N)). Same input → same output as the previous implementation; only
+// internal speed changes.
 export function isMarkdown(filePath: string | null): boolean {
   if (!filePath) return true;
-  const e = getExt(filePath);
+  const e = extOf(filePath);
   return e === "md" || e === "markdown" || e === "mdx";
 }
 
 export function isJson(filePath: string | null): boolean {
-  const e = getExt(filePath);
+  const e = extOf(filePath);
   return e === "json" || e === "jsonc" || e === "json5";
 }
 
 export function isImageFile(filePath: string | null): boolean {
-  const e = getExt(filePath);
-  if (!e) return false;
-  return IMAGE_EXTS.includes(e);
+  return IMAGE_EXTS_SET.has(extOf(filePath));
 }
 
 export function isPdfFile(filePath: string | null): boolean {
-  const e = getExt(filePath);
-  if (!e) return false;
-  return e === "pdf";
+  return extOf(filePath) === "pdf";
 }
 
 export function isAudioFile(filePath: string | null): boolean {
-  const e = getExt(filePath);
-  if (!e) return false;
-  return AUDIO_EXTS.includes(e);
+  return AUDIO_EXTS_SET.has(extOf(filePath));
 }
 
 export function isVideoFile(filePath: string | null): boolean {
-  const e = getExt(filePath);
-  if (!e) return false;
-  return VIDEO_EXTS.includes(e);
+  return VIDEO_EXTS_SET.has(extOf(filePath));
 }
 
 export function isHexFile(filePath: string | null): boolean {
-  const e = getExt(filePath);
-  if (!e) return false;
-  return HEX_EXTS.includes(e);
+  return HEX_EXTS_SET.has(extOf(filePath));
 }
 
 export function isXmindFile(filePath: string | null): boolean {
-  const e = getExt(filePath);
-  if (!e) return false;
-  return e === "xmind";
+  return extOf(filePath) === "xmind";
 }
 
 /** True for files we render via a base64 data URL rather than as text.
  *  Persistence treats these specially: we don't write base64 to localStorage,
- *  we re-read from disk on startup. */
+ *  we re-read from disk on startup.
+ *
+ *  Inlined: the original called 5 isX() functions, each re-running the
+ *  path-split + lowercase. Now we parse the extension once and check the
+ *  five Sets / fixed strings against it. Behavior identical. */
 export function isBinaryRenderable(filePath: string | null): boolean {
+  const e = extOf(filePath);
+  if (!e) return false;
   return (
-    isImageFile(filePath) ||
-    isPdfFile(filePath) ||
-    isAudioFile(filePath) ||
-    isVideoFile(filePath) ||
-    isHexFile(filePath) ||
-    isXmindFile(filePath)
+    IMAGE_EXTS_SET.has(e) ||
+    e === "pdf" ||
+    AUDIO_EXTS_SET.has(e) ||
+    VIDEO_EXTS_SET.has(e) ||
+    HEX_EXTS_SET.has(e) ||
+    e === "xmind"
   );
 }
+
