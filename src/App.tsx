@@ -394,6 +394,9 @@ export default function App() {
         )}
         <div className="flex flex-col flex-1 min-w-0">
           {!zenMode && <TabBar />}
+          {/* Markdown toolbar is lifted out of the editor pane so it spans the
+              full editor+preview row (still shown when preview is maximized). */}
+          {!isDiffTab && isMarkdown(filePath) && <MarkdownToolbar />}
           <div className="flex flex-1 min-h-0">
             {previewEnabled && previewMaximized ? (
               <div className="flex-1 min-w-0">
@@ -413,7 +416,6 @@ export default function App() {
                   style={{ width: previewEnabled ? `${editorPct}%` : "100%" }}
                   className="min-w-0 flex-1 flex flex-col"
                 >
-                  {!isDiffTab && isMarkdown(filePath) && <MarkdownToolbar />}
                   {!isDiffTab && isJson(filePath) && <JsonToolbar />}
                   {active?.externalChange != null && (
                     <ExternalChangeBanner tab={active} />
