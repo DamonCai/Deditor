@@ -56,11 +56,11 @@
     "@replit/codemirror-indentation-markers": "^6.5.3",
     "@replit/codemirror-minimap": "^0.5.2",
     "@tanstack/react-virtual": "^3.13.24",
-    "@tauri-apps/api": "^2.1.1",
-    "@tauri-apps/plugin-dialog": "^2.0.1",
+    "@tauri-apps/api": "^2.11.0",
+    "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-fs": "^2.0.3",
     "@tauri-apps/plugin-log": "^2.8.0",
-    "@tauri-apps/plugin-opener": "^2.2.1",
+    "@tauri-apps/plugin-opener": "^2.5.4",
     "@tauri-apps/plugin-store": "^2.1.0",
     "@types/diff": "^7.0.2",
     "@vscode/markdown-it-katex": "^1.1.2",
@@ -86,7 +86,7 @@
     "zustand": "^5.0.2"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.1.0",
+    "@tauri-apps/cli": "^2.11.2",
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^25.6.0",
     "@types/react": "^18.3.17",
