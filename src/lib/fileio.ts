@@ -103,9 +103,11 @@ export async function openFileByPath(path: string) {
 }
 
 export async function openMany(paths: string[]) {
-  for (const p of paths) {
-    await openFileByPath(p);
-  }
+  // Run all opens concurrently. Each call hits the Rust side independently;
+  // serializing them used to multiply latency by N when the user dropped a
+  // folder full of files onto the window. Promise.all preserves error
+  // isolation — one failed read won't kill the others.
+  await Promise.all(paths.map((p) => openFileByPath(p)));
 }
 
 /** Pop the reopen stack (Cmd+Shift+T) and bring the most recently closed

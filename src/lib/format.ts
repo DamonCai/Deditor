@@ -3,8 +3,18 @@
  *  text, or `null` if the extension isn't supported / formatting failed (caller
  *  falls back to writing the original buffer). */
 
-import { format as prettierFormat } from "prettier/standalone";
 import type { Plugin } from "prettier";
+
+// prettier/standalone is ~86 KB minified — only needed when the user actually
+// hits "Format". Lazy-load on first use so the cold-start bundle doesn't
+// include it. Cache the promise so subsequent format calls don't re-fetch.
+let prettierStandaloneLoader: Promise<typeof import("prettier/standalone")> | null = null;
+function loadPrettierStandalone() {
+  if (!prettierStandaloneLoader) {
+    prettierStandaloneLoader = import("prettier/standalone");
+  }
+  return prettierStandaloneLoader;
+}
 
 type PluginLoader = () => Promise<Plugin[]>;
 
@@ -110,7 +120,10 @@ export async function formatBuffer(
   const cfg = EXT_MAP[ext];
   if (!cfg) return null;
   try {
-    const plugins = await cfg.plugins();
+    const [plugins, { format: prettierFormat }] = await Promise.all([
+      cfg.plugins(),
+      loadPrettierStandalone(),
+    ]);
     const out = await prettierFormat(text, {
       parser: cfg.parser,
       plugins,

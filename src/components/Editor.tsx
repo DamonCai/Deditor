@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { EditorState, EditorSelection, Compartment } from "@codemirror/state";
 import {
   EditorView,
@@ -34,7 +34,10 @@ import { islandLight } from "../lib/islandLightTheme";
 import { detectLang, isMarkdown, isImageFile, isPdfFile, isAudioFile, isVideoFile, isHexFile, isXmindFile } from "../lib/lang";
 import { useEditorStore, type DiffSpec } from "../store/editor";
 import DiffView from "./DiffView";
-import XmindView from "./XmindView";
+// XmindView pulls mind-elixir (~113 KB) + its CSS, plus the xmind parsers.
+// Only mounted when a .xmind file is open — lazy-load so non-XMind users
+// never pay for it on cold start.
+const XmindView = lazy(() => import("./XmindView"));
 import { isEnabled } from "../lib/shortcuts";
 import {
   bookmarkExtension,
@@ -44,7 +47,11 @@ import {
   clearBookmarks,
 } from "../lib/bookmarks";
 import { saveImage } from "../lib/fileio";
-import { exportHtml, exportPdf } from "../lib/export";
+// HTML / PDF export pulls markdown-it + Shiki. Loading lazily — only the
+// "Export HTML" / "Export PDF" right-click menu items use them — keeps
+// Shiki (~150 KB) out of the eager Editor module path.
+const exportHtml = () => import("../lib/export").then((m) => m.exportHtml());
+const exportPdf = () => import("../lib/export").then((m) => m.exportPdf());
 import { codeBlockCompletion } from "../lib/codeBlockComplete";
 import { logError, logInfo } from "../lib/logger";
 import { setActiveView } from "../lib/editorBridge";
@@ -183,7 +190,11 @@ export default function Editor({
   }
   // XMind workbook — read-only viewer (and mind-elixir-backed editor).
   if (isXmindFile(filePath) && value.startsWith("data:")) {
-    return <XmindView dataUrl={value} filePath={filePath} tabId={tabId} />;
+    return (
+      <Suspense fallback={<div style={{ padding: 16, color: "var(--text-soft)" }}>Loading…</div>}>
+        <XmindView dataUrl={value} filePath={filePath} tabId={tabId} />
+      </Suspense>
+    );
   }
   // Binary files we don't have a preview for (Office docs, archives, executables,
   // etc.) — render a hex dump so the user at least sees the raw bytes instead
@@ -605,8 +616,8 @@ export default function Editor({
     ];
     if (isMarkdown(filePath)) {
       items.push({ divider: true });
-      items.push({ label: t("titlebar.exportHtml"), onClick: () => exportHtml() });
-      items.push({ label: t("titlebar.exportPdf"), onClick: () => exportPdf() });
+      items.push({ label: t("titlebar.exportHtml"), onClick: () => void exportHtml() });
+      items.push({ label: t("titlebar.exportPdf"), onClick: () => void exportPdf() });
     }
     return items;
   };

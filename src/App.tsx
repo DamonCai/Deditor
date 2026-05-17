@@ -1,18 +1,25 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import EditorHost from "./components/EditorHost";
 import EditorSlot from "./components/EditorSlot";
-import Preview from "./components/Preview";
+// Preview drags in markdown-it + the Shiki engine + every hydrator
+// (mermaid, plantuml, local-image rewriting). None of that is needed until
+// the user actually opens a .md file with the preview pane on. Loading
+// lazily cuts ~350 KB off the cold-start bundle.
+const Preview = lazy(() => import("./components/Preview"));
 import TitleBar from "./components/TitleBar";
 import StatusBar from "./components/StatusBar";
 import FileTree from "./components/FileTree";
 import ConfirmDialog from "./components/ConfirmDialog";
 import PromptDialog from "./components/PromptDialog";
 import TabBar from "./components/TabBar";
-import MarkdownToolbar from "./components/MarkdownToolbar";
-import JsonToolbar from "./components/JsonToolbar";
+// Toolbars only mount for their respective file types. Lazy-load to keep
+// JSON5 (~45 KB) and the markdown helpers out of the cold-start bundle for
+// users who aren't editing those file types yet.
+const MarkdownToolbar = lazy(() => import("./components/MarkdownToolbar"));
+const JsonToolbar = lazy(() => import("./components/JsonToolbar"));
 import GotoAnything from "./components/GotoAnything";
 import GotoSymbol from "./components/GotoSymbol";
 import FindInFiles from "./components/FindInFiles";
@@ -404,17 +411,23 @@ export default function App() {
           {!zenMode && <TabBar />}
           {/* Markdown toolbar is lifted out of the editor pane so it spans the
               full editor+preview row (still shown when preview is maximized). */}
-          {!isDiffTab && isMarkdown(filePath) && <MarkdownToolbar />}
+          {!isDiffTab && isMarkdown(filePath) && (
+            <Suspense fallback={null}>
+              <MarkdownToolbar />
+            </Suspense>
+          )}
           <div className="flex flex-1 min-h-0">
             {previewEnabled && previewMaximized ? (
               <div className="flex-1 min-w-0">
-                <Preview
-                  theme={theme}
-                  scrollLine={
-                    scrollSync?.from === "editor" ? scrollSync.line : undefined
-                  }
-                  onScroll={(line) => setScrollSync({ line, from: "preview" })}
-                />
+                <Suspense fallback={null}>
+                  <Preview
+                    theme={theme}
+                    scrollLine={
+                      scrollSync?.from === "editor" ? scrollSync.line : undefined
+                    }
+                    onScroll={(line) => setScrollSync({ line, from: "preview" })}
+                  />
+                </Suspense>
               </div>
             ) : (
               <>
@@ -422,7 +435,11 @@ export default function App() {
                   style={{ width: previewEnabled ? `${editorPct}%` : "100%" }}
                   className="min-w-0 flex-1 flex flex-col"
                 >
-                  {!isDiffTab && isJson(filePath) && <JsonToolbar />}
+                  {!isDiffTab && isJson(filePath) && (
+                    <Suspense fallback={null}>
+                      <JsonToolbar />
+                    </Suspense>
+                  )}
                   {activeMeta?.hasExternalChange && (
                     <ExternalChangeBanner tabId={activeMeta.id} />
                   )}
@@ -476,15 +493,17 @@ export default function App() {
                       style={{ width: `${previewPct}%` }}
                       className="min-w-0"
                     >
-                      <Preview
-                        theme={theme}
-                        scrollLine={
-                          scrollSync?.from === "editor" ? scrollSync.line : undefined
-                        }
-                        onScroll={(line) =>
-                          setScrollSync({ line, from: "preview" })
-                        }
-                      />
+                      <Suspense fallback={null}>
+                        <Preview
+                          theme={theme}
+                          scrollLine={
+                            scrollSync?.from === "editor" ? scrollSync.line : undefined
+                          }
+                          onScroll={(line) =>
+                            setScrollSync({ line, from: "preview" })
+                          }
+                        />
+                      </Suspense>
                     </div>
                   </>
                 )}

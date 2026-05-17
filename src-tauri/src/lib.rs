@@ -458,28 +458,37 @@ fn find_in_files(
     query: String,
     case_sensitive: bool,
 ) -> Result<SearchResult, String> {
+    use rayon::prelude::*;
+
     if query.is_empty() {
         return Ok(SearchResult { hits: vec![], truncated: false, files_scanned: 0 });
     }
     let needle = if case_sensitive { query.clone() } else { query.to_lowercase() };
     let needle_bytes = needle.as_bytes();
-    let mut hits: Vec<SearchHit> = Vec::new();
-    let mut files_scanned = 0usize;
-    let mut truncated = false;
 
-    'outer: for root_str in &roots {
+    // PHASE 1: walk every workspace tree, collecting candidate file paths.
+    // This is fs metadata only — very cheap, kept single-threaded so we can
+    // honor the SEARCH_FILES_CAP early-out cleanly. (A parallel walk would
+    // race on the counter and produce non-deterministic truncation.)
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    let mut walk_truncated = false;
+    'walk: for root_str in &roots {
         let root = expand(root_str);
         let mut stack: Vec<PathBuf> = vec![root.clone()];
         while let Some(dir) = stack.pop() {
-            if hits.len() >= SEARCH_HITS_CAP || files_scanned >= SEARCH_FILES_CAP {
-                truncated = true;
-                break 'outer;
+            if candidates.len() >= SEARCH_FILES_CAP {
+                walk_truncated = true;
+                break 'walk;
             }
             let read = match fs::read_dir(&dir) {
                 Ok(r) => r,
                 Err(_) => continue,
             };
             for entry in read.flatten() {
+                if candidates.len() >= SEARCH_FILES_CAP {
+                    walk_truncated = true;
+                    break 'walk;
+                }
                 let name = entry.file_name().to_string_lossy().to_string();
                 let ft = match entry.file_type() {
                     Ok(t) => t,
@@ -498,56 +507,77 @@ fn find_in_files(
                 {
                     continue;
                 }
-                let path = entry.path();
-                let meta = match path.metadata() {
-                    Ok(m) => m,
-                    Err(_) => continue,
+                candidates.push(entry.path());
+            }
+        }
+    }
+
+    // PHASE 2: scan each candidate in parallel across rayon's thread pool.
+    // The per-file work (read + UTF-8 validate + per-line substring search)
+    // dominates the wall-clock; running it concurrently across N cores is
+    // a near-linear speedup until disk IO saturates. Each thread emits its
+    // own Vec<SearchHit>; we flatten + truncate at the end.
+    let files_scanned = std::sync::atomic::AtomicUsize::new(0);
+    let per_file_hits: Vec<Vec<SearchHit>> = candidates
+        .par_iter()
+        .map(|path| {
+            let meta = match path.metadata() {
+                Ok(m) => m,
+                Err(_) => return Vec::new(),
+            };
+            if meta.len() > SEARCH_FILE_BYTES_CAP { return Vec::new(); }
+            let bytes = match fs::read(path) {
+                Ok(b) => b,
+                Err(_) => return Vec::new(),
+            };
+            // Skip binary: any NUL in the first 8 KB.
+            let probe_end = bytes.len().min(8192);
+            if bytes[..probe_end].iter().any(|&b| b == 0) {
+                return Vec::new();
+            }
+            let text = match std::str::from_utf8(&bytes) {
+                Ok(s) => s,
+                Err(_) => return Vec::new(),
+            };
+            files_scanned.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let path_str = path.to_string_lossy().to_string();
+            let mut local: Vec<SearchHit> = Vec::new();
+            for (lineno, line) in text.lines().enumerate() {
+                let found = if case_sensitive {
+                    find_subseq(line.as_bytes(), needle_bytes)
+                } else {
+                    // Lowercasing each line allocates, but only on lines that
+                    // need scanning; most lines never trigger it. We could
+                    // avoid the alloc with an ASCII-only fast path — leave that
+                    // for a future PR if the profiler points here.
+                    let lower = line.to_lowercase();
+                    find_subseq(lower.as_bytes(), needle_bytes)
                 };
-                if meta.len() > SEARCH_FILE_BYTES_CAP { continue; }
-                let bytes = match fs::read(&path) {
-                    Ok(b) => b,
-                    Err(_) => continue,
-                };
-                // Skip binary: any NUL in the first 8 KB.
-                let probe_end = bytes.len().min(8192);
-                if bytes[..probe_end].iter().any(|&b| b == 0) {
-                    continue;
-                }
-                let text = match std::str::from_utf8(&bytes) {
-                    Ok(s) => s,
-                    Err(_) => continue,
-                };
-                files_scanned += 1;
-                let path_str = path.to_string_lossy().to_string();
-                for (lineno, line) in text.lines().enumerate() {
-                    if hits.len() >= SEARCH_HITS_CAP {
-                        truncated = true;
-                        break 'outer;
-                    }
-                    let hay = if case_sensitive { line.as_bytes() } else {
-                        // need to lowercase the line; allocate per match to avoid
-                        // mutating shared state. Most files have very few hits.
-                        let lower = line.to_lowercase();
-                        if let Some(col) = find_subseq(lower.as_bytes(), needle_bytes) {
-                            hits.push(SearchHit {
-                                path: path_str.clone(),
-                                line: (lineno + 1) as u32,
-                                col: (col + 1) as u32,
-                                text: line.to_string(),
-                            });
-                        }
-                        continue;
-                    };
-                    if let Some(col) = find_subseq(hay, needle_bytes) {
-                        hits.push(SearchHit {
-                            path: path_str.clone(),
-                            line: (lineno + 1) as u32,
-                            col: (col + 1) as u32,
-                            text: line.to_string(),
-                        });
-                    }
+                if let Some(col) = found {
+                    local.push(SearchHit {
+                        path: path_str.clone(),
+                        line: (lineno + 1) as u32,
+                        col: (col + 1) as u32,
+                        text: line.to_string(),
+                    });
                 }
             }
+            local
+        })
+        .collect();
+
+    // PHASE 3: flatten + truncate. Order is preserved (par_iter preserves
+    // input order in the collected result), so hits within a file stay
+    // grouped and files come back in walk order.
+    let mut hits: Vec<SearchHit> = Vec::new();
+    let mut truncated = walk_truncated;
+    'collect: for batch in per_file_hits {
+        for h in batch {
+            if hits.len() >= SEARCH_HITS_CAP {
+                truncated = true;
+                break 'collect;
+            }
+            hits.push(h);
         }
     }
 
@@ -555,10 +585,14 @@ fn find_in_files(
         "find_in_files: \"{}\" → {} hits in {} files{}",
         query,
         hits.len(),
-        files_scanned,
+        files_scanned.load(std::sync::atomic::Ordering::Relaxed),
         if truncated { " (truncated)" } else { "" }
     );
-    Ok(SearchResult { hits, truncated, files_scanned })
+    Ok(SearchResult {
+        hits,
+        truncated,
+        files_scanned: files_scanned.load(std::sync::atomic::Ordering::Relaxed),
+    })
 }
 
 fn find_subseq(hay: &[u8], needle: &[u8]) -> Option<usize> {
@@ -592,32 +626,44 @@ fn replace_in_files(
     replacement: String,
     case_sensitive: bool,
 ) -> Result<ReplaceResult, String> {
+    use rayon::prelude::*;
     if query.is_empty() {
         return Ok(ReplaceResult { total: 0, files_changed: 0 });
     }
+    // Per-file work: read → match → write. Each file is independent (no
+    // shared mutable state), so we can fan out across rayon's thread pool.
+    // The previous sequential loop was the bottleneck on Replace All
+    // across a hundred-file match set (typical "rename a function across
+    // a workspace" flow).
+    let results: Vec<Result<(u32, bool), String>> = paths
+        .par_iter()
+        .map(|path_str| -> Result<(u32, bool), String> {
+            let path = expand(path_str);
+            let bytes = fs::read(&path)
+                .map_err(|e| format!("read {}: {}", path.display(), e))?;
+            let probe_end = bytes.len().min(8192);
+            if bytes[..probe_end].iter().any(|&b| b == 0) {
+                return Ok((0, false));
+            }
+            let text = match std::str::from_utf8(&bytes) {
+                Ok(s) => s,
+                Err(_) => return Ok((0, false)),
+            };
+            let (next, count) = substring_replace_all(text, &query, &replacement, case_sensitive);
+            if count == 0 {
+                return Ok((0, false));
+            }
+            fs::write(&path, &next)
+                .map_err(|e| format!("write {}: {}", path.display(), e))?;
+            Ok((count, true))
+        })
+        .collect();
     let mut total: u32 = 0;
     let mut files_changed: u32 = 0;
-    for path_str in &paths {
-        let path = expand(path_str);
-        let bytes = match fs::read(&path) {
-            Ok(b) => b,
-            Err(e) => return Err(format!("read {}: {}", path.display(), e)),
-        };
-        let probe_end = bytes.len().min(8192);
-        if bytes[..probe_end].iter().any(|&b| b == 0) {
-            continue;
-        }
-        let text = match std::str::from_utf8(&bytes) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-        let (next, count) = substring_replace_all(text, &query, &replacement, case_sensitive);
-        if count == 0 {
-            continue;
-        }
-        fs::write(&path, &next).map_err(|e| format!("write {}: {}", path.display(), e))?;
+    for r in results {
+        let (count, changed) = r?;
         total = total.saturating_add(count);
-        files_changed = files_changed.saturating_add(1);
+        if changed { files_changed = files_changed.saturating_add(1); }
     }
     log::info!(
         "replace_in_files: \"{}\" → \"{}\" — {} replacements across {} file(s)",
@@ -1369,6 +1415,27 @@ mod ipc_bench {
             "[file_mtimes 1000 paths]  runs={:?} ms  ← 3s-poll cost when 1000 tabs open",
             times
         );
+    }
+
+    #[test]
+    fn replace_in_files_500_files() {
+        // 500 files of ~5 KB each, all containing 3 occurrences of "needle".
+        let s = Scratch::new("replace_500");
+        let body = "padding\nthe needle is here\nmore padding\nneedle again\nfinal needle\n".repeat(40);
+        let mut paths = Vec::new();
+        for i in 0..500 {
+            let p = s.0.join(format!("r_{:04}.txt", i));
+            fs::write(&p, &body).unwrap();
+            paths.push(p.to_string_lossy().to_string());
+        }
+        let t = Instant::now();
+        let r = replace_in_files(paths, "needle".into(), "haystack".into(), true).unwrap();
+        let dt = t.elapsed().as_secs_f64() * 1000.0;
+        println!(
+            "[replace_in_files 500 files × ~5KB]  total={} changed={} in {:.1} ms  ← Find & Replace All",
+            r.total, r.files_changed, dt
+        );
+        assert!(r.files_changed > 0);
     }
 
     #[test]

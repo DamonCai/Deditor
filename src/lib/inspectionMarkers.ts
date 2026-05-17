@@ -38,7 +38,15 @@ class InspectionStrip implements PluginValue {
   }
 
   update(u: ViewUpdate) {
-    if (u.docChanged || u.selectionSet || u.transactions.length) {
+    // Only refresh when the bookmark field actually changed. The previous
+    // condition (`u.transactions.length`) was true for EVERY update — pure
+    // cursor moves and viewport scrolls also re-walked bookmarks and
+    // rebuilt the strip. Comparing the StateField's identity is O(1) and
+    // skips the work whenever nothing the strip cares about has moved.
+    if (
+      u.startState.field(bookmarkField, false) !==
+      u.state.field(bookmarkField, false)
+    ) {
       this.refresh();
     }
   }

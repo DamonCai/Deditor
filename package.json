@@ -21,8 +21,10 @@
     "perf:react": "npx tsx scripts/perf-react.tsx",
     "perf:soak": "npx tsx --expose-gc scripts/perf-soak.tsx",
     "perf:libs": "npx tsx scripts/perf-libs.ts",
+    "perf:startup": "npx tsx scripts/perf-startup.ts",
+    "perf:dom": "npx tsx scripts/perf-dom.ts",
     "perf:rust": "cargo test --release --manifest-path src-tauri/Cargo.toml ipc_bench -- --nocapture --test-threads=1",
-    "perf:all": "npm run perf:store && npm run perf:react && npm run perf:soak && npm run perf:libs && npm run perf:rust"
+    "perf:all": "npm run perf:store && npm run perf:react && npm run perf:soak && npm run perf:libs && npm run perf:startup && npm run perf:dom && npm run perf:rust"
   },
   "dependencies": {
     "@codemirror/commands": "^6.7.1",
@@ -85,6 +87,7 @@
     "autoprefixer": "^10.4.20",
     "jsdom": "^25.0.1",
     "postcss": "^8.5.0",
+    "rollup-plugin-visualizer": "^5.14.0",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.2",
     "vite": "^6.0.5"
