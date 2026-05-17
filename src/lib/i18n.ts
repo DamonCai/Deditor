@@ -611,6 +611,9 @@ const ZH: Record<string, string> = {
   "md.smaller": "字号小一点",
   "md.bigger": "字号大一点",
   "md.linkDefaultText": "链接",
+  "md.viewEdit": "编辑",
+  "md.viewSplit": "实时预览",
+  "md.viewPreview": "阅读",
 
   // preview
   "preview.maximize": "放大预览（隐藏编辑器）",
@@ -1247,6 +1250,9 @@ const EN: Record<string, string> = {
   "md.smaller": "Smaller font",
   "md.bigger": "Larger font",
   "md.linkDefaultText": "link",
+  "md.viewEdit": "Edit",
+  "md.viewSplit": "Live Preview",
+  "md.viewPreview": "Reading",
 
   // preview
   "preview.maximize": "Maximize preview (hide editor)",

@@ -812,12 +812,7 @@ export default function Editor({
       }
     }
     if (isMarkdown(filePath)) {
-      const { showPreview, togglePreview } = useEditorStore.getState();
       items.push({ divider: true });
-      items.push({
-        label: showPreview ? t("tabbar.hidePreview") : t("tabbar.showPreview"),
-        onClick: () => togglePreview(),
-      });
       items.push({ label: t("titlebar.exportHtml"), onClick: () => void exportHtml() });
       items.push({ label: t("titlebar.exportPdf"), onClick: () => void exportPdf() });
     }

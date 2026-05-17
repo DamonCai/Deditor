@@ -1,14 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { FiMaximize2, FiMinimize2 } from "react-icons/fi";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { renderMarkdown, renderCode } from "../lib/markdown";
 import { hydratePlantuml } from "../lib/plantumlHydrate";
 import { hydrateMermaid } from "../lib/mermaidHydrate";
 import { hydrateLocalImages } from "../lib/localImgHydrate";
 import { isMarkdown } from "../lib/lang";
-import { useEditorStore } from "../store/editor";
-import { useT } from "../lib/i18n";
-import { Button } from "./ui/Button";
 import { logError } from "../lib/logger";
 import { openFileByPath } from "../lib/fileio";
 import {
@@ -30,14 +26,9 @@ interface Props {
 }
 
 export default function Preview({ source, filePath, theme, scrollLine, onScroll }: Props) {
-  const t = useT();
   const [html, setHtml] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
   const isMd = isMarkdown(filePath);
-  const previewMaximized = useEditorStore((s) => s.previewMaximized);
-  const togglePreviewMaximized = useEditorStore(
-    (s) => s.togglePreviewMaximized,
-  );
   // Suppress outgoing scroll events for this many ms after a programmatic scroll
   // (set when applying incoming scrollLine from editor).
   const suppressOutgoingUntil = useRef(0);
@@ -188,30 +179,6 @@ export default function Preview({ source, filePath, theme, scrollLine, onScroll 
 
   return (
     <div className="flex flex-col h-full">
-      {isMd && (
-        <div
-          className="flex items-center justify-end px-2 select-none"
-          style={{
-            height: 32,
-            background: "var(--bg-soft)",
-            borderBottom: "1px solid var(--border)",
-            flexShrink: 0,
-          }}
-        >
-          <Button
-            variant="ghost"
-            size="icon"
-            pressed={previewMaximized}
-            onClick={togglePreviewMaximized}
-            title={previewMaximized ? t("preview.restore") : t("preview.maximize")}
-            style={{
-              color: previewMaximized ? "var(--accent)" : "var(--text)",
-            }}
-          >
-            {previewMaximized ? <FiMinimize2 size={13} /> : <FiMaximize2 size={13} />}
-          </Button>
-        </div>
-      )}
       <div
         ref={containerRef}
         className="preview"
