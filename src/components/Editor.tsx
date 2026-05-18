@@ -112,6 +112,12 @@ interface Props {
   /** Active tab id. Used to look up / save the per-tab CodeMirror state JSON
    *  so undo/redo history survives switching to another tab and back. */
   tabId?: string;
+  /** True when this is the visible Editor inside its host (EditorHost keeps
+   *  many Editors mounted; only one is active at a time). The active Editor
+   *  registers itself with editorBridge so toolbar buttons + undo target the
+   *  correct view. Without this flag, the last-mounted Editor would win
+   *  forever — buttons would silently mutate a hidden tab. */
+  active?: boolean;
   /** When true, skip the per-tab state cache entirely. Used by the secondary
    *  Editor in split-view so it doesn't collide with the primary on cache
    *  reads/writes. Trade-off: secondary view's undo doesn't carry across
@@ -145,6 +151,7 @@ export default function Editor({
   theme,
   fontSize,
   tabId,
+  active,
   noStateCache,
   diff,
   initialCursor,
@@ -491,6 +498,20 @@ export default function Editor({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Toolbar / undo target. EditorHost mounts every visited tab's Editor and
+  // toggles `display` on the wrappers; `setActiveView` from the mount effect
+  // above alone would freeze on whichever Editor mounted LAST (always the
+  // hidden one after a tab switch). Re-register on every active flip so the
+  // visible Editor wins. Skipped for the split-view secondary (active is
+  // undefined there) so the primary tab keeps owning the toolbar even when
+  // the user's focus is on the split clone.
+  useEffect(() => {
+    if (!active) return;
+    const view = viewRef.current;
+    if (!view) return;
+    setActiveView(view);
+  }, [active]);
 
   // Apply external scroll requests (e.g. from preview).
   useEffect(() => {

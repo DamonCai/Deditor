@@ -79,6 +79,7 @@ const EditorHost = memo(function EditorHost({
           >
             <EditorSlot
               tabId={id}
+              active={visible}
               theme={theme}
               fontSize={fontSize}
               // initial cursor / scroll line only meaningful on first mount,
