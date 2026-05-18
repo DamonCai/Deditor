@@ -5,6 +5,13 @@ import { useEditorStore } from "../store/editor";
 
 interface Props {
   tabId: string;
+  /** True for the slot currently visible inside EditorHost. EditorHost keeps
+   *  every visited tab's Editor mounted (display: none for inactive ones);
+   *  without this flag, the most-recently-mounted Editor would forever own
+   *  the toolbar / undo target via editorBridge.setActiveView, even after
+   *  the user switched tabs. Editor re-registers itself as the active view
+   *  whenever this flips true. */
+  active?: boolean;
   theme: "light" | "dark";
   fontSize: number;
   /** When true, skip the per-tab CodeMirror state cache (split-view secondary). */
@@ -22,6 +29,7 @@ interface Props {
  *  *its* tab's slice actually changes. */
 const EditorSlot = memo(function EditorSlot({
   tabId,
+  active,
   theme,
   fontSize,
   noStateCache,
@@ -44,6 +52,7 @@ const EditorSlot = memo(function EditorSlot({
   return (
     <Editor
       tabId={tabId}
+      active={active}
       value={tab.content}
       filePath={tab.filePath}
       diff={tab.diff}
