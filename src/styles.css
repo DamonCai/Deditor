@@ -107,10 +107,12 @@ body,
   -webkit-font-smoothing: antialiased;
 }
 .preview > * {
-  /* Center inner content as a narrow reading column; outer pane can be any width. */
+  /* Left-aligned reading column — content keeps a comfortable line length
+     (860px cap) but every block (paragraph, heading, table) shares the same
+     left edge for a clean visual baseline. */
   max-width: 860px;
-  margin-left: auto;
-  margin-right: auto;
+  margin-left: 0;
+  margin-right: 0;
 }
 .preview h1,
 .preview h2,
@@ -119,7 +121,7 @@ body,
 .preview h5,
 .preview h6 {
   font-weight: 700;
-  margin: 1.6em auto 0.8em;
+  margin: 1.6em 0 0.8em;
   line-height: 1.3;
 }
 .preview h1 {
@@ -146,7 +148,7 @@ body,
   color: var(--text-soft);
 }
 .preview p {
-  margin: 0 auto 16px;
+  margin: 0 0 16px;
 }
 .preview a {
   color: var(--accent);
@@ -168,7 +170,7 @@ body,
   color: #ff7a8c;
 }
 .preview pre {
-  margin: 16px auto;
+  margin: 16px 0;
   padding: 0;
   border-radius: 6px;
   overflow: auto;
@@ -193,7 +195,7 @@ body,
 }
 /* Blockquote: Typora style — no background, gray text, thin left rule. */
 .preview blockquote {
-  margin: 16px auto;
+  margin: 16px 0;
   padding: 0 1em;
   color: var(--text-soft);
   border-left: 4px solid var(--border);
@@ -208,7 +210,7 @@ body,
 .preview ul,
 .preview ol {
   padding-left: 2em;
-  margin: 0 auto 16px;
+  margin: 0 0 16px;
 }
 .preview ul {
   list-style: disc outside;
@@ -241,10 +243,12 @@ body,
   list-style: none;
   margin-left: -1.4em;
 }
-/* Table: GitHub/Typora style — full border, zebra rows. */
+/* Table: GitHub/Typora style — full border, zebra rows. Left-aligned with
+   the rest of the reading column; if the table is wider than the preview pane
+   it gets its own horizontal scrollbar instead of pushing the pane wider. */
 .preview table {
   border-collapse: collapse;
-  margin: 16px auto;
+  margin: 16px 0;
   display: block;
   width: fit-content;
   max-width: 100%;
@@ -265,20 +269,20 @@ body,
 .preview hr {
   border: none;
   border-top: 1px solid var(--border);
-  margin: 24px auto;
+  margin: 24px 0;
   height: 0;
 }
 .preview img {
   max-width: 100%;
   display: block;
-  margin: 16px auto;
+  margin: 16px 0;
 }
 
 /* PlantUML diagram */
 .preview .plantuml-diagram {
   display: flex;
-  justify-content: center;
-  margin: 1.2em auto;
+  justify-content: flex-start;
+  margin: 1.2em 0;
   padding: 12px;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -324,8 +328,8 @@ body,
 /* Mermaid diagram */
 .preview .mermaid-diagram {
   display: flex;
-  justify-content: center;
-  margin: 1.2em auto;
+  justify-content: flex-start;
+  margin: 1.2em 0;
   padding: 12px;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -365,6 +369,125 @@ body,
   overflow-x: auto;
   border-radius: 4px;
   margin: 0;
+}
+
+/* Reading-mode (previewMaximized) full-width layout — drop the 860px reading
+   column cap and let blocks fill the pane edge-to-edge. Higher specificity
+   ([class][class]) so it wins over .preview > * and per-element overrides. */
+.preview.preview-fullwidth > *,
+.preview.preview-fullwidth h1,
+.preview.preview-fullwidth h2,
+.preview.preview-fullwidth h3,
+.preview.preview-fullwidth h4,
+.preview.preview-fullwidth h5,
+.preview.preview-fullwidth h6,
+.preview.preview-fullwidth p,
+.preview.preview-fullwidth ul,
+.preview.preview-fullwidth ol,
+.preview.preview-fullwidth pre,
+.preview.preview-fullwidth blockquote,
+.preview.preview-fullwidth table {
+  max-width: none;
+}
+
+/* Reading-mode chrome: the host wraps Preview + right-side TOC in a flex row
+   so they share vertical space and the TOC can collapse cleanly. */
+.preview-reading-host {
+  display: flex;
+  flex-direction: row;
+  height: 100%;
+  min-width: 0;
+  position: relative;
+}
+.preview-toc {
+  width: 240px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--border);
+  background: var(--bg-soft);
+  overflow-y: auto;
+  padding: 16px 12px 24px;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial,
+    sans-serif;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+.preview-toc-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-soft);
+  margin: 0 0 10px;
+  padding-left: 6px;
+}
+.preview-toc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.preview-toc-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 4px 6px;
+  margin: 1px 0;
+  border-radius: 4px;
+  color: var(--text-soft);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.preview-toc-item:hover {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  color: var(--text);
+}
+.preview-toc-item.active {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.preview-toc-item[data-lvl="1"] { padding-left: 6px; }
+.preview-toc-item[data-lvl="2"] { padding-left: 18px; }
+.preview-toc-item[data-lvl="3"] { padding-left: 30px; }
+.preview-toc-item[data-lvl="4"] { padding-left: 42px; font-size: 12px; }
+.preview-toc-item[data-lvl="5"] { padding-left: 54px; font-size: 12px; }
+.preview-toc-item[data-lvl="6"] { padding-left: 66px; font-size: 12px; }
+.preview-toc-empty {
+  color: var(--text-soft);
+  font-size: 12px;
+  padding: 6px;
+}
+.preview-toc-toggle {
+  position: absolute;
+  top: 10px;
+  /* Clear of the preview pane's vertical scrollbar (system scrollbars are
+     typically 12–15px wide when shown as classic / always-visible). Without
+     this padding the button sits directly on top of the scrollbar thumb. */
+  right: 22px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-soft);
+  border-radius: 6px;
+  cursor: pointer;
+  z-index: 5;
+  padding: 0;
+  line-height: 1;
+}
+.preview-toc-toggle:hover {
+  background: var(--bg-soft);
+  color: var(--text);
 }
 
 /* Bookmarked lines */

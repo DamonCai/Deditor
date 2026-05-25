@@ -247,6 +247,10 @@ const ZH: Record<string, string> = {
   // preview
   "preview.maximize": "放大预览（隐藏编辑器）",
   "preview.restore": "还原（恢复编辑器）",
+  "preview.toc": "目录",
+  "preview.tocEmpty": "无标题",
+  "preview.tocHide": "隐藏目录",
+  "preview.tocShow": "显示目录",
 
   // confirm dialog
   "confirm.unsavedTitle": "未保存修改",
@@ -527,6 +531,10 @@ const EN: Record<string, string> = {
   // preview
   "preview.maximize": "Maximize preview (hide editor)",
   "preview.restore": "Restore (show editor)",
+  "preview.toc": "Outline",
+  "preview.tocEmpty": "No headings",
+  "preview.tocHide": "Hide outline",
+  "preview.tocShow": "Show outline",
 
   // confirm dialog
   "confirm.unsavedTitle": "Unsaved Changes",

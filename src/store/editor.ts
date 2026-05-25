@@ -61,6 +61,9 @@ interface EditorState {
   showPreview: boolean;
   showSidebar: boolean;
   previewMaximized: boolean;
+  /** Visibility of the right-side TOC in markdown reading (preview-maximized)
+   *  mode. Has no effect outside reading mode. Persisted. */
+  tocVisible: boolean;
   editorFontSize: number;
   /** Path of the file the user marked via "Select for Compare" in the file
    *  tree. Right-clicking another file then offers "Compare with Selected". */
@@ -179,6 +182,8 @@ interface EditorState {
   togglePreviewMaximized: () => void;
   toggleSidebar: () => void;
   setShowSidebar: (v: boolean) => void;
+  toggleTocVisible: () => void;
+  setTocVisible: (v: boolean) => void;
   setEditorFontSize: (px: number) => void;
   isActiveDirty: () => boolean;
 }
@@ -364,6 +369,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   showPreview: true,
   showSidebar: true,
   previewMaximized: false,
+  tocVisible: true,
   editorFontSize: 14,
   compareMarkPath: null,
   activeSelectionLength: 0,
@@ -688,6 +694,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   toggleSidebar: () => set({ showSidebar: !get().showSidebar }),
   setShowSidebar: (v) => set({ showSidebar: v }),
+  toggleTocVisible: () => set({ tocVisible: !get().tocVisible }),
+  setTocVisible: (v) => set({ tocVisible: v }),
   setEditorFontSize: (px) =>
     set({ editorFontSize: Math.max(10, Math.min(28, Math.round(px))) }),
   isActiveDirty: () => {

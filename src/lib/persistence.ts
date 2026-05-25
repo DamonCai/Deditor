@@ -39,6 +39,8 @@ interface PersistedV3 {
   previewPct: number;
   editorFontSize?: number;
   previewMaximized?: boolean;
+  /** Right-side TOC visibility in markdown reading mode. Default true. */
+  tocVisible?: boolean;
   language?: Lang;
   /** Per-shortcut enable map. Optional so older snapshots keep loading. */
   shortcuts?: Record<string, boolean>;
@@ -269,6 +271,7 @@ export async function loadPersisted(): Promise<UiExtras | null> {
     showPreview: data.showPreview,
     showSidebar: data.showSidebar,
     previewMaximized: data.previewMaximized ?? false,
+    tocVisible: data.tocVisible ?? true,
   });
 
   if (data.shortcuts && typeof data.shortcuts === "object") {
@@ -369,6 +372,7 @@ function doSave(extras: UiExtras): void {
     previewPct: extras.previewPct,
     editorFontSize: s.editorFontSize,
     previewMaximized: s.previewMaximized,
+    tocVisible: s.tocVisible,
     language: s.language,
     shortcuts: s.shortcuts,
     expandedDirs: s.expandedDirs,

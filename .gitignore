@@ -145,3 +145,4 @@ $RECYCLE.BIN/
 .history/
 
 /package-lock.json
+/DEditor*.dmg

@@ -448,22 +448,42 @@ export default function Editor({
     }
 
     // Direct scroll-event listener for smooth, every-frame outgoing sync.
+    // Emits a *fractional* source line (e.g. 42.37) so Preview can interpolate
+    // between adjacent [data-line] markers instead of snapping to the nearest
+    // one. End-of-doc is signalled by emitting `doc.lines + 1` — Preview reads
+    // anything larger than its own source's total line count as "scroll to max"
+    // so reaching the editor's bottom truly anchors the preview's bottom too.
     let scrollRafId = 0;
     const onScrollEvt = () => {
       if (scrollRafId) return;
       scrollRafId = requestAnimationFrame(() => {
         scrollRafId = 0;
-        const top = view.scrollDOM.scrollTop;
+        const dom = view.scrollDOM;
+        const top = dom.scrollTop;
+        const max = Math.max(0, dom.scrollHeight - dom.clientHeight);
         try {
-          const block = view.lineBlockAtHeight(top);
-          const line = view.state.doc.lineAt(block.from).number;
-          // Always track for persistence — even programmatic scrolls reflect
-          // the user's last viewing position.
-          positionRef.current.scrollTopLine = line;
+          let fracLine: number;
+          if (max > 0 && max - top < 2) {
+            // atBottom sentinel — preview will snap to its own scrollMax.
+            fracLine = view.state.doc.lines + 1;
+          } else {
+            const block = view.lineBlockAtHeight(top);
+            const baseLine = view.state.doc.lineAt(block.from).number;
+            const frac =
+              block.height > 0
+                ? Math.max(0, Math.min(1, (top - block.top) / block.height))
+                : 0;
+            fracLine = baseLine + frac;
+          }
+          // Persist integer-rounded line (schema stays compatible with v3).
+          positionRef.current.scrollTopLine = Math.max(
+            1,
+            Math.min(view.state.doc.lines, Math.round(fracLine)),
+          );
           schedulePositionFlush();
           // But don't echo programmatic scrolls back through editor⇄preview sync.
           if (Date.now() >= suppressOutgoingUntil.current) {
-            onScrollRef.current?.(line);
+            onScrollRef.current?.(fracLine);
           }
         } catch {
           /* during destroy / odd states; ignore */
@@ -513,18 +533,30 @@ export default function Editor({
     setActiveView(view);
   }, [active]);
 
-  // Apply external scroll requests (e.g. from preview).
+  // Apply external scroll requests (e.g. from preview). Accepts a *fractional*
+  // line so preview can drive editor to a sub-line pixel offset; any value
+  // greater than the doc's total line count is treated as an "atBottom"
+  // sentinel and pins the editor's scroll to its max.
   useEffect(() => {
     if (externalScrollLine == null) return;
     const view = viewRef.current;
     if (!view) return;
     const total = view.state.doc.lines;
-    const lineNum = Math.min(Math.max(1, Math.round(externalScrollLine)), total);
+    const dom = view.scrollDOM;
     try {
-      const line = view.state.doc.line(lineNum);
+      if (externalScrollLine > total) {
+        suppressOutgoingUntil.current = Date.now() + 200;
+        dom.scrollTop = Math.max(0, dom.scrollHeight - dom.clientHeight);
+        return;
+      }
+      const clamped = Math.max(1, externalScrollLine);
+      const floor = Math.min(total, Math.floor(clamped));
+      const frac = Math.max(0, Math.min(1, clamped - floor));
+      const line = view.state.doc.line(floor);
       const block = view.lineBlockAt(line.from);
+      const target = block.top + frac * block.height;
       suppressOutgoingUntil.current = Date.now() + 200;
-      view.scrollDOM.scrollTop = block.top;
+      dom.scrollTop = target;
     } catch {
       /* doc shorter than expected */
     }
