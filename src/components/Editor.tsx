@@ -537,29 +537,56 @@ export default function Editor({
   // line so preview can drive editor to a sub-line pixel offset; any value
   // greater than the doc's total line count is treated as an "atBottom"
   // sentinel and pins the editor's scroll to its max.
+  //
+  // Reading-mode subtlety: while the user is in preview-maximized (reading)
+  // mode the editor pane has `display: none`, which means scrollDOM has
+  // clientHeight === 0 and writes to `scrollTop` are no-ops. If we don't
+  // handle that, navigating preview during reading mode won't update the
+  // editor, and exiting reading mode leaves the editor at its pre-reading
+  // position. Detect the zero-layout case and defer the scroll via a
+  // ResizeObserver — when the editor pane becomes visible again, scrollDOM
+  // gains size and we apply the latest pending line.
   useEffect(() => {
     if (externalScrollLine == null) return;
     const view = viewRef.current;
     if (!view) return;
-    const total = view.state.doc.lines;
     const dom = view.scrollDOM;
-    try {
-      if (externalScrollLine > total) {
+
+    const applyScroll = (): boolean => {
+      // No layout → can't honor the write; tell caller to wait.
+      if (dom.clientHeight === 0) return false;
+      const total = view.state.doc.lines;
+      try {
+        if (externalScrollLine > total) {
+          suppressOutgoingUntil.current = Date.now() + 200;
+          dom.scrollTop = Math.max(0, dom.scrollHeight - dom.clientHeight);
+          return true;
+        }
+        const clamped = Math.max(1, externalScrollLine);
+        const floor = Math.min(total, Math.floor(clamped));
+        const frac = Math.max(0, Math.min(1, clamped - floor));
+        const line = view.state.doc.line(floor);
+        const block = view.lineBlockAt(line.from);
+        const target = block.top + frac * block.height;
         suppressOutgoingUntil.current = Date.now() + 200;
-        dom.scrollTop = Math.max(0, dom.scrollHeight - dom.clientHeight);
-        return;
+        dom.scrollTop = target;
+        return true;
+      } catch {
+        // Doc shorter than expected — treat as applied so we don't loop.
+        return true;
       }
-      const clamped = Math.max(1, externalScrollLine);
-      const floor = Math.min(total, Math.floor(clamped));
-      const frac = Math.max(0, Math.min(1, clamped - floor));
-      const line = view.state.doc.line(floor);
-      const block = view.lineBlockAt(line.from);
-      const target = block.top + frac * block.height;
-      suppressOutgoingUntil.current = Date.now() + 200;
-      dom.scrollTop = target;
-    } catch {
-      /* doc shorter than expected */
-    }
+    };
+
+    if (applyScroll()) return;
+
+    // Editor isn't laid out right now (likely display:none from reading
+    // mode). Watch for size changes; the first non-zero clientHeight means
+    // the pane is back on screen — apply the pending line then.
+    const observer = new ResizeObserver(() => {
+      if (applyScroll()) observer.disconnect();
+    });
+    observer.observe(dom);
+    return () => observer.disconnect();
   }, [externalScrollLine]);
 
   useEffect(() => {

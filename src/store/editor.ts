@@ -770,6 +770,23 @@ export function useActiveTabContent(): string {
   );
 }
 
+/** A specific tab's text content (keyed by id). Use this inside per-tab
+ *  components (e.g. PreviewHost's per-tab Preview instance) so each slot
+ *  subscribes only to its own tab's content and a keystroke in tab A doesn't
+ *  re-render tab B's Preview. */
+export function useTabContent(tabId: string | null | undefined): string {
+  return useEditorStore(
+    (s) => (tabId ? s.tabs.find((x) => x.id === tabId)?.content ?? "" : ""),
+  );
+}
+
+/** A specific tab's filePath (keyed by id). */
+export function useTabFilePath(tabId: string | null | undefined): string | null {
+  return useEditorStore(
+    (s) => (tabId ? s.tabs.find((x) => x.id === tabId)?.filePath ?? null : null),
+  );
+}
+
 /** Active tab's diff spec (for diff tabs only). Stable when not a diff tab. */
 export function useActiveTabDiff(): DiffSpec | null {
   return useEditorStore(

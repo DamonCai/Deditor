@@ -8,9 +8,9 @@ import { isMarkdown } from "../lib/lang";
 import { logError } from "../lib/logger";
 import { openFileByPath } from "../lib/fileio";
 import {
-  useActiveTabContent,
-  useActiveTabFilePath,
   useEditorStore,
+  useTabContent,
+  useTabFilePath,
 } from "../store/editor";
 import {
   dirname,
@@ -28,19 +28,38 @@ interface TocItem {
 }
 
 interface Props {
+  /** The tab id this Preview renders. Each Preview is bound to ONE tab so
+   *  PreviewHost can keep one instance per visited tab; switching tabs is
+   *  just a `display` toggle and never destroys the Preview's scroll, html
+   *  cache, or TOC state. Without this prop Preview would self-subscribe to
+   *  the active tab and become a singleton that cross-contaminates tabs. */
+  tabId: string;
   theme: "light" | "dark";
-  /** Editor's current top line — preview will scroll to match. */
+  /** Editor's current top line — preview will scroll to match. Only set on
+   *  the active Preview (inactive previews get undefined so their scrollTop
+   *  is left alone). */
   scrollLine?: number;
-  /** Called when user scrolls preview; reports the source line at the top. */
+  /** Source line to scroll to on FIRST html render only — used to align a
+   *  freshly-mounted Preview with the tab's editor scroll position (which
+   *  may have been restored from persistence). Read once; subsequent prop
+   *  changes are ignored. */
+  initialScrollLine?: number;
+  /** Called when user scrolls preview; reports the source line at the top.
+   *  Only set on the active Preview. */
   onScroll?: (line: number) => void;
 }
 
-export default function Preview({ theme, scrollLine, onScroll }: Props) {
-  // Self-subscribed: Preview owns its content + filePath subscription so App
-  // doesn't have to pass them down (and therefore App doesn't re-render on
-  // every keystroke just to feed the preview).
-  const source = useActiveTabContent();
-  const filePath = useActiveTabFilePath();
+export default function Preview({
+  tabId,
+  theme,
+  scrollLine,
+  initialScrollLine,
+  onScroll,
+}: Props) {
+  // Self-subscribed per tab — each PreviewHost slot only re-renders for its
+  // own tab's content / filePath / dirty flips.
+  const source = useTabContent(tabId);
+  const filePath = useTabFilePath(tabId);
   const [html, setHtml] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
   const isMd = isMarkdown(filePath);
@@ -49,6 +68,12 @@ export default function Preview({ theme, scrollLine, onScroll }: Props) {
   const suppressOutgoingUntil = useRef(0);
   const onScrollRef = useRef(onScroll);
   onScrollRef.current = onScroll;
+  // Last known fractional source-line at the top of the preview viewport.
+  // Updated by the outgoing scroll handler AND by the incoming scrollLine
+  // effect. Used by the re-align effect when previewMaximized toggles (the
+  // pane's width changes, so the same pixel scrollTop maps to a different
+  // logical line — we need to scroll back to the line we were on).
+  const lastTopLineRef = useRef(1);
 
   useEffect(() => {
     let cancelled = false;
@@ -111,23 +136,19 @@ export default function Preview({ theme, scrollLine, onScroll }: Props) {
     totalLinesRef.current = n;
   }, [source]);
 
-  // Apply incoming scrollLine from editor (programmatic scroll).
-  //
-  // Strategy: each [data-line] marker is a sample of (sourceLine → previewTop).
-  // For an incoming fractional line L:
-  //   • L > totalLines  → editor signalled atBottom; pin preview to scrollMax.
-  //   • L ≤ lines[0]    → above the first marker; scroll to 0.
-  //   • interior        → linearly interpolate between the two markers that
-  //                       bracket L, using the editor's actual sub-line offset.
-  //   • past last       → interpolate between (lines[last], tops[last]) and
-  //                       (totalLines, scrollMax) so the tail of the document
-  //                       maps cleanly to the tail of the preview.
-  useEffect(() => {
-    if (scrollLine == null) return;
+  // Marker-based "scroll the preview container to source line L". Returns
+  // true if it found markers and scrolled; false if html isn't rendered yet
+  // (caller can wait for the next html change). Mirrors the strategy used
+  // by both incoming-scroll and re-align effects:
+  //   • L > totalLines  → atBottom sentinel; pin preview to scrollMax.
+  //   • L ≤ lines[0]    → above first marker; scroll to 0.
+  //   • interior        → linearly interpolate between bracketing markers.
+  //   • past last       → interpolate toward (totalLines, scrollMax).
+  const scrollContainerToLine = (targetLine: number): boolean => {
     const root = containerRef.current;
-    if (!root) return;
+    if (!root) return false;
     const els = root.querySelectorAll<HTMLElement>("[data-line]");
-    if (els.length === 0) return;
+    if (els.length === 0) return false;
     const lines: number[] = [];
     const tops: number[] = [];
     els.forEach((el) => {
@@ -137,38 +158,106 @@ export default function Preview({ theme, scrollLine, onScroll }: Props) {
         tops.push(el.offsetTop);
       }
     });
-    if (lines.length === 0) return;
-
+    if (lines.length === 0) return false;
     const scrollMax = Math.max(0, root.scrollHeight - root.clientHeight);
     const totalLines = totalLinesRef.current;
     let top: number;
-
-    if (scrollLine > totalLines) {
+    if (targetLine > totalLines) {
       top = scrollMax;
-    } else if (scrollLine <= lines[0]) {
+    } else if (targetLine <= lines[0]) {
       top = 0;
     } else {
-      // Largest i such that lines[i] <= scrollLine.
       let i = 0;
       for (let k = 0; k < lines.length; k++) {
-        if (lines[k] <= scrollLine) i = k;
+        if (lines[k] <= targetLine) i = k;
         else break;
       }
       if (i < lines.length - 1) {
         const span = lines[i + 1] - lines[i];
-        const t = span > 0 ? (scrollLine - lines[i]) / span : 0;
+        const t = span > 0 ? (targetLine - lines[i]) / span : 0;
         top = tops[i] + t * (tops[i + 1] - tops[i]);
       } else {
-        // Past the last marker — interpolate toward scrollMax using
-        // (totalLines, scrollMax) as the virtual end-of-doc anchor.
         const denom = Math.max(1, totalLines - lines[i]);
-        const t = Math.max(0, Math.min(1, (scrollLine - lines[i]) / denom));
+        const t = Math.max(0, Math.min(1, (targetLine - lines[i]) / denom));
         top = tops[i] + t * (scrollMax - tops[i]);
       }
     }
     suppressOutgoingUntil.current = Date.now() + 200;
     root.scrollTo({ top: Math.max(0, top), behavior: "auto" });
+    return true;
+  };
+
+  // Apply incoming scrollLine from editor (programmatic scroll). Re-runs on
+  // html change so a scrollLine that arrived before html was ready will still
+  // be applied once markers exist.
+  useEffect(() => {
+    if (scrollLine == null) return;
+    lastTopLineRef.current = scrollLine;
+    scrollContainerToLine(scrollLine);
   }, [scrollLine, html]);
+
+  // Apply initialScrollLine ONCE, on the first html render that has data-line
+  // markers. Used to align a freshly-mounted Preview with its tab's editor
+  // scroll position (which may have been restored from persistence). After
+  // it lands, this effect retires — subsequent sync goes through scrollLine.
+  const didApplyInitialRef = useRef(false);
+  useEffect(() => {
+    if (didApplyInitialRef.current) return;
+    if (initialScrollLine == null || initialScrollLine <= 1) {
+      didApplyInitialRef.current = true;
+      return;
+    }
+    // Try now; if html doesn't have markers yet, leave the flag false and
+    // try again next html change.
+    if (scrollContainerToLine(initialScrollLine)) {
+      lastTopLineRef.current = initialScrollLine;
+      didApplyInitialRef.current = true;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [html, initialScrollLine]);
+
+  // Re-snap to the last known source line every time the rendered content's
+  // scrollHeight changes. The markdown html state is set immediately, but
+  // mermaid (~700 KB lazy) and plantuml (network-rendered SVG) hydrate into
+  // the DOM AFTER our html is written. Their SVG insertions push every
+  // [data-line] marker below them DOWN, so a scrollTop set at render time
+  // points to an earlier line than intended once they finish — that's the
+  // "reading view drifts upward each cycle" drift.
+  //
+  // A one-shot setTimeout(800) misses late-arriving mermaid renders; a
+  // MutationObserver fires on every DOM mutation under the container, and
+  // we re-snap whenever scrollHeight actually changed since the last fire.
+  // Capped at 5 seconds (mermaid/plantuml typically finish well within).
+  //
+  // Uses `lastTopLineRef` (not `scrollLine`) so it also corrects drift for
+  // user-initiated scrolls and TOC clicks within the preview.
+  useEffect(() => {
+    const root = containerRef.current;
+    if (!root) return;
+    let lastScrollHeight = root.scrollHeight;
+    let pendingRaf = 0;
+    const resnap = () => {
+      pendingRaf = 0;
+      const h = root.scrollHeight;
+      if (h === lastScrollHeight) return;
+      lastScrollHeight = h;
+      const targetLine = lastTopLineRef.current;
+      if (!Number.isFinite(targetLine) || targetLine <= 1) return;
+      scrollContainerToLine(targetLine);
+    };
+    const observer = new MutationObserver(() => {
+      if (pendingRaf) return;
+      pendingRaf = requestAnimationFrame(resnap);
+    });
+    observer.observe(root, { childList: true, subtree: true });
+    const stopTimer = setTimeout(() => observer.disconnect(), 5000);
+    return () => {
+      observer.disconnect();
+      clearTimeout(stopTimer);
+      if (pendingRaf) cancelAnimationFrame(pendingRaf);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [html]);
 
   // Intercept clicks on anchors and images. External `http(s):` links go to
   // the OS browser; local file paths (relative or absolute, with or without
@@ -187,7 +276,45 @@ export default function Preview({ theme, scrollLine, onScroll }: Props) {
       if (a) {
         const raw = a.getAttribute("href");
         if (!raw) return;
-        if (raw.startsWith("#")) return;
+        if (raw.startsWith("#")) {
+          // In a Tauri WebView the browser-default anchor jump scrolls the
+          // wrong container (window/body instead of the preview pane) and
+          // pins the preview at scrollTop=0, so we have to handle it here.
+          //
+          // We prefer the heading's `data-line` (set by markdown.ts on every
+          // block) over its `offsetTop`. Reason: when mermaid/plantuml
+          // hydrate AFTER the click, the heading's pixel position shifts
+          // down. An offsetTop-based scroll lands at the heading initially,
+          // but then the scroll-event handler computes the WRONG fracLine
+          // (whatever was at scrollTop AFTER hydration), and that wrong
+          // fracLine becomes the target our MutationObserver re-snaps to
+          // forever — that's the flaky "click 5.4.3 sometimes works" case.
+          // Anchoring on data-line keeps the logical target stable.
+          e.preventDefault();
+          let id = raw.slice(1);
+          try { id = decodeURIComponent(id); } catch { /* malformed % escape */ }
+          if (!id) return;
+          let target: HTMLElement | null = null;
+          try {
+            target = root.querySelector<HTMLElement>(`#${CSS.escape(id)}`);
+          } catch { return; }
+          if (!target) return;
+          const dataLine = Number(target.dataset.line);
+          if (Number.isFinite(dataLine) && dataLine > 0) {
+            lastTopLineRef.current = dataLine;
+            scrollContainerToLine(dataLine);
+            // scrollContainerToLine sets suppressOutgoingUntil, so the
+            // normal scroll listener won't propagate. Notify the parent
+            // explicitly so the editor follows.
+            onScrollRef.current?.(dataLine);
+            return;
+          }
+          // Fallback when the heading lacks data-line (shouldn't happen
+          // for markdown-it-rendered output, but keeps user-supplied raw
+          // HTML anchors working).
+          root.scrollTo({ top: Math.max(0, target.offsetTop - 16), behavior: "auto" });
+          return;
+        }
         if (isExternalUrl(raw)) {
           e.preventDefault();
           openUrl(a.href).catch((err) => logError("openUrl failed", err));
@@ -278,6 +405,7 @@ export default function Preview({ theme, scrollLine, onScroll }: Props) {
           }
         }
         if (Number.isFinite(fracLine) && fracLine > 0) {
+          lastTopLineRef.current = fracLine;
           onScrollRef.current?.(fracLine);
         }
       });
@@ -296,6 +424,31 @@ export default function Preview({ theme, scrollLine, onScroll }: Props) {
   const toggleTocVisible = useEditorStore((s) => s.toggleTocVisible);
   const readingMode = previewMaximized && isMd;
   const t = useT();
+
+  // Re-align scroll when the pane's width changes (split ↔ reading toggle).
+  // The pixel scrollTop is preserved by the browser, but Markdown content
+  // re-wraps at a different width and code blocks recompute their heights,
+  // so the same scrollTop now points to a different source line. Without
+  // this, toggling reading mode at section 6.1 can land on 5.4 or 6.4.
+  //
+  // Skip the very first run (mount) — there's no width transition to react
+  // to and we'd just fight whatever scroll position the parent set.
+  const didMountMaximizedRef = useRef(false);
+  useEffect(() => {
+    if (!didMountMaximizedRef.current) {
+      didMountMaximizedRef.current = true;
+      return;
+    }
+    const targetLine = lastTopLineRef.current;
+    if (!Number.isFinite(targetLine) || targetLine <= 0) return;
+    // rAF lets the browser apply the new width / re-layout markdown before
+    // we measure offsetTop on the data-line markers.
+    const raf = requestAnimationFrame(() => {
+      scrollContainerToLine(targetLine);
+    });
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewMaximized]);
 
   // Extract the TOC from the rendered DOM. markdown-it-anchor stamps each
   // heading with an id derived from its text — that's what we use for jumping
@@ -422,7 +575,17 @@ export default function Preview({ theme, scrollLine, onScroll }: Props) {
     if (!root) return;
     const target = root.querySelector<HTMLElement>(`#${CSS.escape(id)}`);
     if (!target) return;
-    root.scrollTo({ top: Math.max(0, target.offsetTop - 16), behavior: "auto" });
+    // Anchor on the heading's data-line (markdown.ts stamps it) so the
+    // logical target survives async mermaid/plantuml hydration shifts.
+    // Fallback to offsetTop for headings without data-line.
+    const dataLine = Number(target.dataset.line);
+    if (Number.isFinite(dataLine) && dataLine > 0) {
+      lastTopLineRef.current = dataLine;
+      scrollContainerToLine(dataLine);
+      onScrollRef.current?.(dataLine);
+    } else {
+      root.scrollTo({ top: Math.max(0, target.offsetTop - 16), behavior: "auto" });
+    }
     // Record the post-clamp scrollTop so the active-tracker can honor the
     // click even when scrollTo got clamped to scrollMax (which collapses
     // multiple distinct heading targets onto the same scroll position).

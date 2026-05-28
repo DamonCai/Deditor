@@ -22,7 +22,7 @@ interface TauriDragDropPayload {
 // idle-prefetched in the background — see scheduleIdlePrefetch() below.
 import EditorHost from "./components/EditorHost";
 import EditorSlot from "./components/EditorSlot";
-import Preview from "./components/Preview";
+import PreviewHost from "./components/PreviewHost";
 import TitleBar from "./components/TitleBar";
 import StatusBar from "./components/StatusBar";
 import FileTree from "./components/FileTree";
@@ -89,9 +89,16 @@ export default function App() {
   const [previewPct, setPreviewPct] = useState(50);
   // Editor↔Preview scroll sync. We track the latest line + which side originated
   // the scroll so each side only reacts to scrolls coming from the OTHER side.
+  // `tabId` is required: scrollSync state is global across tabs, but a scroll
+  // value emitted while tab A was active must not be applied to tab B after a
+  // tab switch (Preview's [scrollLine, html] effect re-runs on html change and
+  // would otherwise scroll B's preview to A's line).
   const [scrollSync, setScrollSync] = useState<
-    { line: number; from: "editor" | "preview" } | null
+    { line: number; from: "editor" | "preview"; tabId: string } | null
   >(null);
+  const activeTabId = activeMeta?.id ?? null;
+  const scrollSyncForActive =
+    scrollSync && scrollSync.tabId === activeTabId ? scrollSync : null;
   const [hydrated, setHydrated] = useState(false);
   const zenMode = useEditorStore((s) => s.zenMode);
   const autoSave = useEditorStore((s) => s.autoSave);
@@ -432,90 +439,108 @@ export default function App() {
           {/* Markdown toolbar is lifted out of the editor pane so it spans the
               full editor+preview row (still shown when preview is maximized). */}
           {!isDiffTab && isMarkdown(filePath) && <MarkdownToolbar />}
+          {/* Editor + Preview row. Editor pane is ALWAYS mounted (display:none
+              in reading mode) — not for memory but for sync correctness: when
+              the user navigates preview to a section while in reading mode,
+              the active editor's externalScrollLine effect needs to fire so
+              the editor follows. Unmounting+remounting the editor pane on
+              every reading-mode toggle would also re-mount EditorHost and
+              every visited tab's editor, undoing all the warm CodeMirror
+              state. Consistent with EditorHost's existing "keep visited
+              editors alive" pattern. */}
           <div className="flex flex-1 min-h-0">
-            {previewEnabled && previewMaximized ? (
-              <div className="flex-1 min-w-0">
-                <Preview
-                  theme={theme}
-                  scrollLine={
-                    scrollSync?.from === "editor" ? scrollSync.line : undefined
-                  }
-                  onScroll={(line) => setScrollSync({ line, from: "preview" })}
-                />
-              </div>
-            ) : (
-              <>
-                <div
-                  style={{ width: previewEnabled ? `${editorPct}%` : "100%" }}
-                  className="min-w-0 flex-1 flex flex-col"
-                >
-                  {!isDiffTab && isJson(filePath) && <JsonToolbar />}
-                  {activeMeta?.hasExternalChange && (
-                    <ExternalChangeBanner tabId={activeMeta.id} />
-                  )}
-                  <div className="flex-1 min-h-0 flex">
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <EditorHost
-                        activeId={activeMeta?.id ?? null}
-                        theme={theme}
-                        fontSize={editorFontSize}
-                        initialCursor={initialPos?.cursor}
-                        initialScrollLine={initialPos?.scrollTopLine}
-                        externalScrollLine={
-                          scrollSync?.from === "preview" ? scrollSync.line : undefined
+            <div
+              key="editor-pane"
+              className="min-w-0 flex-1 flex flex-col"
+              style={{
+                width: previewEnabled
+                  ? previewMaximized
+                    ? 0
+                    : `${editorPct}%`
+                  : "100%",
+                display:
+                  previewEnabled && previewMaximized ? "none" : undefined,
+              }}
+            >
+                {!isDiffTab && isJson(filePath) && <JsonToolbar />}
+                {activeMeta?.hasExternalChange && (
+                  <ExternalChangeBanner tabId={activeMeta.id} />
+                )}
+                <div className="flex-1 min-h-0 flex">
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <EditorHost
+                      activeId={activeTabId}
+                      theme={theme}
+                      fontSize={editorFontSize}
+                      initialCursor={initialPos?.cursor}
+                      initialScrollLine={initialPos?.scrollTopLine}
+                      externalScrollLine={
+                        scrollSyncForActive?.from === "preview"
+                          ? scrollSyncForActive.line
+                          : undefined
+                      }
+                      onScroll={(line) => {
+                        if (activeTabId)
+                          setScrollSync({ line, from: "editor", tabId: activeTabId });
+                      }}
+                      onPositionChange={(pos) => {
+                        if (activeMeta) {
+                          useEditorStore
+                            .getState()
+                            .setTabPosition(activeMeta.id, pos);
                         }
-                        onScroll={(line) => setScrollSync({ line, from: "editor" })}
-                        onPositionChange={(pos) => {
-                          if (activeMeta) {
-                            useEditorStore
-                              .getState()
-                              .setTabPosition(activeMeta.id, pos);
-                          }
-                        }}
-                      />
-                    </div>
-                    {splitEditor && !isDiffTab && activeMeta && (
-                      <>
-                        <div style={{ width: 1, background: "var(--border)", flexShrink: 0 }} />
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <EditorSlot
-                            key={activeMeta.id + "::split"}
-                            tabId={activeMeta.id}
-                            noStateCache
-                            theme={theme}
-                            fontSize={editorFontSize}
-                          />
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </div>
-                {previewEnabled && (
-                  <>
-                    <div
-                      className="splitter"
-                      onMouseDown={() => {
-                        dragRef.current = "preview";
-                        document.body.style.cursor = "col-resize";
                       }}
                     />
-                    <div
-                      style={{ width: `${previewPct}%` }}
-                      className="min-w-0"
-                    >
-                      <Preview
-                        theme={theme}
-                        scrollLine={
-                          scrollSync?.from === "editor" ? scrollSync.line : undefined
-                        }
-                        onScroll={(line) =>
-                          setScrollSync({ line, from: "preview" })
-                        }
-                      />
-                    </div>
-                  </>
-                )}
-              </>
+                  </div>
+                  {splitEditor && !isDiffTab && activeMeta && (
+                    <>
+                      <div style={{ width: 1, background: "var(--border)", flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <EditorSlot
+                          key={activeMeta.id + "::split"}
+                          tabId={activeMeta.id}
+                          noStateCache
+                          theme={theme}
+                          fontSize={editorFontSize}
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            {previewEnabled && !previewMaximized && (
+              <div
+                key="splitter"
+                className="splitter"
+                onMouseDown={() => {
+                  dragRef.current = "preview";
+                  document.body.style.cursor = "col-resize";
+                }}
+              />
+            )}
+            {previewEnabled && (
+              <div
+                key="preview-pane"
+                className="min-w-0"
+                style={{
+                  width: previewMaximized ? "100%" : `${previewPct}%`,
+                  flex: previewMaximized ? "1 1 0" : undefined,
+                }}
+              >
+                <PreviewHost
+                  activeId={activeTabId}
+                  theme={theme}
+                  scrollLine={
+                    scrollSyncForActive?.from === "editor"
+                      ? scrollSyncForActive.line
+                      : undefined
+                  }
+                  onScroll={(line) => {
+                    if (activeTabId)
+                      setScrollSync({ line, from: "preview", tabId: activeTabId });
+                  }}
+                />
+              </div>
             )}
           </div>
         </div>
