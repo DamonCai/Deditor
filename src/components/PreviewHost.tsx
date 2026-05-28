@@ -31,11 +31,13 @@ interface Props {
  *  should fire once, on first html render, then stay out of the way. */
 function PreviewSlot({
   tabId,
+  active,
   theme,
   scrollLine,
   onScroll,
 }: {
   tabId: string;
+  active: boolean;
   theme: "light" | "dark";
   scrollLine?: number;
   onScroll?: (line: number) => void;
@@ -49,6 +51,7 @@ function PreviewSlot({
   return (
     <Preview
       tabId={tabId}
+      active={active}
       theme={theme}
       scrollLine={scrollLine}
       initialScrollLine={initialScrollLine}
@@ -126,6 +129,7 @@ const PreviewHost = memo(function PreviewHost({
           >
             <PreviewSlot
               tabId={id}
+              active={visible}
               theme={theme}
               scrollLine={visible ? scrollLine : undefined}
               onScroll={visible ? onScroll : undefined}

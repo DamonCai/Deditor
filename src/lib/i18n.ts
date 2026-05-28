@@ -251,6 +251,12 @@ const ZH: Record<string, string> = {
   "preview.tocEmpty": "无标题",
   "preview.tocHide": "隐藏目录",
   "preview.tocShow": "显示目录",
+  "preview.search.placeholder": "在阅读视图中查找…（Esc 关闭）",
+  "preview.search.noMatch": "无匹配",
+  "preview.search.matchN": "{cur} / {total}",
+  "preview.search.next": "下一个 (Enter)",
+  "preview.search.prev": "上一个 (Shift+Enter)",
+  "preview.search.close": "关闭 (Esc)",
 
   // confirm dialog
   "confirm.unsavedTitle": "未保存修改",
@@ -535,6 +541,12 @@ const EN: Record<string, string> = {
   "preview.tocEmpty": "No headings",
   "preview.tocHide": "Hide outline",
   "preview.tocShow": "Show outline",
+  "preview.search.placeholder": "Find in reading view… (Esc to close)",
+  "preview.search.noMatch": "No match",
+  "preview.search.matchN": "{cur} / {total}",
+  "preview.search.next": "Next (Enter)",
+  "preview.search.prev": "Previous (Shift+Enter)",
+  "preview.search.close": "Close (Esc)",
 
   // confirm dialog
   "confirm.unsavedTitle": "Unsaved Changes",

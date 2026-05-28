@@ -20,6 +20,11 @@ import {
   stripFileScheme,
 } from "../lib/pathUtil";
 import { useT } from "../lib/i18n";
+import {
+  applySearch,
+  clearHighlights,
+  setCurrentMatch,
+} from "../lib/previewSearch";
 
 interface TocItem {
   id: string;
@@ -34,6 +39,12 @@ interface Props {
    *  cache, or TOC state. Without this prop Preview would self-subscribe to
    *  the active tab and become a singleton that cross-contaminates tabs. */
   tabId: string;
+  /** True when this is the visible Preview slot. PreviewHost keeps every
+   *  visited tab's Preview mounted (display:none for inactive); only the
+   *  active one should own Cmd+F (in reading mode) and other window-level
+   *  shortcuts, otherwise every hidden Preview would also register a
+   *  handler and the keystroke would fire N times. */
+  active?: boolean;
   theme: "light" | "dark";
   /** Editor's current top line — preview will scroll to match. Only set on
    *  the active Preview (inactive previews get undefined so their scrollTop
@@ -51,6 +62,7 @@ interface Props {
 
 export default function Preview({
   tabId,
+  active,
   theme,
   scrollLine,
   initialScrollLine,
@@ -450,6 +462,136 @@ export default function Preview({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [previewMaximized]);
 
+  // Reading-mode in-pane search (Cmd/Ctrl+F). The editor's own Cmd+F goes
+  // through CodeMirror's searchKeymap and won't fire when the editor is
+  // display:none — so without this, there's no way to find text in reading
+  // mode at all. We wrap matches in <span class="preview-search-match"> via
+  // a TreeWalker, track the current index, and scroll it into view.
+  //
+  // Only the ACTIVE Preview owns the Cmd+F handler; otherwise every hidden
+  // PreviewSlot would register one and the keystroke would fire N times.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [matchInfo, setMatchInfo] = useState<{ total: number; current: number }>(
+    { total: 0, current: 0 },
+  );
+  const matchesRef = useRef<HTMLSpanElement[]>([]);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const closeSearch = () => {
+    setSearchOpen(false);
+    setSearchQuery("");
+    if (containerRef.current) clearHighlights(containerRef.current);
+    matchesRef.current = [];
+    setMatchInfo({ total: 0, current: 0 });
+  };
+
+  const gotoMatch = (idx: number) => {
+    const matches = matchesRef.current;
+    if (matches.length === 0) return;
+    const clamped = ((idx % matches.length) + matches.length) % matches.length;
+    setCurrentMatch(matches, clamped);
+    setMatchInfo({ total: matches.length, current: clamped + 1 });
+    // Pin lastTopLineRef to the match's enclosing block's data-line so the
+    // MutationObserver re-snap (triggered by late mermaid renders) keeps
+    // the preview ON the match instead of dragging it back to the pre-
+    // search anchor. closest("[data-line]") walks up to the nearest block
+    // (paragraph / heading / list-item) — accurate to the block, which is
+    // close enough that the match stays in view after re-snap.
+    const block = matches[clamped].closest<HTMLElement>("[data-line]");
+    if (block) {
+      const ln = Number(block.dataset.line);
+      if (Number.isFinite(ln) && ln > 0) {
+        lastTopLineRef.current = ln;
+        // Forward to parent so the editor follows even though it's hidden
+        // in reading mode — exiting reading mode then lands on the match.
+        onScrollRef.current?.(ln);
+      }
+    }
+    suppressOutgoingUntil.current = Date.now() + 200;
+  };
+  const goNext = () =>
+    gotoMatch(matchInfo.current === 0 ? 0 : matchInfo.current);
+  const goPrev = () =>
+    gotoMatch(matchInfo.current === 0 ? 0 : matchInfo.current - 2);
+
+  // Re-apply search whenever query or html changes — keeping highlights
+  // stable as mermaid/plantuml hydrate (their innerHTML replacements wipe
+  // any marks that landed inside; for marks elsewhere it's safe but cheap
+  // to redo). Throttled implicitly by html being debounced upstream.
+  useEffect(() => {
+    if (!searchOpen) return;
+    const root = containerRef.current;
+    if (!root) {
+      matchesRef.current = [];
+      setMatchInfo({ total: 0, current: 0 });
+      return;
+    }
+    if (!searchQuery) {
+      clearHighlights(root);
+      matchesRef.current = [];
+      setMatchInfo({ total: 0, current: 0 });
+      return;
+    }
+    const { total, matches } = applySearch(root, searchQuery);
+    matchesRef.current = matches;
+    if (total === 0) {
+      setMatchInfo({ total: 0, current: 0 });
+    } else {
+      // Keep the user on the same logical match across re-applies if the
+      // index is still valid; otherwise jump back to the first.
+      const idx =
+        matchInfo.current >= 1 && matchInfo.current <= total
+          ? matchInfo.current - 1
+          : 0;
+      setCurrentMatch(matches, idx);
+      setMatchInfo({ total, current: idx + 1 });
+      // Pin lastTopLineRef to the match's block-line — same reasoning as
+      // in gotoMatch (keeps re-snap from undoing the search jump).
+      const block = matches[idx].closest<HTMLElement>("[data-line]");
+      if (block) {
+        const ln = Number(block.dataset.line);
+        if (Number.isFinite(ln) && ln > 0) lastTopLineRef.current = ln;
+      }
+      suppressOutgoingUntil.current = Date.now() + 200;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, html, searchOpen]);
+
+  // Cmd/Ctrl+F to open the search bar. Bound at window level (capture phase)
+  // so it intercepts before any WebView-native find handling.
+  useEffect(() => {
+    if (!active) return;
+    if (!readingMode) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        !e.shiftKey &&
+        !e.altKey &&
+        e.key.toLowerCase() === "f"
+      ) {
+        e.preventDefault();
+        setSearchOpen(true);
+        // Focus + select after the input renders.
+        setTimeout(() => {
+          searchInputRef.current?.focus();
+          searchInputRef.current?.select();
+        }, 0);
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [active, readingMode]);
+
+  // Auto-close the search bar when leaving reading mode (the bar is only
+  // visually anchored there). Also clears any leftover highlights.
+  useEffect(() => {
+    if (readingMode) return;
+    if (!searchOpen && matchesRef.current.length === 0) return;
+    closeSearch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readingMode]);
+
   // Extract the TOC from the rendered DOM. markdown-it-anchor stamps each
   // heading with an id derived from its text — that's what we use for jumping
   // and active-section highlighting.
@@ -645,6 +787,69 @@ export default function Preview({
           >
             {tocVisible ? "✕" : "☰"}
           </button>
+        )}
+        {readingMode && searchOpen && (
+          <div className="preview-search-bar" role="search">
+            <input
+              ref={searchInputRef}
+              type="text"
+              className="preview-search-input"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  if (e.shiftKey) goPrev();
+                  else goNext();
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  closeSearch();
+                }
+              }}
+              placeholder={t("preview.search.placeholder")}
+              spellCheck={false}
+              autoCorrect="off"
+            />
+            <span className="preview-search-count">
+              {matchInfo.total === 0
+                ? searchQuery
+                  ? t("preview.search.noMatch")
+                  : ""
+                : t("preview.search.matchN", {
+                    cur: String(matchInfo.current),
+                    total: String(matchInfo.total),
+                  })}
+            </span>
+            <button
+              type="button"
+              className="preview-search-btn"
+              onClick={goPrev}
+              disabled={matchInfo.total === 0}
+              title={t("preview.search.prev")}
+              aria-label={t("preview.search.prev")}
+            >
+              ‹
+            </button>
+            <button
+              type="button"
+              className="preview-search-btn"
+              onClick={goNext}
+              disabled={matchInfo.total === 0}
+              title={t("preview.search.next")}
+              aria-label={t("preview.search.next")}
+            >
+              ›
+            </button>
+            <button
+              type="button"
+              className="preview-search-btn"
+              onClick={closeSearch}
+              title={t("preview.search.close")}
+              aria-label={t("preview.search.close")}
+            >
+              ✕
+            </button>
+          </div>
         )}
       </div>
     </div>
