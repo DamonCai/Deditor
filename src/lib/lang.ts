@@ -467,6 +467,10 @@ export function isJson(filePath: string | null): boolean {
   return e === "json" || e === "jsonc" || e === "json5";
 }
 
+export function isSql(filePath: string | null): boolean {
+  return extOf(filePath) === "sql";
+}
+
 export function isImageFile(filePath: string | null): boolean {
   return IMAGE_EXTS_SET.has(extOf(filePath));
 }

@@ -2,9 +2,16 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use tauri::menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{Emitter, Manager};
 use tauri_plugin_log::{Target, TargetKind};
+
+/// Queue of file paths the OS asked us to open before the webview was ready
+/// (Finder "Open With → DEditor" on macOS, double-click association on Windows).
+/// Tauri events are not buffered, so we hold paths here until the frontend
+/// drains the queue via `drain_pending_open_files`.
+struct PendingOpens(Mutex<Vec<String>>);
 
 #[derive(serde::Serialize)]
 struct DirEntry {
@@ -1184,6 +1191,24 @@ fn update_menu_state(
     })
 }
 
+/// Drain any file paths the OS queued before the frontend was ready to
+/// receive `open-file` events. Called once on app mount and again whenever
+/// the listener fires (signal-only emit) so the same code path handles both
+/// the cold-start race and the running-instance case.
+#[tauri::command]
+fn drain_pending_open_files(state: tauri::State<'_, PendingOpens>) -> Vec<String> {
+    let out = state
+        .0
+        .lock()
+        .map(|mut q| std::mem::take(&mut *q))
+        .unwrap_or_default();
+    log::info!("drain_pending_open_files: returned {} path(s)", out.len());
+    for p in &out {
+        log::info!("  drained path: {}", p);
+    }
+    out
+}
+
 fn install_panic_hook() {
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -1236,6 +1261,32 @@ pub fn run() {
             if let Ok(log_dir) = app.path().app_log_dir() {
                 log::info!("log directory: {}", log_dir.display());
             }
+
+            // Seed the pending-opens queue with any file paths passed via argv
+            // — this is how Windows delivers a file-association double-click
+            // (the OS passes the path as the first argument). macOS uses the
+            // Cocoa openURLs callback instead, handled below via RunEvent::Opened.
+            let mut initial: Vec<String> = Vec::new();
+            for arg in std::env::args().skip(1) {
+                // Skip macOS Process Serial Number flags and any other -* flags.
+                if arg.starts_with('-') {
+                    continue;
+                }
+                let p = PathBuf::from(&arg);
+                if p.is_file() {
+                    let resolved = p
+                        .canonicalize()
+                        .unwrap_or(p)
+                        .to_string_lossy()
+                        .to_string();
+                    initial.push(resolved);
+                }
+            }
+            if !initial.is_empty() {
+                log::info!("seeded {} file(s) from argv for open-on-launch", initial.len());
+            }
+            app.manage(PendingOpens(Mutex::new(initial)));
+
             install_app_menu(app)?;
             Ok(())
         })
@@ -1261,19 +1312,46 @@ pub fn run() {
             replace_in_files,
             add_recent_document,
             read_app_state,
-            write_app_state
+            write_app_state,
+            drain_pending_open_files
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
             // OS asked us to open these files (Finder "Open With…" / `open -a`
-            // on macOS, double-click association on Windows, etc.). Forward
-            // each path as a frontend `open-file` event so the JS side runs
-            // the same code path used for drag-and-drop.
+            // on macOS, drag-onto-Dock, etc.). We queue the paths and emit a
+            // signal — the frontend drains the queue on mount AND on every
+            // signal, so a cold-start race (event fires before React's
+            // listener registers) doesn't drop the file. The emit payload is
+            // intentionally empty; the queue is the source of truth.
             if let tauri::RunEvent::Opened { urls } = event {
-                for url in urls {
-                    if let Ok(path) = url.to_file_path() {
-                        let _ = app.emit("open-file", path.to_string_lossy().to_string());
+                log::info!("RunEvent::Opened fired with {} url(s)", urls.len());
+                for u in &urls {
+                    log::info!("  raw url: {}", u);
+                }
+                let paths: Vec<String> = urls
+                    .iter()
+                    .filter_map(|u| u.to_file_path().ok())
+                    .map(|p| p.to_string_lossy().to_string())
+                    .collect();
+                if !paths.is_empty() {
+                    log::info!("RunEvent::Opened -> queuing {} path(s)", paths.len());
+                    if let Some(state) = app.try_state::<PendingOpens>() {
+                        if let Ok(mut q) = state.0.lock() {
+                            q.extend(paths);
+                        }
+                    }
+                    let _ = app.emit("open-file", ());
+
+                    // Bring the main window to the foreground. When DEditor is
+                    // already running but backgrounded / minimized / on another
+                    // Space, "Open With" otherwise silently appends a tab the
+                    // user never sees. unminimize + show + set_focus together
+                    // cover all three states (idempotent if already foreground).
+                    if let Some(win) = app.get_webview_window("main") {
+                        let _ = win.unminimize();
+                        let _ = win.show();
+                        let _ = win.set_focus();
                     }
                 }
             }

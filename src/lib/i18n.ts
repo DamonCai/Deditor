@@ -211,6 +211,17 @@ const ZH: Record<string, string> = {
   "json.sortKeysTip": "递归排序所有对象的键，再格式化",
   "json.formatFailed": "格式化失败: {err}",
 
+  // sql toolbar
+  "sql.river": "河流",
+  "sql.riverTip": "PL/SQL Developer 风格：关键字右对齐成河、字段纵向对齐（一字段一行）",
+  "sql.tabular": "左对齐",
+  "sql.tabularTip": "关键字左对齐到固定列宽、内容跟随其后（一字段一行）",
+  "sql.compact": "紧凑",
+  "sql.compactTip": "子句关键字与内容同行、逗号列表合并回行内，最省空间",
+  "sql.minify": "单行",
+  "sql.minifyTip": "压成单行：折叠所有空白，保留字符串/块注释，行注释转为块注释",
+  "sql.formatFailed": "格式化失败: {err}",
+
   // markdown toolbar
   "md.bold": "加粗 (**…**)",
   "md.italic": "斜体 (*…*)",
@@ -500,6 +511,21 @@ const EN: Record<string, string> = {
   "json.sortKeys": "Sort Keys",
   "json.sortKeysTip": "Recursively sort object keys, then pretty-print",
   "json.formatFailed": "Format failed: {err}",
+
+  // sql toolbar
+  "sql.river": "River",
+  "sql.riverTip":
+    "PL/SQL Developer style: keywords right-aligned into a river, columns aligned (one per line)",
+  "sql.tabular": "Tabular",
+  "sql.tabularTip":
+    "Keywords left-aligned to a fixed column, content trailing (one per line)",
+  "sql.compact": "Compact",
+  "sql.compactTip":
+    "Clause keyword + content on one line, comma lists kept inline — most compact",
+  "sql.minify": "Minify",
+  "sql.minifyTip":
+    "Collapse to a single line; strings and block comments preserved, line comments converted to block",
+  "sql.formatFailed": "Format failed: {err}",
 
   // markdown toolbar
   "md.bold": "Bold (**…**)",

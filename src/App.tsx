@@ -31,6 +31,7 @@ import PromptDialog from "./components/PromptDialog";
 import TabBar from "./components/TabBar";
 import MarkdownToolbar from "./components/MarkdownToolbar";
 import JsonToolbar from "./components/JsonToolbar";
+import SqlToolbar from "./components/SqlToolbar";
 import GotoAnything from "./components/GotoAnything";
 import GotoSymbol from "./components/GotoSymbol";
 import FindInFiles from "./components/FindInFiles";
@@ -38,7 +39,7 @@ import SettingsDialog from "./components/SettingsDialog";
 import CommandPalette from "./components/CommandPalette";
 import { isEnabled, SHORTCUTS } from "./lib/shortcuts";
 import { useEditorStore, useActiveTabMeta } from "./store/editor";
-import { isMarkdown, isJson } from "./lib/lang";
+import { isMarkdown, isJson, isSql } from "./lib/lang";
 import { useT } from "./lib/i18n";
 import {
   openFile,
@@ -56,6 +57,7 @@ import {
 import { loadPersisted, schedulePersist } from "./lib/persistence";
 import { useFileWatch } from "./lib/fileWatch";
 import { scheduleIdlePrefetch } from "./lib/idlePrefetch";
+import { logError } from "./lib/logger";
 import { Button } from "./components/ui/Button";
 
 type DragKind = "sidebar" | "preview" | null;
@@ -332,14 +334,33 @@ export default function App() {
   }, []);
 
   // OS-level "Open With → DEditor" (macOS Finder, Windows file association,
-  // `open -a DEditor file.sql` from a terminal, etc.). Tauri raises a
-  // RunEvent::Opened and our Rust glue re-emits it as `open-file` with the
-  // absolute path string. Reuse the regular openFileByPath flow.
+  // `open -a DEditor file.sql` from a terminal, etc.). Rust queues the paths
+  // in a Mutex-backed buffer because Tauri events are not buffered, and the
+  // RunEvent::Opened fires before React's listener exists on a cold start
+  // — emitting alone would drop the file silently. We drain the queue once
+  // on mount (handles cold start) and again on every "open-file" signal
+  // (handles paths arriving while we're already running). Gated on `hydrated`
+  // so `loadPersisted`'s `replaceTabs` doesn't clobber the just-opened tab.
   useEffect(() => {
+    if (!hydrated) return;
     let unlisten: (() => void) | undefined;
     let cancelled = false;
-    listen<string>("open-file", (e) => {
-      if (e.payload) void openFileByPath(e.payload);
+
+    const drainAndOpen = async () => {
+      try {
+        const paths = await invoke<string[]>("drain_pending_open_files");
+        for (const p of paths) {
+          if (cancelled) return;
+          await openFileByPath(p);
+        }
+      } catch (err) {
+        logError("drain_pending_open_files failed", err);
+      }
+    };
+
+    void drainAndOpen();
+    listen("open-file", () => {
+      void drainAndOpen();
     })
       .then((fn) => {
         if (cancelled) fn();
@@ -350,7 +371,7 @@ export default function App() {
       cancelled = true;
       unlisten?.();
     };
-  }, []);
+  }, [hydrated]);
 
   // Suppress browser-level drag default (so Tauri's native handler wins)
   useEffect(() => {
@@ -463,6 +484,7 @@ export default function App() {
               }}
             >
                 {!isDiffTab && isJson(filePath) && <JsonToolbar />}
+                {!isDiffTab && isSql(filePath) && <SqlToolbar />}
                 {activeMeta?.hasExternalChange && (
                   <ExternalChangeBanner tabId={activeMeta.id} />
                 )}
