@@ -6,9 +6,15 @@ import { tStatic } from "./i18n";
 // other UI (toolbar) calls helpers below to operate on it.
 
 let currentView: EditorView | null = null;
+let currentTabId: string | undefined;
+let currentContent: string | undefined;
+export function getActiveViewContent() { return currentContent; }
+export function getActiveViewTabId() { return currentTabId; }
 
-export function setActiveView(v: EditorView | null): void {
+export function setActiveView(v: EditorView | null, tabId?: string, content?: string): void {
   currentView = v;
+  currentTabId = v ? tabId : undefined;
+  currentContent = v ? content ?? v.state.doc.toString() : undefined;
 }
 
 export function getActiveView(): EditorView | null {

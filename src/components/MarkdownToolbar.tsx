@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import {
   FiBold,
   FiItalic,
@@ -28,6 +29,21 @@ import { Button } from "./ui/Button";
 
 export default function MarkdownToolbar() {
   const t = useT();
+  const moreRef = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const dismiss = (event: MouseEvent) => {
+      if (moreRef.current && !moreRef.current.contains(event.target as Node)) moreRef.current.open = false;
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && moreRef.current?.open) {
+        moreRef.current.open = false;
+        moreRef.current.querySelector("summary")?.focus();
+      }
+    };
+    document.addEventListener("click", dismiss);
+    document.addEventListener("keydown", escape);
+    return () => { document.removeEventListener("click", dismiss); document.removeEventListener("keydown", escape); };
+  }, []);
   const editorFontSize = useEditorStore((s) => s.editorFontSize);
   const setEditorFontSize = useEditorStore((s) => s.setEditorFontSize);
   const showPreview = useEditorStore((s) => s.showPreview);
@@ -83,32 +99,7 @@ export default function MarkdownToolbar() {
     getActiveView()?.focus();
   };
 
-  return (
-    <div
-      className="flex items-center gap-1 px-2 select-none"
-      style={{
-        height: 32,
-        background: "var(--bg-soft)",
-        borderBottom: "1px solid var(--border)",
-        flexShrink: 0,
-        overflowX: "auto",
-      }}
-    >
-      {/* Inline emphasis */}
-      <ToolbarButton title={t("md.bold")} onClick={() => wrapSelection("**")}>
-        <FiBold size={13} />
-      </ToolbarButton>
-      <ToolbarButton title={t("md.italic")} onClick={() => wrapSelection("*")}>
-        <FiItalic size={13} />
-      </ToolbarButton>
-      <ToolbarButton
-        title={t("md.strikethrough")}
-        onClick={() => wrapSelection("~~")}
-        label="S̶"
-      />
-      <ToolbarButton title={t("md.inlineCode")} onClick={() => wrapSelection("`")}>
-        <FiCode size={13} />
-      </ToolbarButton>
+  const extraTools = <>
       <Divider />
       {/* Color & highlight — the <input type="color"> sits on top of each
           button. WebKit's native color picker only opens reliably when the
@@ -186,7 +177,7 @@ export default function MarkdownToolbar() {
       <ToolbarButton title={t("md.image")} onClick={onImage}>
         <FiImage size={13} />
       </ToolbarButton>
-      <div style={{ flex: 1 }} />
+
       {/* Editor font size */}
       <span style={{ fontSize: 11, color: "var(--text-soft)" }}>
         {t("md.fontSize")}
@@ -214,6 +205,42 @@ export default function MarkdownToolbar() {
         <FiPlus size={13} />
       </ToolbarButton>
       <Divider />
+  </>;
+
+  return (
+    <div
+      className="md-toolbar-shell select-none"
+      style={{
+        minHeight: 36,
+        background: "var(--bg-soft)",
+        borderBottom: "1px solid var(--border)",
+        flexShrink: 0,
+        position: "relative",
+        containerType: "inline-size",
+      }}
+    >
+      <div className="md-toolbar-row">
+      {/* Inline emphasis */}
+      <ToolbarButton title={t("md.bold")} onClick={() => wrapSelection("**")}>
+        <FiBold size={13} />
+      </ToolbarButton>
+      <ToolbarButton title={t("md.italic")} onClick={() => wrapSelection("*")}>
+        <FiItalic size={13} />
+      </ToolbarButton>
+      <ToolbarButton
+        title={t("md.strikethrough")}
+        onClick={() => wrapSelection("~~")}
+        label="S̶"
+      />
+      <ToolbarButton title={t("md.inlineCode")} onClick={() => wrapSelection("`")}>
+        <FiCode size={13} />
+      </ToolbarButton>
+      <div className="md-toolbar-expanded">{extraTools}</div>
+      <details ref={moreRef} className="md-toolbar-more">
+        <summary>{t("md.more")}</summary>
+        <div className="md-toolbar-popover" onClick={(event) => { if ((event.target as HTMLElement).closest("button") && moreRef.current) moreRef.current.open = false; }}>{extraTools}</div>
+      </details>
+      <div style={{ flex: 1 }} />
       {/* View mode: edit-only / split / preview-only. Rendered as a segmented
           control so the active mode is clearly visible. Drives
           showPreview + previewMaximized in the store. */}
@@ -238,6 +265,7 @@ export default function MarkdownToolbar() {
           {t("md.viewPreview")}
         </SegmentButton>
       </SegmentGroup>
+      </div>
     </div>
   );
 }
@@ -274,6 +302,7 @@ function SegmentButton({
   return (
     <button
       type="button"
+      aria-pressed={active}
       onClick={onClick}
       style={{
         height: "100%",

@@ -79,6 +79,9 @@ export const Button = forwardRef<HTMLButtonElement, Props>(function Button(
     <button
       {...rest}
       ref={ref}
+      type={rest.type ?? "button"}
+      aria-pressed={pressed}
+      aria-label={rest["aria-label"] ?? (isIcon ? rest.title : undefined)}
       disabled={disabled}
       data-variant={variant}
       data-pressed={pressed ? "true" : undefined}

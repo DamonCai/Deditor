@@ -1,3 +1,4 @@
+import { useModalFocus } from "../lib/useModalFocus";
 import { create } from "zustand";
 import { tStatic } from "../lib/i18n";
 import { Button } from "./ui/Button";
@@ -27,12 +28,14 @@ const useConfirm = create<State>(() => ({
   resolve: null,
 }));
 
+let pendingDialog: Promise<unknown> = Promise.resolve();
+
 function show(opts: {
   title: string;
   message: string;
   buttons: ButtonSpec[];
 }): Promise<string> {
-  return new Promise((resolve) => {
+  const pending = pendingDialog.then(() => new Promise<string>((resolve) => {
     useConfirm.setState({
       open: true,
       title: opts.title,
@@ -40,7 +43,9 @@ function show(opts: {
       buttons: opts.buttons,
       resolve,
     });
-  });
+  }));
+  pendingDialog = pending;
+  return pending;
 }
 
 export function confirmUnsaved(
@@ -86,12 +91,13 @@ export function chooseAction(opts: {
 
 export default function ConfirmDialog() {
   const { open, title, message, buttons, resolve } = useConfirm();
-  if (!open) return null;
-
   const close = (value: string) => {
     resolve?.(value);
     useConfirm.setState({ open: false, resolve: null });
   };
+
+  const panelRef = useModalFocus(open, () => close("cancel"), resolve);
+  if (!open) return null;
 
   return (
     <div
@@ -102,24 +108,28 @@ export default function ConfirmDialog() {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        zIndex: 1000,
+        zIndex: 3000,
       }}
       onClick={(e) => {
         if (e.target === e.currentTarget) close("cancel");
       }}
       onKeyDown={(e) => {
         if (e.key === "Escape") close("cancel");
-        if (e.key === "Enter") {
+        if (e.key === "Enter" && !(e.target as HTMLElement).closest("button")) {
           const primary = buttons.find((b) => b.primary || b.danger);
           if (primary) close(primary.value);
         }
       }}
       tabIndex={-1}
-      ref={(el) => el?.focus()}
     >
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
         style={{
-          minWidth: 380,
+          width: "min(520px, calc(100vw - 32px))",
           maxWidth: 520,
           background: "var(--bg)",
           color: "var(--text)",

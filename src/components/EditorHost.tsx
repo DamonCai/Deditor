@@ -2,6 +2,8 @@ import { memo, useEffect, useState } from "react";
 import { useShallow } from "zustand/shallow";
 import { useEditorStore } from "../store/editor";
 import EditorSlot from "./EditorSlot";
+import { useRetainedTabs } from "../lib/retainedTabs";
+import { isBinaryRenderable } from "../lib/lang";
 
 interface Props {
   activeId: string | null;
@@ -14,12 +16,9 @@ interface Props {
   onPositionChange?: (pos: { cursor: number; scrollTopLine: number }) => void;
 }
 
-/** Keeps an Editor instance mounted for every tab the user has visited.
- *  Switching tabs becomes a CSS display toggle (instant) instead of an Editor
- *  unmount + remount (Shiki re-tokenize, language loader re-fetch, ~50–200ms).
- *
- *  Memory cost: ~5–15 MB per visited Editor (CodeMirror state + DOM). On a
- *  desktop app that's fine; tabs are dropped from the set when closed. */
+/** Retain the eight most recent text editors. Older ones keep immutable
+ * CodeMirror state (undo, bookmarks, folds, selections), without live DOM.
+ * Media/XMind remain mounted to preserve playback and their editing sessions. */
 const EditorHost = memo(function EditorHost({
   activeId,
   theme,
@@ -35,12 +34,14 @@ const EditorHost = memo(function EditorHost({
   // wake EditorHost. useShallow does an element-wise compare on the array.
   const tabIds = useEditorStore(useShallow((s) => s.tabs.map((t) => t.id)));
 
+  const recent = useRetainedTabs(activeId, tabIds);
+  const pinned = useEditorStore(useShallow((s) => s.tabs.filter((t) => isBinaryRenderable(t.filePath)).map((t) => t.id)));
+
   const [mounted, setMounted] = useState<Set<string>>(
     () => new Set(activeId ? [activeId] : []),
   );
 
-  // When a new tab becomes active, mount it. We never unmount on switch —
-  // that's the whole point. Drop happens via the tabIds effect below.
+  // Track visited tabs; the recent/pinned filter below controls live DOM.
   useEffect(() => {
     if (!activeId) return;
     setMounted((prev) =>
@@ -65,7 +66,7 @@ const EditorHost = memo(function EditorHost({
 
   return (
     <div style={{ position: "relative", height: "100%", width: "100%" }}>
-      {Array.from(mounted).map((id) => {
+      {Array.from(mounted).filter((id) => id === activeId || recent.includes(id) || pinned.includes(id)).map((id) => {
         const visible = id === activeId;
         return (
           <div

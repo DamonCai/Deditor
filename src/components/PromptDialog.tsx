@@ -1,3 +1,4 @@
+import { useModalFocus } from "../lib/useModalFocus";
 import { useEffect, useRef } from "react";
 import { create } from "zustand";
 import { tStatic } from "../lib/i18n";
@@ -53,12 +54,13 @@ export default function PromptDialog() {
     }
   }, [open]);
 
-  if (!open) return null;
-
   const close = (v: string | null) => {
     resolve?.(v);
     useDlg.setState({ open: false, resolve: null });
   };
+
+  const panelRef = useModalFocus(open, () => close(null), resolve);
+  if (!open) return null;
 
   return (
     <div
@@ -69,18 +71,23 @@ export default function PromptDialog() {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        zIndex: 1000,
+        zIndex: 3000,
       }}
       onClick={(e) => {
         if (e.target === e.currentTarget) close(null);
       }}
     >
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
         onKeyDown={(e) => {
           if (e.key === "Escape") close(null);
         }}
         style={{
-          minWidth: 380,
+          width: "min(520px, calc(100vw - 32px))",
           maxWidth: 520,
           background: "var(--bg)",
           color: "var(--text)",
@@ -98,6 +105,7 @@ export default function PromptDialog() {
         )}
         <input
           ref={inputRef}
+          aria-label={label || title}
           defaultValue={initial}
           placeholder={placeholder}
           spellCheck={false}

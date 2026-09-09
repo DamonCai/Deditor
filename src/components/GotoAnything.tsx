@@ -1,3 +1,4 @@
+import { useModalFocus } from "../lib/useModalFocus";
 import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useEditorStore } from "../store/editor";
@@ -33,6 +34,7 @@ const MAX_RESULTS = 80;
 
 export default function GotoAnything({ open, onClose }: Props) {
   const t = useT();
+  const panelRef = useModalFocus(open, onClose);
   const workspaces = useEditorStore((s) => s.workspaces);
   const [files, setFiles] = useState<WorkspaceFile[] | null>(null);
   const [query, setQuery] = useState("");
@@ -156,6 +158,11 @@ export default function GotoAnything({ open, onClose }: Props) {
       }}
     >
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t("goto.title")}
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
         style={{
           width: "min(640px, 92vw)",
@@ -171,6 +178,7 @@ export default function GotoAnything({ open, onClose }: Props) {
       >
         <input
           ref={inputRef}
+          aria-label={t("goto.title")}
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);

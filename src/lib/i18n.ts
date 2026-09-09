@@ -3,6 +3,17 @@ import { useEditorStore } from "../store/editor";
 export type Lang = "zh" | "en";
 
 const ZH: Record<string, string> = {
+  "goto.title": "搜索文件",
+  "symbol.title": "跳转到符号",
+  "palette.title": "命令面板",
+  "find.title": "在文件中查找",
+  "md.more": "更多",
+  "statusbar.readTime": "约 {minutes} 分钟",
+  "common.retry": "重试搜索",
+  "find.failed": "操作失败：{error}",
+  "find.replaceDone": "已替换 {count} 处，修改 {files} 个文件。",
+
+  "fileio.targetAlreadyOpen": "目标文件已在另一标签打开，请先关闭该标签或选择其他路径。",
   // common
   "common.cancel": "取消",
   "common.confirm": "确定",
@@ -184,7 +195,7 @@ const ZH: Record<string, string> = {
   "find.replaceAll": "全部替换",
   "find.replacing": "替换中…",
   "find.replaceConfirmTitle": "确认全部替换",
-  "find.replaceConfirmMsg": "将在 {files} 个文件里替换 {count} 处匹配，写盘后无法撤销。是否继续？",
+  "find.replaceConfirmMsg": "搜索显示 {count} 个匹配行。将替换这 {files} 个文件中的所有匹配（包括未显示的匹配），写盘后无法撤销。是否继续？",
   "cmd.nav.findInFiles": "Find in Files（全工作区搜索）",
 
   // tabbar
@@ -304,6 +315,17 @@ const ZH: Record<string, string> = {
 };
 
 const EN: Record<string, string> = {
+  "goto.title": "Go to File",
+  "symbol.title": "Go to Symbol",
+  "palette.title": "Command Palette",
+  "find.title": "Find in Files",
+  "md.more": "More",
+  "statusbar.readTime": "~{minutes} min",
+  "common.retry": "Retry search",
+  "find.failed": "Operation failed: {error}",
+  "find.replaceDone": "Replaced {count} occurrence(s) in {files} file(s).",
+
+  "fileio.targetAlreadyOpen": "This file is already open in another tab. Close it or choose another path.",
   // common
   "common.cancel": "Cancel",
   "common.confirm": "OK",
@@ -485,7 +507,7 @@ const EN: Record<string, string> = {
   "find.replaceAll": "Replace All",
   "find.replacing": "Replacing…",
   "find.replaceConfirmTitle": "Confirm Replace All",
-  "find.replaceConfirmMsg": "Replace {count} occurrence(s) across {files} file(s)? This writes to disk and can't be undone.",
+  "find.replaceConfirmMsg": "Found {count} matching lines. Replace ALL occurrences in these {files} files, including matches not shown? This writes to disk and cannot be undone.",
   "cmd.nav.findInFiles": "Find in Files (search all workspaces)",
 
   // tabbar

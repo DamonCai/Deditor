@@ -1,6 +1,8 @@
 import { memo, useMemo } from "react";
 import { useActiveTab, isTabDirty, useEditorStore } from "../store/editor";
-import { detectLang } from "../lib/lang";
+import { countText, documentStatsField } from "../lib/documentStats";
+import { getActiveView, getActiveViewTabId, getActiveViewContent } from "../lib/editorBridge";
+import { detectLang, isMarkdown, isBinaryRenderable } from "../lib/lang";
 import { useT } from "../lib/i18n";
 import LangIcon from "./LangIcon";
 
@@ -66,11 +68,18 @@ function StatusBarImpl() {
   // invalidate this cache, so arrow-key navigation in a big file no longer
   // re-scans tens of KB just to recompute line/col for the status bar.
   // EOL detection also keys off content only — same cache strategy.
-  const newlineOffsets = useMemo(() => buildNewlineOffsets(content), [content]);
-  const lines = newlineOffsets.length + 1;
+  const view = getActiveViewTabId() === active?.id && getActiveViewContent() === content ? getActiveView() : null;
+  const doc = view?.state.doc;
+  const binary = isBinaryRenderable(filePath);
+  const newlineOffsets = useMemo(() => doc || binary ? [] : buildNewlineOffsets(content), [content, doc, binary]);
+  const liveStats = view?.state.field(documentStatsField, false);
+  const stats = useMemo(() => liveStats ?? (isMarkdown(filePath) ? countText(content) : { words: 0, cjk: 0 }), [liveStats, content, filePath]);
+  const readMin = Math.max(1, Math.round(Math.max(stats.cjk / 300, stats.words / 200)));
+  const lines = doc?.lines ?? newlineOffsets.length + 1;
   const chars = content.length;
   const lang = detectLang(filePath);
-  const { line, col } = offsetToLineColCached(newlineOffsets, content.length, cursorOffset);
+  const currentLine = doc?.lineAt(Math.min(doc.length, Math.max(0, cursorOffset)));
+  const { line, col } = currentLine ? { line: currentLine.number, col: Math.min(doc!.length, Math.max(0, cursorOffset)) - currentLine.from + 1 } : offsetToLineColCached(newlineOffsets, content.length, cursorOffset);
   const eol = useMemo(() => detectEol(content), [content]);
 
   return (
@@ -103,8 +112,9 @@ function StatusBarImpl() {
             </span>
           )}
         </span>
-        <span title={t("statusbar.eol")}>{eol}</span>
-        <span title={t("statusbar.encoding")}>UTF-8</span>
+        {isMarkdown(filePath) && <span>{t("statusbar.readTime", { minutes: readMin })}</span>}
+        <span className="statusbar-secondary" title={t("statusbar.eol")}>{eol}</span>
+        <span className="statusbar-secondary" title={t("statusbar.encoding")}>UTF-8</span>
         <span>{lang.label}</span>
         <span>
           {lines} {t("statusbar.lines")} · {chars} {t("statusbar.chars")}

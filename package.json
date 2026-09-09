@@ -28,7 +28,9 @@
     "perf:memo": "npx tsx scripts/perf-memo.tsx",
     "perf:lang": "npx tsx scripts/perf-lang.ts",
     "perf:rust": "cargo test --release --manifest-path src-tauri/Cargo.toml ipc_bench -- --nocapture --test-threads=1",
-    "perf:all": "npm run perf:store && npm run perf:react && npm run perf:soak && npm run perf:libs && npm run perf:startup && npm run perf:dom && npm run perf:mainsub && npm run perf:hydrate && npm run perf:memo && npm run perf:lang && npm run perf:rust"
+    "perf:all": "npm run perf:store && npm run perf:react && npm run perf:soak && npm run perf:libs && npm run perf:startup && npm run perf:dom && npm run perf:mainsub && npm run perf:hydrate && npm run perf:memo && npm run perf:lang && npm run perf:document && npm run perf:rust",
+    "test:regression": "node scripts/test-regression.mjs",
+    "perf:document": "tsx scripts/perf-document.ts"
   },
   "dependencies": {
     "@codemirror/commands": "^6.7.1",
@@ -90,10 +92,12 @@
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
+    "esbuild": "^0.28.2",
     "jsdom": "^25.0.1",
     "postcss": "^8.5.0",
     "rollup-plugin-visualizer": "^5.14.0",
     "tailwindcss": "^3.4.17",
+    "tsx": "^4.23.13",
     "typescript": "^5.7.2",
     "vite": "^6.0.5"
   }

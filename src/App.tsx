@@ -137,20 +137,23 @@ export default function App() {
     }).catch(() => {});
   }, [language, shortcuts]);
 
-  // Hydrate from localStorage on mount
+  // Restore the session before choosing which optional engines to prefetch.
   useEffect(() => {
+    let disposed = false;
+    let cancelPrefetch: (() => void) | undefined;
     loadPersisted()
       .then((extra) => {
+        if (disposed) return;
         if (extra?.sidebarPx) setSidebarPx(extra.sidebarPx);
         if (extra?.previewPct) setPreviewPct(extra.previewPct);
       })
-      .finally(() => setHydrated(true));
-    // After the app shell has painted, idle-prefetch the heavy lazy chunks
-    // (Shiki engine, markdown-it, mermaid, katex, prettier, export). The
-    // first time the user does any of those operations, the JS is already
-    // parsed and warm — no chunk-load gap. Best-effort: failures are
-    // silently swallowed; the real call sites handle errors themselves.
-    scheduleIdlePrefetch();
+      .catch((err) => logError("restore session failed", err))
+      .finally(() => {
+        if (disposed) return;
+        setHydrated(true);
+        cancelPrefetch = scheduleIdlePrefetch();
+      });
+    return () => { disposed = true; cancelPrefetch?.(); };
   }, []);
 
   // Persist on any store change (debounced 500ms).

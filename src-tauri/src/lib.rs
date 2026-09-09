@@ -450,6 +450,20 @@ struct SearchResult {
     files_scanned: usize,
 }
 
+// Rank is independent of parallel completion order. Only the earliest
+// SEARCH_HITS_CAP + 1 matches are retained (one sentinel detects truncation).
+struct RankedHit {
+    file: usize,
+    path: std::sync::Arc<str>,
+    line: u32,
+    col: u32,
+    text: String,
+}
+impl PartialEq for RankedHit { fn eq(&self, other: &Self) -> bool { (self.file, self.line) == (other.file, other.line) } }
+impl Eq for RankedHit {}
+impl PartialOrd for RankedHit { fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> { Some(self.cmp(other)) } }
+impl Ord for RankedHit { fn cmp(&self, other: &Self) -> std::cmp::Ordering { (self.file, self.line).cmp(&(other.file, other.line)) } }
+
 const SEARCH_FILE_BYTES_CAP: u64 = 1_048_576; // 1 MB
 const SEARCH_HITS_CAP: usize = 5_000;
 const SEARCH_FILES_CAP: usize = MAX_WORKSPACE_FILES;
@@ -470,7 +484,6 @@ fn find_in_files(
         return Ok(SearchResult { hits: vec![], truncated: false, files_scanned: 0 });
     }
     let needle = if case_sensitive { query.clone() } else { query.to_lowercase() };
-    let needle_bytes = needle.as_bytes();
 
     // PHASE 1: walk every workspace tree, collecting candidate file paths.
     // This is fs metadata only — very cheap, kept single-threaded so we can
@@ -518,81 +531,54 @@ fn find_in_files(
         }
     }
 
-    // PHASE 2: scan each candidate in parallel across rayon's thread pool.
-    // The per-file work (read + UTF-8 validate + per-line substring search)
-    // dominates the wall-clock; running it concurrently across N cores is
-    // a near-linear speedup until disk IO saturates. Each thread emits its
-    // own Vec<SearchHit>; we flatten + truncate at the end.
+    // Bound retained matches without serial batch barriers. A monotone
+    // cutoff lets late files skip matching once an earlier full prefix exists.
+    // Every file is still read/validated, preserving files_scanned semantics.
     let files_scanned = std::sync::atomic::AtomicUsize::new(0);
-    let per_file_hits: Vec<Vec<SearchHit>> = candidates
-        .par_iter()
-        .map(|path| {
-            let meta = match path.metadata() {
-                Ok(m) => m,
-                Err(_) => return Vec::new(),
-            };
-            if meta.len() > SEARCH_FILE_BYTES_CAP { return Vec::new(); }
-            let bytes = match fs::read(path) {
-                Ok(b) => b,
-                Err(_) => return Vec::new(),
-            };
-            // Skip binary: any NUL in the first 8 KB.
-            let probe_end = bytes.len().min(8192);
-            if bytes[..probe_end].iter().any(|&b| b == 0) {
-                return Vec::new();
+    let cutoff = std::sync::atomic::AtomicUsize::new(usize::MAX);
+    let retained = std::sync::Mutex::new(std::collections::BinaryHeap::<RankedHit>::new());
+    candidates.par_iter().enumerate().for_each(|(index, path)| {
+        let meta = match path.metadata() { Ok(m) => m, Err(_) => return };
+        if meta.len() > SEARCH_FILE_BYTES_CAP { return; }
+        let bytes = match fs::read(path) { Ok(b) => b, Err(_) => return };
+        if bytes[..bytes.len().min(8192)].contains(&0) { return; }
+        let text = match std::str::from_utf8(&bytes) { Ok(s) => s, Err(_) => return };
+        files_scanned.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if index > cutoff.load(std::sync::atomic::Ordering::Relaxed) { return; }
+        let path_str: std::sync::Arc<str> = path.to_string_lossy().as_ref().into();
+        let mut local = Vec::new();
+        for (lineno, line) in text.lines().enumerate() {
+            if index > cutoff.load(std::sync::atomic::Ordering::Relaxed) { break; }
+            if let Some((start, _)) = match_range(line, &needle, case_sensitive) {
+                local.push(RankedHit {
+                    file: index,
+                    path: path_str.clone(),
+                    line: (lineno + 1) as u32,
+                    col: (line[..start].encode_utf16().count() + 1) as u32,
+                    text: line.to_string(),
+                });
+                if local.len() == SEARCH_HITS_CAP + 1 { break; }
             }
-            let text = match std::str::from_utf8(&bytes) {
-                Ok(s) => s,
-                Err(_) => return Vec::new(),
-            };
-            files_scanned.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let path_str = path.to_string_lossy().to_string();
-            // ASCII-only fast path: when the needle is pure ASCII we can do
-            // byte-level case-insensitive search without allocating a
-            // lowercased copy of each line. Most source-code searches stay
-            // here. We just have to verify the LINE is also ASCII for the
-            // fast path to be sound — for Unicode lines fall back to
-            // `to_lowercase` (which IS Unicode-correct for accented Latin
-            // / Greek / etc).
-            let needle_is_ascii = needle.is_ascii();
-            let mut local: Vec<SearchHit> = Vec::new();
-            for (lineno, line) in text.lines().enumerate() {
-                let found = if case_sensitive {
-                    find_subseq(line.as_bytes(), needle_bytes)
-                } else if needle_is_ascii && line.is_ascii() {
-                    // ASCII case-insensitive — no allocation.
-                    find_subseq_ascii_ci(line.as_bytes(), needle_bytes)
-                } else {
-                    let lower = line.to_lowercase();
-                    find_subseq(lower.as_bytes(), needle_bytes)
-                };
-                if let Some(col) = found {
-                    local.push(SearchHit {
-                        path: path_str.clone(),
-                        line: (lineno + 1) as u32,
-                        col: (col + 1) as u32,
-                        text: line.to_string(),
-                    });
-                }
-            }
-            local
-        })
-        .collect();
-
-    // PHASE 3: flatten + truncate. Order is preserved (par_iter preserves
-    // input order in the collected result), so hits within a file stay
-    // grouped and files come back in walk order.
-    let mut hits: Vec<SearchHit> = Vec::new();
-    let mut truncated = walk_truncated;
-    'collect: for batch in per_file_hits {
-        for h in batch {
-            if hits.len() >= SEARCH_HITS_CAP {
-                truncated = true;
-                break 'collect;
-            }
-            hits.push(h);
         }
-    }
+        if local.is_empty() { return; }
+        let mut heap = retained.lock().unwrap();
+        for hit in local {
+            if heap.len() < SEARCH_HITS_CAP + 1 {
+                heap.push(hit);
+            } else if heap.peek().is_some_and(|last| &hit < last) {
+                heap.pop();
+                heap.push(hit);
+            }
+        }
+        if heap.len() == SEARCH_HITS_CAP + 1 {
+            cutoff.store(heap.peek().unwrap().file, std::sync::atomic::Ordering::Relaxed);
+        }
+    });
+    let ranked = retained.into_inner().unwrap().into_sorted_vec();
+    let truncated = walk_truncated || ranked.len() > SEARCH_HITS_CAP;
+    let hits: Vec<SearchHit> = ranked.into_iter().take(SEARCH_HITS_CAP).map(|hit| SearchHit {
+        path: hit.path.to_string(), line: hit.line, col: hit.col, text: hit.text,
+    }).collect();
 
     log::info!(
         "find_in_files: \"{}\" → {} hits in {} files{}",
@@ -633,12 +619,46 @@ fn find_subseq_ascii_ci(hay: &[u8], needle: &[u8]) -> Option<usize> {
     None
 }
 
+/// Map folded UTF-8 positions back to original character boundaries, including
+/// expanding lowercase mappings such as U+0130 (I with dot).
+struct FoldedText { text: String, boundaries: Vec<(usize, usize)> }
+impl FoldedText {
+    fn new(text: &str) -> Self {
+        let mut boundaries = Vec::new();
+        let mut folded_offset = 0;
+        for (offset, ch) in text.char_indices() {
+            boundaries.push((folded_offset, offset));
+            folded_offset += ch.to_lowercase().map(char::len_utf8).sum::<usize>();
+        }
+        boundaries.push((folded_offset, text.len()));
+        Self { text: text.to_lowercase(), boundaries }
+    }
+    fn original_range(&self, start: usize, end: usize) -> (usize, usize) {
+        let left = self.boundaries.partition_point(|&(offset, _)| offset <= start) - 1;
+        let right = self.boundaries.partition_point(|&(offset, _)| offset < end);
+        (self.boundaries[left].1, self.boundaries[right].1)
+    }
+}
+
+fn match_range(text: &str, needle: &str, case_sensitive: bool) -> Option<(usize, usize)> {
+    if case_sensitive {
+        return find_subseq(text.as_bytes(), needle.as_bytes()).map(|i| (i, i + needle.len()));
+    }
+    if text.is_ascii() {
+        return find_subseq_ascii_ci(text.as_bytes(), needle.as_bytes()).map(|i| (i, i + needle.len()));
+    }
+    let folded = FoldedText::new(text);
+    find_subseq(folded.text.as_bytes(), needle.as_bytes())
+        .map(|i| folded.original_range(i, i + needle.len()))
+}
+
 #[derive(serde::Serialize)]
 struct ReplaceResult {
     /// Total replacement count across all files.
     total: u32,
     /// Number of files that had at least one replacement (and were rewritten).
     files_changed: u32,
+    errors: Vec<String>,
 }
 
 /// Plain-substring replace across the supplied file paths. Mirrors the case-
@@ -655,7 +675,7 @@ fn replace_in_files(
 ) -> Result<ReplaceResult, String> {
     use rayon::prelude::*;
     if query.is_empty() {
-        return Ok(ReplaceResult { total: 0, files_changed: 0 });
+        return Ok(ReplaceResult { total: 0, files_changed: 0, errors: vec![] });
     }
     // Per-file work: read → match → write. Each file is independent (no
     // shared mutable state), so we can fan out across rayon's thread pool.
@@ -687,8 +707,9 @@ fn replace_in_files(
         .collect();
     let mut total: u32 = 0;
     let mut files_changed: u32 = 0;
+    let mut errors = Vec::new();
     for r in results {
-        let (count, changed) = r?;
+        let (count, changed) = match r { Ok(value) => value, Err(err) => { errors.push(err); continue; } };
         total = total.saturating_add(count);
         if changed { files_changed = files_changed.saturating_add(1); }
     }
@@ -696,7 +717,7 @@ fn replace_in_files(
         "replace_in_files: \"{}\" → \"{}\" — {} replacements across {} file(s)",
         query, replacement, total, files_changed
     );
-    Ok(ReplaceResult { total, files_changed })
+    Ok(ReplaceResult { total, files_changed, errors })
 }
 
 /// Replace every (non-overlapping) occurrence of `needle` in `hay`, returning
@@ -708,34 +729,34 @@ fn substring_replace_all(
     replacement: &str,
     case_sensitive: bool,
 ) -> (String, u32) {
-    let hb = hay.as_bytes();
-    let nb = needle.as_bytes();
-    if nb.is_empty() || nb.len() > hb.len() {
-        return (hay.to_string(), 0);
-    }
+    if needle.is_empty() { return (hay.to_string(), 0); }
+    let needle = if case_sensitive { needle.to_string() } else { needle.to_lowercase() };
+    let folded = (!case_sensitive && !hay.is_ascii()).then(|| FoldedText::new(hay));
+    let search = folded.as_ref().map_or(hay, |f| f.text.as_str());
     let mut out = String::with_capacity(hay.len());
-    let mut count: u32 = 0;
-    let mut i = 0;
-    let mut copied_until = 0;
-    while i + nb.len() <= hb.len() {
-        let m = if case_sensitive {
-            &hb[i..i + nb.len()] == nb
+    let mut copied = 0;
+    let mut offset = 0;
+    let mut count = 0;
+    while offset < search.len() {
+        let rest = &search.as_bytes()[offset..];
+        let found = if !case_sensitive && folded.is_none() {
+            find_subseq_ascii_ci(rest, needle.as_bytes())
         } else {
-            (0..nb.len()).all(|k| hb[i + k].eq_ignore_ascii_case(&nb[k]))
+            find_subseq(rest, needle.as_bytes())
         };
-        if m {
-            // Splicing at byte offset `i` is UTF-8-safe because `needle` itself
-            // is UTF-8 and we only match aligned occurrences of it.
-            out.push_str(&hay[copied_until..i]);
+        let Some(found) = found else { break };
+        let start = offset + found;
+        let end = start + needle.len();
+        let (from, to) = folded.as_ref().map_or((start, end), |f| f.original_range(start, end));
+        if from >= copied {
+            out.push_str(&hay[copied..from]);
             out.push_str(replacement);
-            count = count.saturating_add(1);
-            i += nb.len();
-            copied_until = i;
-        } else {
-            i += 1;
+            copied = to;
+            count += 1;
         }
+        offset = end;
     }
-    out.push_str(&hay[copied_until..]);
+    out.push_str(&hay[copied..]);
     (out, count)
 }
 
@@ -1586,5 +1607,100 @@ mod ipc_bench {
             dt
         );
         assert!(r.hits.len() > 0);
+    }
+}
+
+#[cfg(test)]
+mod regression {
+    use super::*;
+    fn scratch(name: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("deditor_regression_{}_{}", name, std::process::id()));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+    #[test]
+    fn unicode_search_and_replace() {
+        let dir = scratch("unicode");
+        let file = dir.join("sample.txt");
+        fs::write(&file, "中文foo\n😀foo\nİx\nCAFÉ\nΟΣ").unwrap();
+        let roots = vec![dir.to_string_lossy().into_owned()];
+        let res = find_in_files(roots.clone(), "foo".into(), true).unwrap();
+        assert_eq!(res.hits.iter().map(|h| (h.line,h.col)).collect::<Vec<_>>(), vec![(1,3),(2,3)]);
+        let res = find_in_files(roots.clone(), "x".into(), false).unwrap();
+        assert_eq!((res.hits[0].line,res.hits[0].col), (3,2));
+        assert_eq!(find_in_files(roots, "café".into(), false).unwrap().hits.len(),1);
+        assert_eq!(substring_replace_all("CAFÉ café", "café", "X", false), ("X X".into(),2));
+        assert_eq!(substring_replace_all("İİ", "i", "X", false), ("XX".into(),2));
+        assert_eq!(substring_replace_all("ΟΣ", "ος", "X", false), ("X".into(),1));
+        assert_eq!(substring_replace_all("中文foo😀foo", "foo", "X", true), ("中文X😀X".into(),2));
+        assert_eq!(substring_replace_all("aaaa", "aa", "X", true), ("XX".into(),2));
+        assert_eq!(substring_replace_all("abc", "", "X", false), ("abc".into(),0));
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn exact_cap_order_and_binary_boundaries() {
+        let dir = scratch("cap");
+        let file = dir.join("sample.txt");
+        fs::write(&file,"match\n".repeat(SEARCH_HITS_CAP)).unwrap();
+        fs::write(dir.join("binary.bin"), b"match\0match").unwrap();
+        fs::write(dir.join("large.txt"), vec![b'm'; SEARCH_FILE_BYTES_CAP as usize + 1]).unwrap();
+        let roots=vec![dir.to_string_lossy().into_owned()];
+        let exact=find_in_files(roots.clone(),"match".into(),true).unwrap();
+        assert!(!exact.truncated);
+        assert_eq!(exact.files_scanned,1);
+        assert_eq!(exact.hits.len(),SEARCH_HITS_CAP);
+        assert!(exact.hits.iter().enumerate().all(|(i,h)| h.line as usize == i+1));
+        fs::write(&file,"match\n".repeat(SEARCH_HITS_CAP+1)).unwrap();
+        let extra=find_in_files(roots.clone(),"match".into(),true).unwrap();
+        assert!(extra.truncated);
+        assert_eq!(extra.hits.len(),SEARCH_HITS_CAP);
+        assert_eq!(extra.files_scanned,1);
+        let empty=find_in_files(roots,"".into(),true).unwrap();
+        assert!(empty.hits.is_empty());
+        assert_eq!(empty.files_scanned,0);
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn parallel_search_keeps_the_serial_prefix() {
+        let dir = scratch("ordered");
+        for i in 0..64 { fs::write(dir.join(format!("{i}.txt")), "match\n".repeat(100)).unwrap(); }
+        let expected: Vec<(String, u32)> = fs::read_dir(&dir).unwrap().flatten()
+            .flat_map(|entry| (1..=100).map(move |line| (entry.path().to_string_lossy().into_owned(), line)))
+            .take(SEARCH_HITS_CAP).collect();
+        for _ in 0..5 {
+            let result = find_in_files(vec![dir.to_string_lossy().into_owned()], "match".into(), true).unwrap();
+            let actual: Vec<_> = result.hits.into_iter().map(|hit| (hit.path, hit.line)).collect();
+            assert_eq!(actual, expected);
+            assert!(result.truncated);
+            assert_eq!(result.files_scanned, 64);
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn partial_replace_reports_successes_and_failures() {
+        let dir=scratch("replace");
+        let good=dir.join("good.txt");
+        fs::write(&good,"CAFÉ café").unwrap();
+        let result=replace_in_files(vec![good.to_string_lossy().into_owned(),dir.join("missing.txt").to_string_lossy().into_owned()],"café".into(),"X".into(),false).unwrap();
+        assert_eq!(result.total,2);
+        assert_eq!(result.files_changed,1);
+        assert_eq!(result.errors.len(),1);
+        assert_eq!(fs::read_to_string(good).unwrap(),"X X");
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn dense_search_benchmark() {
+        let dir = std::env::temp_dir().join(format!("deditor_dense_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        for i in 0..24 { fs::write(dir.join(format!("{i}.txt")), "needle data\n".repeat(20_000)).unwrap(); }
+        for _ in 0..3 {
+            let start = std::time::Instant::now();
+            let result = find_in_files(vec![dir.to_string_lossy().into_owned()], "needle".into(), true).unwrap();
+            assert_eq!(result.hits.len(), SEARCH_HITS_CAP);
+            assert!(result.truncated);
+            assert_eq!(result.files_scanned, 24);
+            println!("dense search: {:.2} ms", start.elapsed().as_secs_f64() * 1000.0);
+        }
+        fs::remove_dir_all(dir).unwrap();
     }
 }

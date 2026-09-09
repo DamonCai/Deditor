@@ -1,3 +1,4 @@
+import { useModalFocus } from "../lib/useModalFocus";
 import { useEffect, useRef } from "react";
 import { useEditorStore } from "../store/editor";
 import { SHORTCUTS, type ShortcutMeta } from "../lib/shortcuts";
@@ -13,6 +14,7 @@ const GROUP_ORDER: ShortcutMeta["group"][] = ["file", "nav", "editor"];
 
 export default function SettingsDialog({ open, onClose }: Props) {
   const t = useT();
+  const panelRef = useModalFocus(open, onClose);
   const shortcuts = useEditorStore((s) => s.shortcuts);
   const setShortcutEnabled = useEditorStore((s) => s.setShortcutEnabled);
   const resetShortcuts = useEditorStore((s) => s.resetShortcuts);
@@ -75,6 +77,11 @@ export default function SettingsDialog({ open, onClose }: Props) {
       }}
     >
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t("settings.title")}
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
         style={{
           width: "min(640px, 92vw)",

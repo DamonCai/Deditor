@@ -1,3 +1,4 @@
+import { useModalFocus } from "../lib/useModalFocus";
 import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useActiveTab } from "../store/editor";
 import { extractSymbols, type Symbol } from "../lib/symbols";
@@ -20,6 +21,7 @@ const MAX_RESULTS = 200;
 
 export default function GotoSymbol({ open, onClose }: Props) {
   const t = useT();
+  const panelRef = useModalFocus(open, onClose);
   const active = useActiveTab();
   const content = active?.content ?? "";
   const filePath = active?.filePath ?? null;
@@ -124,6 +126,11 @@ export default function GotoSymbol({ open, onClose }: Props) {
       }}
     >
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t("symbol.title")}
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
         style={{
           width: "min(560px, 90vw)",
@@ -139,6 +146,7 @@ export default function GotoSymbol({ open, onClose }: Props) {
       >
         <input
           ref={inputRef}
+          aria-label={t("symbol.title")}
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);

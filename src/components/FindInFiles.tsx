@@ -1,8 +1,9 @@
+import { useModalFocus } from "../lib/useModalFocus";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useEditorStore } from "../store/editor";
 import { openFileByPath } from "../lib/fileio";
-import { getActiveView } from "../lib/editorBridge";
+import { getActiveView, getActiveViewTabId } from "../lib/editorBridge";
 import { useT, tStatic } from "../lib/i18n";
 import { logError, logInfo } from "../lib/logger";
 import { chooseAction } from "./ConfirmDialog";
@@ -30,10 +31,12 @@ interface SearchResult {
 interface ReplaceResult {
   total: number;
   files_changed: number;
+  errors?: string[];
 }
 
 export default function FindInFiles({ open, onClose }: Props) {
   const t = useT();
+  const panelRef = useModalFocus(open, onClose);
   const workspaces = useEditorStore((s) => s.workspaces);
   const [query, setQuery] = useState("");
   const [replacement, setReplacement] = useState("");
@@ -44,6 +47,12 @@ export default function FindInFiles({ open, onClose }: Props) {
   const [replacing, setReplacing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const reqIdRef = useRef(0);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [retry, setRetry] = useState(0);
+  const [resultsKey, setResultsKey] = useState("");
+  const searchKey = JSON.stringify([query, caseSensitive, workspaces]);
+  useEffect(() => () => { reqIdRef.current++; }, []);
 
   useEffect(() => {
     if (open) requestAnimationFrame(() => inputRef.current?.focus());
@@ -51,12 +60,16 @@ export default function FindInFiles({ open, onClose }: Props) {
 
   // Debounce search by 300ms after typing stops.
   useEffect(() => {
-    if (!open) return;
-    if (!query.trim()) {
-      setResults(null);
+    const id = ++reqIdRef.current;
+    setReplacing(false);
+    setResults(null);
+    setResultsKey("");
+    setError("");
+    setNotice("");
+    if (!open || !query.trim()) {
+      setSearching(false);
       return;
     }
-    const id = ++reqIdRef.current;
     setSearching(true);
     const timer = setTimeout(async () => {
       try {
@@ -67,18 +80,19 @@ export default function FindInFiles({ open, onClose }: Props) {
         });
         if (reqIdRef.current === id) {
           setResults(res);
+          setResultsKey(searchKey);
           setSearching(false);
         }
       } catch (err) {
         if (reqIdRef.current === id) {
           logError("find_in_files failed", err);
           setSearching(false);
-          setResults({ hits: [], truncated: false, files_scanned: 0 });
+          setError(String(err));
         }
       }
     }, 300);
     return () => clearTimeout(timer);
-  }, [open, query, caseSensitive, workspaces]);
+  }, [open, query, caseSensitive, workspaces, retry]);
 
   // Group hits by file path for the result list.
   const grouped = useMemo(() => {
@@ -104,56 +118,55 @@ export default function FindInFiles({ open, onClose }: Props) {
   };
 
   const onReplaceAll = async () => {
-    if (!results || results.hits.length === 0 || replacing) return;
+    if (!results || !results.hits.length || replacing || searching || resultsKey !== searchKey) return;
     const uniquePaths = Array.from(new Set(results.hits.map((h) => h.path)));
-    const choice = await chooseAction({
-      title: tStatic("find.replaceConfirmTitle"),
-      message: tStatic("find.replaceConfirmMsg", {
-        count: String(results.hits.length),
-        files: String(uniquePaths.length),
-      }),
-      buttons: [
-        { label: tStatic("common.cancel"), value: "cancel" },
-        { label: tStatic("find.replaceAll"), value: "ok", primary: true, danger: true },
-      ],
-    });
-    if (choice !== "ok") return;
+    const id = ++reqIdRef.current;
     setReplacing(true);
+    setError("");
+    setNotice("");
     try {
-      const res = await invoke<ReplaceResult>("replace_in_files", {
-        paths: uniquePaths,
-        query,
-        replacement,
-        caseSensitive,
+      const choice = await chooseAction({
+        title: tStatic("find.replaceConfirmTitle"),
+        message: tStatic("find.replaceConfirmMsg", { count: results.hits.length, files: uniquePaths.length }),
+        buttons: [
+          { label: tStatic("common.cancel"), value: "cancel" },
+          { label: tStatic("find.replaceAll"), value: "ok", primary: true, danger: true },
+        ],
       });
-      logInfo(
-        `replace_in_files: ${res.total} replacement(s) across ${res.files_changed} file(s)`,
-      );
-      // Re-run the search so the result list reflects post-replacement state.
-      // Bump reqIdRef so the in-flight debounce (if any) discards.
-      reqIdRef.current++;
-      const fresh = await invoke<SearchResult>("find_in_files", {
-        roots: workspaces,
-        query,
-        caseSensitive,
-      });
-      setResults(fresh);
+      if (choice !== "ok" || id !== reqIdRef.current) return;
+      const res = await invoke<ReplaceResult>("replace_in_files", { paths: uniquePaths, query, replacement, caseSensitive });
+      if (id !== reqIdRef.current) return;
+      setNotice(t("find.replaceDone", { count: res.total, files: res.files_changed }));
+      if (res.errors?.length) setError(res.errors.join("\n"));
+      logInfo(`replace_in_files: ${res.total} replacement(s) across ${res.files_changed} file(s)`);
+      const fresh = await invoke<SearchResult>("find_in_files", { roots: workspaces, query, caseSensitive });
+      if (id === reqIdRef.current) {
+        setResults(fresh);
+        setResultsKey(searchKey);
+      }
     } catch (err) {
       logError("replace_in_files failed", err);
+      if (id === reqIdRef.current) setError(String(err));
     } finally {
-      setReplacing(false);
+      if (id === reqIdRef.current) setReplacing(false);
     }
   };
 
   const openHit = async (path: string, line: number, col: number) => {
     await openFileByPath(path);
-    // Defer one frame so the editor mounts / state restores before we jump.
-    requestAnimationFrame(() => {
+    const target = useEditorStore.getState().tabs.find((tab) => tab.filePath === path);
+    if (!target) return;
+    let attempts = 0;
+    const jump = () => {
+      if (useEditorStore.getState().activeId !== target.id) return;
       const view = getActiveView();
-      if (!view) return;
+      if (!view || getActiveViewTabId() !== target.id) {
+        if (++attempts < 10) requestAnimationFrame(jump);
+        return;
+      }
       try {
         const lineInfo = view.state.doc.line(Math.min(line, view.state.doc.lines));
-        const pos = lineInfo.from + Math.max(0, col - 1);
+        const pos = lineInfo.from + Math.min(lineInfo.length, Math.max(0, col - 1));
         view.dispatch({
           selection: { anchor: pos },
           scrollIntoView: true,
@@ -162,7 +175,8 @@ export default function FindInFiles({ open, onClose }: Props) {
       } catch {
         /* doc shorter than expected */
       }
-    });
+    };
+    requestAnimationFrame(jump);
   };
 
   return (
@@ -179,6 +193,11 @@ export default function FindInFiles({ open, onClose }: Props) {
       }}
     >
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t("find.title")}
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
         style={{
           width: "min(720px, 95vw)",
@@ -219,6 +238,8 @@ export default function FindInFiles({ open, onClose }: Props) {
             </Button>
             <input
               ref={inputRef}
+              aria-label={t("find.title")}
+              disabled={replacing}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={onKeyDown}
@@ -242,6 +263,7 @@ export default function FindInFiles({ open, onClose }: Props) {
             <Button
               variant={caseSensitive ? "primary" : "secondary"}
               size="sm"
+              disabled={replacing}
               onClick={() => setCaseSensitive((v) => !v)}
               title={t("find.caseSensitive")}
               style={{ fontFamily: "var(--font-mono, ui-monospace, monospace)" }}
@@ -253,6 +275,8 @@ export default function FindInFiles({ open, onClose }: Props) {
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ width: 22 }} />
               <input
+                aria-label={t("find.replacePlaceholder")}
+                disabled={replacing}
                 value={replacement}
                 onChange={(e) => setReplacement(e.target.value)}
                 onKeyDown={onKeyDown}
@@ -273,7 +297,7 @@ export default function FindInFiles({ open, onClose }: Props) {
                 variant="primary"
                 size="sm"
                 onClick={() => void onReplaceAll()}
-                disabled={!results || results.hits.length === 0 || replacing}
+                disabled={!results || results.hits.length === 0 || replacing || searching || resultsKey !== searchKey}
                 title={t("find.replaceAll")}
               >
                 {replacing ? t("find.replacing") : t("find.replaceAll")}
@@ -304,6 +328,11 @@ export default function FindInFiles({ open, onClose }: Props) {
             : t("find.idle")}
         </div>
 
+        {notice && <div role="status" style={{ padding: "8px 12px", color: "var(--text-soft)", fontSize: 12 }}>{notice}</div>}
+        {error && <div role="alert" style={{ padding: "8px 12px", color: "var(--text)", fontSize: 12, whiteSpace: "pre-wrap" }}>
+          {t("find.failed", { error })}
+          <Button size="sm" disabled={replacing} onClick={() => setRetry((v) => v + 1)}>{t("common.retry")}</Button>
+        </div>}
         <div style={{ overflowY: "auto", flex: 1 }}>
           {grouped.map(({ path, hits }) => (
             <div key={path} style={{ borderBottom: "1px solid var(--border)" }}>

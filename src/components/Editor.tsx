@@ -1,5 +1,6 @@
+import { documentStatsField } from "../lib/documentStats";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { EditorState, EditorSelection, Compartment } from "@codemirror/state";
+import { EditorState, EditorSelection, Compartment, StateEffect } from "@codemirror/state";
 import {
   EditorView,
   keymap,
@@ -62,7 +63,7 @@ const exportHtml = () => import("../lib/export").then((m) => m.exportHtml());
 const exportPdf = () => import("../lib/export").then((m) => m.exportPdf());
 import { codeBlockCompletion } from "../lib/codeBlockComplete";
 import { logError, logInfo } from "../lib/logger";
-import { setActiveView } from "../lib/editorBridge";
+import { setActiveView, getActiveView } from "../lib/editorBridge";
 import { tStatic, useT } from "../lib/i18n";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
 
@@ -342,6 +343,7 @@ export default function Editor({
         // literals appear naturally. Enabling globally would noisily decorate
         // identifiers like `rgb(...)` in unrelated code that happens to match.
         colorPreviewSupported(filePath) ? colorPreview() : [],
+        documentStatsField,
         bookmarkExtension(),
         inspectionMarkers(),
         EditorView.updateListener.of((u) => {
@@ -351,6 +353,7 @@ export default function Editor({
             // (which arrives as the `value` prop on the next tick) recognizes
             // its own echo and skips the sync effect's O(N) compare.
             lastEmittedRef.current = next;
+            if (getActiveView() === u.view) setActiveView(u.view, tabId, next);
             onChangeRef.current(next);
           }
           if (u.selectionSet || u.docChanged) {
@@ -360,7 +363,7 @@ export default function Editor({
             // range so multi-cursor selections still report a useful total.
             let selLen = 0;
             for (const r of u.state.selection.ranges) selLen += r.to - r.from;
-            useEditorStore.getState().setActiveSelectionLength(selLen);
+            if (getActiveView() === u.view) useEditorStore.getState().setActiveSelectionLength(selLen);
           }
         }),
         themeCompartment.current.of(theme === "dark" ? islandDark : islandLight),
@@ -397,7 +400,9 @@ export default function Editor({
     // on disk anymore.
     const cachedJSON = tabId && !noStateCache ? getEditorStateCache(tabId) : undefined;
     let state: EditorState;
-    if (cachedJSON && (cachedJSON as { doc?: string }).doc === value) {
+    if (cachedJSON instanceof EditorState && cachedJSON.doc.toString() === value) {
+      state = cachedJSON.update({ effects: StateEffect.reconfigure.of(extensions) }).state;
+    } else if (cachedJSON && (cachedJSON as { doc?: string }).doc === value) {
       try {
         state = EditorState.fromJSON(
           cachedJSON,
@@ -427,7 +432,7 @@ export default function Editor({
 
     const view = new EditorView({ state, parent: hostRef.current });
     viewRef.current = view;
-    setActiveView(view);
+    setActiveView(view, tabId);
 
     // Restore first-visible line. Defer to next frame so CM has measured layout.
     if (initialScrollLine != null && initialScrollLine > 1) {
@@ -504,17 +509,20 @@ export default function Editor({
       // Stash state JSON (incl. undo history) for next mount of the same tab.
       if (tabId && !noStateCache) {
         try {
-          setEditorStateCache(tabId, view.state.toJSON({ history: historyField }));
+          if (useEditorStore.getState().tabs.some((t) => t.id === tabId)) {
+            setEditorStateCache(tabId, view.state);
+            useEditorStore.getState().setTabPosition(tabId, { ...positionRef.current });
+          }
         } catch {
           /* defensive: never block unmount on a serialization error */
         }
       }
       view.destroy();
       viewRef.current = null;
-      setActiveView(null);
+      if (getActiveView() === view) setActiveView(null);
       // Clear the StatusBar readout so a closed editor's last selection
       // count doesn't linger over the next tab.
-      useEditorStore.getState().setActiveSelectionLength(0);
+      if (!getActiveView()) useEditorStore.getState().setActiveSelectionLength(0);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -530,7 +538,9 @@ export default function Editor({
     if (!active) return;
     const view = viewRef.current;
     if (!view) return;
-    setActiveView(view);
+    setActiveView(view, tabId);
+    view.requestMeasure();
+    useEditorStore.getState().setActiveSelectionLength(view.state.selection.ranges.reduce((n, r) => n + r.to - r.from, 0));
   }, [active]);
 
   // Apply external scroll requests (e.g. from preview). Accepts a *fractional*
@@ -741,7 +751,6 @@ export default function Editor({
           className="h-full w-full overflow-hidden"
           style={{ ["--editor-font-size" as string]: `${fontSize}px` }}
         />
-        <InspectionsBadge value={value} filePath={filePath} />
       </div>
       {ctxMenu && (
         <ContextMenu
@@ -752,61 +761,6 @@ export default function Editor({
         />
       )}
     </>
-  );
-}
-
-/** IntelliJ-style inspections widget in the editor's top-right corner. We
- *  don't ship a real linter so we surface document stats instead — line/char
- *  counts always, plus an estimated read time for Markdown. Pure decorative
- *  pill; click target reserved for future "jump to next problem" wiring. */
-function InspectionsBadge({
-  value,
-  filePath,
-}: {
-  value: string;
-  filePath: string | null;
-}) {
-  // data: URLs are binary content (image / pdf / hex), the badge is meaningless.
-  if (value.startsWith("data:")) return null;
-  const lines = value === "" ? 0 : value.split("\n").length;
-  const chars = value.length;
-  // Markdown read-time: 300 cn-chars/min OR 200 en-words/min, whichever larger.
-  let readMin = 0;
-  if (isMarkdown(filePath)) {
-    const cjk = (value.match(/[一-鿿]/g) ?? []).length;
-    const words = value.split(/\s+/).filter(Boolean).length;
-    readMin = Math.max(1, Math.round(Math.max(cjk / 300, words / 200)));
-  }
-  return (
-    <div
-      style={{
-        position: "absolute",
-        top: 6,
-        right: 14,
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        padding: "2px 10px",
-        fontSize: 11,
-        color: "var(--text-soft)",
-        background: "color-mix(in srgb, var(--bg-soft) 85%, transparent)",
-        border: "1px solid var(--border)",
-        borderRadius: 999,
-        backdropFilter: "blur(6px)",
-        pointerEvents: "none",
-        userSelect: "none",
-      }}
-    >
-      <span className="tabular-nums">{lines.toLocaleString()} 行</span>
-      <span style={{ opacity: 0.5 }}>·</span>
-      <span className="tabular-nums">{chars.toLocaleString()} 字</span>
-      {readMin > 0 && (
-        <>
-          <span style={{ opacity: 0.5 }}>·</span>
-          <span className="tabular-nums">~{readMin} min</span>
-        </>
-      )}
-    </div>
   );
 }
 

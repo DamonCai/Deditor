@@ -2,6 +2,8 @@ import { memo, useEffect, useState } from "react";
 import { useShallow } from "zustand/shallow";
 import { useEditorStore } from "../store/editor";
 import Preview from "./Preview";
+import { useRetainedTabs } from "../lib/retainedTabs";
+import { isMarkdown } from "../lib/lang";
 
 interface Props {
   activeId: string | null;
@@ -14,17 +16,9 @@ interface Props {
   onScroll?: (line: number) => void;
 }
 
-/** Mirrors EditorHost: keeps a Preview instance mounted for every visited
- *  tab. Switching tabs is a CSS `display` toggle so each tab's preview
- *  scroll, rendered html cache, and TOC state are preserved independently
- *  — switching A→B→A does NOT touch A's preview at all.
- *
- *  Memory cost: each Preview keeps a rendered html string + Mermaid SVGs in
- *  its DOM. For typical markdown tabs that's tens of KB; for very large
- *  markdown files it can be more. Tabs are dropped from the set when the
- *  user closes the tab (or when the file becomes a non-markdown — Preview
- *  for that tab is then unnecessary and the slot is cleaned up below).
- */
+/** Keep logical preview/search state for visited Markdown tabs, while only
+ *  the eight most recent retain document DOM. Reactivation restores the
+ *  saved source anchor; closing a tab drops its slot and cached HTML. */
 /** Thin wrapper that reads ONE tab's saved scroll line at mount time and
  *  passes it as initialScrollLine to Preview. We capture it via useState
  *  initializer so it doesn't re-fetch on every render — the snap-to-line
@@ -32,12 +26,14 @@ interface Props {
 function PreviewSlot({
   tabId,
   active,
+  retainDom,
   theme,
   scrollLine,
   onScroll,
 }: {
   tabId: string;
   active: boolean;
+  retainDom: boolean;
   theme: "light" | "dark";
   scrollLine?: number;
   onScroll?: (line: number) => void;
@@ -52,6 +48,7 @@ function PreviewSlot({
     <Preview
       tabId={tabId}
       active={active}
+      retainDom={retainDom}
       theme={theme}
       scrollLine={scrollLine}
       initialScrollLine={initialScrollLine}
@@ -73,18 +70,13 @@ const PreviewHost = memo(function PreviewHost({
     useShallow((s) =>
       s.tabs
         .filter((t) => {
-          if (t.diff) return false;
-          if (!t.filePath) return false;
-          const lower = t.filePath.toLowerCase();
-          return (
-            lower.endsWith(".md") ||
-            lower.endsWith(".markdown") ||
-            lower.endsWith(".mdx")
-          );
+          return !t.diff && isMarkdown(t.filePath);
         })
         .map((t) => t.id),
     ),
   );
+
+  const recent = useRetainedTabs(activeId, previewableIds);
 
   const [mounted, setMounted] = useState<Set<string>>(
     () => new Set(activeId && previewableIds.includes(activeId) ? [activeId] : []),
@@ -130,6 +122,7 @@ const PreviewHost = memo(function PreviewHost({
             <PreviewSlot
               tabId={id}
               active={visible}
+              retainDom={visible || recent.includes(id)}
               theme={theme}
               scrollLine={visible ? scrollLine : undefined}
               onScroll={visible ? onScroll : undefined}

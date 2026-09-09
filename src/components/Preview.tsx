@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { renderMarkdown, renderCode } from "../lib/markdown";
 import { hydratePlantuml } from "../lib/plantumlHydrate";
@@ -45,6 +45,8 @@ interface Props {
    *  shortcuts, otherwise every hidden Preview would also register a
    *  handler and the keystroke would fire N times. */
   active?: boolean;
+  /** Cold previews retain logical state but release their large HTML/SVG DOM. */
+  retainDom?: boolean;
   theme: "light" | "dark";
   /** Editor's current top line — preview will scroll to match. Only set on
    *  the active Preview (inactive previews get undefined so their scrollTop
@@ -63,6 +65,7 @@ interface Props {
 export default function Preview({
   tabId,
   active,
+  retainDom = true,
   theme,
   scrollLine,
   initialScrollLine,
@@ -72,7 +75,8 @@ export default function Preview({
   // own tab's content / filePath / dirty flips.
   const source = useTabContent(tabId);
   const filePath = useTabFilePath(tabId);
-  const [html, setHtml] = useState("");
+  const [cachedHtml, setHtml] = useState("");
+  const html = retainDom ? cachedHtml : "";
   const containerRef = useRef<HTMLDivElement>(null);
   const isMd = isMarkdown(filePath);
   // Suppress outgoing scroll events for this many ms after a programmatic scroll
@@ -198,6 +202,15 @@ export default function Preview({
     root.scrollTo({ top: Math.max(0, top), behavior: "auto" });
     return true;
   };
+
+  const suspended = useRef(false);
+  useLayoutEffect(() => {
+    if (!retainDom) { suspended.current = true; return; }
+    if (suspended.current && active) {
+      scrollContainerToLine(lastTopLineRef.current);
+      suspended.current = false;
+    }
+  }, [retainDom, active, html]);
 
   // Apply incoming scrollLine from editor (programmatic scroll). Re-runs on
   // html change so a scrollLine that arrived before html was ready will still
@@ -520,6 +533,7 @@ export default function Preview({
   // any marks that landed inside; for marks elsewhere it's safe but cheap
   // to redo). Throttled implicitly by html being debounced upstream.
   useEffect(() => {
+    if (!retainDom) { matchesRef.current = []; return; }
     if (!searchOpen) return;
     const root = containerRef.current;
     if (!root) {
@@ -556,7 +570,7 @@ export default function Preview({
       suppressOutgoingUntil.current = Date.now() + 200;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchQuery, html, searchOpen]);
+  }, [searchQuery, html, searchOpen, retainDom]);
 
   // Cmd/Ctrl+F to open the search bar. Bound at window level (capture phase)
   // so it intercepts before any WebView-native find handling.
@@ -597,6 +611,7 @@ export default function Preview({
   // and active-section highlighting.
   const [tocItems, setTocItems] = useState<TocItem[]>([]);
   useEffect(() => {
+    if (!retainDom) return;
     if (!readingMode) {
       if (tocItems.length) setTocItems([]);
       return;
@@ -618,7 +633,7 @@ export default function Preview({
     });
     setTocItems(items);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [html, readingMode]);
+  }, [html, readingMode, retainDom]);
 
   // Active TOC item — driven by two signals so both natural scroll AND TOC
   // clicks are honored correctly:
@@ -638,6 +653,7 @@ export default function Preview({
   const [activeTocId, setActiveTocId] = useState<string>("");
   const clickedTocRef = useRef<{ id: string; scrollTop: number } | null>(null);
   useEffect(() => {
+    if (!retainDom) return;
     if (!readingMode || tocItems.length === 0) {
       if (activeTocId) setActiveTocId("");
       clickedTocRef.current = null;
@@ -710,7 +726,7 @@ export default function Preview({
       if (rafId) cancelAnimationFrame(rafId);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tocItems, readingMode]);
+  }, [tocItems, readingMode, retainDom]);
 
   const handleTocJump = (id: string) => {
     const root = containerRef.current;

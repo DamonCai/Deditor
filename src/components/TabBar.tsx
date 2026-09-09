@@ -3,7 +3,7 @@ import { useShallow } from "zustand/shallow";
 import { FiChevronDown, FiPlus, FiX } from "react-icons/fi";
 import { LuGitCompare } from "react-icons/lu";
 import { useEditorStore, isTabDirty, type Tab } from "../store/editor";
-import { closeTabById, newFile, revealInFinder } from "../lib/fileio";
+import { closeTabById, closeOtherTabs, newFile, revealInFinder } from "../lib/fileio";
 import { useT, tStatic } from "../lib/i18n";
 import LangIcon from "./LangIcon";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
@@ -36,7 +36,6 @@ function TabBarImpl() {
   const tabs = useEditorStore(useShallow((s) => s.tabs));
   const activeId = useEditorStore((s) => s.activeId);
   const setActive = useEditorStore((s) => s.setActive);
-  const closeOthers = useEditorStore((s) => s.closeOthers);
   const reorderTabs = useEditorStore((s) => s.reorderTabs);
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const [overflowOpen, setOverflowOpen] = useState(false);
@@ -174,12 +173,12 @@ function TabBarImpl() {
       items.push({ label: t("tabbar.close"), onClick: () => closeTabById(tab.id) });
       items.push({
         label: t("tabbar.closeOthers"),
-        onClick: () => closeOthers(tab.id),
+        onClick: () => void closeOtherTabs(tab.id),
         disabled: tabsLen <= 1,
       });
       setMenu({ x: e.clientX, y: e.clientY, items });
     },
-    [t, closeOthers],
+    [t],
   );
 
   return (

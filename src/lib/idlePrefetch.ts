@@ -15,6 +15,8 @@
  *  error handling.
  */
 
+import { useEditorStore } from "../store/editor";
+import { isMarkdown } from "./lang";
 import { logDebug } from "./logger";
 
 type Importer = () => Promise<unknown>;
@@ -36,11 +38,13 @@ function onIdle(fn: () => void, deadlineMs = 50): void {
  *  (not Promise.all) so we never starve the main thread with a parse storm.
  *  Total wall time: a handful of seconds in the background, completely
  *  invisible. */
-function runQueue(queue: Array<{ name: string; fn: Importer }>): void {
+function runQueue(queue: Array<{ name: string; fn: Importer }>, cancelled: () => boolean): void {
   const step = () => {
+    if (cancelled()) return;
     const next = queue.shift();
     if (!next) return;
     onIdle(() => {
+      if (cancelled()) return;
       const t0 = performance.now();
       next
         .fn()
@@ -61,32 +65,27 @@ function runQueue(queue: Array<{ name: string; fn: Importer }>): void {
 /** Kick off the prefetch sequence. Call once, after the app shell has had
  *  a chance to paint. We schedule the FIRST prefetch with a brief delay so
  *  the very first interactive frames belong entirely to the user. */
-export function scheduleIdlePrefetch(): void {
-  // Order matters: most-likely-to-be-needed first, so if the user starts
-  // poking around mid-prefetch the earliest chunks are already in.
-  const queue: Array<{ name: string; fn: Importer }> = [
-    // Shiki engine + markdown-it: needed the moment a .md file opens with
-    // preview on. Heaviest after CodeMirror — biggest win to pre-warm.
-    { name: "highlight (Shiki engine)", fn: () => import("./highlight").then((m) => m.getHighlighter()) },
-    { name: "markdown renderer", fn: () => import("./markdown") },
-    // KaTeX: only ~260 KB but immediately needed if any opened doc has math.
-    { name: "katex", fn: () => import("@vscode/markdown-it-katex") },
-    // Mermaid: ~600 KB lazy chunk. Pre-warm so the first ```mermaid``` block
-    // paints without the half-second engine-load gap.
-    { name: "mermaid", fn: () => import("mermaid") },
-    // PlantUML encoder: small but real if the doc has PUML.
-    { name: "plantuml-encoder", fn: () => import("plantuml-encoder") },
-    // Export pipeline (HTML/PDF) — pulls markdown-it + Shiki again so the
-    // cache is already warm; explicitly listing ensures the export.ts
-    // module itself is parsed.
-    { name: "export", fn: () => import("./export") },
-    // Prettier standalone: only needed when the user hits Format. Small
-    // but worth pre-warming since the first format would otherwise sit
-    // on a 100 ms wait for the standalone to load.
-    { name: "prettier/standalone", fn: () => import("prettier/standalone") },
-  ];
-
-  // Wait a beat after first paint before starting — let real user input
-  // win any contention in the first ~300 ms.
-  setTimeout(() => runQueue(queue), 300);
+export function scheduleIdlePrefetch(): () => void {
+  let cancelled = false;
+  const timer = setTimeout(() => {
+    const state = useEditorStore.getState();
+    const markdown = state.tabs.filter((tab) => !tab.diff && isMarkdown(tab.filePath));
+    const queue: Array<{ name: string; fn: Importer }> = [];
+    if (markdown.length) {
+      queue.push({ name: "highlight", fn: () => import("./highlight").then((m) => m.getHighlighter()) });
+      queue.push({ name: "markdown", fn: () => import("./markdown") });
+      if (markdown.some((tab) => /\$[^$\n]+\$|\$\$/.test(tab.content))) {
+        queue.push({ name: "katex", fn: () => import("@vscode/markdown-it-katex") });
+      }
+      if (markdown.some((tab) => /(?:```|~~~)mermaid\b/i.test(tab.content))) {
+        queue.push({ name: "mermaid", fn: () => import("mermaid") });
+      }
+      if (markdown.some((tab) => /(?:```|~~~)(?:plantuml|puml|uml)\b/i.test(tab.content))) {
+        queue.push({ name: "plantuml", fn: () => import("plantuml-encoder") });
+      }
+    }
+    if (state.formatOnSave) queue.push({ name: "prettier", fn: () => import("prettier/standalone") });
+    runQueue(queue, () => cancelled);
+  }, 300);
+  return () => { cancelled = true; clearTimeout(timer); };
 }

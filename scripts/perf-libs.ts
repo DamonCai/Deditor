@@ -198,7 +198,7 @@ const check = (r: { label: string; max_ms: number; mean_ms: number }, limit: num
   // ── 4. diff.computeRows ─────────────────────────────────────────────────
   console.log("\n[4] diff.computeRows — DiffView mount");
   const diffModule: any = await import("../src/lib/diff");
-  const computeFn = diffModule.computeDiffRows || diffModule.diff || diffModule.default;
+  const computeFn = diffModule.computeDiff;
   if (typeof computeFn === "function") {
     const aBig = Array.from({ length: 1000 }, (_, i) => `line ${i}`).join("\n");
     const bBig = Array.from({ length: 1000 }, (_, i) => i === 500 ? `modified line ${i}` : `line ${i}`).join("\n");
@@ -206,7 +206,7 @@ const check = (r: { label: string; max_ms: number; mean_ms: number }, limit: num
     console.table([r4]);
     check(r4, FRAME * 2);
   } else {
-    console.log("  (diff function shape didn't match — skipping)");
+    throw new Error("computeDiff export missing");
   }
 
   // ── 5. symbols.extractSymbols ──────────────────────────────────────────
@@ -217,11 +217,12 @@ const check = (r: { label: string; max_ms: number; mean_ms: number }, limit: num
     const tsCode = Array.from({ length: 500 }, (_, i) =>
       `export function fn${i}() { return ${i}; }\nclass C${i} { method${i}() {} }\n`,
     ).join("");
-    const r5 = bench("extractSymbols 1000-symbol TS file", () => extractFn(tsCode, "test.ts"));
+    if (extractFn("test.ts", tsCode).length !== 1000) throw new Error("Expected 1000 symbols");
+    const r5 = bench("extractSymbols 1000-symbol TS file", () => extractFn("test.ts", tsCode));
     console.table([r5]);
     check(r5, FRAME);
   } else {
-    console.log("  (symbols function shape didn't match — skipping)");
+    throw new Error("extractSymbols export missing");
   }
 
   // ── 6. jsonFormat.smartFormat ──────────────────────────────────────────

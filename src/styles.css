@@ -705,3 +705,17 @@ body,
     color: #1f2328 !important;
   }
 }
+
+.md-toolbar-row { display: flex; align-items: center; gap: 4px; min-height: 36px; padding: 0 8px; }
+.md-toolbar-expanded { display: flex; align-items: center; gap: 4px; }
+.md-toolbar-more { display: none; }
+.md-toolbar-more summary { cursor: pointer; font-size: 12px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 4px; }
+.md-toolbar-popover { position: absolute; left: 8px; right: 8px; top: 100%; z-index: 40; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 12px; background: var(--bg-soft); border: 1px solid var(--border); box-shadow: var(--shadow-modal); border-radius: 6px; }
+@container (max-width: 900px) {
+  .md-toolbar-expanded { display: none; }
+  .md-toolbar-more { display: block; }
+}
+@media (max-width: 850px) {
+  .statusbar-secondary { display: none; }
+}
+.deditor-btn:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
