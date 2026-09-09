@@ -1,3 +1,4 @@
+import { topicIndicators, type TopicIndicator } from "./indicators";
 import {
   type Topic,
   type Sheet,
@@ -19,9 +20,10 @@ export interface SceneNode extends Box {
   content: Box;
   imageHeight: number;
   labelLines: string[];
-  detailLines: string[];
+  indicators: TopicIndicator[];
+  indicatorColumns: number;
   labelY: number;
-  detailY: number;
+  indicatorY: number;
   fontSize: number;
   fill: string;
   color: string;
@@ -223,7 +225,6 @@ export function buildScene(
   sheet: Sheet,
   folded: Set<string> = new Set(),
   measure: Measure = estimate,
-  captions = { notes: "Notes", link: "Link" },
 ): Scene {
   const warnings = new Set<string>();
   function layout(
@@ -259,19 +260,19 @@ export function buildScene(
     const auxiliary = { ...p, "fo:font-weight": "400", "fo:font-style": "normal" };
     const labelLines = topic.labels?.length
       ? wrap(topic.labels.join(" · "), Math.max(60, widthHint), 11, auxiliary, measure) : [];
-    const details = [topic.notes ? captions.notes : "",
-      ...(topic.markers ?? []).map(m => m.markerId.replace("priority-", "P")),
-      topic.href ? captions.link : ""].filter(Boolean).join(" · ");
-    const detailLines = details ? wrap(details, Math.max(60, widthHint), 10, auxiliary, measure) : [];
+    const indicators = topicIndicators(topic);
+    const indicatorColumns = Math.max(1, Math.min(indicators.length,
+      Math.floor((Math.max(60, widthHint) + 4) / 20)));
+    const indicatorRows = Math.ceil(indicators.length / indicatorColumns);
     const contentWidth = Math.max(24, imageWidth,
       ...lines.map(s => measure(s, style.fontSize, p)),
       ...labelLines.map(s => measure(s, 11, auxiliary)),
-      ...detailLines.map(s => measure(s, 10, auxiliary)));
+      indicators.length ? indicatorColumns * 20 - 4 : 0);
     const titleHeight = lines.length * style.fontSize * 1.4;
     const pictureHeight = imageHeight ? imageHeight + 8 : 0;
     const contentHeight = pictureHeight + titleHeight +
       (labelLines.length ? 6 + labelLines.length * 16 : 0) +
-      (detailLines.length ? 4 + detailLines.length * 14 : 0);
+      (indicatorRows ? 4 + indicatorRows * 20 : 0);
     const paddedWidth = Math.max(depth === 0 ? 100 : 50,
       contentWidth + (depth === 0 ? 58 : depth === 1 ? 48 : 28));
     const paddedHeight = contentHeight + (depth === 0 ? 28 : 18);
@@ -283,7 +284,7 @@ export function buildScene(
     const content = { x: (width - contentWidth) / 2, y: (height - contentHeight) / 2,
       width: contentWidth, height: contentHeight };
     const labelY = content.y + pictureHeight + titleHeight + 6;
-    const detailY = content.y + pictureHeight + titleHeight +
+    const indicatorY = content.y + pictureHeight + titleHeight +
       (labelLines.length ? 6 + labelLines.length * 16 : 0) + 4;
     const node: SceneNode = {
       topic,
@@ -292,7 +293,7 @@ export function buildScene(
       branch,
       detached,
       lines,
-      content, imageHeight, labelLines, detailLines, labelY, detailY,
+      content, imageHeight, labelLines, indicators, indicatorColumns, labelY, indicatorY,
       ...style,
       x: -width / 2,
       y: -height / 2,

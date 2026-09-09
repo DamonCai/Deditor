@@ -22,7 +22,6 @@ import {
 import { STRUCTURES, styleFor } from "../lib/xmind/scene";
 import XmindCanvas, { type Camera } from "./XmindCanvas";
 import { useEditorStore } from "../store/editor";
-import { saveFile } from "../lib/fileio";
 import { registerDocumentFlush } from "../lib/documentFlush";
 import { logError } from "../lib/logger";
 import { useT } from "../lib/i18n";
@@ -55,7 +54,7 @@ useEditorStore.subscribe((state) => {
   for (const id of sessionCache.keys())
     if (!open.has(id)) sessionCache.delete(id);
 });
-export default function XmindView({ dataUrl, filePath, tabId }: Props) {
+export default function XmindView({ dataUrl, tabId }: Props) {
   const t = useT();
   const [session, setSession] = useState<Session | null>(null),
     [error, setError] = useState("");
@@ -63,15 +62,6 @@ export default function XmindView({ dataUrl, filePath, tabId }: Props) {
     echo = useRef("");
   const [sheetId, setSheetId] = useState(""),
     [selected, setSelected] = useState<string[]>([]);
-  const [mode, setMode] = useState<"read" | "edit">(() => {
-    try {
-      return localStorage.getItem("deditor:xmind:viewMode") === "edit"
-        ? "edit"
-        : "read";
-    } catch {
-      return "read";
-    }
-  });
   const [inspector, setInspector] = useState(true),
     [outline, setOutline] = useState(false),
     [query, setQuery] = useState("");
@@ -194,7 +184,7 @@ export default function XmindView({ dataUrl, filePath, tabId }: Props) {
   const execute = useCallback(
     (command: Command) => {
       const s = current.current;
-      if (!s || !s.doc.editable || mode !== "edit") return;
+      if (!s || !s.doc.editable || !tabId) return;
       try {
         const sheets = editDocument(s.sheets, sheetId, command);
         if (sheets !== s.sheets)
@@ -209,7 +199,7 @@ export default function XmindView({ dataUrl, filePath, tabId }: Props) {
         setError(String(err));
       }
     },
-    [sheetId, mode, publish],
+    [sheetId, tabId, publish],
   );
   const undo = () => {
     const s = current.current;
@@ -258,8 +248,7 @@ export default function XmindView({ dataUrl, filePath, tabId }: Props) {
     },
     [sheetId],
   );
-  const canEdit = !!tabId && !!session?.doc.editable,
-    editing = canEdit && mode === "edit";
+  const editing = !!tabId && !!session?.doc.editable;
   const add = (kind: "attached" | "detached" | "callout") => {
     if (!sheet) return;
     const n = newTopic(
@@ -362,45 +351,58 @@ export default function XmindView({ dataUrl, filePath, tabId }: Props) {
   const p = resolved.properties;
   return (
     <div className="xm-workbench" data-xmind-tab={tabId}>
-      <header className="xm-header">
-        <strong title={filePath ?? ""}>
-          {filePath?.split(/[\\/]/).pop() ?? "XMind"}
-        </strong>
-        <div className="xm-mode">
-          <Button
-            size="sm"
-            pressed={mode === "read"}
-            onClick={() => {
-              flush();
-              setMode("read");
-              try {
-                localStorage.setItem("deditor:xmind:viewMode", "read");
-              } catch {
-                /* Optional preference. */
+      <header className="document-toolbar xm-tools">
+        {editing && (
+          <>
+            <Button size="sm" disabled={!session.past.length} onClick={undo}>
+              {t("xmind.undo")}
+            </Button>
+            <Button size="sm" disabled={!session.future.length} onClick={redo}>
+              {t("xmind.redo")}
+            </Button>
+            <span className="xm-divider" />
+            <Button size="sm" onClick={() => add("attached")}>
+              {t("xmind.child")}
+            </Button>
+            <Button size="sm" onClick={() => add("detached")}>
+              {t("xmind.floating")}
+            </Button>
+            <Button size="sm" disabled={!topic} onClick={() => add("callout")}>
+              {t("xmind.callout")}
+            </Button>
+            <Button
+              size="sm"
+              disabled={!selected.length || !parents.get(selected[0])}
+              onClick={() => group("boundary")}
+            >
+              {t("xmind.boundary")}
+            </Button>
+            <Button
+              size="sm"
+              disabled={!selected.length || !parents.get(selected[0])}
+              onClick={() => group("summary")}
+            >
+              {t("xmind.summary")}
+            </Button>
+            <Button
+              size="sm"
+              disabled={selected.length !== 2}
+              onClick={() =>
+                execute({
+                  type: "relationship",
+                  from: selected[0],
+                  to: selected[1],
+                  title: t("xmind.relationship"),
+                })
               }
-            }}
-          >
-            {t("xmind.read")}
-          </Button>
-          <Button
-            size="sm"
-            pressed={editing}
-            disabled={!canEdit}
-            onClick={() => {
-              setMode("edit");
-              try {
-                localStorage.setItem("deditor:xmind:viewMode", "edit");
-              } catch {
-                /* Optional preference. */
-              }
-            }}
-          >
-            {t("xmind.edit")}
-          </Button>
-        </div>
+            >
+              {t("xmind.relationship")}
+            </Button>
+          </>
+        )}
         <div className="xm-spacer" />
         <input
-          className="xm-search"
+          className="deditor-input deditor-input--compact xm-search"
           aria-label={t("xmind.search")}
           placeholder={t("xmind.search")}
           value={query}
@@ -421,67 +423,6 @@ export default function XmindView({ dataUrl, filePath, tabId }: Props) {
           {t("xmind.inspector")}
         </Button>
       </header>
-      {editing && (
-        <div className="xm-tools">
-          <Button size="sm" disabled={!session.past.length} onClick={undo}>
-            {t("xmind.undo")}
-          </Button>
-          <Button size="sm" disabled={!session.future.length} onClick={redo}>
-            {t("xmind.redo")}
-          </Button>
-          <span className="xm-divider" />
-          <Button size="sm" onClick={() => add("attached")}>
-            {t("xmind.child")}
-          </Button>
-          <Button size="sm" onClick={() => add("detached")}>
-            {t("xmind.floating")}
-          </Button>
-          <Button size="sm" disabled={!topic} onClick={() => add("callout")}>
-            {t("xmind.callout")}
-          </Button>
-          <Button
-            size="sm"
-            disabled={!selected.length || !parents.get(selected[0])}
-            onClick={() => group("boundary")}
-          >
-            {t("xmind.boundary")}
-          </Button>
-          <Button
-            size="sm"
-            disabled={!selected.length || !parents.get(selected[0])}
-            onClick={() => group("summary")}
-          >
-            {t("xmind.summary")}
-          </Button>
-          <Button
-            size="sm"
-            disabled={selected.length !== 2}
-            onClick={() =>
-              execute({
-                type: "relationship",
-                from: selected[0],
-                to: selected[1],
-                title: t("xmind.relationship"),
-              })
-            }
-          >
-            {t("xmind.relationship")}
-          </Button>
-          <div className="xm-spacer" />
-          <Button
-            size="sm"
-            onClick={() => {
-              flush();
-              saveFile().catch((err) => {
-                logError("xmind save failed", err);
-                setError(String(err));
-              });
-            }}
-          >
-            {t("common.save")}
-          </Button>
-        </div>
-      )}
       {error && (
         <div className="xm-error" role="alert">
           {t("xmind.editError", { error })}
@@ -490,7 +431,7 @@ export default function XmindView({ dataUrl, filePath, tabId }: Props) {
           </Button>
         </div>
       )}
-      {!canEdit && <div className="xm-legacy">{t("xmind.legacy")}</div>}
+      {!editing && <div className="xm-legacy">{t("xmind.legacy")}</div>}
       <div className="xm-body">
         {outline && (
           <nav className="xm-outline" aria-label={t("xmind.outline")}>
@@ -576,7 +517,7 @@ export default function XmindView({ dataUrl, filePath, tabId }: Props) {
                     {topic.structureClass &&
                       !STRUCTURES.some(([s]) => s === topic.structureClass) && (
                         <option value={topic.structureClass}>
-                          {topic.structureClass}
+                          {t("xmind.originalLayout")}
                         </option>
                       )}
                   </select>

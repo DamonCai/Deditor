@@ -490,7 +490,7 @@ test(1, "diamond and ellipse contain title, labels and metadata", () => {
       assert.ok(shape === "diamond" ? dx + dy < 1 : shape === "ellipse" ? dx * dx + dy * dy < 1 : dx < 1 && dy < 1);
     }
     assert.ok(n.labelLines.length > 1);
-    assert.ok(n.detailY + n.detailLines.length * 14 <= c.y + c.height);
+    assert.ok(n.indicatorY + Math.ceil(n.indicators.length / n.indicatorColumns) * 20 <= c.y + c.height);
   }
 });
 const fishSheet = (structure = "org.xmind.ui.fishbone.leftHeaded", count = 4): Sheet => ({
@@ -554,6 +554,46 @@ test(3, "folding and reopening a fishbone preserves branches, routes and archive
     assert.deepEqual(buildScene(doc.sheets[0]), whole);
   }
   assert.deepEqual(writeDocument(doc, doc.sheets), bytes);
+});
+
+
+test(1, "marker IDs become symbols without deleting user labels or archive fields", () => {
+  const sheet: Sheet = { id: "symbols", title: "Symbols", rootTopic: {
+    id: "symbols-root", title: "task-done is a user title", labels: ["star-red", "客户标签"],
+    markers: [{ markerId: "task-done" }, { markerId: "task-half" },
+      { markerId: "priority-1" }, { markerId: "star-red" }, { markerId: "unknown-internal-name" }],
+    notes: { plain: { content: "Keep these notes" } }, href: "https://example.test/",
+  } };
+  const before = JSON.stringify(sheet), node = buildScene(sheet).nodes[0];
+  assert.deepEqual(node.indicators.map(i => i.kind), ["task", "task", "priority", "star", "marker", "notes", "link"]);
+  assert.equal(node.indicators[0].value, 1);
+  assert.equal(node.indicators[1].value, .5);
+  assert.ok(node.labelLines.join("").includes("star-red"));
+  assert.ok(node.lines.join("").includes("task-done"));
+  assert.ok(!JSON.stringify(node.indicators).includes("unknown-internal-name"));
+  assert.equal(JSON.stringify(sheet), before);
+  const bytes = zipSync({ "content.json": strToU8(JSON.stringify([sheet])) });
+  const doc = openDocument(bytes);
+  const renamed = editDocument(doc.sheets, sheet.id, { type: "title", id: "symbols-root", title: "Renamed" });
+  const reopened = openDocument(writeDocument(doc, renamed)).sheets[0].rootTopic;
+  assert.deepEqual(reopened.markers, sheet.rootTopic.markers);
+  assert.deepEqual(reopened.notes, sheet.rootTopic.notes);
+  assert.deepEqual(reopened.labels, sheet.rootTopic.labels);
+});
+test(2, "many and unknown markers wrap inside shaped topics without phantom text rows", () => {
+  for (const count of [0, 1, 31]) {
+    const sheet: Sheet = { id: "wrap-symbols", title: "Symbols", rootTopic: {
+      id: "root", title: "标题", style: { properties: { "shape-class": "diamond", "fo:max-width": "60" } },
+      markers: Array.from({ length: count }, (_, i) => ({ markerId: `unrecognized-${i}` })),
+    } };
+    const n = buildScene(sheet).nodes[0];
+    assert.equal(n.indicators.length, count);
+    if (count) {
+      assert.ok(n.indicatorColumns * 20 - 4 <= n.content.width);
+      assert.ok(n.indicatorY + Math.ceil(count / n.indicatorColumns) * 20 <= n.content.y + n.content.height);
+    }
+    assert.deepEqual(n.labelLines, []);
+  }
 });
 
 console.log(`${passed} XMind tests passed`);

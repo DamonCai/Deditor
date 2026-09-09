@@ -37,34 +37,11 @@
   font-size: 12px;
   overflow: hidden;
 }
-.xm-header,
-.xm-tools {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.xm-header strong {
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 600;
-}
-.xm-header {
-  background: var(--bg-soft);
+.document-toolbar.xm-tools {
+  height: auto;
   flex-wrap: wrap;
-}
-.xm-tools {
-  min-height: 39px;
-  flex-wrap: wrap;
-}
-.xm-mode {
-  display: flex;
-  gap: 2px;
-  margin-left: 8px;
+  padding-top: 5px;
+  padding-bottom: 5px;
 }
 .xm-spacer {
   flex: 1;
@@ -76,11 +53,6 @@
 }
 .xm-search {
   width: 150px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  border-radius: 6px;
-  padding: 5px 8px;
-  color: var(--text);
 }
 .xm-body {
   display: flex;
@@ -315,9 +287,6 @@
   .xm-outline {
     width: 165px;
   }
-  .xm-header strong {
-    max-width: 120px;
-  }
   .xm-search {
     width: 120px;
   }
@@ -341,17 +310,7 @@
     bottom: 0;
     z-index: 25;
   }
-  .xm-header {
-    gap: 4px;
-    padding: 6px;
-  }
-  .xm-header strong {
-    max-width: 90px;
-  }
-  .xm-tools {
-    padding: 6px;
-  }
-  .xm-header .xm-spacer {
+  .xm-tools .xm-spacer {
     display: none;
   }
 }

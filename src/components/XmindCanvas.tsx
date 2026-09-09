@@ -1,3 +1,4 @@
+import XmindIndicator from "./XmindIndicator";
 import { logError } from "../lib/logger";
 import {
   useEffect,
@@ -17,7 +18,6 @@ import {
 } from "../lib/xmind/document";
 import {
   buildScene,
-  STRUCTURES,
   edgePath,
   braceConnector,
   type SceneNode,
@@ -166,8 +166,8 @@ export default function XmindCanvas({
     };
   }, []);
   const scene = useMemo(
-    () => buildScene(sheet, folded, measure, { notes: t("xmind.notes"), link: t("xmind.link") }),
-    [sheet, folded, fontsReady, t],
+    () => buildScene(sheet, folded, measure),
+    [sheet, folded, fontsReady],
   );
   const byId = useMemo(
     () => new Map(scene.nodes.map((n) => [n.topic.id, n])),
@@ -821,16 +821,23 @@ export default function XmindCanvas({
                   ))}
                 </text>
               )}
-              {[{ lines: n.labelLines, y: n.labelY, size: 11 },
-                { lines: n.detailLines, y: n.detailY, size: 10 }].map((row, index) => (
-                <text key={index} x={n.width / 2} y={row.y + row.size}
-                  textAnchor="middle" fontSize={row.size} fontWeight={400} fontStyle="normal"
-                  fontFamily={n.properties["fo:font-family"] ?? "NeverMind, PingFang SC, Microsoft YaHei, sans-serif"}
-                  fill={n.color} opacity={0.7} pointerEvents="none">
-                  {row.lines.map((line, i) => <tspan key={i} x={n.width / 2}
-                    dy={i ? (index === 0 ? 16 : 14) : 0}>{line}</tspan>)}
-                </text>
-              ))}
+              {!!n.labelLines.length && <text x={n.width / 2} y={n.labelY + 11}
+                textAnchor="middle" fontSize={11} fontWeight={400} fontStyle="normal"
+                fontFamily={n.properties["fo:font-family"] ?? "NeverMind, PingFang SC, Microsoft YaHei, sans-serif"}
+                fill={n.color} opacity={0.7} pointerEvents="none">
+                {n.labelLines.map((line, i) => <tspan key={i} x={n.width / 2} dy={i ? 16 : 0}>{line}</tspan>)}
+              </text>}
+              {n.indicators.map((icon, i) => {
+                const row = Math.floor(i / n.indicatorColumns);
+                const columns = Math.min(n.indicatorColumns, n.indicators.length - row * n.indicatorColumns);
+                const label = icon.kind === "task"
+                  ? t("xmind.indicator.task", { percent: Math.round((icon.value ?? 0) * 100) })
+                  : icon.kind === "priority" ? t("xmind.indicator.priority", { value: icon.value ?? 1 })
+                    : t(`xmind.indicator.${icon.kind}`);
+                return <XmindIndicator key={i} icon={icon} label={label} color={n.color}
+                  x={(n.width - (columns * 20 - 4)) / 2 + (i % n.indicatorColumns) * 20}
+                  y={n.indicatorY + row * 20} />;
+              })}
               {!!n.topic.children?.attached?.length && (
                 <g
                   data-fold="true"
@@ -898,14 +905,12 @@ export default function XmindCanvas({
         </div>
       )}
       {!!scene.warnings.length && (
-        <div className="xm-warning" role="status">
-          {t("xmind.approximate")}{" "}
-          {scene.warnings
-            .map((structure) => {
-              const label = STRUCTURES.find(([id]) => id === structure)?.[1];
-              return label ? t(`xmind.layout.${label}`) : structure;
-            })
-            .join(", ")}
+        <div className="xm-warning" role="status" aria-label={t("xmind.approximate")}
+          title={t("xmind.approximate")}>
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+            <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" />
+            <path d="M8 7v4" stroke="currentColor" /><circle cx="8" cy="4.5" r=".8" fill="currentColor" />
+          </svg>
         </div>
       )}
       {context && (

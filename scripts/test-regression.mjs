@@ -1,3 +1,4 @@
+import { zipSync, strToU8 } from "fflate";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -848,14 +849,37 @@ test(5, "navigation and settings dialogs restore keyboard focus", async () => {
 
 function xmindUrl(bytes) {return `data:application/vnd.xmind.workbook;base64,${Buffer.from(bytes).toString('base64')}`;}
 function xmindSheets() {return app.openXmindDocument(new Uint8Array(Buffer.from(store.getState().tabs[0].content.split(',')[1], 'base64'))).sheets;}
-async function mountXmind(editing = true) {
+async function mountXmind(editing = true, bytes = app.sampleArchive()) {
+  if(root){await act(async()=>root.unmount());root=undefined;}
   window.HTMLCanvasElement.prototype.getContext = () => ({font:'',measureText:text=>({width:Array.from(text).length*9})});
-  const url=xmindUrl(app.sampleArchive());
+  const url=xmindUrl(bytes);
   reset([tab('xm',url,'/test/sample.xmind',url)]);
   localStorage.setItem('deditor:xmind:viewMode',editing?'edit':'read');
   function Host() {const content=store(s=>s.tabs.find(t=>t.id==='xm')?.content);return content?React.createElement(app.XmindView,{dataUrl:content,filePath:'/test/sample.xmind',tabId:'xm'}):null;}
   await render(React.createElement(Host));
 }
+test(3, 'XMind symbols and layout hints never paint internal names with legacy mode preferences', async()=>{
+  const sheet={id:'icons-sheet',title:'Icons',rootTopic:{id:'icons-root',title:'交付计划',
+    structureClass:'org.xmind.ui.unknown-internal-layout',labels:['客户标签'],
+    markers:[{markerId:'task-done'},{markerId:'task-half'},{markerId:'star-red'},{markerId:'priority-1'},{markerId:'vendor-private-marker'}],
+    notes:{plain:{content:'保留真实备注'}},href:'https://example.test/'}};
+  const bytes=zipSync({'content.json':strToU8(JSON.stringify([sheet]))});
+  for(const previousEditing of [false,true]) {
+    await mountXmind(previousEditing,bytes);
+    const node=document.querySelector('[data-topic="icons-root"]');
+    const painted=[...node.querySelectorAll('text')].map(n=>n.textContent).join(' ');
+    assert.ok(painted.includes('交付计划'));
+    assert.ok(painted.includes('客户标签'));
+    assert.ok(!/task-done|task-half|star-red|priority-1|vendor-private-marker|Notes|Link/.test(painted));
+    assert.equal(node.querySelectorAll('svg[role="img"]').length,7);
+    assert.ok(node.querySelector('[aria-label="Task progress 100%"]'));
+    assert.ok(node.querySelector('[aria-label="Has notes"]'));
+    assert.ok(!document.querySelector('.xm-warning').textContent.includes('org.xmind'));
+    assert.ok(![...document.querySelectorAll('option')].some(n=>n.textContent.includes('org.xmind')));
+  }
+  assert.equal(store.getState().tabs[0].content,store.getState().tabs[0].savedContent);
+  assert.deepEqual(xmindSheets()[0].rootTopic.markers,sheet.rootTopic.markers);
+});
 test(1, 'XMind creates a subtopic, marks dirty and preserves unknown fields', async()=>{
   await mountXmind(); const count=document.querySelectorAll('[data-topic]').length;
   await click('Subtopic');
@@ -863,13 +887,48 @@ test(1, 'XMind creates a subtopic, marks dirty and preserves unknown fields', as
   assert.notEqual(store.getState().tabs[0].content,store.getState().tabs[0].savedContent);
   assert.deepEqual(xmindSheets()[0].rootTopic.customExtension,{keep:['unknown',123]});
 });
-test(2, 'XMind read mode rejects editing keys and allows view navigation', async()=>{
-  await mountXmind(false);const before=store.getState().tabs[0].content;
+test(1, 'XMind opens editable even with an old read preference and has no separate save or mode controls', async()=>{
+  await mountXmind(false);
+  const before=store.getState().tabs[0].content;
+  const buttons=[...document.querySelectorAll('.xm-workbench button')].map(b=>b.textContent);
+  for(const name of ['Read','Edit','Save'])assert.ok(!buttons.includes(name));
+  assert.equal(document.querySelectorAll('.xm-workbench .document-toolbar').length,1);
+  assert.equal(document.querySelector('.xm-tools strong'),null);
+  assert.ok(buttons.includes('Subtopic'));
+  assert.equal(store.getState().tabs[0].content,store.getState().tabs[0].savedContent);
+  const canvas=document.querySelector('.xm-canvas');
+  await act(async()=>canvas.dispatchEvent(new window.KeyboardEvent('keydown',{key:'F2',bubbles:true})));
+  assert.ok(document.querySelector('textarea[aria-label="Edit topic text"]'));
+  await act(async()=>setInput(document.querySelector('textarea[aria-label="Edit topic text"]'),'直接编辑中文'));
+  await act(async()=>app.saveFile());
+  assert.notEqual(store.getState().tabs[0].content,before);
+  assert.equal(xmindSheets()[0].rootTopic.title,'直接编辑中文');
+  assert.equal(writes.at(-1).cmd,'write_binary_file');
+});
+test(1, 'Timeline compatibility hints do not block direct editing or standard saving',async()=>{
+  const timeline={id:'timeline',title:'时间轴',rootTopic:{id:'timeline-root',title:'2026 · 版本演进',structureClass:'org.xmind.ui.timeline.horizontal',children:{attached:[{id:'q1',title:'Q1 · 发现'}]}}};
+  await mountXmind(false,zipSync({'content.json':strToU8(JSON.stringify([timeline]))}));
+  assert.ok(document.querySelector('.xm-warning'));
+  assert.equal(document.querySelector('.xm-warning').textContent,'');
+  await act(async()=>document.querySelector('[data-topic="q1"]').dispatchEvent(new window.MouseEvent('dblclick',{bubbles:true})));
+  await act(async()=>setInput(document.querySelector('textarea[aria-label="Edit topic text"]'),'Q1 · 已编辑'));
+  await act(async()=>app.saveFile());
+  const saved=app.openXmindDocument(new Uint8Array(Buffer.from(writes.at(-1).data,'base64')));
+  assert.equal(saved.sheets[0].rootTopic.children.attached[0].title,'Q1 · 已编辑');
+  assert.equal(saved.sheets[0].rootTopic.structureClass,timeline.rootTopic.structureClass);
+  assert.equal(store.getState().tabs[0].content,store.getState().tabs[0].savedContent);
+});
+test(2, 'Legacy XML remains viewable without offering unsupported editing', async()=>{
+  const bytes=zipSync({'content.xml':strToU8('<xmap-content xmlns="urn:xmind:xmap:xmlns:content:2.0"><sheet id="old"><title>Legacy</title><topic id="old-root"><title>旧文件</title></topic></sheet></xmap-content>')});
+  await mountXmind(false,bytes);
+  const before=store.getState().tabs[0].content;
+  assert.ok(document.querySelector('[data-topic="old-root"]'));
+  assert.ok(document.querySelector('.xm-legacy'));
   const canvas=document.querySelector('.xm-canvas');
   for(const key of ['Enter','Tab','Delete','F2'])await act(async()=>canvas.dispatchEvent(new window.KeyboardEvent('keydown',{key,bubbles:true})));
   assert.equal(store.getState().tabs[0].content,before);
   assert.equal(document.querySelector('textarea[aria-label="Edit topic text"]'),null);
-  assert.equal([...document.querySelectorAll('button')].some(b=>b.textContent==='Subtopic'),false);
+  assert.ok(![...document.querySelectorAll('button')].some(b=>b.textContent==='Subtopic'));
 });
 test(3, 'XMind sheet edits retain active sheet, undo/redo and canvas instance',async()=>{
   await mountXmind();await click('组织结构');
@@ -891,6 +950,33 @@ test(3, 'XMind save flushes the in-place title before binary IPC',async()=>{
   const doc=app.openXmindDocument(new Uint8Array(Buffer.from(writes.at(-1).data,'base64')));
   assert.equal(doc.sheets[0].rootTopic.title,'Saved while editing');
   assert.equal(store.getState().tabs[0].content,store.getState().tabs[0].savedContent);
+});
+test(3, 'XMind automatic save commits a focused draft through the shared save queue',async()=>{
+  await mountXmind(false);
+  await act(async()=>document.querySelector('[data-topic="root"]').dispatchEvent(new window.MouseEvent('dblclick',{bubbles:true})));
+  await act(async()=>setInput(document.querySelector('textarea[aria-label="Edit topic text"]'),'自动保存草稿'));
+  await act(async()=>app.saveAllDirty());
+  assert.equal(writes.at(-1).cmd,'write_binary_file');
+  const doc=app.openXmindDocument(new Uint8Array(Buffer.from(writes.at(-1).data,'base64')));
+  assert.equal(doc.sheets[0].rootTopic.title,'自动保存草稿');
+  assert.equal(store.getState().tabs[0].content,store.getState().tabs[0].savedContent);
+});
+test(3, 'XMind close uses the common unsaved prompt and save-as keeps a valid archive',async()=>{
+  await mountXmind(false);
+  await act(async()=>document.querySelector('[data-topic="root"]').dispatchEvent(new window.MouseEvent('dblclick',{bubbles:true})));
+  await act(async()=>setInput(document.querySelector('textarea[aria-label="Edit topic text"]'),'关闭前保留'));
+  let prompts=0;globalThis.__confirm=async()=>{prompts++;return 'cancel';};
+  await act(async()=>assert.equal(await app.closeActiveTab(),false));
+  assert.equal(prompts,1);assert.equal(store.getState().tabs.length,1);
+  assert.notEqual(store.getState().tabs[0].content,store.getState().tabs[0].savedContent);
+  globalThis.__save=async()=>'/test/renamed.xmind';
+  await act(async()=>assert.equal(await app.saveFileAs(),true));
+  assert.equal(writes.at(-1).cmd,'write_binary_file');
+  const doc=app.openXmindDocument(new Uint8Array(Buffer.from(writes.at(-1).data,'base64')));
+  assert.equal(doc.sheets[0].rootTopic.title,'关闭前保留');
+  assert.equal(store.getState().tabs[0].filePath,'/test/renamed.xmind');
+  await act(async()=>assert.equal(await app.closeActiveTab(),true));
+  assert.equal(prompts,1);assert.ok(!store.getState().tabs.some(t=>t.id==='xm'));
 });
 test(2, 'XMind Escape cancels the inline draft even when focus blurs', async()=>{
   await mountXmind();const before=store.getState().tabs[0].content;
@@ -927,11 +1013,11 @@ test(3, 'XMind tab unmount commits a draft and restores sheet and undo history',
   assert.ok(document.querySelector('[data-topic="org-root"]'));
   await click('Undo');assert.equal(xmindSheets()[1].rootTopic.title,'项目组');
 });
-test(5,'XMind switching read/edit preserves camera and rendered content',async()=>{
+test(5,'XMind standard save preserves camera and rendered content',async()=>{
   await mountXmind();const svg=document.querySelector('.xm-svg');
   const zoom=[...document.querySelectorAll('button')].find(b=>b.getAttribute('aria-label')==='Zoom in');
   await act(async()=>zoom.click());const box=svg.getAttribute('viewBox');
-  await click('Read');await click('Edit');
+  await act(async()=>app.saveFile());
   assert.equal(document.querySelector('.xm-svg'),svg);assert.equal(svg.getAttribute('viewBox'),box);
 });
 
