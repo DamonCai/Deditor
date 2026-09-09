@@ -38,6 +38,7 @@ export interface Edge {
   direction: Direction;
   brace: boolean;
   points?: { x: number; y: number }[];
+  trunk?: { x: number; y: number }[];
 }
 export interface SceneGroup extends Box {
   id: string;
@@ -211,7 +212,7 @@ function shift(fragment: Fragment, x: number, y: number) {
     n.y += y;
   }
   for (const edge of fragment.edges)
-    for (const point of edge.points ?? []) { point.x += x; point.y += y; }
+    for (const point of [...(edge.points ?? []), ...(edge.trunk ?? [])]) { point.x += x; point.y += y; }
   fragment.bounds = {
     ...fragment.bounds,
     x: fragment.bounds.x + x,
@@ -276,7 +277,7 @@ export function buildScene(
     const paddedHeight = contentHeight + (depth === 0 ? 28 : 18);
     const shape = style.shape.toLowerCase();
     // Inscribe the padded content rectangle in curved / tapered shapes.
-    const factor = /diamond|rhombus/.test(shape) ? 2 : /ellipse|oval/.test(shape) ? Math.SQRT2 : 1;
+    const factor = shape.includes("diamond") ? 2 : /ellipse|oval/.test(shape) ? Math.SQRT2 : 1;
     const width = /pill/.test(shape) ? paddedWidth + paddedHeight : paddedWidth * factor;
     const height = paddedHeight * factor;
     const content = { x: (width - contentWidth) / 2, y: (height - contentHeight) / 2,
@@ -394,24 +395,27 @@ export function buildScene(
           cause.topic = child;
           const leaves = (folded.has(child.id) ? [] : child.children?.attached ?? [])
             .map(t => layout(t, depth + 2, branchIndex, "right", child.id));
-          const lengths = leaves.map(f => Math.max(
-            f.nodes[0].y + f.nodes[0].height / 2 - f.bounds.y,
-            f.bounds.y + f.bounds.height - f.nodes[0].y - f.nodes[0].height / 2) * 2);
-          const reach = Math.max(90, lengths.reduce((a, b) => a + b + 24, 0) + 32);
+          const slots = leaves.map(f => {
+            const n = f.nodes[0];
+            const anchorY = n.y + n.height * (n.shape.toLowerCase().includes("underline") ? 1 : 0.5);
+            const above = anchorY - f.bounds.y, below = f.bounds.y + f.bounds.height - anchorY;
+            return { anchorY, before: sign < 0 ? above : below, after: sign < 0 ? below : above };
+          });
+          const reach = Math.max(90, slots.reduce((sum, slot) => sum + slot.before + slot.after + 24, 0) + 48);
           const tip = { x: cursor + reach / Math.sqrt(3), y: sign * reach };
           shift(part, tip.x, tip.y + sign * cause.height / 2);
-          let distance = reach - 20;
+          let distance = reach;
           leaves.forEach((leaf, k) => {
-            distance -= lengths[k] / 2;
+            distance -= 24 + slots[k].before;
             const anchor = { x: cursor + distance / Math.sqrt(3), y: sign * distance };
             const leafRoot = leaf.nodes[0];
             shift(leaf, anchor.x + 24 - leaf.bounds.x,
-              anchor.y - leafRoot.y - leafRoot.height / 2);
+              anchor.y - slots[k].anchorY);
             part.nodes.push(...leaf.nodes);
             part.edges.push({ from: child.id, to: leafRoot.topic.id,
               direction: "right", brace: false,
               points: [anchor, { x: leafRoot.x, y: anchor.y }] }, ...leaf.edges);
-            distance -= lengths[k] / 2 + 24;
+            distance -= slots[k].after;
           });
           part.bounds = boundsOf(part.nodes);
           pairRight = Math.max(pairRight, part.bounds.x + part.bounds.width);
@@ -423,13 +427,13 @@ export function buildScene(
         fragment.nodes.push(...part.nodes);
         fragment.edges.push({ from: topic.id, to: part.nodes[0].topic.id,
           direction: "fishbone", brace: false,
-          points: [...(i === ribs.length - 1 ? [{ x: width / 2, y: 0 }] : []),
-            { x: base, y: 0 }, tip] }, ...part.edges);
+          points: [{ x: base, y: 0 }, tip],
+          trunk: i === ribs.length - 1 ? [{ x: width / 2, y: 0 }, { x: cursor - 40, y: 0 }] : undefined }, ...part.edges);
       });
       if (sc.toLowerCase().includes("rightheaded")) {
         for (const n of fragment.nodes.slice(1)) n.x = -n.x - n.width;
         for (const edge of fragment.edges) {
-          for (const point of edge.points ?? []) point.x = -point.x;
+          for (const point of [...(edge.points ?? []), ...(edge.trunk ?? [])]) point.x = -point.x;
           if (edge.direction === "right") edge.direction = "left";
           else if (edge.direction === "left") edge.direction = "right";
         }
@@ -481,7 +485,8 @@ export function buildScene(
       );
       add(f, "up");
     }
-    fragment.bounds = boundsOf(fragment.nodes);
+    fragment.bounds = boundsOf([...fragment.nodes, ...fragment.edges.flatMap(e =>
+      [...(e.points ?? []), ...(e.trunk ?? [])].map(p => ({ ...p, width: 0, height: 0 }))) ]);
     return fragment;
   }
   const initial = layout(
@@ -599,7 +604,8 @@ export function buildScene(
   };
 }
 export function edgePath(edge: Edge, from: SceneNode, to: SceneNode): string {
-  if (edge.points) return edge.points.map((p, i) => `${i ? "L" : "M"}${p.x},${p.y}`).join(" ");
+  if (edge.points) return [edge.trunk ?? [], edge.points].map(points =>
+    points.map((p, i) => `${i ? "L" : "M"}${p.x},${p.y}`).join(" ")).join(" ").trim();
   const cx = (n: Box) => n.x + n.width / 2,
     cy = (n: Box) => n.y + n.height / 2;
   const d = edge.direction;
