@@ -1,49 +1,47 @@
-# 全屏窗口按钮验证（2026-09-09）
+# 全屏窗口按钮验证
 
-## 实现
+## 当前实现
 
-移除之前全屏专用的 React/CSS 仿制按钮。普通窗口仍使用原生标题栏按钮；全屏使用 AppKit 创建的标准 NSButton，尺寸和水平间距从普通窗口的实际按钮读取，放在 40pt 标题栏中。当前机器实测每个 14×14pt、间距 23pt。保留单个侧栏开关，移除 D / DEditor 标识。
+普通窗口继续使用 macOS 原生标题栏按钮；全屏以 AppKit 标准窗口控件组成常驻按钮组，沿用普通窗口的尺寸和间距。隐藏系统分离标题栏以避免顶部重复按钮；退出全屏和进入专注模式时恢复原生层。关闭、退出全屏和退出后最小化的动作保持原来的原生路径。
 
-全屏时，根据原生按钮所属窗口找到 AppKit 分离标题栏，隐藏其内容，避免顶部揭示时重复出现第二组按钮。退出全屏或进入专注模式时移除常驻按钮并恢复原生层。实现参考了 [JetBrains Runtime 的全屏原生按钮处理](https://github.com/JetBrains/JetBrainsRuntime/blob/jbr21/src/java.desktop/macosx/native/libawt_lwawt/awt/AWTWindow.m)，本项目不通过私有类名查找窗口。
+## 本次修复：三个标记时有时无
 
-红色调用 performClose，绿色调用 toggleFullScreen；黄色等待 NSWindowDidExitFullScreenNotification，下一主线程循环再最小化。新增 set_titlebar_visible 命令用于专注模式联动，已移除旧 WebView 关闭/最小化/全屏操作权限。
+之前只更新容器的 hover 判断并要求重绘，没能可靠同步三个原生控件各自缓存的图案。原生离屏测试复现了退出 hover 后图案仍保留的问题。此前依据日志判断绘制成功不充分，不能作为三枚标记视觉同步的证据。
 
-## 五轮验证
+现在根据实际指针是否位于整组按钮内，统一同步三个控件的 highlighted 状态，然后整组刷新。移入、移出和组内移动均重新校准；即使组状态没有变化，也重新同步各个控件并刷新缓存，修复原生子按钮自身 tracking 改写状态后的不同步。先更新全部控件，再显示整组，避免逐个显示中间状态。
 
-轮 1 — 用例：普通窗口与全屏的尺寸、布局及顶部揭示。
-  期望：系统绘制同尺寸按钮，全屏常驻，仅一组。
-  实测：独立 macOS 测试包运行；原生日志记录三枚按钮均 14×14pt、间距 23pt；全屏/普通窗口 AX 各一组；顶部操作后应用窗口截图无新增一行；日志确认分离标题栏内容已隐藏。
-  结果：通过。截图范围为应用窗口，不包含系统菜单栏，分离层隐藏另由原生日志交叉确认。
+已删除 `_mouseInGroup:` 私有回调和绘制诊断日志；使用 NSControl 的公开状态和刷新接口。全屏按钮工厂可能返回内部控件类型，因此不通过运行时 NSButton 类型筛选来跳过子控件。
 
-轮 2 — 用例：不同原生尺寸与三按钮垂直对齐。
-  期望：保持原生宽高，中心位于标题栏 y=20pt。
-  实测：cargo test window_chrome::tests 两项通过，覆盖 14×16pt 和 16×16pt，验证尺寸保留、三枚按钮的位置与中心。
+## 原生图像测试
+
+`src-tauri/examples/window_hover.rs` 直接包含生产窗口模块，使用同一个 FullscreenButtonsView 创建原生控件并离屏绘制 PNG。它不抓取桌面，也不打开用户文档或使用编辑器持久化状态。
+
+执行：
+
+```sh
+cargo run --manifest-path src-tauri/Cargo.toml --example window_hover
+```
+
+轮 1 — 用例：未悬停 → 悬停 → 移出 → 再次悬停。
+  期望：悬停图像改变；两次未悬停图像完全相同；两次悬停图像完全相同。
+  实测：PNG 字节比较全部通过；图像检查确认三个控件一起出现关闭、最小化、缩放标记，一起消失。
   结果：通过。
 
-轮 3 — 用例：全屏黄色最小化、恢复后绿色退出、红色关闭。
-  期望：退出动画结束后最小化；退出恢复原生标题栏；正常关闭。
-  实测：最终测试包黄色操作在 14:26:10 UTC 收到 native window minimization completed（NSWindowDidMiniaturizeNotification）；恢复并再次进入全屏成功；绿色操作后常驻 host 移除，普通按钮恢复；红色关闭后进程已退出。
+轮 2 — 用例：逐一把三个子按钮的状态改为与整组相反，再次同步（6 个组合）。
+  期望：鼠标仍在组内时恢复三枚标记；鼠标不在组内时清掉任何单独残留的标记。
+  实测：3 个 hover 修复和 3 个 idle 修复均与对应基准 PNG 完全相同。输出 PASS: enter/exit/re-enter and all 6 individual-widget recovery cases。
   结果：通过。
 
-轮 4 — 用例：专注模式联动、亮暗主题、窗口失焦和重新激活。
-  期望：专注模式隐藏常驻按钮，退出后恢复一组；主题和激活态使用系统绘制。
-  实测：Cmd+K 后 AX 无窗口按钮，日志确认 host 移除；再次 Cmd+K 后恢复一组并重新隐藏分离标题栏；亮暗主题截图、失焦灰色和激活彩色均已检查。
+轮 3 — 用例：既有 UI 回归及 TypeScript/Vite 构建。
+  期望：相邻功能无失败，前端编译成功。
+  实测：41 passed, 0 failed；npm run build 成功，仅有既有的大 chunk 提示。
   结果：通过。
 
-轮 5 — 用例：相邻 UI 回归及生产前端/原生构建。
-  期望：现有组件回归通过，TypeScript/Vite 与 Tauri 均可构建。
-  实测：npm run test:regression 为 41 passed, 0 failed；npm run build 成功；Tauri debug macOS app bundle 构建成功。仅有已有的大 chunk 警告。
-  结果：通过。
+样例图像：
 
-## 范围
+- [未悬停](../tests/artifacts/window-hover/idle.png)
+- [悬停](../tests/artifacts/window-hover/hover.png)
+- [移出](../tests/artifacts/window-hover/idle-again.png)
+- [再次悬停](../tests/artifacts/window-hover/hover-again.png)
 
-原生验证使用独立标识 com.deditor.fullscreen-review 的 DEditor Fullscreen Review.app，未替换 /Applications/DEditor.app。此次修改包含 Rust，开发应用需重启原生进程；已安装应用需重新打包更新。Windows 分支是 no-op，未在 Windows 机器运行；其它 macOS 版本及多显示器跨屏未实测。
-
-
-## 全屏按钮悬停标记补充（2026-09-09）
-
-问题：原生按钮在自定义容器中可点击，但鼠标移入后没有关闭、最小化及退出全屏的内部标记。
-
-修复：给原生容器增加随 visibleRect 更新的 NSTrackingArea，维护整组鼠标进入/离开状态，刷新系统按钮；首次全屏布局和窗口焦点变化时按实际指针位置同步。没有把 hover 强制设置为按下高亮。
-
-原生绘制兼容：标准窗口按钮会查询容器的 `_mouseInGroup:`；本次仅在 FullscreenButtonsView 实现这一回调，不修改 AppKit 类，也不自绘符号。该回调不是公开 API，需要在 macOS 大版本升级时复验。依据为 [Chromium 原生按钮容器实现](https://chromium.googlesource.com/chromium/src/+/0a7406f924b6c1b1d9f26ffdb1ee23596fb452ef/chrome/browser/ui/cocoa/tabs/tab_strip_controller.mm)；事件追踪采用 [Apple NSTrackingArea](https://developer.apple.com/documentation/appkit/nstrackingarea) 的公开接口。
+范围：本次原生图像验证在 macOS 上进行，覆盖生产按钮容器的绘制与状态同步；离屏窗口未进入系统全屏空间，所以绿色控件显示缩放符号。该测试不等同于全屏动画或绿色按钮悬停菜单的截图验收。Windows 和其它 macOS 版本未实测。原生代码更新需要重启开发进程；已安装版需重新打包。

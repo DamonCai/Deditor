@@ -16,6 +16,12 @@ export interface SceneNode extends Box {
   parent?: string;
   depth: number;
   lines: string[];
+  content: Box;
+  imageHeight: number;
+  labelLines: string[];
+  detailLines: string[];
+  labelY: number;
+  detailY: number;
   fontSize: number;
   fill: string;
   color: string;
@@ -31,6 +37,7 @@ export interface Edge {
   to: string;
   direction: Direction;
   brace: boolean;
+  points?: { x: number; y: number }[];
 }
 export interface SceneGroup extends Box {
   id: string;
@@ -63,7 +70,7 @@ export const STRUCTURES = [
   ["org.xmind.ui.org-chart.up", "up"],
   ["org.xmind.ui.brace.right", "brace"],
   ["org.xmind.ui.timeline.horizontal", "timeline"],
-  ["org.xmind.ui.fishbone.right", "fishbone"],
+  ["org.xmind.ui.fishbone.leftHeaded", "fishbone"],
 ] as const;
 export function directionOf(sc?: string): Direction {
   const s = (sc ?? "org.xmind.ui.map.unbalanced").toLowerCase();
@@ -203,6 +210,8 @@ function shift(fragment: Fragment, x: number, y: number) {
     n.x += x;
     n.y += y;
   }
+  for (const edge of fragment.edges)
+    for (const point of edge.points ?? []) { point.x += x; point.y += y; }
   fragment.bounds = {
     ...fragment.bounds,
     x: fragment.bounds.x + x,
@@ -213,6 +222,7 @@ export function buildScene(
   sheet: Sheet,
   folded: Set<string> = new Set(),
   measure: Measure = estimate,
+  captions = { notes: "Notes", link: "Link" },
 ): Scene {
   const warnings = new Set<string>();
   function layout(
@@ -244,21 +254,36 @@ export function buildScene(
     const imageHeight = topic.image
       ? Math.min(180, topic.image.height ?? 80)
       : 0;
-    const width = Math.max(
-      depth === 0 ? 100 : 50,
-      ...lines.map(
-        (s) =>
-          measure(s, style.fontSize, p) +
-          (depth === 0 ? 58 : depth === 1 ? 48 : 28),
-      ),
-      imageWidth + 24,
-    );
-    const height =
-      lines.length * style.fontSize * 1.4 +
-      (depth === 0 ? 28 : depth === 1 ? 18 : 16) +
-      imageHeight +
-      (topic.labels?.length ? 22 : 0) +
-      (topic.notes || topic.markers?.length || topic.href ? 18 : 0);
+    // Measure every visible row with the same font used by the SVG renderer.
+    const auxiliary = { ...p, "fo:font-weight": "400", "fo:font-style": "normal" };
+    const labelLines = topic.labels?.length
+      ? wrap(topic.labels.join(" · "), Math.max(60, widthHint), 11, auxiliary, measure) : [];
+    const details = [topic.notes ? captions.notes : "",
+      ...(topic.markers ?? []).map(m => m.markerId.replace("priority-", "P")),
+      topic.href ? captions.link : ""].filter(Boolean).join(" · ");
+    const detailLines = details ? wrap(details, Math.max(60, widthHint), 10, auxiliary, measure) : [];
+    const contentWidth = Math.max(24, imageWidth,
+      ...lines.map(s => measure(s, style.fontSize, p)),
+      ...labelLines.map(s => measure(s, 11, auxiliary)),
+      ...detailLines.map(s => measure(s, 10, auxiliary)));
+    const titleHeight = lines.length * style.fontSize * 1.4;
+    const pictureHeight = imageHeight ? imageHeight + 8 : 0;
+    const contentHeight = pictureHeight + titleHeight +
+      (labelLines.length ? 6 + labelLines.length * 16 : 0) +
+      (detailLines.length ? 4 + detailLines.length * 14 : 0);
+    const paddedWidth = Math.max(depth === 0 ? 100 : 50,
+      contentWidth + (depth === 0 ? 58 : depth === 1 ? 48 : 28));
+    const paddedHeight = contentHeight + (depth === 0 ? 28 : 18);
+    const shape = style.shape.toLowerCase();
+    // Inscribe the padded content rectangle in curved / tapered shapes.
+    const factor = /diamond|rhombus/.test(shape) ? 2 : /ellipse|oval/.test(shape) ? Math.SQRT2 : 1;
+    const width = /pill/.test(shape) ? paddedWidth + paddedHeight : paddedWidth * factor;
+    const height = paddedHeight * factor;
+    const content = { x: (width - contentWidth) / 2, y: (height - contentHeight) / 2,
+      width: contentWidth, height: contentHeight };
+    const labelY = content.y + pictureHeight + titleHeight + 6;
+    const detailY = content.y + pictureHeight + titleHeight +
+      (labelLines.length ? 6 + labelLines.length * 16 : 0) + 4;
     const node: SceneNode = {
       topic,
       parent,
@@ -266,6 +291,7 @@ export function buildScene(
       branch,
       detached,
       lines,
+      content, imageHeight, labelLines, detailLines, labelY, detailY,
       ...style,
       x: -width / 2,
       y: -height / 2,
@@ -285,7 +311,7 @@ export function buildScene(
     if (
       sc &&
       (!/map|logic|org-chart|tree|brace|timeline|fishbone/.test(sc) ||
-        /timeline|fishbone/.test(sc))
+        /timeline/.test(sc))
     )
       warnings.add(sc);
     const brace = sc.includes("brace");
@@ -352,7 +378,63 @@ export function buildScene(
         : Math.ceil(children.length / 2);
       arrange(children.slice(0, split), "right");
       arrange(children.slice(split).reverse(), "left", split);
-    } else if (direction === "timeline" || direction === "fishbone") {
+    } else if (direction === "fishbone") {
+      // Each cause is a diagonal rib. Its children join successive points on
+      // that rib horizontally, ordered from the tip towards the spine.
+      let cursor = width / 2 + 80;
+      const ribs: { part: Fragment; base: number; tip: { x: number; y: number } }[] = [];
+      for (let i = 0; i < children.length; i += 2) {
+        let pairRight = cursor;
+        for (let j = i; j < Math.min(i + 2, children.length); j++) {
+          const child = children[j], sign = j % 2 === 0 ? -1 : 1;
+          const branchIndex = depth === 0 ? j : branch;
+          const bare = { ...child, children: { ...child.children, attached: [] } };
+          const part = layout(bare, depth + 1, branchIndex, "right", topic.id);
+          const cause = part.nodes[0];
+          cause.topic = child;
+          const leaves = (folded.has(child.id) ? [] : child.children?.attached ?? [])
+            .map(t => layout(t, depth + 2, branchIndex, "right", child.id));
+          const lengths = leaves.map(f => Math.max(
+            f.nodes[0].y + f.nodes[0].height / 2 - f.bounds.y,
+            f.bounds.y + f.bounds.height - f.nodes[0].y - f.nodes[0].height / 2) * 2);
+          const reach = Math.max(90, lengths.reduce((a, b) => a + b + 24, 0) + 32);
+          const tip = { x: cursor + reach / Math.sqrt(3), y: sign * reach };
+          shift(part, tip.x, tip.y + sign * cause.height / 2);
+          let distance = reach - 20;
+          leaves.forEach((leaf, k) => {
+            distance -= lengths[k] / 2;
+            const anchor = { x: cursor + distance / Math.sqrt(3), y: sign * distance };
+            const leafRoot = leaf.nodes[0];
+            shift(leaf, anchor.x + 24 - leaf.bounds.x,
+              anchor.y - leafRoot.y - leafRoot.height / 2);
+            part.nodes.push(...leaf.nodes);
+            part.edges.push({ from: child.id, to: leafRoot.topic.id,
+              direction: "right", brace: false,
+              points: [anchor, { x: leafRoot.x, y: anchor.y }] }, ...leaf.edges);
+            distance -= lengths[k] / 2 + 24;
+          });
+          part.bounds = boundsOf(part.nodes);
+          pairRight = Math.max(pairRight, part.bounds.x + part.bounds.width);
+          ribs.push({ part, base: cursor, tip });
+        }
+        cursor = pairRight + 64;
+      }
+      ribs.forEach(({ part, base, tip }, i) => {
+        fragment.nodes.push(...part.nodes);
+        fragment.edges.push({ from: topic.id, to: part.nodes[0].topic.id,
+          direction: "fishbone", brace: false,
+          points: [...(i === ribs.length - 1 ? [{ x: width / 2, y: 0 }] : []),
+            { x: base, y: 0 }, tip] }, ...part.edges);
+      });
+      if (sc.toLowerCase().includes("rightheaded")) {
+        for (const n of fragment.nodes.slice(1)) n.x = -n.x - n.width;
+        for (const edge of fragment.edges) {
+          for (const point of edge.points ?? []) point.x = -point.x;
+          if (edge.direction === "right") edge.direction = "left";
+          else if (edge.direction === "left") edge.direction = "right";
+        }
+      }
+    } else if (direction === "timeline") {
       let cursor = width / 2 + 90;
       children.forEach((child, i) => {
         const d = i % 2 === 0 ? "up" : "down";
@@ -517,6 +599,7 @@ export function buildScene(
   };
 }
 export function edgePath(edge: Edge, from: SceneNode, to: SceneNode): string {
+  if (edge.points) return edge.points.map((p, i) => `${i ? "L" : "M"}${p.x},${p.y}`).join(" ");
   const cx = (n: Box) => n.x + n.width / 2,
     cy = (n: Box) => n.y + n.height / 2;
   const d = edge.direction;

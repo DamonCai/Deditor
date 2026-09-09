@@ -52,7 +52,8 @@ const measure: Measure = (text, size, p) => {
     measureContext = document.createElement("canvas").getContext("2d");
   if (!measureContext) return Array.from(text).length * size * 0.7;
   measureContext.font = `${p["fo:font-style"] ?? "normal"} ${p["fo:font-weight"] ?? 400} ${size}px ${p["fo:font-family"] ?? "NeverMind, PingFang SC, Microsoft YaHei, sans-serif"}`;
-  return measureContext.measureText(text).width;
+  const metrics = measureContext.measureText(text);
+  return Math.max(metrics.width, (metrics.actualBoundingBoxLeft || 0) + (metrics.actualBoundingBoxRight || 0));
 };
 function NodeShape({ node: n }: { node: SceneNode }) {
   const shape = n.shape.toLowerCase(),
@@ -165,8 +166,8 @@ export default function XmindCanvas({
     };
   }, []);
   const scene = useMemo(
-    () => buildScene(sheet, folded, measure),
-    [sheet, folded, fontsReady],
+    () => buildScene(sheet, folded, measure, { notes: t("xmind.notes"), link: t("xmind.link") }),
+    [sheet, folded, fontsReady, t],
   );
   const byId = useMemo(
     () => new Map(scene.nodes.map((n) => [n.topic.id, n])),
@@ -711,9 +712,7 @@ export default function XmindCanvas({
               n.topic.title.toLowerCase().includes(query.toLowerCase());
           const offset = dragOffset?.id === n.topic.id ? dragOffset : null;
           const img = imageSource(n.topic, resources),
-            imageHeight = n.topic.image
-              ? Math.min(180, n.topic.image.height ?? 80)
-              : 0;
+            imageHeight = n.imageHeight;
           const isFolded = folded.has(n.topic.id);
           return (
             <g
@@ -746,19 +745,19 @@ export default function XmindCanvas({
               {img && (
                 <image
                   href={img}
-                  x={12}
-                  y={9}
-                  width={n.width - 24}
+                  x={n.content.x}
+                  y={n.content.y}
+                  width={n.content.width}
                   height={imageHeight}
                   preserveAspectRatio="xMidYMid meet"
                 />
               )}
               {editing === n.topic.id ? (
                 <foreignObject
-                  x={6}
-                  y={imageHeight + 4}
-                  width={n.width - 12}
-                  height={n.height - imageHeight - 8}
+                  x={n.content.x}
+                  y={n.content.y + (imageHeight ? imageHeight + 8 : 0)}
+                  width={n.content.width}
+                  height={n.lines.length * n.fontSize * 1.4}
                 >
                   <textarea
                     aria-label={t("xmind.editTitle")}
@@ -797,7 +796,7 @@ export default function XmindCanvas({
               ) : (
                 <text
                   x={n.width / 2}
-                  y={imageHeight + 12 + n.fontSize}
+                  y={n.content.y + (imageHeight ? imageHeight + 8 : 0) + n.fontSize * 1.05}
                   textAnchor="middle"
                   fill={n.color}
                   fontFamily={
@@ -822,43 +821,16 @@ export default function XmindCanvas({
                   ))}
                 </text>
               )}
-              {!!n.topic.labels?.length && (
-                <text
-                  x={n.width / 2}
-                  y={
-                    n.height -
-                    (n.topic.notes || n.topic.markers?.length || n.topic.href
-                      ? 26
-                      : 10)
-                  }
-                  textAnchor="middle"
-                  fontSize={11}
-                  fill={n.color}
-                  opacity={0.65}
-                >
-                  {n.topic.labels.join(" · ")}
+              {[{ lines: n.labelLines, y: n.labelY, size: 11 },
+                { lines: n.detailLines, y: n.detailY, size: 10 }].map((row, index) => (
+                <text key={index} x={n.width / 2} y={row.y + row.size}
+                  textAnchor="middle" fontSize={row.size} fontWeight={400} fontStyle="normal"
+                  fontFamily={n.properties["fo:font-family"] ?? "NeverMind, PingFang SC, Microsoft YaHei, sans-serif"}
+                  fill={n.color} opacity={0.7} pointerEvents="none">
+                  {row.lines.map((line, i) => <tspan key={i} x={n.width / 2}
+                    dy={i ? (index === 0 ? 16 : 14) : 0}>{line}</tspan>)}
                 </text>
-              )}
-              {(n.topic.notes || n.topic.markers?.length || n.topic.href) && (
-                <text
-                  x={n.width / 2}
-                  y={n.height - 7}
-                  textAnchor="middle"
-                  fontSize={10}
-                  fill={n.color}
-                  opacity={0.7}
-                >
-                  {[
-                    n.topic.notes ? t("xmind.notes") : "",
-                    ...(n.topic.markers ?? []).map((m) =>
-                      m.markerId.replace("priority-", "P"),
-                    ),
-                    n.topic.href ? t("xmind.link") : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </text>
-              )}
+              ))}
               {!!n.topic.children?.attached?.length && (
                 <g
                   data-fold="true"

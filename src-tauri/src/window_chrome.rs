@@ -1,13 +1,11 @@
-//! macOS fullscreen chrome. AppKit draws the buttons in both window modes.
-//! The detached fullscreen titlebar is hidden while our native button host is
-//! visible, so revealing the menu bar cannot expose another row of controls.
+// macOS fullscreen chrome. AppKit draws the buttons in both window modes.
+// The detached fullscreen titlebar is hidden while our native button host is
+// visible, so revealing the menu bar cannot expose another row of controls.
 use std::cell::{Cell, RefCell};
 
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Bool};
-use objc2::{
-    define_class, msg_send, sel, AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly,
-};
+use objc2::{define_class, msg_send, sel, AnyThread, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
     NSButton, NSEvent, NSTrackingArea, NSTrackingAreaOptions, NSView, NSWindow, NSWindowButton,
     NSWindowDidExitFullScreenNotification, NSWindowDidMiniaturizeNotification, NSWindowStyleMask,
@@ -25,66 +23,56 @@ thread_local! {
     static TITLEBAR_VISIBLE: Cell<bool> = const { Cell::new(true) };
 }
 
-#[derive(Default)]
-struct ButtonHoverState {
-    inside: Cell<bool>,
-    #[cfg(debug_assertions)]
-    reported_hover: Cell<bool>,
-}
-
 // Standard window buttons placed outside AppKit's titlebar need their own
 // shared tracking area. Let AppKit draw the hover glyphs for all three buttons.
 define_class!(
     #[unsafe(super(NSView))]
     #[thread_kind = MainThreadOnly]
-    #[ivars = ButtonHoverState]
     struct FullscreenButtonsView;
 
     unsafe impl NSObjectProtocol for FullscreenButtonsView {}
 
     impl FullscreenButtonsView {
-        // AppKit's standard window-button cells query their host for this
-        // group state when drawing glyphs. Merely setting highlighted only
-        // changes the pressed appearance. Isolate this AppKit compatibility
-        // hook here; never replace the system buttons or draw their icons.
-        #[unsafe(method(_mouseInGroup:))]
-        fn mouse_in_group(&self, _button: &NSButton) -> Bool {
-            let inside = self.ivars().inside.get();
-            #[cfg(debug_assertions)]
-            if inside && !self.ivars().reported_hover.replace(true) {
-                log::info!("native fullscreen buttons drawing hover glyphs");
-            }
-            Bool::new(inside)
-        }
-
         #[unsafe(method(mouseEntered:))]
         fn mouse_entered(&self, _event: &NSEvent) {
-            self.set_group_hover(true);
+            self.sync_hover();
         }
 
         #[unsafe(method(mouseExited:))]
         fn mouse_exited(&self, _event: &NSEvent) {
-            self.set_group_hover(false);
+            self.sync_hover();
+        }
+
+        #[unsafe(method(mouseMoved:))]
+        fn mouse_moved(&self, _event: &NSEvent) {
+            self.sync_hover();
         }
     }
 );
 
 impl FullscreenButtonsView {
     fn set_group_hover(&self, hovered: bool) {
-        if self.ivars().inside.replace(hovered) == hovered {
-            return;
-        }
+        // Native tracking can change cached artwork independently of the
+        // public highlighted flag. Reapply the shared state on every group
+        // tracking event, including moves between widgets inside the group.
+        let views = self.subviews();
         // AppKit can return private widget classes from standardWindowButton.
         // Invalidate each child as an NSView rather than requiring NSButton's
         // concrete runtime class (which would skip those native widgets).
-        for view in self.subviews() {
+        for view in views {
             // Window widgets expose NSControl's no-argument invalidation
             // selector; this also refreshes their internally cached artwork.
             unsafe {
+                let _: () = msg_send![&*view, setHighlighted: Bool::new(hovered)];
                 let _: () = msg_send![&*view, setNeedsDisplay];
             }
-            view.displayIfNeeded();
+            view.setNeedsDisplay(true);
         }
+        // Invalidate the whole group before drawing any one widget. Native
+        // child tracking events can reach this responder too, so event names
+        // alone must never flip the group's state.
+        self.setNeedsDisplay(true);
+        self.displayIfNeeded();
     }
 
     fn sync_hover(&self) {
@@ -211,9 +199,7 @@ impl Chrome {
         }
         if self.host.is_none() {
             let host: Retained<FullscreenButtonsView> = unsafe {
-                let allocated =
-                    FullscreenButtonsView::alloc(mtm).set_ivars(ButtonHoverState::default());
-                msg_send![super(allocated), initWithFrame: NSRect::ZERO]
+                msg_send![FullscreenButtonsView::alloc(mtm), initWithFrame: NSRect::ZERO]
             };
             // The view owns the tracking area. InVisibleRect follows layout and
             // fullscreen resizing without retaining stale tracking rectangles.
@@ -222,6 +208,7 @@ impl Chrome {
                     NSTrackingArea::alloc(),
                     NSRect::ZERO,
                     NSTrackingAreaOptions::MouseEnteredAndExited
+                        | NSTrackingAreaOptions::MouseMoved
                         | NSTrackingAreaOptions::ActiveAlways
                         | NSTrackingAreaOptions::InVisibleRect,
                     Some(&host),

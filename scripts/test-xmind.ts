@@ -473,4 +473,87 @@ test(
     assert.deepEqual(archive, before);
   },
 );
+// Native rendering regressions: containment is tested against the real shape,
+// not merely against its surrounding rectangle.
+test(1, "diamond and ellipse contain title, labels and metadata", () => {
+  for (const shape of ["diamond", "ellipse", "roundedRect", "pill"]) {
+    const sheet: Sheet = { id: "shape-sheet", title: "Shapes", rootTopic: {
+      id: "shape-root", title: "菱形 / Decision\n第二行 gyp",
+      labels: ["长标签".repeat(30)], notes: { plain: { content: "note" } },
+      markers: [{ markerId: "priority-1" }, { markerId: "task-half" }],
+      style: { properties: { "shape-class": shape, "fo:font-style": "italic", "fo:max-width": "130" } },
+    } };
+    const n = buildScene(sheet).nodes[0], c = n.content;
+    for (const x of [c.x, c.x + c.width]) for (const y of [c.y, c.y + c.height]) {
+      const dx = Math.abs(x - n.width / 2) / (n.width / 2);
+      const dy = Math.abs(y - n.height / 2) / (n.height / 2);
+      assert.ok(shape === "diamond" ? dx + dy < 1 : shape === "ellipse" ? dx * dx + dy * dy < 1 : dx < 1 && dy < 1);
+    }
+    assert.ok(n.labelLines.length > 1);
+    assert.ok(n.detailY + n.detailLines.length * 14 <= c.y + c.height);
+  }
+});
+const fishSheet = (structure = "org.xmind.ui.fishbone.leftHeaded", count = 4): Sheet => ({
+  id: "fish-sheet", title: "Fishbone", rootTopic: { id: "fish", title: "显示效果差异", structureClass: structure,
+    children: { attached: Array.from({ length: count }, (_, i) => ({ id: `cause-${i}`, title: `原因 ${i}`,
+      children: { attached: Array.from({ length: 3 }, (_, j) => ({ id: `leaf-${i}-${j}`, title: `原因明细 ${j}` })) } })) } },
+});
+test(1, "fishbone has alternating diagonal ribs with horizontal twigs on each rib", () => {
+  const scene = buildScene(fishSheet()), root = scene.nodes[0];
+  assert.deepEqual(scene.warnings, []);
+  for (let i = 0; i < 4; i++) {
+    const rib = scene.edges.find(e => e.to === `cause-${i}`)!;
+    const points = rib.points!, base = points[points.length - 2], tip = points[points.length - 1];
+    assert.equal(base.y, 0);
+    assert.ok((tip.y < 0) === (i % 2 === 0));
+    assert.ok(Math.abs(Math.abs(tip.y) / (tip.x - base.x) - Math.sqrt(3)) < 1e-8);
+    const cause = scene.nodes.find(n => n.topic.id === rib.to)!;
+    for (let j = 0; j < 3; j++) {
+      const twig = scene.edges.find(e => e.to === `leaf-${i}-${j}`)!.points!;
+      assert.equal(twig[0].y, twig[1].y);
+      assert.ok(Math.abs(twig[0].x - base.x - Math.abs(twig[0].y) / Math.sqrt(3)) < 1e-8);
+      assert.ok(Math.abs(twig[0].y) < Math.abs(tip.y));
+      assert.ok(twig[1].x > twig[0].x);
+    }
+    assert.ok(cause.x > root.x + root.width);
+  }
+  for (const a of scene.nodes) for (const b of scene.nodes) if (a !== b) {
+    assert.ok(a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y,
+      `overlap: ${a.topic.id}, ${b.topic.id}`);
+  }
+});
+test(2, "fishbone handles empty, single, odd, mirrored and deeply nested causes", () => {
+  for (const count of [0, 1, 3, 8]) {
+    const left = fishSheet(undefined, count), right = fishSheet("org.xmind.ui.fishbone.rightHeaded", count);
+    if (count) for (const sheet of [left, right]) {
+      const leaf = sheet.rootTopic.children!.attached![0].children!.attached![0];
+      leaf.title = "中英文 long text ".repeat(20);
+      leaf.children = { attached: [{ id: "deep", title: "更深一层" }] };
+    }
+    const a = buildScene(left), b = buildScene(right);
+    assert.equal(a.nodes.length, b.nodes.length);
+    a.nodes.forEach((n, i) => {
+      assert.ok(Math.abs(n.x + n.width + b.nodes[i].x) < 1e-8);
+      assert.equal(n.y, b.nodes[i].y);
+    });
+    for (const scene of [a, b]) for (const edge of scene.edges) {
+      const path = edgePath(edge, scene.nodes.find(n => n.topic.id === edge.from)!, scene.nodes.find(n => n.topic.id === edge.to)!);
+      assert.ok(!/NaN|Infinity/.test(path));
+    }
+  }
+});
+test(3, "folding and reopening a fishbone preserves branches, routes and archive", () => {
+  const sheets = [fishSheet(), ...sampleSheets()];
+  const bytes = zipSync({ "content.json": strToU8(JSON.stringify(sheets)) });
+  const doc = openDocument(bytes);
+  const whole = buildScene(doc.sheets[0]);
+  for (const id of ["fish", "cause-0"]) {
+    const folded = buildScene(doc.sheets[0], new Set([id]));
+    assert.equal(folded.nodes.length, id === "fish" ? 1 : whole.nodes.length - 3);
+    for (const e of folded.edges) assert.ok(folded.nodes.some(n => n.topic.id === e.to));
+    assert.deepEqual(buildScene(doc.sheets[0]), whole);
+  }
+  assert.deepEqual(writeDocument(doc, doc.sheets), bytes);
+});
+
 console.log(`${passed} XMind tests passed`);
