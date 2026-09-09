@@ -1,3 +1,5 @@
+import { logError } from "../lib/logger";
+import { showError } from "../lib/feedback";
 import { useState } from "react";
 import { FiAlignRight, FiAlignLeft, FiAlignJustify, FiMinimize2 } from "react-icons/fi";
 import { useT } from "../lib/i18n";
@@ -30,7 +32,8 @@ export default function SqlToolbar() {
     try {
       next = await formatSql(current, style);
     } catch (err) {
-      alert(
+      logError("SQL format failed", err);
+      void showError(
         t("sql.formatFailed", {
           err: err instanceof Error ? err.message : String(err),
         }),
@@ -56,11 +59,8 @@ export default function SqlToolbar() {
 
   return (
     <div
-      className="flex flex-nowrap items-center gap-1 px-2 select-none"
+      className="document-toolbar select-none"
       style={{
-        height: 32,
-        background: "var(--bg-soft)",
-        borderBottom: "1px solid var(--border)",
         flexShrink: 0,
         overflowX: "auto",
         whiteSpace: "nowrap",

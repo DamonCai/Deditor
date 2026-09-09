@@ -1,3 +1,4 @@
+import { showError } from "./feedback";
 import { save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { renderMarkdown, renderCode } from "./markdown";
@@ -134,7 +135,7 @@ export async function exportPdf() {
     logInfo("export PDF: print dialog opened");
   } catch (err) {
     logError("export PDF failed", err);
-    alert(
+    void showError(
       tStatic("export.pdfFailed", {
         err: err instanceof Error ? err.message : String(err),
       }),

@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useEffect } from "react";
 import { useActiveTabHeader } from "../store/editor";
 import { useEditorStore } from "../store/editor";
 import { useT } from "../lib/i18n";
@@ -6,18 +6,16 @@ import { useT } from "../lib/i18n";
 // (monitors, position math, dozens of methods we don't use). We only need
 // two calls; invoke them via the plugin protocol directly through the
 // already-bundled core/invoke. Saves the entire barrel from the main chunk.
-import { invoke } from "@tauri-apps/api/core";
-import { FiSettings, FiSearch, FiSun, FiMoon } from "react-icons/fi";
+import { invoke, isTauri } from "@tauri-apps/api/core";
+import { FiSettings, FiSearch, FiSun, FiMoon, FiSidebar } from "react-icons/fi";
 import { Button } from "./ui/Button";
-
-// Tauri stashes the current window's label on the global it injects at boot.
-// Tauri config has no explicit label so the runtime default is "main".
-function currentLabel(): string {
+import { logError } from "../lib/logger";
+function currentWindowLabel(): string {
   return (window as any).__TAURI_INTERNALS__?.metadata?.currentWindow?.label ?? "main";
 }
 
-// macOS draws traffic lights inside our overlay-styled title bar; reserve ~80px
-// on the left so the controls don't overlap the leftmost toolbar content.
+// macOS draws native traffic lights in the overlay; titlebar--mac reserves
+// their space, including in fullscreen so the toolbar does not jump sideways.
 const IS_MAC =
   typeof navigator !== "undefined" &&
   /(Mac|iPad|iPhone|iPod)/i.test(navigator.userAgent);
@@ -33,13 +31,13 @@ function onTitleBarMouseDown(e: React.MouseEvent<HTMLDivElement>) {
     return;
   }
   if (e.detail === 2) {
-    void invoke("plugin:window|toggle_maximize", { label: currentLabel() });
+    void invoke("plugin:window|toggle_maximize", { label: currentWindowLabel() });
     return;
   }
-  void invoke("plugin:window|start_dragging", { label: currentLabel() });
+  void invoke("plugin:window|start_dragging", { label: currentWindowLabel() });
 }
 
-/** IntelliJ-style Main Toolbar. App identity on the left, current file name in
+/** IntelliJ-style Main Toolbar. Sidebar toggle on the left, current file name in
  *  the middle (which also acts as the window drag handle), global actions
  *  (search / settings) on the right.
  *
@@ -50,10 +48,22 @@ function onTitleBarMouseDown(e: React.MouseEvent<HTMLDivElement>) {
 // short-circuits instead of re-running all its hooks. The component's own
 // store subscriptions still wake it when its fields actually change.
 function TitleBarImpl() {
+  useEffect(() => {
+    if (!IS_MAC || !isTauri()) return;
+    const setVisible = (visible: boolean) => {
+      void invoke("set_titlebar_visible", { visible }).catch((err) =>
+        logError("Update native titlebar visibility failed", err),
+      );
+    };
+    setVisible(true);
+    return () => setVisible(false);
+  }, []);
   const t = useT();
   const header = useActiveTabHeader();
   const setSettingsOpen = useEditorStore((s) => s.setSettingsOpen);
   const setGotoAnythingOpen = useEditorStore((s) => s.setGotoAnythingOpen);
+  const showSidebar = useEditorStore((s) => s.showSidebar);
+  const toggleSidebar = useEditorStore((s) => s.toggleSidebar);
   const theme = useEditorStore((s) => s.theme);
   const setTheme = useEditorStore((s) => s.setTheme);
   const name = header?.filePath
@@ -63,74 +73,27 @@ function TitleBarImpl() {
 
   return (
     <div
-      className="flex items-center select-none"
+      className={`titlebar${IS_MAC ? " titlebar--mac" : ""}`}
       onMouseDown={onTitleBarMouseDown}
-      style={{
-        // 40px matches IntelliJ New UI Main Toolbar; traffic-light center
-        // (y=14 + 6 = 20) aligns exactly with content vertical center (40/2).
-        // Keep 84px reserved on macOS even in fullscreen — the OS hides the
-        // traffic lights then, so the gap looks empty but never causes the
-        // overlap we'd get if we tried (and failed) to detect the transition.
-        height: 40,
-        padding: `0 8px 0 ${IS_MAC ? 84 : 12}px`,
-        fontSize: 12,
-        background: "var(--bg-soft)",
-        borderBottom: "1px solid var(--border)",
-        gap: 12,
-      }}
     >
-      {/* App identity. Mirrors IntelliJ's project-name button — static-styled,
-          no popover wired up because we don't model multiple projects. */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          fontWeight: 600,
-          color: "var(--text)",
-          letterSpacing: "0.02em",
-        }}
+      <Button
+        variant="ghost"
+        size="iconLg"
+        title={t("shortcut.nav.toggleSidebar")}
+        pressed={showSidebar}
+        onClick={toggleSidebar}
       >
-        <span
-          aria-hidden
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: 20,
-            height: 20,
-            borderRadius: 4,
-            background: "var(--accent)",
-            color: "#fff",
-            fontWeight: 700,
-            fontSize: 12,
-          }}
-        >
-          D
-        </span>
-        <span>DEditor</span>
-      </div>
+        <FiSidebar size={16} />
+      </Button>
 
-      {/* Filename in the middle. */}
-      <div
-        className="flex items-center justify-center"
-        style={{ flex: 1, minWidth: 0, gap: 6, color: "var(--text-soft)" }}
-      >
-        <span
-          style={{
-            maxWidth: "60%",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
+      <div className="titlebar-document">
+        <span className="titlebar-filename" title={header?.filePath ?? name}>
           {name}
         </span>
-        {dirty && <span style={{ color: "var(--accent)" }}>●</span>}
+        {dirty && <span className="titlebar-dirty" />}
       </div>
 
-      {/* Right-side action cluster. */}
-      <div className="flex items-center" style={{ gap: 2 }}>
+      <div className="titlebar-actions">
         <Button
           variant="ghost"
           size="iconLg"
@@ -142,7 +105,7 @@ function TitleBarImpl() {
         <Button
           variant="ghost"
           size="iconLg"
-          title={theme === "dark" ? "Light theme" : "Dark theme"}
+          title={t(theme === "dark" ? "titlebar.toLight" : "titlebar.toDark")}
           onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
         >
           {theme === "dark" ? <FiSun size={16} /> : <FiMoon size={16} />}

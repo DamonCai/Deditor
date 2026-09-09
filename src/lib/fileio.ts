@@ -1,3 +1,5 @@
+import { showError } from "./feedback";
+import { flushDocument, flushDocuments } from "./documentFlush";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
@@ -170,7 +172,7 @@ export async function openCompare(leftPath: string, rightPath: string): Promise<
     isVideoFile(rightPath) || isHexFile(rightPath) || isXmindFile(rightPath)
   ) {
     logWarn(`compare refused: binary file involved (${leftPath} vs ${rightPath})`);
-    alert(tStatic("filetree.compareBinaryRefused"));
+    void showError(tStatic("filetree.compareBinaryRefused"));
     return;
   }
   try {
@@ -308,6 +310,7 @@ function finishSave(snapshot: Tab, path: string, written: string): boolean {
 
 async function saveTab(id: string, saveAs = false, automatic = false): Promise<boolean> {
   return queueSave(id, async () => {
+    flushDocument(id);
     const snapshot = useEditorStore.getState().tabs.find((t) => t.id === id);
     if (!snapshot || snapshot.diff) return false;
     if (automatic && (!snapshot.filePath || snapshot.externalChange != null)) return false;
@@ -338,6 +341,7 @@ async function saveTab(id: string, saveAs = false, automatic = false): Promise<b
 }
 
 export async function saveAllDirty(): Promise<void> {
+  flushDocuments();
   const ids = useEditorStore.getState().tabs
     .filter((t) => t.filePath && !t.diff && t.content !== t.savedContent && t.externalChange == null)
     .map((t) => t.id);
@@ -371,6 +375,7 @@ export function closeTabById(id: string): Promise<boolean> {
   const existing = closingTabs.get(id);
   if (existing) return existing;
   const pending = (async () => {
+    flushDocument(id);
     const tab = useEditorStore.getState().tabs.find((t) => t.id === id);
     if (!tab) return true;
     if (tab.content !== tab.savedContent) {
@@ -477,7 +482,7 @@ export async function revealInFinder(path: string): Promise<void> {
     await revealItemInDir(path);
   } catch (err) {
     logError(`reveal in finder failed: ${path}`, err);
-    alert(
+    void showError(
       tStatic("fileio.cantOpenLocation", {
         err: err instanceof Error ? err.message : String(err),
       }),

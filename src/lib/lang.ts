@@ -467,6 +467,11 @@ export function isJson(filePath: string | null): boolean {
   return e === "json" || e === "jsonc" || e === "json5";
 }
 
+export function isHtml(filePath: string | null): boolean {
+  const e = extOf(filePath);
+  return e === "html" || e === "htm";
+}
+
 export function isSql(filePath: string | null): boolean {
   return extOf(filePath) === "sql";
 }
@@ -514,4 +519,3 @@ export function isBinaryRenderable(filePath: string | null): boolean {
     e === "xmind"
   );
 }
-

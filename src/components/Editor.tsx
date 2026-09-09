@@ -1,3 +1,4 @@
+import { showError } from "../lib/feedback";
 import { documentStatsField } from "../lib/documentStats";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { EditorState, EditorSelection, Compartment, StateEffect } from "@codemirror/state";
@@ -43,7 +44,7 @@ import { islandLight } from "../lib/islandLightTheme";
 import { detectLang, isMarkdown, isImageFile, isPdfFile, isAudioFile, isVideoFile, isHexFile, isXmindFile } from "../lib/lang";
 import { useEditorStore, type DiffSpec } from "../store/editor";
 import DiffView from "./DiffView";
-// XmindView pulls mind-elixir (~113 KB) + its CSS, plus the xmind parsers.
+// XmindView loads the local SVG canvas and lossless XMind document model.
 // Only mounted when a .xmind file is open — lazy-load so non-XMind users
 // never pay for it on cold start.
 const XmindView = lazy(() => import("./XmindView"));
@@ -825,7 +826,7 @@ async function handleImagePaste(blob: File, mime: string, view: EditorView) {
     baseDir = workspaces[0];
   }
   if (!baseDir) {
-    alert(tStatic("editor.pasteImageNoTarget"));
+    void showError(tStatic("editor.pasteImageNoTarget"));
     return;
   }
   const isMd = isMarkdown(filePath);
@@ -839,7 +840,7 @@ async function handleImagePaste(blob: File, mime: string, view: EditorView) {
     logInfo(`pasted image saved: assets/${name} (${buf.byteLength} bytes)`);
   } catch (err) {
     logError(`paste image save failed: assets/${name}`, err);
-    alert(tStatic("editor.saveImageFailed", { err: String(err) }));
+    void showError(tStatic("editor.saveImageFailed", { err: String(err) }));
     return;
   }
   const rel = `assets/${name}`;

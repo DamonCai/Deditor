@@ -23,6 +23,8 @@ interface TauriDragDropPayload {
 import EditorHost from "./components/EditorHost";
 import EditorSlot from "./components/EditorSlot";
 import PreviewHost from "./components/PreviewHost";
+import HtmlPreview from "./components/HtmlPreview";
+import HtmlToolbar from "./components/HtmlToolbar";
 import TitleBar from "./components/TitleBar";
 import StatusBar from "./components/StatusBar";
 import FileTree from "./components/FileTree";
@@ -37,10 +39,10 @@ import GotoSymbol from "./components/GotoSymbol";
 import FindInFiles from "./components/FindInFiles";
 import SettingsDialog from "./components/SettingsDialog";
 import CommandPalette from "./components/CommandPalette";
+import { useT } from "./lib/i18n";
 import { isEnabled, SHORTCUTS } from "./lib/shortcuts";
 import { useEditorStore, useActiveTabMeta } from "./store/editor";
-import { isMarkdown, isJson, isSql } from "./lib/lang";
-import { useT } from "./lib/i18n";
+import { isMarkdown, isJson, isSql, isHtml } from "./lib/lang";
 import {
   openFile,
   openFileByPath,
@@ -63,7 +65,6 @@ import { Button } from "./components/ui/Button";
 type DragKind = "sidebar" | "preview" | null;
 
 export default function App() {
-  const t = useT();
   // Per-field selectors only — destructuring the whole store re-renders App
   // on every store change (every keystroke, every cursor move). Slicing per
   // field keeps App quiet unless these specific values change.
@@ -79,7 +80,8 @@ export default function App() {
   const activeMeta = useActiveTabMeta();
   const filePath = activeMeta?.filePath ?? null;
   const isDiffTab = !!activeMeta?.isDiff;
-  const previewEnabled = !isDiffTab && showPreview && isMarkdown(filePath);
+  const htmlFile = isHtml(filePath);
+  const previewEnabled = !isDiffTab && showPreview && (isMarkdown(filePath) || htmlFile);
   // Initial caret + scroll for the active tab. Read imperatively so subscribing
   // components don't re-render every cursor move; Editor only consumes these
   // on mount (a fresh instance is created via `key={tab.id}` per active tab).
@@ -436,33 +438,15 @@ export default function App() {
             />
           </>
         )}
-        {!zenMode && !showSidebar && (
-          <div
-            role="button"
-            tabIndex={0}
-            title={t("filetree.expand")}
-            onClick={() => useEditorStore.getState().toggleSidebar()}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                useEditorStore.getState().toggleSidebar();
-              }
-            }}
-            className="sidebar-rail"
-            style={{
-              width: 8,
-              flexShrink: 0,
-              borderRight: "1px solid var(--border)",
-              background: "var(--bg-soft)",
-              cursor: "pointer",
-            }}
-          />
-        )}
         <div className="flex flex-col flex-1 min-w-0">
           {!zenMode && <TabBar />}
           {/* Markdown toolbar is lifted out of the editor pane so it spans the
               full editor+preview row (still shown when preview is maximized). */}
           {!isDiffTab && isMarkdown(filePath) && <MarkdownToolbar />}
+          {!isDiffTab && htmlFile && <HtmlToolbar />}
+          {!isDiffTab && htmlFile && activeMeta?.hasExternalChange && (
+            <ExternalChangeBanner tabId={activeMeta.id} />
+          )}
           {/* Editor + Preview row. Editor pane is ALWAYS mounted (display:none
               in reading mode) — not for memory but for sync correctness: when
               the user navigates preview to a section while in reading mode,
@@ -488,7 +472,7 @@ export default function App() {
             >
                 {!isDiffTab && isJson(filePath) && <JsonToolbar />}
                 {!isDiffTab && isSql(filePath) && <SqlToolbar />}
-                {activeMeta?.hasExternalChange && (
+                {!htmlFile && activeMeta?.hasExternalChange && (
                   <ExternalChangeBanner tabId={activeMeta.id} />
                 )}
                 <div className="flex-1 min-h-0 flex">
@@ -552,19 +536,23 @@ export default function App() {
                   flex: previewMaximized ? "1 1 0" : undefined,
                 }}
               >
-                <PreviewHost
-                  activeId={activeTabId}
-                  theme={theme}
-                  scrollLine={
-                    scrollSyncForActive?.from === "editor"
-                      ? scrollSyncForActive.line
-                      : undefined
-                  }
-                  onScroll={(line) => {
-                    if (activeTabId)
-                      setScrollSync({ line, from: "preview", tabId: activeTabId });
-                  }}
-                />
+                {htmlFile && activeTabId ? (
+                  <HtmlPreview key={activeTabId} tabId={activeTabId} />
+                ) : (
+                  <PreviewHost
+                    activeId={activeTabId}
+                    theme={theme}
+                    scrollLine={
+                      scrollSyncForActive?.from === "editor"
+                        ? scrollSyncForActive.line
+                        : undefined
+                    }
+                    onScroll={(line) => {
+                      if (activeTabId)
+                        setScrollSync({ line, from: "preview", tabId: activeTabId });
+                    }}
+                  />
+                )}
               </div>
             )}
           </div>
@@ -614,7 +602,7 @@ function ExternalChangeBanner({ tabId }: { tabId: string }) {
         alignItems: "center",
         gap: 12,
         padding: "8px 12px",
-        background: "rgba(245, 158, 11, 0.15)",
+        background: "var(--warning-bg)",
         borderBottom: "1px solid var(--border)",
         fontSize: 12,
       }}

@@ -1,3 +1,6 @@
+#[cfg(target_os = "macos")]
+mod window_chrome;
+
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 use std::fs;
@@ -837,6 +840,15 @@ fn path_kind(path: String) -> String {
     }
 }
 
+/// Keep the native fullscreen controls in sync with the web titlebar / Zen mode.
+#[tauri::command]
+fn set_titlebar_visible(app: tauri::AppHandle, visible: bool) {
+    #[cfg(target_os = "macos")]
+    window_chrome::set_visible(&app, visible);
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, visible);
+}
+
 /// Receive a log line from the frontend.
 /// Levels: "error" | "warn" | "info" | "debug" | "trace"
 #[tauri::command]
@@ -1309,7 +1321,21 @@ pub fn run() {
             app.manage(PendingOpens(Mutex::new(initial)));
 
             install_app_menu(app)?;
+            #[cfg(target_os = "macos")]
+            window_chrome::schedule_sync(app.handle());
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            #[cfg(target_os = "macos")]
+            if window.label() == "main" {
+                match event {
+                    tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Focused(_) | tauri::WindowEvent::ScaleFactorChanged { .. } => window_chrome::schedule_sync(window.app_handle()),
+                    tauri::WindowEvent::Destroyed => window_chrome::clear(),
+                    _ => {}
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            let _ = (window, event);
         })
         .invoke_handler(tauri::generate_handler![
             read_text_file,
@@ -1324,6 +1350,7 @@ pub fn run() {
             delete_path,
             print_window,
             frontend_log,
+            set_titlebar_visible,
             update_menu_state,
             read_binary_as_base64,
             list_workspace_files,

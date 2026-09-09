@@ -47,8 +47,8 @@ export default function DiffView({ spec }: Props) {
           <LangIcon filePath={spec.rightPath} size={14} />
           <span className="truncate">{rightName}</span>
         </div>
-        <span className="tabular-nums" style={{ color: "#16a34a" }}>+{stats.addedLines}</span>
-        <span className="tabular-nums" style={{ color: "#dc2626" }}>−{stats.removedLines}</span>
+        <span className="tabular-nums" style={{ color: "var(--success-text)" }}>+{stats.addedLines}</span>
+        <span className="tabular-nums" style={{ color: "var(--error-text)" }}>−{stats.removedLines}</span>
         <span className="tabular-nums" style={{ color: "var(--text-soft)" }}>~{stats.modifiedLines}</span>
       </div>
 

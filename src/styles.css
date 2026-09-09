@@ -16,6 +16,14 @@
   --text: #000000;
   --text-soft: #6c707e;
   --accent: #3574f0;
+  --on-accent: #ffffff;
+  --danger-fill: #d92d36;
+  --error-text: #c22932;
+  --error-bg: rgba(217, 45, 54, 0.08);
+  --success-text: #16803d;
+  --warning-bg: rgba(245, 158, 11, 0.15);
+  --modal-backdrop: rgba(0, 0, 0, 0.4);
+  --toolbar-height: 36px;
   /* Selection / hover overlays — distinct from the editor's own selection
      so non-CodeMirror surfaces (file tree, lists) can use them too. */
   --selection-bg: #c5d4f4;
@@ -43,6 +51,11 @@
   --text: #dfe1e5;
   --text-soft: #868a91;
   --accent: #3574f0;
+  --danger-fill: #d92d36;
+  --error-text: #ff8e96;
+  --error-bg: rgba(255, 142, 150, 0.10);
+  --success-text: #73c991;
+  --modal-backdrop: rgba(0, 0, 0, 0.55);
   --selection-bg: #214283;
   --hover-bg: rgba(255, 255, 255, 0.06);
   /* Heavier in dark mode so the modal pops against the canvas. */
@@ -75,6 +88,60 @@ body,
      the page when their internal content grows. Anything that needs to
      scroll provides its own scroll container. */
   overflow: hidden;
+}
+
+/* Compact main toolbar. */
+.titlebar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  height: 40px;
+  padding: 0 10px 0 14px;
+  gap: 16px;
+  user-select: none;
+  font-size: 12px;
+  line-height: 16px;
+  background: var(--bg-soft);
+  /* An inset divider keeps the content centered in the full 40px height. */
+  box-shadow: inset 0 -1px var(--border);
+}
+
+.titlebar--mac {
+  padding-left: 96px;
+}
+
+.titlebar-document {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-width: 0;
+  gap: 7px;
+  color: var(--text-soft);
+}
+
+.titlebar-filename {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.titlebar-dirty {
+  width: 5px;
+  height: 5px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.titlebar-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 4px;
 }
 
 /* CodeMirror fills its container */
@@ -303,9 +370,9 @@ body,
 .preview .plantuml-diagram.error {
   flex-direction: column;
   align-items: stretch;
-  color: #ef4444;
-  background: rgba(239, 68, 68, 0.05);
-  border-color: rgba(239, 68, 68, 0.3);
+  color: var(--error-text);
+  background: var(--error-bg);
+  border-color: color-mix(in srgb, var(--error-text) 30%, transparent);
   font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
   font-size: 13px;
 }
@@ -349,9 +416,9 @@ body,
 .preview .mermaid-diagram.error {
   flex-direction: column;
   align-items: stretch;
-  color: #ef4444;
-  background: rgba(239, 68, 68, 0.05);
-  border-color: rgba(239, 68, 68, 0.3);
+  color: var(--error-text);
+  background: var(--error-bg);
+  border-color: color-mix(in srgb, var(--error-text) 30%, transparent);
   font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
   font-size: 13px;
 }
@@ -467,27 +534,8 @@ body,
 .preview-toc-toggle {
   position: absolute;
   top: 10px;
-  /* Clear of the preview pane's vertical scrollbar (system scrollbars are
-     typically 12–15px wide when shown as classic / always-visible). Without
-     this padding the button sits directly on top of the scrollbar thumb. */
   right: 22px;
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--text-soft);
-  border-radius: 6px;
-  cursor: pointer;
   z-index: 5;
-  padding: 0;
-  line-height: 1;
-}
-.preview-toc-toggle:hover {
-  background: var(--bg-soft);
-  color: var(--text);
 }
 
 /* Reading-mode in-pane search */
@@ -502,51 +550,17 @@ body,
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--shadow-popup);
   font-size: 12px;
   z-index: 20;
 }
-.preview-search-input {
-  width: 200px;
-  padding: 4px 6px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg-soft);
-  color: var(--text);
-  font-size: 12px;
-  outline: none;
-}
-.preview-search-input:focus {
-  border-color: var(--accent, #4a90e2);
-}
+.preview-search-input { width: 200px; }
 .preview-search-count {
   min-width: 56px;
   text-align: center;
   color: var(--text-soft);
   font-variant-numeric: tabular-nums;
   user-select: none;
-}
-.preview-search-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border: none;
-  background: transparent;
-  color: var(--text-soft);
-  cursor: pointer;
-  border-radius: 4px;
-  font-size: 14px;
-  line-height: 1;
-}
-.preview-search-btn:hover:not(:disabled) {
-  background: var(--bg-soft);
-  color: var(--text);
-}
-.preview-search-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
 }
 .preview-search-match {
   background: rgba(255, 213, 79, 0.45);
@@ -573,29 +587,115 @@ body,
   border-left: 2px solid #f59e0b;
 }
 
-/* JetBrains-style button hover/active overlays. The component sets the base
-   colors (transparent / accent / etc); these rules layer hover / active on top
-   so the inline-style props stay simple. */
+/* App controls own their state colors in CSS, never inline background. */
 .deditor-btn {
   outline: none;
   font-family: inherit;
+  cursor: pointer;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
 }
-.deditor-btn:not(:disabled):hover {
-  background: color-mix(in srgb, var(--text) 7%, transparent);
+.deditor-btn[data-variant="ghost"] { color: var(--text-soft); border: none; }
+.deditor-btn[data-pressed="true"] { background: var(--bg-mute); }
+.deditor-btn:not(:disabled):hover { background: var(--hover-bg); }
+.deditor-btn:not(:disabled):active { background: var(--bg-mute); }
+.deditor-btn:is([data-variant="ghost"], [data-variant="secondary"])[data-pressed="true"]:not(:disabled):hover {
+  background: color-mix(in srgb, var(--bg-mute) 93%, var(--text));
 }
-.deditor-btn:not(:disabled):active {
-  background: color-mix(in srgb, var(--text) 12%, transparent);
+.deditor-btn:is([data-variant="ghost"], [data-variant="secondary"])[data-pressed="true"]:not(:disabled):active {
+  background: color-mix(in srgb, var(--bg-mute) 88%, var(--text));
 }
-.deditor-btn:focus-visible {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+.deditor-btn[data-variant="primary"], .deditor-btn[data-variant="danger"] {
+  --button-fill: var(--accent);
+  background: var(--button-fill);
+  border-color: var(--button-fill);
+  color: var(--on-accent);
 }
-/* Primary / danger get an accent-darkening hover instead of the gray overlay,
-   keeping the saturated fill readable. */
+.deditor-btn[data-variant="danger"] { --button-fill: var(--danger-fill); }
 .deditor-btn[data-variant="primary"]:not(:disabled):hover,
 .deditor-btn[data-variant="danger"]:not(:disabled):hover {
-  filter: brightness(1.08);
+  background: color-mix(in srgb, var(--button-fill) 90%, #000);
 }
+.deditor-btn[data-variant="primary"]:not(:disabled):active,
+.deditor-btn[data-variant="danger"]:not(:disabled):active {
+  background: color-mix(in srgb, var(--button-fill) 80%, #000);
+}
+.deditor-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.deditor-btn:focus-visible, .deditor-segment:focus-visible, .deditor-focus:focus-visible,
+summary:focus-visible, .preview-toc-item:focus-visible, .cm-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.deditor-segments {
+  display: inline-flex;
+  flex-shrink: 0;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  overflow: hidden;
+  background: var(--bg);
+}
+.deditor-segment {
+  height: 100%;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms ease;
+}
+.deditor-segment + .deditor-segment { border-left: 1px solid var(--border); }
+.deditor-segment:hover { background: var(--hover-bg); }
+.deditor-segment:active { background: var(--bg-mute); }
+.deditor-segment[data-selected="true"] { background: var(--accent); color: var(--on-accent); }
+.deditor-segment:focus-visible { outline-offset: -2px; }
+.deditor-segment[data-selected="true"]:focus-visible { outline-color: var(--on-accent); }
+/* Opt-in classes keep document HTML and XMind's controls outside this scope. */
+.deditor-input {
+  height: 32px;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+  box-sizing: border-box;
+}
+.deditor-input--compact { height: 24px; padding: 3px 8px; font-size: 12px; }
+.deditor-input:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.deditor-input:disabled { opacity: 0.5; cursor: not-allowed; }
+.deditor-palette-input { outline: none; }
+.deditor-palette-input:focus { box-shadow: inset 0 -2px var(--accent); }
+.deditor-notice {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-soft);
+  background: var(--bg-soft);
+}
+.deditor-notice[data-tone="error"] {
+  color: var(--error-text);
+  background: var(--error-bg);
+  border-color: color-mix(in srgb, var(--error-text) 30%, transparent);
+}
+.document-toolbar, .md-toolbar-shell {
+  height: var(--toolbar-height);
+  min-height: var(--toolbar-height);
+  flex-shrink: 0;
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--border);
+  box-sizing: border-box;
+}
+.document-toolbar { display: flex; align-items: center; gap: 4px; padding: 0 8px; }
 
 /* Splitter */
 .splitter {
@@ -608,15 +708,6 @@ body,
 .splitter:hover,
 .splitter.dragging {
   background: var(--accent);
-}
-
-/* Collapsed-sidebar rail — clickable column anywhere along its height. */
-.sidebar-rail {
-  transition: background 0.12s;
-}
-.sidebar-rail:hover {
-  background: var(--hover-bg) !important;
-  color: var(--text) !important;
 }
 
 /* TabBar scroll strip — hide scrollbar but keep scrollable */
@@ -636,9 +727,10 @@ body,
 }
 .cm-search {
   display: flex !important;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  padding: 6px 10px !important;
+  padding: 6px 32px 6px 10px !important;
 }
 .cm-search label {
   font-size: 12px;
@@ -648,30 +740,37 @@ body,
   gap: 4px;
 }
 .cm-textfield {
+  height: 24px;
+  box-sizing: border-box;
   background: var(--bg) !important;
   color: var(--text) !important;
   border: 1px solid var(--border) !important;
   border-radius: 4px !important;
-  padding: 4px 8px !important;
+  padding: 3px 8px !important;
   font-size: 12px !important;
   outline: none;
 }
 .cm-textfield:focus {
+  box-shadow: 0 0 0 1px var(--accent);
   border-color: var(--accent) !important;
 }
 .cm-button {
-  background: var(--bg) !important;
+  background: transparent !important;
   color: var(--text) !important;
   border: 1px solid var(--border) !important;
   border-radius: 4px !important;
   padding: 3px 10px !important;
-  font-size: 12px !important;
+  font-size: 11px !important;
   cursor: pointer;
   background-image: none !important;
 }
-.cm-button:hover {
+.cm-button:not(:disabled):hover {
+  background: var(--hover-bg) !important;
+}
+.cm-button:not(:disabled):active {
   background: var(--bg-mute) !important;
 }
+.cm-button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Column-mode (Alt-drag) crosshair cue */
 .cm-editor.cm-crosshair-cursor,
@@ -706,11 +805,11 @@ body,
   }
 }
 
-.md-toolbar-row { display: flex; align-items: center; gap: 4px; min-height: 36px; padding: 0 8px; }
+.md-toolbar-row { display: flex; align-items: center; gap: 4px; min-height: calc(var(--toolbar-height) - 1px); padding: 0 8px; }
 .md-toolbar-expanded { display: flex; align-items: center; gap: 4px; }
 .md-toolbar-more { display: none; }
 .md-toolbar-more summary { cursor: pointer; font-size: 12px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 4px; }
-.md-toolbar-popover { position: absolute; left: 8px; right: 8px; top: 100%; z-index: 40; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 12px; background: var(--bg-soft); border: 1px solid var(--border); box-shadow: var(--shadow-modal); border-radius: 6px; }
+.md-toolbar-popover { position: absolute; left: 8px; right: 8px; top: 100%; z-index: 40; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 12px; background: var(--bg-soft); border: 1px solid var(--border); box-shadow: var(--shadow-popup); border-radius: 6px; }
 @container (max-width: 900px) {
   .md-toolbar-expanded { display: none; }
   .md-toolbar-more { display: block; }
@@ -718,4 +817,3 @@ body,
 @media (max-width: 850px) {
   .statusbar-secondary { display: none; }
 }
-.deditor-btn:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

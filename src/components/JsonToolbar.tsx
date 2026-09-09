@@ -1,3 +1,5 @@
+import { logError } from "../lib/logger";
+import { showError } from "../lib/feedback";
 import { FiZap, FiMinimize2 } from "react-icons/fi";
 import { useT } from "../lib/i18n";
 import { getActiveView } from "../lib/editorBridge";
@@ -25,7 +27,8 @@ export default function JsonToolbar() {
     try {
       next = transform(current);
     } catch (err) {
-      alert(
+      logError("JSON format failed", err);
+      void showError(
         t("json.formatFailed", {
           err: err instanceof Error ? err.message : String(err),
         }),
@@ -45,11 +48,8 @@ export default function JsonToolbar() {
 
   return (
     <div
-      className="flex flex-nowrap items-center gap-1 px-2 select-none"
+      className="document-toolbar select-none"
       style={{
-        height: 32,
-        background: "var(--bg-soft)",
-        borderBottom: "1px solid var(--border)",
         flexShrink: 0,
         overflowX: "auto",
         whiteSpace: "nowrap",

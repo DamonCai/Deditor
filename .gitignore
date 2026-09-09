@@ -146,3 +146,5 @@ $RECYCLE.BIN/
 
 /package-lock.json
 /DEditor*.dmg
+
+tests/

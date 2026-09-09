@@ -26,6 +26,7 @@ import { useEditorStore } from "../store/editor";
 import { useT } from "../lib/i18n";
 import { promptInput } from "./PromptDialog";
 import { Button } from "./ui/Button";
+import PreviewModeSwitch from "./PreviewModeSwitch";
 
 export default function MarkdownToolbar() {
   const t = useT();
@@ -46,22 +47,6 @@ export default function MarkdownToolbar() {
   }, []);
   const editorFontSize = useEditorStore((s) => s.editorFontSize);
   const setEditorFontSize = useEditorStore((s) => s.setEditorFontSize);
-  const showPreview = useEditorStore((s) => s.showPreview);
-  const previewMaximized = useEditorStore((s) => s.previewMaximized);
-  const viewMode: "edit" | "split" | "preview" = !showPreview
-    ? "edit"
-    : previewMaximized
-      ? "preview"
-      : "split";
-  const setViewMode = (mode: "edit" | "split" | "preview") => {
-    if (mode === "edit") {
-      useEditorStore.setState({ showPreview: false, previewMaximized: false });
-    } else if (mode === "split") {
-      useEditorStore.setState({ showPreview: true, previewMaximized: false });
-    } else {
-      useEditorStore.setState({ showPreview: true, previewMaximized: true });
-    }
-  };
 
   const onLink = async () => {
     const url = await promptInput({
@@ -211,9 +196,6 @@ export default function MarkdownToolbar() {
     <div
       className="md-toolbar-shell select-none"
       style={{
-        minHeight: 36,
-        background: "var(--bg-soft)",
-        borderBottom: "1px solid var(--border)",
         flexShrink: 0,
         position: "relative",
         containerType: "inline-size",
@@ -244,87 +226,9 @@ export default function MarkdownToolbar() {
       {/* View mode: edit-only / split / preview-only. Rendered as a segmented
           control so the active mode is clearly visible. Drives
           showPreview + previewMaximized in the store. */}
-      <SegmentGroup>
-        <SegmentButton
-          isFirst
-          active={viewMode === "edit"}
-          onClick={() => setViewMode("edit")}
-        >
-          {t("md.viewEdit")}
-        </SegmentButton>
-        <SegmentButton
-          active={viewMode === "split"}
-          onClick={() => setViewMode("split")}
-        >
-          {t("md.viewSplit")}
-        </SegmentButton>
-        <SegmentButton
-          active={viewMode === "preview"}
-          onClick={() => setViewMode("preview")}
-        >
-          {t("md.viewPreview")}
-        </SegmentButton>
-      </SegmentGroup>
+      <PreviewModeSwitch />
       </div>
     </div>
-  );
-}
-
-function SegmentGroup({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        display: "inline-flex",
-        height: 24,
-        border: "1px solid var(--border)",
-        borderRadius: 5,
-        overflow: "hidden",
-        background: "var(--bg)",
-        flexShrink: 0,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function SegmentButton({
-  children,
-  active,
-  onClick,
-  isFirst,
-}: {
-  children: React.ReactNode;
-  active: boolean;
-  onClick: () => void;
-  isFirst?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      style={{
-        height: "100%",
-        padding: "0 10px",
-        fontSize: 12,
-        fontWeight: 600,
-        border: "none",
-        borderLeft: isFirst ? "none" : "1px solid var(--border)",
-        cursor: "pointer",
-        background: active ? "var(--accent)" : "transparent",
-        color: active ? "#fff" : "var(--text)",
-        transition: "background 0.12s",
-      }}
-      onMouseEnter={(e) => {
-        if (!active) e.currentTarget.style.background = "var(--hover-bg)";
-      }}
-      onMouseLeave={(e) => {
-        if (!active) e.currentTarget.style.background = "transparent";
-      }}
-    >
-      {children}
-    </button>
   );
 }
 

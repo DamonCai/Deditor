@@ -1,0 +1,357 @@
+@font-face {
+  font-family: NeverMind;
+  src: url("../assets/nevermind/NeverMind-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: NeverMind;
+  src: url("../assets/nevermind/NeverMind-Medium.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: NeverMind;
+  src: url("../assets/nevermind/NeverMind-DemiBold.ttf") format("truetype");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: NeverMind;
+  src: url("../assets/nevermind/NeverMind-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+.xm-workbench {
+  height: 100%;
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  overflow: hidden;
+}
+.xm-header,
+.xm-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.xm-header strong {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.xm-header {
+  background: var(--bg-soft);
+  flex-wrap: wrap;
+}
+.xm-tools {
+  min-height: 39px;
+  flex-wrap: wrap;
+}
+.xm-mode {
+  display: flex;
+  gap: 2px;
+  margin-left: 8px;
+}
+.xm-spacer {
+  flex: 1;
+}
+.xm-divider {
+  height: 18px;
+  border-left: 1px solid var(--border);
+  margin: 0 3px;
+}
+.xm-search {
+  width: 150px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: 6px;
+  padding: 5px 8px;
+  color: var(--text);
+}
+.xm-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+.xm-canvas {
+  flex: 1;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  outline: none;
+}
+.xm-canvas:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.xm-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+  user-select: none;
+}
+.xm-inspector {
+  width: 236px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--border);
+  overflow: auto;
+  padding: 12px;
+  background: var(--bg);
+}
+.xm-panel-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+  margin-bottom: 14px;
+}
+.xm-panel-section {
+  font-weight: 600;
+  border-top: 1px solid var(--border);
+  margin: 16px -12px 12px;
+  padding: 12px 12px 0;
+}
+.xm-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0;
+  color: var(--text-soft);
+}
+.xm-field input,
+.xm-field textarea,
+.xm-field select {
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-soft);
+  font: inherit;
+}
+.xm-field textarea {
+  resize: vertical;
+}
+.xm-field :disabled {
+  opacity: 0.7;
+}
+.xm-color-row {
+  display: flex;
+  gap: 14px;
+}
+.xm-color-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.xm-color-row input {
+  width: 32px;
+  height: 25px;
+  border: 0;
+  padding: 0;
+  background: none;
+}
+.xm-help {
+  font-size: 11px;
+  line-height: 1.8;
+  color: var(--text-soft);
+  margin: 12px 0;
+  white-space: pre-line;
+}
+.xm-link {
+  word-break: break-all;
+}
+.xm-zoom {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  box-shadow: 0 3px 18px #0001;
+  white-space: nowrap;
+}
+.xm-zoom span {
+  width: 40px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.xm-sheets {
+  display: flex;
+  gap: 3px;
+  padding: 0 10px;
+  align-items: center;
+  min-height: 36px;
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.xm-sheets > button[role="tab"] {
+  background: transparent;
+  color: var(--text-soft);
+  border: 0;
+  border-top: 2px solid transparent;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+.xm-sheets > button[aria-selected="true"] {
+  border-top-color: var(--accent);
+  color: var(--accent);
+  background: var(--bg-soft);
+}
+.xm-sheets .xm-help {
+  margin: 0 8px;
+}
+.xm-outline {
+  width: 200px;
+  overflow: auto;
+  border-right: 1px solid var(--border);
+  background: var(--bg);
+  padding: 8px 0;
+  flex-shrink: 0;
+}
+.xm-outline button {
+  display: block;
+  background: none;
+  border: 0;
+  text-align: left;
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-soft);
+  padding: 7px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.xm-outline button[aria-current="true"] {
+  background: var(--bg-soft);
+  color: var(--accent);
+}
+.xm-context {
+  position: absolute;
+  width: 180px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  z-index: 20;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 30px #0003;
+}
+.xm-context button {
+  text-align: left;
+}
+.xm-search-count,
+.xm-warning {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  background: var(--bg);
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-soft);
+  font-size: 11px;
+  max-width: 80%;
+}
+.xm-search-count {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.xm-warning {
+  top: auto;
+  bottom: 65px;
+}
+.xm-error,
+.xm-legacy {
+  padding: 8px 12px;
+  background: var(--bg-soft);
+  font-size: 12px;
+}
+.xm-error {
+  color: #d56a5d;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.xm-empty {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+@media (max-width: 900px) {
+  .xm-inspector {
+    width: 205px;
+  }
+  .xm-outline {
+    width: 165px;
+  }
+  .xm-header strong {
+    max-width: 120px;
+  }
+  .xm-search {
+    width: 120px;
+  }
+  .xm-sheets .xm-help {
+    display: none;
+  }
+}
+@media (max-width: 650px) {
+  .xm-inspector {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 25;
+    box-shadow: -4px 0 20px #0002;
+  }
+  .xm-outline {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 25;
+  }
+  .xm-header {
+    gap: 4px;
+    padding: 6px;
+  }
+  .xm-header strong {
+    max-width: 90px;
+  }
+  .xm-tools {
+    padding: 6px;
+  }
+  .xm-header .xm-spacer {
+    display: none;
+  }
+}

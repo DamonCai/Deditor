@@ -80,11 +80,11 @@ function TabBarImpl() {
       tabEls.forEach((el) => { el.style.borderLeft = ""; el.style.borderRight = ""; });
       dropIndicator.current = insertBeforeIdx;
       if (insertBeforeIdx != null && insertBeforeIdx < tabEls.length) {
-        tabEls[insertBeforeIdx].style.borderLeft = "3px solid #4f8cff";
+        tabEls[insertBeforeIdx].style.borderLeft = "3px solid var(--accent)";
       }
       if (insertBeforeIdx === tabEls.length) {
         const last = tabEls[tabEls.length - 1];
-        if (last) last.style.borderRight = "3px solid #4f8cff";
+        if (last) last.style.borderRight = "3px solid var(--accent)";
       }
     };
 
@@ -217,6 +217,7 @@ function TabBarImpl() {
       </div>
       <Button
         variant="ghost"
+        size="icon"
         onClick={newFile}
         title={t("tabbar.newTab")}
         style={iconBtnStyle}
@@ -226,6 +227,7 @@ function TabBarImpl() {
       <Button
         ref={overflowBtnRef}
         variant="ghost"
+        size="icon"
         onClick={() => setOverflowOpen((v) => !v)}
         title={t("tabbar.allTabs", { n: tabs.length })}
         style={{ ...iconBtnStyle, position: "relative" }}
@@ -352,34 +354,15 @@ const TabItem = memo(function TabItem({
       >
         {name}
       </span>
-      <span
+      <Button variant="ghost" size="icon"
         onClick={(e) => {
           e.stopPropagation();
           onTabClose(tab.id);
         }}
         title={tStatic("tabbar.closeShortcut")}
-        style={{
-          width: 16,
-          height: 16,
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          borderRadius: 3,
-          fontSize: 14,
-          lineHeight: 1,
-          color: "var(--text-soft)",
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = "var(--hover-bg)";
-          e.currentTarget.style.color = "var(--text)";
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = "";
-          e.currentTarget.style.color = "var(--text-soft)";
-        }}
-      >
-        {dirty ? "●" : "×"}
-      </span>
+        style={{ width: 20, height: 20 }}>
+        {dirty ? <span style={{ fontSize: 10 }}>●</span> : <FiX size={14} />}
+      </Button>
     </div>
   );
 });
@@ -461,20 +444,13 @@ function OverflowDropdown({
     >
       <div style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>
         <input
+          className="deditor-input deditor-input--compact"
           autoFocus
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           placeholder={t("tabbar.searchPlaceholder", { n: tabs.length })}
           style={{
             width: "100%",
-            background: "var(--bg-soft)",
-            border: "1px solid var(--border)",
-            color: "var(--text)",
-            borderRadius: 4,
-            padding: "4px 8px",
-            fontSize: 12,
-            outline: "none",
-            boxSizing: "border-box",
           }}
         />
       </div>
@@ -547,33 +523,15 @@ function OverflowDropdown({
                   </span>
                 )}
               </div>
-              <span
+              <Button variant="ghost" size="icon"
                 onClick={(e) => {
                   e.stopPropagation();
                   onClose(tb.id);
                 }}
                 title={t("tabbar.close")}
-                style={{
-                  width: 18,
-                  height: 18,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  borderRadius: 3,
-                  color: "var(--text-soft)",
-                  flexShrink: 0,
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "var(--border)";
-                  e.currentTarget.style.color = "var(--text)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "";
-                  e.currentTarget.style.color = "var(--text-soft)";
-                }}
-              >
-                <FiX size={12} />
-              </span>
+                style={{ width: 20, height: 20 }}>
+                <FiX size={14} />
+              </Button>
             </div>
           );
         })}

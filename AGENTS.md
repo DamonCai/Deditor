@@ -663,3 +663,35 @@ SetFile -a C "$DMG"                        # 标记 "Has Custom Icon"
 - Rust stable，`~/.cargo/config.toml` 走 rsproxy.cn 镜像
 - 已装 Xcode CLI Tools（有 sips / Rez / DeRez / SetFile / xattr）
 - 第一次接触 Tauri / Rust 桌面开发，前端（React/TS）熟
+
+
+## UI 开发规范与统一标准（2026-09-09）
+
+新增或修改界面时，先复用下面的共用组件和样式。相同用途的控件必须具有相同的尺寸、字体、圆角、间距及 normal / hover / active / selected / disabled / focus 状态，不允许按文件类型再复制一套近似实现。
+
+| 对象 | 唯一入口与规格 |
+| --- | --- |
+| 普通按钮 | `src/components/ui/Button.tsx`。primary / secondary / ghost / danger；sm：11px 字号、3px 10px 内边距；md：12px、5px 12px；圆角 4px。弹窗确定/取消统一 md，不允许各弹窗覆写字号、padding。 |
+| 图标按钮 | Button 的 icon（24px）/ iconLg（28px），图标默认 14px。关闭统一 `FiX`；禁止以 `×`、`✕` 文本字形代替。标签关闭属于紧凑场景，允许 20px 点击框；保留未保存圆点。标签条的新建/列表入口允许 32px 整条高度，仍使用 icon 消除文字按钮 padding。 |
+| 分段控件 | `src/components/ui/SegmentedControl.tsx`。高度 24px、圆角 5px、12px/600 字体、左右内边距 10px。设置选项用 radio 语义，视图切换用 pressed 语义，共享视觉规则。Markdown/HTML 通过 `PreviewModeSwitch` 绑定 store。 |
+| 文件工具栏 | `.document-toolbar`；Markdown 外壳 `.md-toolbar-shell`。高度含底边框共 36px（`--toolbar-height`），左右内边距 8px，间距 4px。Markdown 内层高度为 35px，避免外壳边框额外增加 1px。 |
+| 文本输入框 | `.deditor-input`：32px 高、13px 字号、6px 10px 内边距、4px 圆角。紧凑路径/搜索框增加 `.deditor-input--compact`：24px 高、12px、3px 8px。命令/文件/符号快速导航沿用大搜索框，添加 `.deditor-palette-input`。 |
+| 焦点与禁用 | 输入框 focus 用 accent 边框及 1px 外环；按钮 focus-visible 用 2px accent 轮廓；分段控件使用内轮廓避免裁切，选中项用白色轮廓。禁止只设 outline:none 而无替代反馈。禁用控件透明度 0.5、not-allowed 光标，不能响应点击。 |
+| 错误提示 | 需要用户关闭的提示调用 `src/lib/feedback.ts` 的 `showError()`，复用排队的 ConfirmDialog；禁止新增 `window.alert()`。局部错误使用 `.deditor-notice` + `data-tone="error"` + `role="alert"`；普通状态使用同一类 + `role="status"`。超长错误正文在弹窗内部滚动（最高 50vh），保持关闭按钮可见。原始异常仍在 catch 中用 logError 记录，不吞掉。 |
+| 浮层与主题 | 弹窗遮罩使用 `--modal-backdrop`，弹窗/弹出层阴影分别使用 `--shadow-modal` / `--shadow-popup`。错误、危险按钮、成功、警告使用 `--error-text` / `--error-bg` / `--danger-fill` / `--success-text` / `--warning-bg`；拖拽指示使用 `--accent`。 |
+
+### 实现边界
+
+- Button 的背景、边框颜色、hover / active / disabled 由 `src/styles.css` 管理。不要在行内 style 中写背景或状态颜色，否则会覆盖 CSS 伪类。行内 style 仅用于必要的布局适配；同类控件的例外必须写明用途。
+- 切换按钮用 `pressed` 同时表达视觉与无障碍状态；选中后的 hover / active 必须保留选中底色。CodeMirror 自带查找栏通过 `.cm-button` / `.cm-textfield` 适配到 sm 按钮和 compact 输入框规格，包含焦点、悬停与禁用状态；窄窗口允许换行，并为关闭按钮预留空间，不能裁掉替换操作。
+- 不使用全局 input/button 选择器统一应用外观；使用 `deditor-*` / 工具栏类，避免污染 Markdown 正文、HTML iframe 和专用预览器。
+- HTML 正文保留文件自身排版；代码、阅读正文与应用控件可使用不同字体。语言品牌图标及用户指定颜色属于内容，不按错误/主色 token 强制替换。
+- XMind 正在独立改造，当前不调整 `XmindView.tsx`、`XmindCanvas.tsx`、`xmind.css` 的布局与专用控件。修改共用 Button / 全局 token 时需运行 XMind 相邻回归，避免间接破坏其行为。
+- 所有新文案同步补齐 `src/lib/i18n.ts` 的中英文；纯图标按钮必须提供本地化 title 或 aria-label。替换关闭按钮时保留事件冒泡控制、dirty 标记及原本动作。
+- 错误弹窗异步排队，必须在显示下一条消息时重置错误 tone，保留 Esc/Enter/Tab 和关闭后的焦点恢复；不要使错误提示阻断无关保存队列。
+
+### 验证要求
+
+除本文件已有的 3–5 轮不同用例测试要求，还需按改动覆盖：亮/暗主题、normal/hover/active/selected/disabled/focus、键盘 Tab/Enter/Esc、720px 窄窗口、切换文件类型/多标签、长错误信息和错误后继续操作。共享样式必须做浏览器实际布局/焦点检查；DOM 单测不能替代尺寸与颜色验证。
+
+完成后运行 `npm run test:regression` 与 `npm run build`。报告分别说明修改内容、不同轮次的预期/实测/结果，以及未验证的原生平台范围；不能把 jsdom 结果宣称为 macOS/Windows 安装包验证。

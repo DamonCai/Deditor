@@ -17,6 +17,7 @@ interface State {
   title: string;
   message: string;
   buttons: ButtonSpec[];
+  tone?: "error";
   resolve: ((c: string) => void) | null;
 }
 
@@ -34,6 +35,7 @@ function show(opts: {
   title: string;
   message: string;
   buttons: ButtonSpec[];
+  tone?: "error";
 }): Promise<string> {
   const pending = pendingDialog.then(() => new Promise<string>((resolve) => {
     useConfirm.setState({
@@ -41,6 +43,7 @@ function show(opts: {
       title: opts.title,
       message: opts.message,
       buttons: opts.buttons,
+      tone: opts.tone,
       resolve,
     });
   }));
@@ -85,12 +88,13 @@ export function chooseAction(opts: {
   title: string;
   message: string;
   buttons: ButtonSpec[];
+  tone?: "error";
 }): Promise<string> {
   return show(opts);
 }
 
 export default function ConfirmDialog() {
-  const { open, title, message, buttons, resolve } = useConfirm();
+  const { open, title, message, buttons, resolve, tone } = useConfirm();
   const close = (value: string) => {
     resolve?.(value);
     useConfirm.setState({ open: false, resolve: null });
@@ -104,7 +108,7 @@ export default function ConfirmDialog() {
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(0,0,0,0.45)",
+        background: "var(--modal-backdrop)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -140,7 +144,8 @@ export default function ConfirmDialog() {
         }}
       >
         <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>{title}</div>
-        <div style={{ fontSize: 14, color: "var(--text-soft)", marginBottom: 18 }}>
+        <div className={tone ? "deditor-notice" : undefined} data-tone={tone}
+          style={{ ...(tone ? {} : { fontSize: 14, color: "var(--text-soft)" }), marginBottom: 18, maxHeight: "50vh", overflowY: "auto", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
           {message}
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
@@ -149,7 +154,6 @@ export default function ConfirmDialog() {
               key={b.value}
               variant={b.danger ? "danger" : b.primary ? "primary" : "secondary"}
               onClick={() => close(b.value)}
-              style={{ padding: "6px 16px", fontSize: 13 }}
             >
               {b.label}
             </Button>

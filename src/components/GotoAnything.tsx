@@ -150,7 +150,7 @@ export default function GotoAnything({ open, onClose }: Props) {
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(0,0,0,0.35)",
+        background: "var(--modal-backdrop)",
         zIndex: 1000,
         display: "flex",
         justifyContent: "center",
@@ -177,6 +177,7 @@ export default function GotoAnything({ open, onClose }: Props) {
         }}
       >
         <input
+          className="deditor-palette-input"
           ref={inputRef}
           aria-label={t("goto.title")}
           value={query}

@@ -26,6 +26,7 @@ for (const key of [
   "Element",
   "MutationObserver",
   "DOMRect",
+  "DOMParser",
   "getComputedStyle",
   "localStorage",
   "requestAnimationFrame",
@@ -73,7 +74,7 @@ fs.symlinkSync(
 );
 const stubs = {
   "@tauri-apps/api/core":
-    "export const invoke=(...args)=>globalThis.__invoke(...args); export const convertFileSrc=(p)=>p;",
+    "export const invoke=(...args)=>globalThis.__invoke(...args); export const convertFileSrc=(p)=>'http://asset.localhost/'+encodeURIComponent(p);",
   "@tauri-apps/plugin-dialog":
     "export const save=(...args)=>globalThis.__save(...args); export const open=async()=>null;",
   "@tauri-apps/plugin-opener":
@@ -89,6 +90,9 @@ await build({
   stdin: {
     contents: `
 export * from './src/lib/fileio';
+export {default as XmindView} from './src/components/XmindView';
+export {sampleArchive} from './tests/fixtures/xmind';
+export {openDocument as openXmindDocument} from './src/lib/xmind/document';
 export {useEditorStore} from './src/store/editor';
 export * from './src/lib/documentStats';
 export * from './src/lib/editorBridge';
@@ -98,6 +102,12 @@ export * from './src/lib/retainedTabs';
 export {default as EditorHost} from './src/components/EditorHost';
 export {default as PreviewHost} from './src/components/PreviewHost';
 export {default as MarkdownToolbar} from './src/components/MarkdownToolbar';
+export {default as HtmlToolbar} from './src/components/HtmlToolbar';
+export {default as JsonToolbar} from './src/components/JsonToolbar';
+export {showError} from './src/lib/feedback';
+export {default as HtmlPreview} from './src/components/HtmlPreview';
+export {buildHtmlPreview} from './src/lib/htmlPreview';
+export {isHtml} from './src/lib/lang';
 export {default as ConfirmDialog, chooseAction} from './src/components/ConfirmDialog';
 export {default as FindInFiles} from './src/components/FindInFiles';
 export {default as SettingsDialog} from './src/components/SettingsDialog';
@@ -212,13 +222,91 @@ async function click(name) {
 }
 function setInput(input, value) {
   Object.getOwnPropertyDescriptor(
-    window.HTMLInputElement.prototype,
+    input instanceof window.HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype,
     "value",
   ).set.call(input, value);
   input.dispatchEvent(new window.Event("input", { bubbles: true }));
 }
 const tests = [];
 const test = (round, name, fn) => tests.push({ round, name, fn });
+
+test(1, "HTML reading renders current unsaved content and preserves document styles", async () => {
+  const content = '<html lang="zh"><head><style>h1 { color: red }</style></head><body><h1>阅读</h1><img src="assets/photo.png"></body></html>';
+  reset([tab("html", content, "/test/site/index.html")]);
+  await render(React.createElement(app.HtmlPreview, { tabId: "html" }));
+  const frame = document.querySelector("iframe");
+  assert.equal(frame.title, "HTML reading view");
+  const doc = new DOMParser().parseFromString(frame.srcdoc, "text/html");
+  assert.equal(doc.querySelector("h1").textContent, "阅读");
+  assert.match(doc.querySelector("style").textContent, /color: red/);
+  assert.equal(doc.documentElement.lang, "zh");
+  assert.equal(new URL(doc.querySelector("img").getAttribute("src"), doc.querySelector("base").href).pathname, "//test/site/assets/photo.png");
+  assert.equal(store.getState().tabs[0].content, content);
+  assert.equal(store.getState().tabs[0].savedContent, "old");
+});
+
+test(2, "HTML handles empty files, fragments, mixed-case extensions and Windows Unicode paths", async () => {
+  assert.equal(app.isHtml(null), false);
+  assert.equal(app.isHtml("/test/a.HTML"), true);
+  assert.equal(app.isHtml("C:\\docs\\a.HTM"), true);
+  assert.equal(app.isHtml("/test/html.txt"), false);
+  for (const content of ["", "<h1>未闭合标题", "<p>中文 &amp; &lt;标签&gt;</p>"]) {
+    const doc = new DOMParser().parseFromString(app.buildHtmlPreview(content, "C:\\阅读 文档\\index.htm"), "text/html");
+    assert.ok(doc.body);
+    const target = new URL("images/photo.png", doc.querySelector("base").href);
+    assert.equal(decodeURIComponent(target.pathname), "/C:/阅读 文档/images/photo.png");
+  }
+  const doc = new DOMParser().parseFromString(app.buildHtmlPreview('<base href="../shared/"><base href="https://ignored.test/"><img src="a.png">', "/test/site/index.html"), "text/html");
+  assert.equal(doc.querySelectorAll("base").length, 1);
+  assert.equal(new URL("a.png", doc.querySelector("base").href).pathname, "//test/shared/a.png");
+  const malformed = new DOMParser().parseFromString(app.buildHtmlPreview('<base href="http://["><a href="#section">Section</a><h1 id="section">Still readable</h1>', "/test/a.html"), "text/html");
+  assert.equal(malformed.querySelector("base").href, "http://asset.localhost//test/a.html");
+  assert.equal(malformed.querySelector("a").getAttribute("href"), "about:srcdoc#section");
+  assert.equal(malformed.querySelector("h1").textContent, "Still readable");
+});
+
+test(3, "HTML mode toggles preserve editor undo and preview follows edits and tab switches", async () => {
+  reset([tab("a", "<h1>A</h1>", "/test/a.html"), tab("b", "<h1>B</h1>", "/test/b.htm")]);
+  function Host() {
+    const activeId = store((s) => s.activeId);
+    const show = store((s) => s.showPreview);
+    const reading = store((s) => s.previewMaximized);
+    return React.createElement(React.Fragment, null,
+      React.createElement(app.HtmlToolbar),
+      React.createElement("div", { style: { display: show && reading ? "none" : "block" } }, React.createElement(app.EditorHost, { activeId, theme: "light", fontSize: 14 })),
+      show && React.createElement(app.HtmlPreview, { key: activeId, tabId: activeId }));
+  }
+  await render(React.createElement(Host));
+  const view = app.getActiveView();
+  await act(async () => view.dispatch({ changes: { from: 4, to: 5, insert: "Updated" } }));
+  await click("Reading");
+  assert.equal(button("Reading").getAttribute("aria-pressed"), "true");
+  assert.match(document.querySelector("iframe").srcdoc, /Updated/);
+  await act(async () => store.getState().setActive("b"));
+  assert.match(document.querySelector("iframe").srcdoc, /<h1>B<\/h1>/);
+  await act(async () => store.getState().setActive("a"));
+  await click("Edit");
+  assert.equal(document.querySelector("iframe"), null);
+  assert.equal(app.getActiveView(), view);
+  await act(async () => assert.equal(undo(view), true));
+  assert.equal(store.getState().tabs[0].content, "<h1>A</h1>");
+  await click("Live Preview");
+  assert.equal(store.getState().previewMaximized, false);
+  assert.match(document.querySelector("iframe").srcdoc, /<h1>A<\/h1>/);
+});
+
+test(4, "HTML reading isolates scripts, nested frames and refresh navigation", async () => {
+  reset([tab("a", '<meta http-equiv="REFRESH" content="0;url=https://example.com"><script>parent.compromised=true</script><iframe src="https://example.com"></iframe><form action="https://example.com"></form>', "/test/a.html")]);
+  await render(React.createElement(app.HtmlPreview, { tabId: "a" }));
+  const frame = document.querySelector("iframe");
+  assert.equal(frame.getAttribute("sandbox"), "");
+  const doc = new DOMParser().parseFromString(frame.srcdoc, "text/html");
+  assert.equal(doc.querySelector('meta[http-equiv="REFRESH"]'), null);
+  assert.match(doc.querySelector("meta").content, /script-src 'none'/);
+  assert.match(doc.querySelector("meta").content, /frame-src 'none'/);
+  assert.match(doc.querySelector("meta").content, /form-action 'none'/);
+  assert.equal(window.compromised, undefined);
+});
 
 test(
   1,
@@ -755,6 +843,138 @@ test(5, "navigation and settings dialogs restore keyboard focus", async () => {
     root = undefined;
     assert.equal(document.activeElement, invoker);
   }
+});
+
+
+function xmindUrl(bytes) {return `data:application/vnd.xmind.workbook;base64,${Buffer.from(bytes).toString('base64')}`;}
+function xmindSheets() {return app.openXmindDocument(new Uint8Array(Buffer.from(store.getState().tabs[0].content.split(',')[1], 'base64'))).sheets;}
+async function mountXmind(editing = true) {
+  window.HTMLCanvasElement.prototype.getContext = () => ({font:'',measureText:text=>({width:Array.from(text).length*9})});
+  const url=xmindUrl(app.sampleArchive());
+  reset([tab('xm',url,'/test/sample.xmind',url)]);
+  localStorage.setItem('deditor:xmind:viewMode',editing?'edit':'read');
+  function Host() {const content=store(s=>s.tabs.find(t=>t.id==='xm')?.content);return content?React.createElement(app.XmindView,{dataUrl:content,filePath:'/test/sample.xmind',tabId:'xm'}):null;}
+  await render(React.createElement(Host));
+}
+test(1, 'XMind creates a subtopic, marks dirty and preserves unknown fields', async()=>{
+  await mountXmind(); const count=document.querySelectorAll('[data-topic]').length;
+  await click('Subtopic');
+  assert.equal(document.querySelectorAll('[data-topic]').length,count+1);
+  assert.notEqual(store.getState().tabs[0].content,store.getState().tabs[0].savedContent);
+  assert.deepEqual(xmindSheets()[0].rootTopic.customExtension,{keep:['unknown',123]});
+});
+test(2, 'XMind read mode rejects editing keys and allows view navigation', async()=>{
+  await mountXmind(false);const before=store.getState().tabs[0].content;
+  const canvas=document.querySelector('.xm-canvas');
+  for(const key of ['Enter','Tab','Delete','F2'])await act(async()=>canvas.dispatchEvent(new window.KeyboardEvent('keydown',{key,bubbles:true})));
+  assert.equal(store.getState().tabs[0].content,before);
+  assert.equal(document.querySelector('textarea[aria-label="Edit topic text"]'),null);
+  assert.equal([...document.querySelectorAll('button')].some(b=>b.textContent==='Subtopic'),false);
+});
+test(3, 'XMind sheet edits retain active sheet, undo/redo and canvas instance',async()=>{
+  await mountXmind();await click('组织结构');
+  const svg=document.querySelector('.xm-svg');
+  await click('Subtopic');assert.equal(document.querySelector('[role=tab][aria-selected=true]').textContent,'组织结构');
+  assert.equal(xmindSheets()[1].rootTopic.children.attached.length,4);
+  await click('Undo');assert.equal(xmindSheets()[1].rootTopic.children.attached.length,3);
+  await click('Redo');assert.equal(xmindSheets()[1].rootTopic.children.attached.length,4);
+  assert.equal(document.querySelector('.xm-svg'),svg);
+  assert.equal(xmindSheets()[0].rootTopic.title,'DEditor\n思维导图体验');
+});
+test(3, 'XMind save flushes the in-place title before binary IPC',async()=>{
+  await mountXmind();
+  await act(async()=>document.querySelector('[data-topic="root"]').dispatchEvent(new window.MouseEvent('dblclick',{bubbles:true})));
+  const input=document.querySelector('textarea[aria-label="Edit topic text"]');assert.ok(input);
+  await act(async()=>setInput(input,'Saved while editing'));
+  await act(async()=>app.saveFile());
+  assert.equal(writes.at(-1).cmd,'write_binary_file');
+  const doc=app.openXmindDocument(new Uint8Array(Buffer.from(writes.at(-1).data,'base64')));
+  assert.equal(doc.sheets[0].rootTopic.title,'Saved while editing');
+  assert.equal(store.getState().tabs[0].content,store.getState().tabs[0].savedContent);
+});
+test(2, 'XMind Escape cancels the inline draft even when focus blurs', async()=>{
+  await mountXmind();const before=store.getState().tabs[0].content;
+  await act(async()=>document.querySelector('[data-topic="root"]').dispatchEvent(new window.MouseEvent('dblclick',{bubbles:true})));
+  const input=document.querySelector('textarea[aria-label="Edit topic text"]');
+  await act(async()=>setInput(input,'Must be cancelled'));
+  await act(async()=>input.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+  assert.equal(document.querySelector('textarea[aria-label="Edit topic text"]'),null);
+  assert.equal(store.getState().tabs[0].content,before);
+});
+test(2, 'XMind inspector preserves multiline title on an unchanged blur', async()=>{
+  await mountXmind();const before=store.getState().tabs[0].content;
+  const input=document.querySelector('textarea[aria-label="Topic text"]');assert.ok(input);
+  assert.equal(input.value,'DEditor\n思维导图体验');
+  await act(async()=>{input.focus();input.blur();});
+  assert.equal(store.getState().tabs[0].content,before);
+});
+test(4,'XMind failed save leaves edited archive dirty and visible',async()=>{
+  await mountXmind();await click('Subtopic');
+  globalThis.__invoke=async(cmd)=>{if(cmd==='write_binary_file')throw new Error('disk full');};
+  await assert.rejects(()=>app.saveFile(),/disk full/);
+  assert.notEqual(store.getState().tabs[0].content,store.getState().tabs[0].savedContent);
+  assert.ok(document.querySelector('[data-topic="root"]'));
+});
+test(3, 'XMind tab unmount commits a draft and restores sheet and undo history', async()=>{
+  await mountXmind();await click('组织结构');
+  await act(async()=>document.querySelector('[data-topic="org-root"]').dispatchEvent(new window.MouseEvent('dblclick',{bubbles:true})));
+  await act(async()=>setInput(document.querySelector('textarea[aria-label="Edit topic text"]'),'Draft across tabs'));
+  await act(async()=>{root.unmount();});root=undefined;
+  assert.equal(xmindSheets()[1].rootTopic.title,'Draft across tabs');
+  function Host(){const content=store(s=>s.tabs[0].content);return React.createElement(app.XmindView,{dataUrl:content,filePath:'/test/sample.xmind',tabId:'xm'});}
+  await render(React.createElement(Host));
+  assert.equal(document.querySelector('[role=tab][aria-selected=true]').textContent,'组织结构');
+  assert.ok(document.querySelector('[data-topic="org-root"]'));
+  await click('Undo');assert.equal(xmindSheets()[1].rootTopic.title,'项目组');
+});
+test(5,'XMind switching read/edit preserves camera and rendered content',async()=>{
+  await mountXmind();const svg=document.querySelector('.xm-svg');
+  const zoom=[...document.querySelectorAll('button')].find(b=>b.getAttribute('aria-label')==='Zoom in');
+  await act(async()=>zoom.click());const box=svg.getAttribute('viewBox');
+  await click('Read');await click('Edit');
+  assert.equal(document.querySelector('.xm-svg'),svg);assert.equal(svg.getAttribute('viewBox'),box);
+});
+
+test(4, "format errors use the themed dialog and preserve the original buffer", async () => {
+  const content = "this is invalid json {";
+  reset([tab("json", content, "/test/invalid.json", content)]);
+  await render(React.createElement(React.Fragment, null,
+    React.createElement(app.JsonToolbar),
+    React.createElement(app.EditorHost, { activeId: "json", theme: "light", fontSize: 14 }),
+    React.createElement(app.ConfirmDialog)));
+  const format = [...document.querySelectorAll("button")].find(b => b.textContent.includes("Format"));
+  assert.ok(format);
+  format.focus();
+  await act(async () => { format.click(); await flush(); });
+  const dialog = document.querySelector('[role="dialog"][aria-label="Operation failed"]');
+  assert.ok(dialog);
+  assert.ok(dialog.querySelector('[data-tone="error"]'));
+  assert.ok(dialog.contains(document.activeElement));
+  assert.equal(store.getState().tabs[0].content, content);
+  await click("Close");
+  assert.equal(document.querySelector('[role="dialog"]'), null);
+  assert.equal(document.activeElement, format);
+});
+
+test(4, "queued error dialogs reset their appearance before a normal confirmation", async () => {
+  reset();
+  await render(React.createElement(app.ConfirmDialog));
+  let first, second, next;
+  await act(async () => {
+    first = app.showError("第一条错误 " + "details ".repeat(300));
+    second = app.showError("Second failure");
+    next = app.chooseAction({ title: "Continue", message: "Normal confirmation", buttons: [{ label: "Done", value: "done", primary: true }] });
+    await flush();
+  });
+  assert.match(document.querySelector('[data-tone="error"]').textContent, /第一条错误/);
+  await click("Close"); await first;
+  assert.match(document.querySelector('[data-tone="error"]').textContent, /Second failure/);
+  await act(async () => document.activeElement.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+  await second;
+  await act(async () => flush());
+  assert.equal(document.querySelector('[data-tone="error"]'), null);
+  assert.match(document.querySelector('[role="dialog"]').textContent, /Normal confirmation/);
+  await click("Done"); assert.equal(await next, "done");
 });
 
 let failed = 0,

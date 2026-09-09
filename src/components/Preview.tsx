@@ -1,3 +1,5 @@
+import { Button } from "./ui/Button";
+import { FiX, FiMenu, FiChevronLeft, FiChevronRight } from "react-icons/fi";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { renderMarkdown, renderCode } from "../lib/markdown";
@@ -792,8 +794,9 @@ export default function Preview({
           </aside>
         )}
         {readingMode && (
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="iconLg"
             className="preview-toc-toggle"
             onClick={() => toggleTocVisible()}
             title={tocVisible ? t("preview.tocHide") : t("preview.tocShow")}
@@ -801,15 +804,15 @@ export default function Preview({
               tocVisible ? t("preview.tocHide") : t("preview.tocShow")
             }
           >
-            {tocVisible ? "✕" : "☰"}
-          </button>
+            {tocVisible ? <FiX size={14} /> : <FiMenu size={14} />}
+          </Button>
         )}
         {readingMode && searchOpen && (
           <div className="preview-search-bar" role="search">
             <input
               ref={searchInputRef}
               type="text"
-              className="preview-search-input"
+              className="deditor-input deditor-input--compact preview-search-input"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => {
@@ -836,35 +839,35 @@ export default function Preview({
                     total: String(matchInfo.total),
                   })}
             </span>
-            <button
-              type="button"
-              className="preview-search-btn"
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={goPrev}
               disabled={matchInfo.total === 0}
               title={t("preview.search.prev")}
               aria-label={t("preview.search.prev")}
             >
-              ‹
-            </button>
-            <button
-              type="button"
-              className="preview-search-btn"
+              <FiChevronLeft size={14} />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={goNext}
               disabled={matchInfo.total === 0}
               title={t("preview.search.next")}
               aria-label={t("preview.search.next")}
             >
-              ›
-            </button>
-            <button
-              type="button"
-              className="preview-search-btn"
+              <FiChevronRight size={14} />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={closeSearch}
               title={t("preview.search.close")}
               aria-label={t("preview.search.close")}
             >
-              ✕
-            </button>
+              <FiX size={14} />
+            </Button>
           </div>
         )}
       </div>

@@ -1,3 +1,4 @@
+import { showError } from "../lib/feedback";
 import { memo, useCallback, useEffect, useState } from "react";
 import { useShallow } from "zustand/shallow";
 import { useEditorStore, useActiveTabFilePath } from "../store/editor";
@@ -21,7 +22,7 @@ import { promptInput } from "./PromptDialog";
 import { confirmDelete } from "./ConfirmDialog";
 import { logError } from "../lib/logger";
 import { useT, tStatic } from "../lib/i18n";
-import { FiFolder, FiFolderPlus, FiChevronsLeft } from "react-icons/fi";
+import { FiFolder, FiFolderPlus } from "react-icons/fi";
 import { Button } from "./ui/Button";
 
 const FOLDER_COLOR = "#dcb67a"; // soft amber, matches VSCode default folder icon
@@ -44,7 +45,6 @@ function FileTreeImpl() {
   // waking FileTree when contents match.
   const workspaces = useEditorStore(useShallow((s) => s.workspaces));
   const removeWorkspace = useEditorStore((s) => s.removeWorkspace);
-  const toggleSidebar = useEditorStore((s) => s.toggleSidebar);
   const filePath = useActiveTabFilePath();
   const setCompareMarkPath = useEditorStore((s) => s.setCompareMarkPath);
   const [pathInput, setPathInput] = useState("");
@@ -158,12 +158,7 @@ function FileTreeImpl() {
           placeholder={t("filetree.pathPlaceholder")}
           spellCheck={false}
           disabled={busy}
-          className="flex-1 min-w-0 px-2 py-1 text-xs rounded outline-none"
-          style={{
-            background: "var(--bg)",
-            border: "1px solid var(--border)",
-            color: "var(--text)",
-          }}
+          className="deditor-input deditor-input--compact flex-1"
         />
         <Button
           variant="ghost"
@@ -173,19 +168,10 @@ function FileTreeImpl() {
         >
           <FiFolderPlus size={16} />
         </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={toggleSidebar}
-          title={t("filetree.collapse")}
-        >
-          <FiChevronsLeft size={16} />
-        </Button>
       </div>
       {error && (
         <div
-          className="px-2 py-1 text-xs"
-          style={{ color: "#ef4444", background: "var(--bg)" }}
+          className="deditor-notice" role="alert" data-tone="error"
         >
           {error}
         </div>
@@ -244,7 +230,7 @@ async function promptCreate(kind: "file" | "dir", parent: string) {
     }
   } catch (err) {
     logError(`create ${kind} failed`, err);
-    alert(
+    void showError(
       tStatic("filetree.createFailed", {
         err: err instanceof Error ? err.message : String(err),
       }),
@@ -260,7 +246,7 @@ async function promptDelete(path: string, isDir: boolean) {
     await deletePath(path);
   } catch (err) {
     logError("delete failed", err);
-    alert(
+    void showError(
       tStatic("filetree.deleteFailed", {
         err: err instanceof Error ? err.message : String(err),
       }),
@@ -288,7 +274,7 @@ async function promptRename(path: string, isDir: boolean) {
     await renamePath(path, newPath);
   } catch (err) {
     logError("rename failed", err);
-    alert(
+    void showError(
       tStatic("filetree.renameFailed", {
         err: err instanceof Error ? err.message : String(err),
       }),
@@ -516,8 +502,8 @@ const DirNode = memo(function DirNode({
           )}
           {error && (
             <div
-              className="px-3 py-1 text-xs"
-              style={{ color: "#ef4444", paddingLeft: (depth + 1) * 14 + 12 }}
+              className="deditor-notice" role="alert" data-tone="error"
+              style={{ marginLeft: (depth + 1) * 14 }}
             >
               {error}
             </div>
@@ -650,7 +636,7 @@ function Spinner() {
 
 function ErrorLine({ msg }: { msg: string }) {
   return (
-    <div className="px-3 py-2 text-xs" style={{ color: "#ef4444" }}>
+    <div className="deditor-notice" role="alert" data-tone="error">
       {msg}
     </div>
   );

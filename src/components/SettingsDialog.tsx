@@ -4,6 +4,8 @@ import { useEditorStore } from "../store/editor";
 import { SHORTCUTS, type ShortcutMeta } from "../lib/shortcuts";
 import { useT } from "../lib/i18n";
 import { Button } from "./ui/Button";
+import { SegmentedControl } from "./ui/SegmentedControl";
+import { FiX } from "react-icons/fi";
 
 interface Props {
   open: boolean;
@@ -69,7 +71,7 @@ export default function SettingsDialog({ open, onClose }: Props) {
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(0,0,0,0.4)",
+        background: "var(--modal-backdrop)",
         zIndex: 1100,
         display: "flex",
         justifyContent: "center",
@@ -114,10 +116,9 @@ export default function SettingsDialog({ open, onClose }: Props) {
             variant="ghost"
             size="icon"
             onClick={onClose}
-            aria-label="Close"
-            style={{ fontSize: 16 }}
+            aria-label={t("common.close")}
           >
-            ×
+            <FiX size={14} />
           </Button>
         </div>
 
@@ -374,45 +375,7 @@ function RadioRow<T extends string>({
       }}
     >
       <span style={{ fontSize: 13, color: "var(--text)", flex: 1 }}>{label}</span>
-      <div
-        role="radiogroup"
-        style={{
-          display: "inline-flex",
-          flexShrink: 0,
-          border: "1px solid var(--border)",
-          borderRadius: 4,
-          overflow: "hidden",
-          background: "var(--bg)",
-        }}
-      >
-        {options.map((opt, i) => {
-          const active = opt.value === value;
-          return (
-            <button
-              key={opt.value}
-              type="button"
-              role="radio"
-              aria-checked={active}
-              onClick={() => onChange(opt.value)}
-              className="deditor-btn"
-              style={{
-                padding: "3px 12px",
-                fontSize: 12,
-                border: "none",
-                borderLeft: i === 0 ? "none" : "1px solid var(--border)",
-                background: active ? "var(--accent)" : "transparent",
-                color: active ? "#fff" : "var(--text)",
-                cursor: "pointer",
-                whiteSpace: "nowrap",
-                transition:
-                  "background 120ms ease, color 120ms ease",
-              }}
-            >
-              {opt.label}
-            </button>
-          );
-        })}
-      </div>
+      <SegmentedControl radio label={label} value={value} options={options} onChange={onChange} />
     </div>
   );
 }

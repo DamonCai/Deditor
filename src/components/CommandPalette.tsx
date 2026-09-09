@@ -125,7 +125,7 @@ export default function CommandPalette({ open, onClose }: Props) {
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(0,0,0,0.35)",
+        background: "var(--modal-backdrop)",
         zIndex: 1050,
         display: "flex",
         justifyContent: "center",
@@ -152,6 +152,7 @@ export default function CommandPalette({ open, onClose }: Props) {
         }}
       >
         <input
+          className="deditor-palette-input"
           ref={inputRef}
           aria-label={t("palette.title")}
           value={query}

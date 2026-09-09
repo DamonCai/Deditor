@@ -67,7 +67,7 @@ export default function PromptDialog() {
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(0,0,0,0.45)",
+        background: "var(--modal-backdrop)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -104,6 +104,7 @@ export default function PromptDialog() {
           </div>
         )}
         <input
+          className="deditor-input"
           ref={inputRef}
           aria-label={label || title}
           defaultValue={initial}
@@ -117,14 +118,6 @@ export default function PromptDialog() {
           }}
           style={{
             width: "100%",
-            background: "var(--bg-soft)",
-            border: "1px solid var(--border)",
-            color: "var(--text)",
-            borderRadius: 5,
-            padding: "6px 10px",
-            fontSize: 13,
-            outline: "none",
-            boxSizing: "border-box",
             marginBottom: 14,
           }}
         />

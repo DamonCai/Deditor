@@ -8,6 +8,7 @@ import { useT, tStatic } from "../lib/i18n";
 import { logError, logInfo } from "../lib/logger";
 import { chooseAction } from "./ConfirmDialog";
 import { Button } from "./ui/Button";
+import { FiChevronDown, FiChevronRight } from "react-icons/fi";
 import LangIcon from "./LangIcon";
 
 interface Props {
@@ -185,7 +186,7 @@ export default function FindInFiles({ open, onClose }: Props) {
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(0,0,0,0.35)",
+        background: "var(--modal-backdrop)",
         zIndex: 1050,
         display: "flex",
         justifyContent: "center",
@@ -224,19 +225,15 @@ export default function FindInFiles({ open, onClose }: Props) {
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Button
               variant="ghost"
-              size="sm"
+              size="icon"
               pressed={showReplace}
               onClick={() => setShowReplace((v) => !v)}
               title={t("find.toggleReplace")}
-              style={{
-                width: 22,
-                padding: "3px 0",
-                fontFamily: "var(--font-mono, ui-monospace, monospace)",
-              }}
             >
-              {showReplace ? "▾" : "▸"}
+              {showReplace ? <FiChevronDown size={14} /> : <FiChevronRight size={14} />}
             </Button>
             <input
+              className="deditor-input"
               ref={inputRef}
               aria-label={t("find.title")}
               disabled={replacing}
@@ -251,17 +248,11 @@ export default function FindInFiles({ open, onClose }: Props) {
               spellCheck={false}
               style={{
                 flex: 1,
-                padding: "6px 10px",
-                fontSize: 13,
-                background: "var(--bg)",
-                color: "var(--text)",
-                border: "1px solid var(--border)",
-                borderRadius: 4,
-                outline: "none",
               }}
             />
             <Button
               variant={caseSensitive ? "primary" : "secondary"}
+              pressed={caseSensitive}
               size="sm"
               disabled={replacing}
               onClick={() => setCaseSensitive((v) => !v)}
@@ -273,8 +264,9 @@ export default function FindInFiles({ open, onClose }: Props) {
           </div>
           {showReplace && (
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ width: 22 }} />
+              <span style={{ width: 24, flexShrink: 0 }} />
               <input
+                className="deditor-input"
                 aria-label={t("find.replacePlaceholder")}
                 disabled={replacing}
                 value={replacement}
@@ -284,13 +276,6 @@ export default function FindInFiles({ open, onClose }: Props) {
                 spellCheck={false}
                 style={{
                   flex: 1,
-                  padding: "6px 10px",
-                  fontSize: 13,
-                  background: "var(--bg)",
-                  color: "var(--text)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 4,
-                  outline: "none",
                 }}
               />
               <Button
@@ -328,8 +313,8 @@ export default function FindInFiles({ open, onClose }: Props) {
             : t("find.idle")}
         </div>
 
-        {notice && <div role="status" style={{ padding: "8px 12px", color: "var(--text-soft)", fontSize: 12 }}>{notice}</div>}
-        {error && <div role="alert" style={{ padding: "8px 12px", color: "var(--text)", fontSize: 12, whiteSpace: "pre-wrap" }}>
+        {notice && <div role="status" className="deditor-notice">{notice}</div>}
+        {error && <div role="alert" className="deditor-notice" data-tone="error">
           {t("find.failed", { error })}
           <Button size="sm" disabled={replacing} onClick={() => setRetry((v) => v + 1)}>{t("common.retry")}</Button>
         </div>}
