@@ -28,6 +28,8 @@ thread_local! {
 #[derive(Default)]
 struct ButtonHoverState {
     inside: Cell<bool>,
+    #[cfg(debug_assertions)]
+    reported_hover: Cell<bool>,
 }
 
 // Standard window buttons placed outside AppKit's titlebar need their own
@@ -47,7 +49,12 @@ define_class!(
         // hook here; never replace the system buttons or draw their icons.
         #[unsafe(method(_mouseInGroup:))]
         fn mouse_in_group(&self, _button: &NSButton) -> Bool {
-            Bool::new(self.ivars().inside.get())
+            let inside = self.ivars().inside.get();
+            #[cfg(debug_assertions)]
+            if inside && !self.ivars().reported_hover.replace(true) {
+                log::info!("native fullscreen buttons drawing hover glyphs");
+            }
+            Bool::new(inside)
         }
 
         #[unsafe(method(mouseEntered:))]
@@ -71,7 +78,12 @@ impl FullscreenButtonsView {
         // Invalidate each child as an NSView rather than requiring NSButton's
         // concrete runtime class (which would skip those native widgets).
         for view in self.subviews() {
-            view.setNeedsDisplay(true);
+            // Window widgets expose NSControl's no-argument invalidation
+            // selector; this also refreshes their internally cached artwork.
+            unsafe {
+                let _: () = msg_send![&*view, setNeedsDisplay];
+            }
+            view.displayIfNeeded();
         }
     }
 
