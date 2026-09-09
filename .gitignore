@@ -35,6 +35,14 @@ Cargo.lock.bak
 src-tauri/gen/schemas/
 
 # -- Distribution bundles (do NOT commit binaries) ----------------------------
+/DEditor*.dmg
+/DEditor*.app
+/DEditor*.msi
+/DEditor*.exe
+/DEditor*.pkg
+/DEditor*.AppImage
+/DEditor*.deb
+/DEditor*.rpm
 scripts/*.dmg
 scripts/*.app
 scripts/*.msi
@@ -56,10 +64,11 @@ lerna-debug.log*
 
 # -- Environment / secrets ----------------------------------------------------
 .env
-.env.local
-.env.*.local
-.env.development.local
-.env.production.local
+.env.*
+!.env.example
+!.env.*.example
+!.env.sample
+!.env.template
 *.pem
 *.key
 *.crt
@@ -70,6 +79,8 @@ coverage/
 *.lcov
 .jest-cache/
 .vitest-cache/
+# Generated screenshots and visual-review files; keep tests/fixtures/ in Git.
+/tests/artifacts/
 
 # -- Caches -------------------------------------------------------------------
 .cache/
@@ -80,6 +91,9 @@ coverage/
 .npm/
 
 # -- Editors / IDEs -----------------------------------------------------------
+# Local assistant permissions (shared instructions stay in Git)
+.claude/settings.local.json
+
 # VSCode (allow shared extension recommendations)
 .vscode/*
 !.vscode/extensions.json
@@ -144,7 +158,4 @@ $RECYCLE.BIN/
 *.orig
 .history/
 
-/package-lock.json
-/DEditor*.dmg
-
-tests/
+# Commit package-lock.json and src-tauri/Cargo.lock for reproducible installs.
