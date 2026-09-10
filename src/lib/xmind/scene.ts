@@ -1,3 +1,4 @@
+import { relationshipGeometry } from "./relationship";
 import { topicIndicators, type TopicIndicator } from "./indicators";
 import {
   type Topic,
@@ -20,6 +21,7 @@ export interface SceneNode extends Box {
   content: Box;
   imageHeight: number;
   labelLines: string[];
+  labels: (Box & { lines: string[] })[];
   indicators: TopicIndicator[];
   indicatorColumns: number;
   labelY: number;
@@ -33,6 +35,7 @@ export interface SceneNode extends Box {
   properties: Properties;
   branch: number;
   detached: boolean;
+  direction: Direction;
 }
 export interface Edge {
   from: string;
@@ -263,20 +266,28 @@ export function buildScene(
       : 0;
     // Measure every visible row with the same font used by the SVG renderer.
     const auxiliary = { ...p, "fo:font-weight": "400", "fo:font-style": "normal" };
-    const labelLines = topic.labels?.length
-      ? wrap(topic.labels.join(" · "), Math.max(60, widthHint), 11, auxiliary, measure) : [];
+    // Keep each label as a separate capsule. Long labels wrap within their own
+    // box instead of merging unrelated labels into a single text paragraph.
+    const labels = (topic.labels ?? []).map((label) => {
+      const lines = wrap(label, Math.max(60, widthHint) - 16, 11, auxiliary, measure);
+      return { lines, x: 0, y: 0,
+        width: Math.max(20, ...lines.map((line) => measure(line, 11, auxiliary) + 16)),
+        height: lines.length * 16 + 4 };
+    });
+    const labelLines = labels.flatMap((label) => label.lines);
+    const labelsHeight = labels.reduce((total, label) => total + label.height + 4, 0);
     const indicators = topicIndicators(topic);
     const indicatorColumns = Math.max(1, Math.min(indicators.length,
       Math.floor((Math.max(60, widthHint) + 4) / 20)));
     const indicatorRows = Math.ceil(indicators.length / indicatorColumns);
     const contentWidth = Math.max(24, imageWidth,
       ...lines.map(s => measure(s, style.fontSize, p)),
-      ...labelLines.map(s => measure(s, 11, auxiliary)),
+      ...labels.map((label) => label.width),
       indicators.length ? indicatorColumns * 20 - 4 : 0);
     const titleHeight = lines.length * style.fontSize * 1.4;
     const pictureHeight = imageHeight ? imageHeight + 8 : 0;
     const contentHeight = pictureHeight + titleHeight +
-      (labelLines.length ? 6 + labelLines.length * 16 : 0) +
+      (labels.length ? 4 + labelsHeight : 0) +
       (indicatorRows ? 4 + indicatorRows * 20 : 0);
     const paddedWidth = Math.max(depth === 0 ? 100 : 50,
       contentWidth + (depth === 0 ? 58 : depth === 1 ? 48 : 28));
@@ -289,16 +300,23 @@ export function buildScene(
     const content = { x: (width - contentWidth) / 2, y: (height - contentHeight) / 2,
       width: contentWidth, height: contentHeight };
     const labelY = content.y + pictureHeight + titleHeight + 6;
+    let nextLabelY = labelY;
+    for (const label of labels) {
+      label.x = (width - label.width) / 2;
+      label.y = nextLabelY;
+      nextLabelY += label.height + 4;
+    }
     const indicatorY = content.y + pictureHeight + titleHeight +
-      (labelLines.length ? 6 + labelLines.length * 16 : 0) + 4;
+      (labels.length ? 4 + labelsHeight : 0) + 4;
     const node: SceneNode = {
       topic,
       parent,
       depth,
       branch,
       detached,
+      direction: inherited,
       lines,
-      content, imageHeight, labelLines, indicators, indicatorColumns, labelY, indicatorY,
+      content, imageHeight, labelLines, labels, indicators, indicatorColumns, labelY, indicatorY,
       ...style,
       x: -width / 2,
       y: -height / 2,
@@ -312,8 +330,9 @@ export function buildScene(
     let direction = topic.structureClass
       ? directionOf(topic.structureClass)
       : inherited;
-    if (depth > 0 && direction === "side")
+    if (depth > 0 && !detached && direction === "side")
       direction = inherited === "left" ? "left" : "right";
+    node.direction = direction;
     const sc = topic.structureClass ?? "";
     if (
       sc &&
@@ -396,7 +415,7 @@ export function buildScene(
       const parsed = explicit === undefined ? NaN : Number(explicit);
       const split = Number.isFinite(parsed)
         ? Math.max(0, Math.min(children.length, Math.floor(parsed)))
-        : Math.ceil(children.length / 2);
+        : Math.min(children.length, Math.max(2, Math.ceil(children.length / 2)));
       arrange(children.slice(0, split), "right");
       arrange(children.slice(split).reverse(), "left");
     } else if (direction === "fishbone") {
@@ -610,7 +629,21 @@ export function buildScene(
       }
     }
   }
-  const b = boundsOf([...initial.nodes, ...groups]);
+  const relationBoxes: Box[] = [];
+  const nodeMap = new Map(initial.nodes.map((n) => [n.topic.id, n]));
+  for (const relation of sheet.relationships ?? []) {
+    const from = nodeMap.get(relation.end1Id), to = nodeMap.get(relation.end2Id);
+    if (!from || !to) continue;
+    const g = relationshipGeometry(sheet, relation, from, to);
+    if (g.unsupportedPolar) warnings.add("relationship-polar-controls");
+    // Include the curve's control hull and label in Fit, not just topic boxes.
+    for (const point of g.straight ? [g.start, g.end] : [g.start, g.c1, g.c2, g.end])
+      relationBoxes.push({ ...point, width: 0, height: 0 });
+    const textWidth = measure(relation.title ?? "", g.fontSize, g.properties);
+    relationBoxes.push({ x: g.label.x - textWidth / 2, y: g.label.y - g.fontSize,
+      width: textWidth, height: g.fontSize * 2 });
+  }
+  const b = boundsOf([...initial.nodes, ...groups, ...relationBoxes]);
   return {
     ...initial,
     groups,
@@ -678,6 +711,13 @@ export function edgePath(edge: Edge, from: SceneNode, to: SceneNode): string {
   const lineClass =
     (from.properties["line-class"] ?? to.properties["line-class"] ?? "").toLowerCase();
   if (lineClass.includes("straight")) return `M${x1},${y1} L${x2},${y2}`;
+  if (vertical && (lineClass.includes("roundedelbow") || (!lineClass && from.depth > 0))) {
+    const sign = d === "up" ? -1 : 1, turn = Math.sign(x2 - x1);
+    const spine = y1 + sign * 14;
+    const radius = Math.min(10, Math.abs(x2 - x1), Math.abs(y2 - spine));
+    if (!turn) return `M${x1},${y1} V${y2}`;
+    return `M${x1},${y1} V${spine} H${x2 - turn * radius} Q${x2},${spine} ${x2},${spine + sign * radius} V${y2}`;
+  }
   if (!vertical && lineClass.includes("roundedelbow")) {
     // Every sibling uses the same spine beside its parent. The overlapping
     // stem segments form one trunk; only the turn into each child is rounded.
@@ -690,14 +730,14 @@ export function edgePath(edge: Edge, from: SceneNode, to: SceneNode): string {
     return `M${x1},${y1} H${spine} V${y2 - turn * r} Q${spine},${y2} ${spine + sign * r},${y2} H${x2}`;
   }
   if (
-    lineClass.includes("elbow") ||
-    vertical ||
-    edge.brace ||
-    (from.topic.structureClass ?? "").includes("org-chart")
+    lineClass.includes("elbow") || edge.brace
   ) {
     return vertical
       ? `M${x1},${y1} V${(y1 + y2) / 2} H${x2} V${y2}`
       : `M${x1},${y1} H${(x1 + x2) / 2} V${y2} H${x2}`;
+  }
+  if (from.depth === 0 && vertical && !lineClass) {
+    return `M${x1},${y1} Q${x2},${y1 + (y2 - y1) * 0.2} ${x2},${y2}`;
   }
   if (from.depth === 0 && !vertical) {
     // The main branch emerges from underneath the central topic, easing into

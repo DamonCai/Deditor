@@ -1,3 +1,4 @@
+import { relationshipGeometry, topicAnchor } from "../src/lib/xmind/relationship";
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { unzipSync, strFromU8, zipSync, strToU8 } from "fflate";
@@ -702,6 +703,66 @@ test(6, "pasting subtrees rejects nested duplicate IDs and preserves the origina
   const archive=openDocument(sampleArchive());
   const reopened=openDocument(writeDocument(archive,changed));
   assert.deepEqual(reopened.sheets[0].rootTopic.children!.attached!.slice(-2).map(t=>t.title),["A","B"]);
+});
+
+test(1, "relationship control vectors are relative to the matching topic centres", () => {
+  const sheet=sampleSheets()[0], scene=buildScene(sheet);
+  const a=scene.nodes.find(n=>n.topic.id==='read')!, b=scene.nodes.find(n=>n.topic.id==='edit')!;
+  const relation={id:'r',end1Id:'read',end2Id:'edit',title:'Review',controlPoints:{'0':{x:200,y:-100},'1':{x:250,y:80}},style:{properties:{'line-color':'#aa1122','line-pattern':'solid','line-width':'3pt'}}};
+  const g=relationshipGeometry(sheet,relation,a,b);
+  assert.deepEqual(g.c1,{x:a.x+a.width/2+200,y:a.y+a.height/2-100});
+  assert.deepEqual(g.c2,{x:b.x+b.width/2+250,y:b.y+b.height/2+80});
+  assert.equal(g.color,'#aa1122');assert.equal(g.width,3);assert.equal(g.dash,undefined);
+  assert.equal(g.label.x,(g.start.x+3*g.c1.x+3*g.c2.x+g.end.x)/8);
+  assert.notEqual(g.start.x,a.x+a.width/2,'control direction determines the outline attachment, not a fixed top-centre point');
+});
+test(2, "relationship outline intersections and coincident topics remain finite", () => {
+  const a=buildScene(sampleSheets()[0]).nodes[0];
+  for(const shape of ['ellipse','diamond','roundedRect']) {
+    const n={...a,x:0,y:0,width:100,height:60,shape};
+    const p=topicAnchor(n,{x:200,y:120});
+    assert.ok(p.x>=0&&p.x<=100&&p.y>=0&&p.y<=60);
+    const g=relationshipGeometry(sampleSheets()[0],{id:'r',end1Id:'a',end2Id:'a'},n,n);
+    assert.ok(!/NaN|Infinity/.test(g.path));
+  }
+});
+test(3, "relationship edits preserve the other control, custom fields and archive resources", () => {
+  const doc=openDocument(sampleArchive());
+  const sheets=editDocument(doc.sheets,'sheet-main',{type:'relationship-update',id:'rel',controlPoints:{'1':{x:200,y:-120}},title:'Updated relation'});
+  const result=openDocument(writeDocument(doc,sheets));
+  assert.deepEqual(result.sheets[0].relationships![0].controlPoints,{'0':{x:8,y:9},'1':{x:200,y:-120}});
+  assert.deepEqual(result.files['attachments/keep.bin'],doc.files['attachments/keep.bin']);
+  assert.throws(()=>editDocument(sheets,'sheet-main',{type:'relationship-update',id:'rel',controlPoints:{'0':{x:NaN,y:0}}}),/Invalid control/);
+  assert.equal(editDocument(sheets,'sheet-main',{type:'relationship-delete',id:'rel'})[0].relationships!.length,0);
+  assert.equal(result.sheets[0].relationships!.length,1);
+});
+test(1, "organization branches honour explicit curves and use curved central/default rounded child links", () => {
+  for(const dir of ['up','down']) {
+    const sheet=sampleSheets()[1];sheet.rootTopic.structureClass='org.xmind.ui.org-chart.'+dir;
+    for(const [style,token] of [['','Q'],['org.xmind.branchConnection.curve','C'],['org.xmind.branchConnection.elbow','H'],['org.xmind.branchConnection.roundedElbow','Q']]) {
+      sheet.rootTopic.style={properties:{'line-class':style}};
+      const scene=buildScene(sheet),edge=scene.edges.find(e=>e.from===sheet.rootTopic.id)!;
+      const path=edgePath(edge,scene.nodes.find(n=>n.topic.id===edge.from)!,scene.nodes.find(n=>n.topic.id===edge.to)!);
+      assert.ok(path.includes(token),`${dir} ${style}: ${path}`);
+    }
+  }
+});
+
+test(2, "detached maps honour explicit right-number instead of inheriting the central direction", () => {
+  const sheet=sampleSheets()[0];
+  sheet.rootTopic.children!.detached=[{id:'free-direction',title:'Free',structureClass:'org.xmind.ui.map.unbalanced',
+    extensions:[{provider:'org.xmind.ui.map.unbalanced',content:[{name:'right-number',content:'0'}]}],
+    children:{attached:[{id:'free-left',title:'Left'}]}}];
+  const scene=buildScene(sheet),free=scene.nodes.find(n=>n.topic.id==='free-direction')!,child=scene.nodes.find(n=>n.topic.id==='free-left')!;
+  assert.ok(child.x+child.width<free.x);
+});
+
+test(1, "native default branch counts keep two topics on the right before balancing", () => {
+  for(const [count,right] of [[1,1],[2,2],[3,2],[4,2],[6,3]]) {
+    const sheet=sampleSheets()[0];sheet.rootTopic.children={attached:Array.from({length:count},(_,i)=>({id:'b'+i,title:'Branch '+i}))};
+    const scene=buildScene(sheet),root=scene.nodes.find(n=>n.depth===0)!;
+    assert.equal(scene.nodes.filter(n=>n.depth===1&&n.x>root.x).length,right);
+  }
 });
 
 console.log(`${passed} XMind tests passed`);

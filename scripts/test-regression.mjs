@@ -107,6 +107,7 @@ export * from './src/lib/editorBridge';
 export * from './src/lib/editorStateCache';
 export * from './src/lib/bookmarks';
 export * from './src/lib/retainedTabs';
+export {default as Editor} from './src/components/Editor';
 export {default as EditorHost} from './src/components/EditorHost';
 export {default as PreviewHost} from './src/components/PreviewHost';
 export {default as Tooltip} from './src/components/ui/Tooltip';
@@ -1271,7 +1272,7 @@ test(3, 'XMind close uses the common unsaved prompt and save-as keeps a valid ar
   await act(async()=>assert.equal(await app.closeActiveTab(),false));
   assert.equal(prompts,1);assert.equal(store.getState().tabs.length,1);
   assert.notEqual(store.getState().tabs[0].content,store.getState().tabs[0].savedContent);
-  globalThis.__save=async()=>'/test/renamed.xmind';
+  globalThis.__save=async(options)=>{assert.deepEqual(options.filters,[{name:'XMind',extensions:['xmind']}]);return '/test/renamed.xmind';};
   await act(async()=>assert.equal(await app.saveFileAs(),true));
   assert.equal(writes.at(-1).cmd,'write_binary_file');
   const doc=app.openXmindDocument(new Uint8Array(Buffer.from(writes.at(-1).data,'base64')));
@@ -1667,6 +1668,190 @@ test(9, "workspace path errors dismiss, expire, reset on retry and preserve the 
     await act(async () => {root.unmount();}); root=undefined;
     assert.equal(timers.size, 0, 'unmount cancels the pending dismissal');
   } finally { globalThis.setTimeout=realSet;globalThis.clearTimeout=realClear; }
+});
+
+test(1, 'XMind fold persists across sheets and save, with undo/redo', async () => {
+  await mountXmind();
+  const before = store.getState().tabs[0].content;
+  await act(async () => document.querySelector('[data-topic="read"] [data-fold]').dispatchEvent(new window.MouseEvent('click', {bubbles:true})));
+  assert.equal(document.querySelector('[data-topic="colors"]'), null);
+  assert.equal(document.querySelector('[data-topic="read"] [data-fold] text').textContent, '3');
+  assert.equal(xmindSheets()[0].rootTopic.children.attached[0].branch, 'folded');
+  await click('组织结构'); await click('产品设计');
+  assert.equal(document.querySelector('[data-topic="colors"]'), null);
+  await click('Undo');
+  assert.ok(document.querySelector('[data-topic="colors"]'));
+  assert.equal(store.getState().tabs[0].content, before);
+  await click('Redo');
+  await act(async()=>app.saveFile());
+  const doc = app.openXmindDocument(new Uint8Array(Buffer.from(writes.at(-1).data,'base64')));
+  assert.equal(doc.sheets[0].rootTopic.children.attached[0].branch,'folded');
+});
+
+test(2, 'XMind fold controls follow left/up/down layout and labels remain separate', async () => {
+  for (const direction of ['left','up','down']) {
+    const structure = direction === 'left' ? 'logic.left' : 'org-chart.'+direction;
+    const sheets = [{id:'test-sheet',title:'Test',rootTopic:{id:'root',title:'Root',structureClass:'org.xmind.ui.'+structure,
+      children:{attached:[{id:'branch',title:'分支', labels:['visual-QA', '跨平台'],children:{attached:[{id:'leaf',title:'Leaf'}]}}]}}}];
+    await mountXmind(true, zipSync({'content.json':strToU8(JSON.stringify(sheets))}));
+    const node=document.querySelector('[data-topic="branch"]');
+    const [x,y] = node.querySelector('[data-fold]').getAttribute('transform').match(/-?[\d.]+/g).map(Number);
+    const shape=node.querySelector('rect');
+    if(direction==='left') assert.ok(x<0);
+    if(direction==='up') assert.ok(y<0);
+    if(direction==='down') assert.ok(y>Number(shape.getAttribute('height')));
+    assert.equal(node.querySelectorAll('[data-label]').length,2);
+    assert.equal(node.querySelector('[data-label="0"] text').textContent,'visual-QA');
+    assert.equal(node.querySelector('[data-label="1"] text').textContent,'跨平台');
+  }
+});
+
+test(3, 'XMind searches and outline reveal folded descendants without writing', async () => {
+  const sheets=[{id:'test-sheet',title:'Test',rootTopic:{id:'root',title:'Root',children:{attached:[
+    {id:'branch',title:'Branch',branch:'folded',children:{attached:[{id:'leaf',title:'Hidden needle'}]}}
+  ]}}}];
+  await mountXmind(true,zipSync({'content.json':strToU8(JSON.stringify(sheets))}));
+  const before=store.getState().tabs[0].content;
+  assert.equal(document.querySelector('[data-topic="leaf"]'),null);
+  await act(async()=>setInput(document.querySelector('input[aria-label="Find topics"]'),'needle'));
+  assert.ok(document.querySelector('[data-topic="leaf"][aria-selected="true"]'));
+  assert.equal(store.getState().tabs[0].content,before);
+  assert.match(document.querySelector('.xm-search-count').textContent,/1/);
+  await act(async()=>setInput(document.querySelector('input[aria-label="Find topics"]'),'missing'));
+  assert.match(document.querySelector('.xm-search-count').textContent,/0/);
+  assert.equal(document.querySelector('.xm-search-count button').disabled,true);
+  // Explicitly collapse the search-revealed branch, then select via outline.
+  await act(async()=>document.querySelector('[data-topic="branch"] [data-fold]').dispatchEvent(new window.MouseEvent('click',{bubbles:true})));
+  assert.equal(document.querySelector('[data-topic="leaf"]'),null);
+  await click('Outline'); await click('Hidden needle');
+  assert.ok(document.querySelector('[data-topic="leaf"][aria-selected="true"]'));
+});
+
+test(2, 'XMind multiline draft expands without writing and Escape cancels', async () => {
+  await mountXmind();
+  const before=store.getState().tabs[0].content;
+  const node=document.querySelector('[data-topic="read"]');
+  await act(async()=>node.dispatchEvent(new window.MouseEvent('dblclick',{bubbles:true})));
+  const editor=document.querySelector('textarea[aria-label="Edit topic text"]');
+  const height=Number(editor.parentElement.getAttribute('height'));
+  await act(async()=>setInput(editor,'很长的主题文字'.repeat(12)+'\n第二行\n第三行'));
+  assert.ok(Number(editor.parentElement.getAttribute('height'))>height);
+  assert.equal(store.getState().tabs[0].content,before);
+  await act(async()=>editor.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+  assert.equal(store.getState().tabs[0].content,before);
+  assert.equal(document.querySelector('foreignObject'),null);
+});
+
+test(3, 'XMind context keyboard Escape closes from focused menu and drag Escape cancels', async () => {
+  await mountXmind();
+  const node=document.querySelector('[data-topic="read"]');
+  await act(async()=>node.dispatchEvent(new window.MouseEvent('contextmenu',{bubbles:true,clientX:40,clientY:50})));
+  assert.ok(document.activeElement.closest('.xm-context'));
+  await act(async()=>document.activeElement.dispatchEvent(new window.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true})));
+  assert.match(document.activeElement.textContent,/Sibling/);
+  await act(async()=>document.activeElement.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+  assert.equal(document.querySelector('.xm-context'),null);
+  assert.equal(document.activeElement,document.querySelector('.xm-canvas'));
+  const before=store.getState().tabs[0].content;
+  const svg=document.querySelector('.xm-svg');svg.setPointerCapture=()=>{};
+  await act(async()=>node.dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true,button:0,clientX:100,clientY:100})));
+  await act(async()=>svg.dispatchEvent(new window.MouseEvent('pointermove',{bubbles:true,clientX:150,clientY:150})));
+  await act(async()=>document.querySelector('.xm-canvas').dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+  await act(async()=>svg.dispatchEvent(new window.MouseEvent('pointerup',{bubbles:true,clientX:150,clientY:150})));
+  assert.equal(store.getState().tabs[0].content,before);
+});
+
+test(1, 'XMind relationship selection, draft save and delete preserve topics and undo', async () => {
+  await mountXmind();
+  const nodeCount=document.querySelectorAll('[data-topic]').length;
+  const relation=document.querySelector('[data-relationship="rel"]');
+  await act(async()=>relation.dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true,button:0})));
+  assert.equal(document.querySelectorAll('[data-control]').length,2);
+  await act(async()=>relation.dispatchEvent(new window.MouseEvent('dblclick',{bubbles:true})));
+  const input=document.querySelector('input[aria-label="Edit relationship text"]');assert.ok(input);
+  await act(async()=>setInput(input,'联系保存核对'));
+  await act(async()=>app.saveFile());
+  assert.equal(app.openXmindDocument(new Uint8Array(Buffer.from(writes.at(-1).data,'base64'))).sheets[0].relationships[0].title,'联系保存核对');
+  await act(async()=>document.querySelector('.xm-canvas').dispatchEvent(new window.KeyboardEvent('keydown',{key:'Delete',bubbles:true})));
+  assert.equal(document.querySelector('[data-relationship="rel"]'),null);
+  assert.equal(document.querySelectorAll('[data-topic]').length,nodeCount);
+  await click('Undo');assert.ok(document.querySelector('[data-relationship="rel"]'));
+});
+test(2, 'XMind relationship Escape cancels title and control-point drags', async () => {
+  await mountXmind();
+  const before=store.getState().tabs[0].content;
+  const relation=document.querySelector('[data-relationship="rel"]');
+  await act(async()=>relation.dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true,button:0})));
+  await act(async()=>relation.dispatchEvent(new window.MouseEvent('dblclick',{bubbles:true})));
+  const input=document.querySelector('input[aria-label="Edit relationship text"]');
+  await act(async()=>setInput(input,'Cancelled'));
+  await act(async()=>input.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+  assert.equal(store.getState().tabs[0].content,before);
+  const handle=document.querySelector('[data-control="0"]');handle.setPointerCapture=()=>{};
+  const path=()=>document.querySelector('[data-relationship-path]').getAttribute('d');
+  const original=path();
+  await act(async()=>handle.dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true,button:0})));
+  await act(async()=>handle.dispatchEvent(new window.MouseEvent('pointermove',{bubbles:true,clientX:200,clientY:50})));
+  assert.notEqual(path(),original);
+  await act(async()=>window.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+  await act(async()=>handle.dispatchEvent(new window.MouseEvent('pointerup',{bubbles:true,clientX:200,clientY:50})));
+  assert.equal(store.getState().tabs[0].content,before);assert.equal(path(),original);
+});
+test(3, 'XMind control-point drag is a single edit and notes icon selects the owner and opens its field', async () => {
+  await mountXmind();
+  const original=store.getState().tabs[0].content;
+  const relation=document.querySelector('[data-relationship="rel"]');
+  await act(async()=>relation.dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true,button:0})));
+  const handle=document.querySelector('[data-control="1"]');handle.setPointerCapture=()=>{};
+  await act(async()=>handle.dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true,button:0})));
+  await act(async()=>handle.dispatchEvent(new window.MouseEvent('pointermove',{bubbles:true,clientX:230,clientY:80})));
+  assert.equal(store.getState().tabs[0].content,original,'preview does not write per pointer movement');
+  await act(async()=>handle.dispatchEvent(new window.MouseEvent('pointerup',{bubbles:true,clientX:230,clientY:80})));
+  assert.deepEqual(xmindSheets()[0].relationships[0].controlPoints['0'],{x:8,y:9});
+  assert.ok(xmindSheets()[0].relationships[0].controlPoints['1']);
+  await click('Undo');assert.equal(store.getState().tabs[0].content,original);
+  await click('Format');
+  const note=document.querySelector('[data-topic="edit"] [data-note-button]');
+  await act(async()=>note.dispatchEvent(new window.MouseEvent('click',{bubbles:true})));
+  assert.ok(document.querySelector('[data-topic="edit"][aria-selected="true"]'));
+  assert.equal(document.activeElement.getAttribute('data-field'),'notes');
+  assert.match(document.activeElement.value,/Tab/);
+  assert.equal(store.getState().tabs[0].content,original);
+});
+
+test(2, 'XMind relationship text clipboard stays inside input and Enter restores canvas focus', async () => {
+  await mountXmind();
+  const original=store.getState().tabs[0].content;
+  const relation=document.querySelector('[data-relationship="rel"]');
+  await act(async()=>relation.dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true,button:0})));
+  await act(async()=>relation.dispatchEvent(new window.MouseEvent('dblclick',{bubbles:true})));
+  const input=document.querySelector('input[aria-label="Edit relationship text"]');
+  const paste=new window.Event('paste',{bubbles:true,cancelable:true});
+  Object.defineProperty(paste,'clipboardData',{value:{getData:()=> 'Pasted relation'}});
+  await act(async()=>input.dispatchEvent(paste));
+  assert.equal(paste.defaultPrevented,false);
+  assert.equal(store.getState().tabs[0].content,original);
+  await act(async()=>setInput(input,'Pasted relation'));
+  await act(async()=>input.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',bubbles:true})));
+  assert.equal(document.activeElement,document.querySelector('.xm-canvas'));
+  assert.equal(xmindSheets()[0].relationships[0].title,'Pasted relation');
+  await click('Undo');assert.equal(store.getState().tabs[0].content,original);
+});
+
+test(4, 'one editor tab can switch XMind, text and binary hydration without changing hook order', async () => {
+  reset();
+  window.HTMLCanvasElement.prototype.getContext = () => ({font:'',measureText:text=>({width:Array.from(text).length*9})});
+  const url=xmindUrl(app.sampleArchive());
+  const props={value:url,filePath:'/test/probe.xmind',theme:'light',fontSize:14,tabId:'a',active:true,onChange:()=>{}};
+  await render(React.createElement(app.Editor,props));
+  assert.ok(document.querySelector('.xm-canvas'));
+  await act(async()=>root.render(React.createElement(app.Editor,{...props,filePath:'/test/probe.txt',value:'Text after Save As'})));
+  assert.ok(document.querySelector('.cm-editor'));
+  await act(async()=>root.render(React.createElement(app.Editor,props)));
+  assert.ok(document.querySelector('.xm-canvas'));
+  await act(async()=>root.render(React.createElement(app.Editor,{...props,filePath:'/test/probe.png',value:''})));
+  await act(async()=>root.render(React.createElement(app.Editor,{...props,filePath:'/test/probe.png',value:'data:image/png;base64,AA=='})));
+  assert.ok(document.querySelector('img'));
 });
 
 let failed = 0,

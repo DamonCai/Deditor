@@ -142,26 +142,8 @@ import {
   setEditorStateCache,
 } from "../lib/editorStateCache";
 
-export default function Editor({
-  value,
-  filePath,
-  theme,
-  fontSize,
-  tabId,
-  active,
-  noStateCache,
-  diff,
-  initialCursor,
-  initialScrollLine,
-  externalScrollLine,
-  onChange,
-  onScroll,
-  onPositionChange,
-}: Props) {
-  const t = useT();
-  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
-  const hostRef = useRef<HTMLDivElement>(null);
-
+export default function Editor(props: Props) {
+  const { value, filePath, tabId, diff } = props;
   // Diff tab — render the side-by-side comparison.
   if (diff) {
     return <DiffView spec={diff} />;
@@ -193,7 +175,7 @@ export default function Editor({
       </div>
     );
   }
-  // XMind workbook — read-only viewer (and mind-elixir-backed editor).
+  // XMind workbook — dedicated canvas and document editor.
   if (isXmindFile(filePath) && value.startsWith("data:")) {
     return (
       <Suspense fallback={<div style={{ padding: 16, color: "var(--text-soft)" }}>Loading…</div>}>
@@ -207,6 +189,29 @@ export default function Editor({
   if (isHexFile(filePath) && value.startsWith("data:")) {
     return <HexView dataUrl={value} filePath={filePath} />;
   }
+  return <TextEditor {...props} />;
+}
+
+// Keep the text editor's hooks in their own component. Save As or binary
+// hydration can change the renderer without changing the owning tab ID.
+function TextEditor({
+  value,
+  filePath,
+  theme,
+  fontSize,
+  tabId,
+  active,
+  noStateCache,
+  initialCursor,
+  initialScrollLine,
+  externalScrollLine,
+  onChange,
+  onScroll,
+  onPositionChange,
+}: Props) {
+  const t = useT();
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
+  const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const themeCompartment = useRef(new Compartment());
   const langCompartment = useRef(new Compartment());

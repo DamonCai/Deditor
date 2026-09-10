@@ -64,6 +64,15 @@ export default function XmindView({ dataUrl, tabId }: Props) {
   const [inspector, setInspector] = useState(true),
     [outline, setOutline] = useState(false),
     [query, setQuery] = useState("");
+  const inspectorRef = useRef<HTMLElement>(null);
+  const [inspectField, setInspectField] = useState<string | null>(null);
+  useEffect(() => {
+    if (!inspector || !inspectField) return;
+    const field = inspectorRef.current?.querySelector<HTMLTextAreaElement>(`[data-field="${inspectField}"]`);
+    field?.scrollIntoView({ block: "nearest" });
+    field?.focus();
+    setInspectField(null);
+  }, [inspector, inspectField, selected]);
   const [resources, setResources] = useState<Record<string, string>>({});
   const cameras = useRef(new Map<string, Camera>()),
     draftFlush = useRef<(() => void) | null>(null);
@@ -300,6 +309,7 @@ export default function XmindView({ dataUrl, tabId }: Props) {
     value: string,
     save: (v: string) => void,
     multiline = false,
+    fieldKey?: string,
   ) => (
     <label className="xm-field">
       {label}
@@ -307,6 +317,7 @@ export default function XmindView({ dataUrl, tabId }: Props) {
         <textarea
           key={`${topic?.id}-${label}-${value}`}
           aria-label={label}
+          data-field={fieldKey}
           defaultValue={value}
           onBlur={(e) => {
             if (e.target.value !== value) save(e.target.value);
@@ -318,6 +329,7 @@ export default function XmindView({ dataUrl, tabId }: Props) {
         <input
           key={`${topic?.id}-${label}-${value}`}
           aria-label={label}
+          data-field={fieldKey}
           defaultValue={value}
           onBlur={(e) => {
             if (e.target.value !== value) save(e.target.value);
@@ -471,11 +483,15 @@ export default function XmindView({ dataUrl, tabId }: Props) {
           query={query}
           camera={cameras.current.get(sheet.id)}
           onCamera={saveCamera}
-          onInspect={() => setInspector(true)}
+          onInspect={(field, id) => {
+            if (id) setSelected([id]);
+            setInspector(true);
+            if (field) setInspectField(field);
+          }}
           registerFlush={registerFlush}
         />
         {inspector && (
-          <aside className="xm-inspector" aria-label={t("xmind.inspector")}>
+          <aside ref={inspectorRef} className="xm-inspector" aria-label={t("xmind.inspector")}>
             <div className="xm-panel-title">
               {t("xmind.inspector")}
             </div>
@@ -605,6 +621,7 @@ export default function XmindView({ dataUrl, tabId }: Props) {
                   topic.notes?.plain?.content ?? "",
                   (text) => execute({ type: "notes", id: topic.id, text }),
                   true,
+                  "notes",
                 )}
                 {field(
                   t("xmind.labels"),

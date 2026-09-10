@@ -317,7 +317,12 @@ async function saveTab(id: string, saveAs = false, automatic = false): Promise<b
     const binary = isBinaryRenderable(snapshot.filePath);
     let target = snapshot.filePath;
     if (saveAs || !target) {
-      target = await save({ filters: MD_FILTER, defaultPath: target ?? "untitled.md" });
+      // macOS appends the first filter's extension even when defaultPath already
+      // ends in .xmind. Keep the archive format explicit in Save As.
+      const filters = isXmindFile(snapshot.filePath)
+        ? [{ name: "XMind", extensions: ["xmind"] }]
+        : MD_FILTER;
+      target = await save({ filters, defaultPath: target ?? "untitled.md" });
       if (!target) return false;
       if (useEditorStore.getState().tabs.some((t) => t.id !== id && t.filePath === target)) {
         throw new Error(tStatic("fileio.targetAlreadyOpen"));

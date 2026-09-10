@@ -314,3 +314,13 @@
     display: none;
   }
 }
+
+/* Expanded controls are quiet until the owner is hovered or selected. */
+.xm-fold { opacity: 0; pointer-events: none; }
+[data-topic]:hover > .xm-fold,
+[data-topic][aria-selected="true"] > .xm-fold,
+.xm-fold[data-folded="true"] { opacity: 1; pointer-events: auto; }
+.xm-fold:hover > circle:nth-child(2) { stroke-width: 2; }
+.xm-context { max-height: calc(100% - 12px); overflow-y: auto; }
+
+[data-topic][data-editing] > .xm-fold { opacity: 0; pointer-events: none; }

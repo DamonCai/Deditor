@@ -1,8 +1,10 @@
+import XmindRelationship from "./XmindRelationship";
 import XmindIndicator from "./XmindIndicator";
 import { logError } from "../lib/logger";
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -45,7 +47,7 @@ interface Props {
   query: string;
   camera?: Camera;
   onCamera: (camera: Camera) => void;
-  onInspect: () => void;
+  onInspect: (field?: "notes", id?: string) => void;
   registerFlush: (flush: () => void) => () => void;
 }
 let measureContext: CanvasRenderingContext2D | null | undefined;
@@ -124,16 +126,37 @@ export default function XmindCanvas({
   const [camera, setCamera] = useState<Camera>(
     saved ?? { x: 0, y: 0, zoom: 1 },
   );
-  const [folded, setFolded] = useState<Set<string>>(() => {
-    const s = new Set<string>();
+  // Document folding participates in save/undo. Search and outline revelation
+  // are view-only overrides, so looking for a topic never dirties the file.
+  const [foldOverrides, setFoldOverrides] = useState<Map<string, boolean>>(new Map());
+  const folded = useMemo(() => {
+    const result = new Set<string>();
     walkTopics(sheet.rootTopic, (n) => {
-      if (n.branch === "folded") s.add(n.id);
+      if (foldOverrides.get(n.id) ?? n.branch === "folded") result.add(n.id);
     });
-    return s;
-  });
+    return result;
+  }, [sheet, foldOverrides]);
+  const parents = useMemo(() => {
+    const result = new Map<string, string>();
+    walkTopics(sheet.rootTopic, (n, parent) => { if (parent) result.set(n.id, parent.id); });
+    return result;
+  }, [sheet]);
   const [editing, setEditing] = useState<string | null>(null),
     [draft, setDraft] = useState("");
+  const [selectedRelationship, setSelectedRelationship] = useState<string | null>(null);
+  const relationshipFlush = useRef<(() => void) | null>(null);
+  const setRelationshipFlush = useCallback((flush: (() => void) | null) => { relationshipFlush.current = flush; }, []);
+  useEffect(() => { if (selected.length) setSelectedRelationship(null); }, [selected]);
   const [context, setContext] = useState<{ x: number; y: number } | null>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!context || !menu.current || !host.current) return;
+    const bounds = host.current.getBoundingClientRect();
+    const box = menu.current.getBoundingClientRect();
+    menu.current.style.left = `${Math.max(6, Math.min(context.x, bounds.width - box.width - 6))}px`;
+    menu.current.style.top = `${Math.max(6, Math.min(context.y, bounds.height - box.height - 6))}px`;
+    menu.current.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+  }, [context, size]);
   const [dragOffset, setDragOffset] = useState<{
     id: string;
     x: number;
@@ -249,6 +272,21 @@ export default function XmindCanvas({
     return () => el.removeEventListener("wheel", wheel);
   }, []);
   useEffect(() => {
+    const hidden: string[] = [];
+    for (const id of selected) {
+      let parent = parents.get(id);
+      while (parent) {
+        if (folded.has(parent)) hidden.push(parent);
+        parent = parents.get(parent);
+      }
+    }
+    if (hidden.length) setFoldOverrides((old) => {
+      const next = new Map(old);
+      hidden.forEach((id) => next.set(id, false));
+      return next;
+    });
+  }, [selected, parents]); // Fold changes alone must not reopen a collapsed selection.
+  useEffect(() => {
     const id = selected[0];
     if (!id) return;
     const n = byId.get(id);
@@ -260,7 +298,7 @@ export default function XmindCanvas({
         n.y + n.height > viewport.y + viewport.height)
     )
       setCamera((c) => ({ ...c, x: n.x + n.width / 2, y: n.y + n.height / 2 }));
-  }, [selected]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selected, byId]); // eslint-disable-line react-hooks/exhaustive-deps
   const select = (id: string, multi = false) =>
     onSelect(
       multi
@@ -287,9 +325,21 @@ export default function XmindCanvas({
       setEditing(null);
     }
   }, [editing, draft, onCommand]);
+  useLayoutEffect(() => {
+    const input = host.current?.querySelector<HTMLTextAreaElement>("foreignObject textarea");
+    if (!input) return;
+    // Browser line breaking can differ from canvas metrics (CJK punctuation,
+    // fallback fonts, scrollbar gutters). Size to the actual rendered draft.
+    input.style.height = "0px";
+    const height = input.scrollHeight + 2;
+    const box = input.parentElement;
+    if (box && height > 2) box.setAttribute("height", String(height));
+    input.style.height = "100%";
+    input.scrollTop = 0;
+  }, [editing, draft, scene]);
   const commitRef = useRef(commitEdit);
   commitRef.current = commitEdit;
-  useEffect(() => registerFlush(() => commitRef.current()), [registerFlush]);
+  useEffect(() => registerFlush(() => { commitRef.current(); relationshipFlush.current?.(); }), [registerFlush]);
   const add = (sibling = false) => {
     cancelEditing.current = false;
     if (readonly) return;
@@ -301,8 +351,8 @@ export default function XmindCanvas({
     onSelect([topic.id]);
     setDraft(topic.title);
     setEditing(topic.id);
-    setFolded((old) => {
-      const next = new Set(old);
+    setFoldOverrides((old) => {
+      const next = new Map(old);
       next.delete(parent);
       return next;
     });
@@ -313,12 +363,19 @@ export default function XmindCanvas({
       onSelect([sheet.rootTopic.id]);
     }
   };
-  const toggleFold = useCallback((id: string) =>
-    setFolded((old) => {
-      const next = new Set(old);
-      next.has(id) ? next.delete(id) : next.add(id);
+  const toggleFold = useCallback((id: string) => {
+    if (!findTopic(sheet.rootTopic, id)?.children?.attached?.length) return;
+    const collapse = !folded.has(id);
+    // Select the owner before hiding selected descendants.
+    onSelect([id]);
+    setFoldOverrides((old) => {
+      const next = new Map(old);
+      if (readonly) next.set(id, collapse);
+      else next.delete(id);
       return next;
-    }), []);
+    });
+    if (!readonly) onCommand({ type: "fold", ids: [id], folded: collapse });
+  }, [sheet, folded, readonly, onSelect, onCommand]);
   const focusNode = (id: string) => {
     const n = byId.get(id);
     if (n) {
@@ -326,26 +383,36 @@ export default function XmindCanvas({
       setCamera((c) => ({ ...c, x: n.x + n.width / 2, y: n.y + n.height / 2 }));
     }
   };
-  const matches = useMemo(
-    () =>
-      query
-        ? scene.nodes.filter((n) =>
-            n.topic.title.toLowerCase().includes(query.toLowerCase()),
-          )
-        : [],
-    [scene, query],
-  );
+  const matches = useMemo(() => {
+    const found: Topic[] = [];
+    if (query.trim()) walkTopics(sheet.rootTopic, (topic) => {
+      if (topic.title.toLowerCase().includes(query.trim().toLowerCase())) found.push(topic);
+    });
+    return found;
+  }, [sheet, query]);
   useEffect(() => {
-    if (matches.length) focusNode(matches[0].topic.id);
-  }, [query]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (matches.length) onSelect([matches[0].id]);
+  }, [query]); // A new search reveals the first match, including folded ancestors.
   const onKey = (e: KeyboardEvent) => {
-    if ((e.target as HTMLElement).closest("input,textarea,select,button"))
+    if ((e.target as HTMLElement).closest("input,textarea,select,button") && e.key !== "Escape")
       return;
     const mod = e.metaKey || e.ctrlKey;
     if (e.nativeEvent.isComposing) return;
     if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      pointer.current = null;
+      setDragOffset(null);
       setContext(null);
       setEditing(null);
+      setSelectedRelationship(null);
+      host.current?.focus();
+      return;
+    }
+    if (mod && e.key === "/" && selected[0]) {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleFold(selected[0]);
       return;
     }
     if (mod && e.key.toLowerCase() === "a") {
@@ -392,9 +459,13 @@ export default function XmindCanvas({
     } else if ((e.key === "Delete" || e.key === "Backspace") && !readonly) {
       e.preventDefault();
       e.stopPropagation();
-      remove();
+      if (selectedRelationship) {
+        onCommand({ type: "relationship-delete", id: selectedRelationship });
+        setSelectedRelationship(null);
+      } else remove();
     } else if (e.key === " " && selected[0]) {
       e.preventDefault();
+      e.stopPropagation();
       toggleFold(selected[0]);
     } else if (e.key.startsWith("Arrow")) {
       e.preventDefault();
@@ -448,19 +519,6 @@ export default function XmindCanvas({
   const sceneContent = useMemo(() => {
     const selectedIds = new Set(selected);
     return <>
-        <defs>
-          <marker
-            id={viewId}
-            viewBox="0 0 10 10"
-            refX={9}
-            refY={5}
-            markerWidth={7}
-            markerHeight={7}
-            orient="auto-start-reverse"
-          >
-            <path d="M0,0 L10,5 L0,10 z" fill="#8490a1" />
-          </marker>
-        </defs>
         {scene.groups.map((g) => (
           <g key={g.id} pointerEvents="none">
             {g.summary ? (
@@ -532,38 +590,8 @@ export default function XmindCanvas({
             />
           ) : null;
         })}
-        {(sheet.relationships ?? []).map((r) => {
-          const a = byId.get(r.end1Id),
-            b = byId.get(r.end2Id);
-          if (!a || !b) return null;
-          const ax = a.x + a.width / 2,
-            ay = a.y,
-            bx = b.x + b.width / 2,
-            by = b.y,
-            top = Math.min(ay, by) - 60;
-          return (
-            <g key={r.id}>
-              <path
-                d={`M${ax},${ay} C${ax},${top} ${bx},${top} ${bx},${by}`}
-                stroke={r.style?.properties?.["line-color"] ?? "#8490a1"}
-                strokeWidth={1.5}
-                fill="none"
-                strokeDasharray="6 4"
-                markerEnd={`url(#${viewId})`}
-              />
-              <text
-                x={(ax + bx) / 2}
-                y={top + 8}
-                textAnchor="middle"
-                fontSize={12}
-                fill="#64748b"
-              >
-                {r.title}
-              </text>
-            </g>
-          );
-        })}
-        {scene.nodes.map((n) => {
+        {[...scene.nodes.filter((n) => n.topic.id !== editing),
+          ...scene.nodes.filter((n) => n.topic.id === editing)].map((n) => {
           const chosen = selectedIds.has(n.topic.id),
             match =
               query &&
@@ -571,11 +599,29 @@ export default function XmindCanvas({
           const offset = dragOffset?.id === n.topic.id ? dragOffset : null;
           const img = imageSource(n.topic, resources),
             imageHeight = n.imageHeight;
+          // The editor grows independently of the saved node, so long drafts
+          // and Shift+Enter remain visible before they are committed.
+          const editWidth = editing !== n.topic.id ? n.content.width : Math.max(n.content.width, Math.min(480,
+            Math.max(80, ...draft.split("\n").map((line) => measure(line, n.fontSize, n.properties) + 12))));
+          const editRows = editing !== n.topic.id ? 1 : draft.split("\n").reduce((rows, line) => rows +
+            Math.max(1, Math.ceil(measure(line, n.fontSize, n.properties) / (editWidth - 8))), 0);
+          const editHeight = Math.max(n.fontSize * 1.4 + 8, editRows * n.fontSize * 1.4 + 8);
           const isFolded = folded.has(n.topic.id);
+          let hiddenCount = 0;
+          const countChildren = (topic: Topic) => {
+            for (const child of topic.children?.attached ?? []) { hiddenCount++; countChildren(child); }
+          };
+          if (isFolded) countChildren(n.topic);
+          const foldRadius = isFolded ? Math.max(9, String(hiddenCount).length * 3.5 + 4) : 8;
+          const foldX = n.direction === "left" ? -foldRadius - 4
+            : n.direction === "down" || n.direction === "up" ? n.width / 2 : n.width + foldRadius + 4;
+          const foldY = n.direction === "down" ? n.height + foldRadius + 4
+            : n.direction === "up" ? -foldRadius - 4 : n.height / 2;
           return (
             <g
               key={n.topic.id}
               data-topic={n.topic.id}
+              data-editing={editing === n.topic.id || undefined}
               pointerEvents={offset ? "none" : undefined}
               data-parent={n.parent}
               data-detached={n.detached || undefined}
@@ -613,10 +659,10 @@ export default function XmindCanvas({
               )}
               {editing === n.topic.id ? (
                 <foreignObject
-                  x={n.content.x}
-                  y={n.content.y + (imageHeight ? imageHeight + 8 : 0)}
-                  width={n.content.width}
-                  height={n.lines.length * n.fontSize * 1.4}
+                  x={(n.width - editWidth) / 2}
+                  y={n.content.y + (imageHeight ? imageHeight + 8 : 0) - 4}
+                  width={editWidth}
+                  height={editHeight}
                 >
                   <textarea
                     aria-label={t("xmind.editTitle")}
@@ -644,8 +690,15 @@ export default function XmindCanvas({
                       height: "100%",
                       resize: "none",
                       fontSize: n.fontSize,
+                      fontFamily: n.properties["fo:font-family"] ?? "NeverMind, PingFang SC, Microsoft YaHei, sans-serif",
+                      fontWeight: n.properties["fo:font-weight"] ?? 400,
+                      fontStyle: n.properties["fo:font-style"],
+                      lineHeight: 1.4,
+                      padding: "3px",
+                      margin: 0,
+                      boxSizing: "border-box",
                       color: n.color,
-                      background: n.fill,
+                      background: n.fill === "none" || n.fill === "transparent" ? scene.background : n.fill,
                       border: "1px solid #4787ed",
                       textAlign: "center",
                       outline: "none",
@@ -680,12 +733,18 @@ export default function XmindCanvas({
                   ))}
                 </text>
               )}
-              {!!n.labelLines.length && <text x={n.width / 2} y={n.labelY + 11}
-                textAnchor="middle" fontSize={11} fontWeight={400} fontStyle="normal"
-                fontFamily={n.properties["fo:font-family"] ?? "NeverMind, PingFang SC, Microsoft YaHei, sans-serif"}
-                fill={n.color} opacity={0.7} pointerEvents="none">
-                {n.labelLines.map((line, i) => <tspan key={i} x={n.width / 2} dy={i ? 16 : 0}>{line}</tspan>)}
-              </text>}
+              {n.labels.map((label, index) => (
+                <g key={index} data-label={index} pointerEvents="none">
+                  <rect x={label.x} y={label.y} width={label.width} height={label.height}
+                    rx={5} fill="#E9E9E9" />
+                  <text x={n.width / 2} y={label.y + 14} textAnchor="middle"
+                    fontSize={11} fontWeight={400} fontStyle="normal"
+                    fontFamily={n.properties["fo:font-family"] ?? "NeverMind, PingFang SC, Microsoft YaHei, sans-serif"}
+                    fill="#555555">
+                    {label.lines.map((line, i) => <tspan key={i} x={n.width / 2} dy={i ? 16 : 0}>{line}</tspan>)}
+                  </text>
+                </g>
+              ))}
               {n.indicators.map((icon, i) => {
                 const row = Math.floor(i / n.indicatorColumns);
                 const columns = Math.min(n.indicatorColumns, n.indicators.length - row * n.indicatorColumns);
@@ -693,13 +752,24 @@ export default function XmindCanvas({
                   ? t("xmind.indicator.task", { percent: Math.round((icon.value ?? 0) * 100) })
                   : icon.kind === "priority" ? t("xmind.indicator.priority", { value: icon.value ?? 1 })
                     : t(`xmind.indicator.${icon.kind}`);
-                return <XmindIndicator key={i} icon={icon} label={label} color={n.color}
+                const indicator = <XmindIndicator icon={icon} label={label} color={n.color}
                   x={(n.width - (columns * 20 - 4)) / 2 + (i % n.indicatorColumns) * 20}
                   y={n.indicatorY + row * 20} />;
+                return icon.kind === "notes" ? <g key={i} data-note-button role="button" tabIndex={0}
+                  aria-label={t("xmind.openNotes")} style={{ cursor: "pointer" }}
+                  onPointerDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}
+                  onClick={(e) => { e.stopPropagation(); onInspect("notes", n.topic.id); }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault(); e.stopPropagation(); onInspect("notes", n.topic.id);
+                    }
+                  }}>{indicator}</g> : <g key={i}>{indicator}</g>;
               })}
               {!!n.topic.children?.attached?.length && (
                 <g
                   data-fold="true"
+                  className="xm-fold"
+                  data-folded={isFolded}
                   role="button"
                   aria-label={t(isFolded ? "xmind.expand" : "xmind.collapse")}
                   data-tooltip={t(isFolded ? "xmind.expand" : "xmind.collapse")}
@@ -707,26 +777,43 @@ export default function XmindCanvas({
                     e.stopPropagation();
                     toggleFold(n.topic.id);
                   }}
-                  transform={`translate(${n.width + 11},${n.height / 2})`}
+                  transform={`translate(${foldX},${foldY})`}
                   style={{ cursor: "pointer" }}
                 >
-                  <circle r={8} fill="#fff" stroke={n.lineColor} />
+                  <circle r={foldRadius + 5} fill="transparent" />
+                  <circle r={foldRadius} fill="#fff" stroke={n.lineColor} />
                   <text
                     textAnchor="middle"
                     dy={4}
-                    fontSize={13}
+                    fontSize={isFolded ? 11 : 13}
                     fill={n.lineColor}
+                    pointerEvents="none"
                   >
-                    {isFolded ? "+" : "−"}
+                    {isFolded ? hiddenCount : "−"}
                   </text>
                 </g>
               )}
             </g>
           );
         })}
+        {(sheet.relationships ?? []).map((relation) => {
+          const from = byId.get(relation.end1Id), to = byId.get(relation.end2Id);
+          if (!from || !to) return null;
+          return <XmindRelationship key={relation.id} relation={relation} sheet={sheet} from={from} to={to}
+            readonly={readonly} selected={selectedRelationship === relation.id} markerPrefix={viewId}
+            onSelect={() => { onSelect([]); setSelectedRelationship(relation.id); }}
+            onCommand={onCommand} registerFlush={setRelationshipFlush}
+            toWorld={(x, y) => {
+              const rect = svg.current!.getBoundingClientRect();
+              const c = cameraRef.current;
+              return { x: c.x + (x - rect.left - rect.width / 2) / c.zoom,
+                y: c.y + (y - rect.top - rect.height / 2) / c.zoom };
+            }} />;
+        })}
     </>;
   }, [scene, selected, query, dragOffset, resources, readonly, editing, draft,
-    folded, t, commitEdit, toggleFold, byId, braceEdges, sheet.relationships, viewId]);
+    folded, t, commitEdit, toggleFold, byId, braceEdges, sheet, viewId,
+    selectedRelationship, onCommand, onSelect, onInspect, setRelationshipFlush]);
 
   return (
     <div
@@ -737,7 +824,7 @@ export default function XmindCanvas({
       tabIndex={0}
       onKeyDown={onKey}
       onCopy={(e) => {
-        if (editing) return;
+        if (editing || (e.target as Element).closest("input,textarea,[contenteditable=true]")) return;
         const chosen = selectedTopicRoots(sheet.rootTopic, selected);
         if (chosen.length) {
           e.clipboardData.setData(
@@ -752,7 +839,7 @@ export default function XmindCanvas({
         }
       }}
       onPaste={(e) => {
-        if (readonly || editing) return;
+        if (readonly || editing || (e.target as Element).closest("input,textarea,[contenteditable=true]")) return;
         const raw = e.clipboardData.getData("application/x-deditor-topics");
         const text = e.clipboardData.getData("text/plain");
         if (!raw && !text) return;
@@ -766,8 +853,8 @@ export default function XmindCanvas({
           const incoming = topics.map(duplicateTopic);
           const parent = selected[0] ?? sheet.rootTopic.id;
           onCommand({ type: "paste", parent, topics: incoming });
-          setFolded((old) => {
-            const next = new Set(old);
+          setFoldOverrides((old) => {
+            const next = new Map(old);
             next.delete(parent);
             return next;
           });
@@ -783,8 +870,8 @@ export default function XmindCanvas({
         if (n && !selected.includes(n)) onSelect([n]);
         const r = host.current!.getBoundingClientRect();
         setContext({
-          x: Math.min(e.clientX - r.left, r.width - 190),
-          y: Math.min(e.clientY - r.top, r.height - 260),
+          x: e.clientX - r.left,
+          y: e.clientY - r.top,
         });
       }}
     >
@@ -798,13 +885,16 @@ export default function XmindCanvas({
           if (e.button !== 0 && e.button !== 1) return;
           if ((e.target as Element).closest("textarea,[data-fold]")) return;
           setContext(null);
+          setSelectedRelationship(null);
           host.current?.focus();
           const id =
             (e.target as Element)
               .closest("[data-topic]")
               ?.getAttribute("data-topic") ?? undefined;
-          if (id) select(id, e.shiftKey || e.metaKey || e.ctrlKey);
-          else onSelect([]);
+          if (e.button === 0) {
+            if (id) select(id, e.shiftKey || e.metaKey || e.ctrlKey);
+            else onSelect([]);
+          }
           pointer.current = {
             x: e.clientX,
             y: e.clientY,
@@ -880,6 +970,7 @@ export default function XmindCanvas({
           const id = (e.target as Element)
             .closest("[data-topic]")
             ?.getAttribute("data-topic");
+          if ((e.target as Element).closest("[data-fold]")) return;
           if (id) startEdit(id);
           else if (!readonly) {
             const r = svg.current!.getBoundingClientRect();
@@ -933,8 +1024,8 @@ export default function XmindCanvas({
             size="sm"
             disabled={!matches.length}
             onClick={() => {
-              const i = matches.findIndex((n) => n.topic.id === selected[0]);
-              focusNode(matches[(i + 1) % matches.length].topic.id);
+              const i = matches.findIndex((n) => n.id === selected[0]);
+              onSelect([matches[(i + 1) % matches.length].id]);
             }}
           >
             {t("xmind.next")}
@@ -952,8 +1043,19 @@ export default function XmindCanvas({
       )}
       {context && (
         <div
+          ref={menu}
           className="xm-context"
           role="menu"
+          onKeyDown={(e) => {
+            if (!["ArrowDown", "ArrowUp", "Home", "End", "Tab"].includes(e.key)) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const buttons = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
+            const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+            const step = e.key === "ArrowUp" || (e.key === "Tab" && e.shiftKey) ? -1 : 1;
+            buttons[e.key === "Home" ? 0 : e.key === "End" ? buttons.length - 1
+              : (index + step + buttons.length) % buttons.length]?.focus();
+          }}
           style={{ left: Math.max(0, context.x), top: Math.max(0, context.y) }}
         >
           {!readonly && (
@@ -976,12 +1078,12 @@ export default function XmindCanvas({
             </>
           )}
           <Button
-            disabled={!selected.length}
+            disabled={!findTopic(sheet.rootTopic, selected[0])?.children?.attached?.length}
             onClick={() => act(() => toggleFold(selected[0]))}
           >
             {t("xmind.fold")}
           </Button>
-          <Button onClick={() => act(onInspect)}>{t("xmind.inspector")}</Button>
+          <Button onClick={() => act(() => onInspect())}>{t("xmind.inspector")}</Button>
           <Button onClick={() => act(fit)}>{t("xmind.fit")}</Button>
           <Button onClick={() => setContext(null)}>{t("common.close")}</Button>
         </div>

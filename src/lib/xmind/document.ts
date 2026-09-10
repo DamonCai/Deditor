@@ -153,6 +153,7 @@ export type Command =
   | { type: "notes"; id: string; text: string }
   | { type: "labels"; id: string; labels: string[] }
   | { type: "structure"; id: string; structure: string }
+  | { type: "fold"; ids: string[]; folded: boolean }
   | {
       type: "add";
       parent: string;
@@ -171,6 +172,8 @@ export type Command =
     }
   | { type: "position"; id: string; x: number; y: number }
   | { type: "relationship"; from: string; to: string; title: string }
+  | { type: "relationship-update"; id: string; title?: string; controlPoints?: Record<string, { x: number; y: number }> }
+  | { type: "relationship-delete"; id: string }
   | {
       type: "group";
       parent: string;
@@ -236,6 +239,28 @@ export function editDocument(
     root = sheet.rootTopic;
   const topic = "id" in command ? findTopic(root, command.id) : undefined;
   switch (command.type) {
+    case "relationship-update": {
+      const relation = sheet.relationships?.find((r) => r.id === command.id);
+      if (!relation) throw new Error("Relationship not found");
+      if (command.title !== undefined) relation.title = command.title;
+      if (command.controlPoints) {
+        for (const point of Object.values(command.controlPoints))
+          if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) throw new Error("Invalid control point");
+        relation.controlPoints = { ...(relation.controlPoints as object ?? {}), ...command.controlPoints };
+      }
+      break;
+    }
+    case "relationship-delete":
+      sheet.relationships = sheet.relationships?.filter((r) => r.id !== command.id);
+      break;
+    case "fold":
+      for (const id of command.ids) {
+        const target = findTopic(root, id);
+        if (!target?.children?.attached?.length) continue;
+        if (command.folded) target.branch = "folded";
+        else delete target.branch;
+      }
+      break;
     case "title":
       if (!topic) throw new Error("Topic not found");
       if (topic.title !== command.title) delete topic.titleUnedited;
@@ -278,6 +303,9 @@ export function editDocument(
         ids.add(t.id);
       });
       p.children ??= {};
+      // Adding a child must expose it, including toolbar and clipboard additions.
+      if (command.type === "paste" || !command.kind || command.kind === "attached")
+        delete p.branch;
       const list = (p.children[command.type === "add" ? command.kind ?? "attached" : "attached"] ??= []);
       const i = command.type === "add" && command.after
         ? list.findIndex((c) => c.id === command.after)
