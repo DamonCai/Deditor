@@ -329,8 +329,10 @@ test(4, "Markdown toolbar dialogs validate tables and reading mode disables edit
   reset();
   await withToolbarEditor("", async view => {
     await render(React.createElement(app.MarkdownToolbar));
-    await click("Insert");
-    await click("Table");
+    assert.equal(document.querySelectorAll('.md-heading-select').length, 1, "heading control appears once");
+    assert.equal(document.querySelectorAll('.md-tool[aria-label="Bold (**…**)"]').length, 1, "bold control appears once");
+    assert.equal(document.querySelectorAll('.md-menu-trigger').length, 0, "actions are directly visible");
+    await act(async () => document.querySelector('.md-tool[aria-label="Table"]').click());
     const inputs = document.querySelectorAll('.md-insert-dialog input');
     await act(async () => { setInput(inputs[0], "3"); setInput(inputs[1], "2"); });
     await act(async () => document.querySelector('.md-insert-dialog form').dispatchEvent(new window.Event("submit", {bubbles:true,cancelable:true})));
@@ -339,7 +341,7 @@ test(4, "Markdown toolbar dialogs validate tables and reading mode disables edit
     assert.equal((html.match(/<th>/g) || []).length, 3);
     assert.equal((html.match(/<td>/g) || []).length, 6);
     await act(async () => store.setState({showPreview:true,previewMaximized:true}));
-    assert.ok([...document.querySelectorAll('.md-menu-trigger')].every(b=>b.disabled));
+    assert.ok([...document.querySelectorAll('.md-tool, .md-heading-select, .md-color-trigger')].every(b=>b.disabled));
     assert.ok([...document.querySelectorAll('.deditor-segment')].every(b=>!b.disabled));
   });
 });
@@ -349,16 +351,61 @@ test(3, "Markdown color picker applies once and font controls respect bounds", a
   await withToolbarEditor("sample", async view => {
     await act(async () => view.dispatch({selection:{anchor:0,head:6}}));
     await render(React.createElement(app.MarkdownToolbar));
-    await click("Format");
-    await act(async () => setInput(document.querySelector('.md-menu-colors input'), "#008080"));
+    await act(async () => document.querySelector('.md-color-trigger').click());
+    assert.equal(document.querySelectorAll('.md-color-swatch').length, 60);
+    await act(async () => setInput(document.querySelector('.md-native-color'), "#008080"));
+    assert.equal(document.querySelector('.md-hex-input').value, "#008080");
     assert.equal(view.state.doc.toString(), "sample", "choosing a color does not change the document");
-    await act(async () => document.querySelector('.md-menu-colors button').click());
+    await act(async () => document.querySelector('.md-color-custom').dispatchEvent(new window.Event('submit', {bubbles:true,cancelable:true})));
     assert.equal(view.state.doc.toString(), '<span style="color:#008080">sample</span>');
-    await click("More");
+    assert.equal(document.querySelector('.md-color-popover'), null);
     await act(async () => store.setState({editorFontSize:10}));
     assert.equal(document.querySelector('.md-font-controls button').disabled, true);
     await act(async () => store.setState({editorFontSize:28}));
     assert.equal([...document.querySelectorAll('.md-font-controls button')].at(-1).disabled, true);
+  });
+});
+
+test(2, "Markdown palette validates HEX and closes with Escape without editing", async () => {
+  reset();
+  await withToolbarEditor("sample", async view => {
+    await render(React.createElement(app.MarkdownToolbar));
+    const trigger = document.querySelector('.md-color-trigger');
+    await act(async () => trigger.click());
+    await act(async () => setInput(document.querySelector('.md-hex-input'), "#ZZZZZZ"));
+    assert.equal(document.querySelector('.md-color-custom button').disabled, true);
+    await act(async () => document.dispatchEvent(new window.KeyboardEvent('keydown', {key:'Escape',bubbles:true})));
+    assert.equal(document.querySelector('.md-color-popover'), null);
+    assert.equal(document.activeElement, trigger);
+    assert.equal(view.state.doc.toString(), "sample");
+    await act(async () => trigger.click());
+    await act(async () => setInput(document.querySelector('.md-hex-input'), "abc"));
+    await act(async () => document.querySelector('.md-color-custom').dispatchEvent(new window.Event('submit', {bubbles:true,cancelable:true})));
+    assert.equal(view.state.doc.toString(), '<span style="color:#AABBCC">sample</span>');
+  });
+});
+
+test(3, "Markdown palette applies swatches immediately and replaces the same selected color", async () => {
+  reset();
+  await withToolbarEditor("sample", async view => {
+    await act(async () => view.dispatch({selection:{anchor:0,head:6}}));
+    await render(React.createElement(app.MarkdownToolbar));
+    const pick = async color => {
+      await act(async () => document.querySelector('.md-color-trigger').click());
+      await act(async () => document.querySelector(`.md-color-swatch[aria-label="${color}"]`).click());
+    };
+    await pick("#4472C4");
+    assert.equal(view.state.doc.toString(), '<span style="color:#4472C4">sample</span>');
+    await pick("#C00000");
+    assert.equal(view.state.doc.toString(), '<span style="color:#C00000">sample</span>');
+    await pick("#C00000");
+    assert.equal(view.state.doc.toString(), '<span style="color:#C00000">sample</span>', 'choosing the same color never removes it');
+    await act(async () => view.dispatch({selection:{anchor:0,head:view.state.doc.length}}));
+    await pick("#C00000");
+    assert.equal(view.state.doc.toString(), '<span style="color:#C00000">sample</span>', 'selecting the entire span does not toggle it off');
+    await act(async () => document.querySelectorAll('.md-color-trigger')[1].click());
+    await act(async () => document.querySelector('.md-color-swatch[aria-label="#FFFF00"]').click());
+    assert.equal(view.state.doc.toString(), '<span style="color:#C00000"><span style="background:#FFFF00">sample</span></span>');
   });
 });
 

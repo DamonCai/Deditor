@@ -118,6 +118,49 @@ export function wrapSelection(prefix: string, suffix = prefix): void {
   });
 }
 
+/** Choosing a color sets it; changing the same selected span replaces its color. */
+export function setSelectionColor(
+  property: "color" | "background",
+  color: string,
+): void {
+  if (!/^#[\da-f]{6}$/i.test(color)) return;
+  withView((view) => {
+    const { from, to } = view.state.selection.main;
+    const prefix = `<span style="${property}:${color}">`;
+    const before = view.state.sliceDoc(Math.max(0, from - 64), from);
+    const existing = before.match(
+      new RegExp(`<span style="${property}:#[\\da-f]{6}">$`, "i"),
+    );
+    if (existing && view.state.sliceDoc(to, to + 7) === "</span>") {
+      view.dispatch({
+        changes: { from: from - existing[0].length, to: from, insert: prefix },
+        selection: {
+          anchor: from + prefix.length - existing[0].length,
+          head: to + prefix.length - existing[0].length,
+        },
+        annotations: isolateHistory.of("full"),
+      });
+    } else {
+      const selected = view.state.sliceDoc(from, to);
+      const selectedSpan = selected.match(
+        new RegExp(
+          `^<span style="${property}:#[\\da-f]{6}">([\\s\\S]*)</span>$`,
+          "i",
+        ),
+      );
+      const text = selectedSpan ? selectedSpan[1] : selected;
+      view.dispatch({
+        changes: { from, to, insert: prefix + text + "</span>" },
+        selection: {
+          anchor: from + prefix.length,
+          head: from + prefix.length + text.length,
+        },
+        annotations: isolateHistory.of("full"),
+      });
+    }
+  });
+}
+
 /** Set headings or toggle list/quote prefixes on precisely the selected lines. */
 export function prefixLines(prefix: string): void {
   withView((view) => {
