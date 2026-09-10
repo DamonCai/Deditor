@@ -57,11 +57,6 @@ import {
   clearBookmarks,
 } from "../lib/bookmarks";
 import { saveImage } from "../lib/fileio";
-// HTML / PDF export pulls markdown-it + Shiki. Loading lazily — only the
-// "Export HTML" / "Export PDF" right-click menu items use them — keeps
-// Shiki (~150 KB) out of the eager Editor module path.
-const exportHtml = () => import("../lib/export").then((m) => m.exportHtml());
-const exportPdf = () => import("../lib/export").then((m) => m.exportPdf());
 import { codeBlockCompletion } from "../lib/codeBlockComplete";
 import { logError, logInfo } from "../lib/logger";
 import { setActiveView, getActiveView, notifyActiveEditor } from "../lib/editorBridge";
@@ -737,11 +732,6 @@ export default function Editor({
         onClick: () => view && openSearchPanel(view),
       },
     ];
-    if (isMarkdown(filePath)) {
-      items.push({ divider: true });
-      items.push({ label: t("titlebar.exportHtml"), onClick: () => void exportHtml() });
-      items.push({ label: t("titlebar.exportPdf"), onClick: () => void exportPdf() });
-    }
     return items;
   };
 
