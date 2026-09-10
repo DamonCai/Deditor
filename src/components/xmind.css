@@ -316,3 +316,10 @@
 .xm-context { max-height: calc(100% - 12px); overflow-y: auto; }
 
 [data-topic][data-editing] > .xm-fold { opacity: 0; pointer-events: none; }
+
+.xm-color-value { position: relative; display: block; }
+.xm-color-value[data-mixed] { border: 1px dashed var(--border); border-radius: 4px; }
+.xm-color-value[data-mixed] input { opacity: 0; }
+.xm-color-value:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.xm-mixed-label { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; font-size: 11px; }
+.xm-inspector .deditor-btn[data-pressed="mixed"] { border-style: dashed; }

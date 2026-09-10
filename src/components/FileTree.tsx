@@ -22,10 +22,19 @@ import { promptInput } from "./PromptDialog";
 import { confirmDelete } from "./ConfirmDialog";
 import { logError } from "../lib/logger";
 import { useT, tStatic } from "../lib/i18n";
-import { FiChevronRight, FiFolder, FiFolderPlus, FiMoreHorizontal, FiX } from "react-icons/fi";
+import { FiChevronRight, FiCrosshair, FiFolder, FiFolderPlus, FiMoreHorizontal, FiX } from "react-icons/fi";
 import { Button } from "./ui/Button";
 
 const FOLDER_COLOR = "#dcb67a"; // soft amber, matches VSCode default folder icon
+
+function treePath(path: string): string {
+  const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
+  return /^(?:[a-z]:|\/\/)/i.test(normalized) ? normalized.toLowerCase() : normalized;
+}
+
+function containsFile(root: string, file: string): boolean {
+  return treePath(file).startsWith(`${treePath(root)}/`);
+}
 
 interface MenuState {
   x: number;
@@ -53,6 +62,123 @@ function FileTreeImpl() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [menu, setMenu] = useState<MenuState | null>(null);
+  const treeRef = useRef<HTMLDivElement>(null);
+  const operation = useRef(0);
+  const [expanding, setExpanding] = useState(false);
+  const [revealRequest, setRevealRequest] = useState<{ path: string; id: number } | null>(null);
+  const activeWorkspace = filePath
+    ? [...workspaces].sort((a, b) => b.length - a.length).find((w) => containsFile(w, filePath))
+    : undefined;
+
+  useEffect(() => {
+    setExpanding(false);
+    setRevealRequest(null);
+    return () => { operation.current++; };
+  }, [workspaces]);
+
+  useEffect(() => {
+    if (!revealRequest || revealRequest.path !== filePath || !treeRef.current) return;
+    const container = treeRef.current;
+    const reveal = () => {
+      const row = [...container.querySelectorAll<HTMLButtonElement>("[data-file-path]")]
+        .find((el) => treePath(el.dataset.filePath!) === treePath(revealRequest.path));
+      if (!row) return false;
+      row.scrollIntoView({ block: "center", inline: "nearest" });
+      row.focus({ preventScroll: true });
+      setRevealRequest(null);
+      return true;
+    };
+    if (reveal()) return;
+    // Ancestors load asynchronously; reveal only once the actual row exists.
+    const observer = new MutationObserver(() => { if (reveal()) observer.disconnect(); });
+    observer.observe(container, { childList: true, subtree: true });
+    const timeout = setTimeout(() => {
+      observer.disconnect();
+      setRevealRequest(null);
+      setError({ message: t("filetree.locateFailed") });
+    }, 10000);
+    return () => { observer.disconnect(); clearTimeout(timeout); };
+  }, [revealRequest, filePath, t]);
+
+  const collapseAll = () => {
+    operation.current++;
+    setExpanding(false);
+    setRevealRequest(null);
+    const state = useEditorStore.getState();
+    const expandedDirs = { ...state.expandedDirs };
+    for (const path of [...Object.keys(expandedDirs), ...workspaces]) {
+      if (workspaces.some((w) => treePath(w) === treePath(path) || containsFile(w, path))) {
+        expandedDirs[path] = false;
+      }
+    }
+    useEditorStore.setState({ expandedDirs });
+  };
+
+  const expandAll = async () => {
+    const id = ++operation.current;
+    setRevealRequest(null);
+    setError(null);
+    setExpanding(true);
+    const pending = [...workspaces];
+    const expanded = new Set<string>();
+    let failed = false;
+    // Bound accidental expansion of very large workspaces. Collapse cancels
+    // outstanding reads without allowing their result to reopen the tree.
+    while (pending.length && expanded.size < 5000) {
+      const path = pending.shift()!;
+      if (expanded.has(path)) continue;
+      expanded.add(path);
+      try {
+        const entries = await listDir(path);
+        if (id !== operation.current) return;
+        pending.push(...entries.filter((e) => e.is_dir).map((e) => e.path));
+      } catch (err) {
+        if (id !== operation.current) return;
+        logError("Expand directory failed", err);
+        failed = true;
+      }
+    }
+    if (id !== operation.current) return;
+    useEditorStore.setState((state) => ({
+      expandedDirs: { ...state.expandedDirs, ...Object.fromEntries([...expanded].map((p) => [p, true])) },
+    }));
+    setExpanding(false);
+    if (failed || pending.length) setError({ message: t(pending.length ? "filetree.expandLimit" : "filetree.expandFailed") });
+  };
+
+  const locateFile = async () => {
+    if (!filePath) return;
+    const id = ++operation.current;
+    setExpanding(false);
+    setError(null);
+    setRevealRequest(null);
+    if (!activeWorkspace) {
+      await revealInFinder(filePath);
+      return;
+    }
+    const ancestors: Record<string, boolean> = { [activeWorkspace]: true };
+    let parent = activeWorkspace;
+    try {
+      // Use paths returned by the backend, including their separator/casing.
+      // This also detects hidden or removed files without opening a new tab.
+      while (true) {
+        const entries = await listDir(parent);
+        if (id !== operation.current || useEditorStore.getState().tabs.find((tab) => tab.id === useEditorStore.getState().activeId)?.filePath !== filePath) return;
+        if (entries.some((e) => !e.is_dir && treePath(e.path) === treePath(filePath))) break;
+        const child = entries.find((e) => e.is_dir && containsFile(e.path, filePath));
+        if (!child) throw new Error("Current file is not visible in the directory tree");
+        parent = child.path;
+        ancestors[parent] = true;
+      }
+    } catch (err) {
+      if (id !== operation.current) return;
+      logError("Locate current file failed", err);
+      setError({ message: t("filetree.locateFailed") });
+      return;
+    }
+    useEditorStore.setState((state) => ({ expandedDirs: { ...state.expandedDirs, ...ancestors } }));
+    setRevealRequest({ path: filePath, id: operation.current });
+  };
 
   useEffect(() => {
     if (!error) return;
@@ -174,7 +300,7 @@ function FileTreeImpl() {
       style={{ background: "var(--bg-soft)" }}
     >
       <div
-        className="flex items-center gap-1 px-2"
+        className="flex items-center gap-0.5 px-2 shrink-0"
         style={{
           height: 32,
           borderBottom: "1px solid var(--border)",
@@ -193,7 +319,7 @@ function FileTreeImpl() {
           placeholder={t("filetree.pathPlaceholder")}
           spellCheck={false}
           disabled={busy}
-          className="deditor-input deditor-input--compact flex-1"
+          className="deditor-input deditor-input--compact flex-1 min-w-0"
         />
         <Button
           variant="ghost"
@@ -204,6 +330,21 @@ function FileTreeImpl() {
         >
           <FiFolderPlus size={16} />
         </Button>
+        <div className="filetree-toolbar flex items-center gap-0.5 shrink-0"
+          role="group" aria-label={t("filetree.navigation")}>
+          <Button variant="ghost" size="icon" title={t("filetree.locate")}
+            disabled={!filePath} onClick={() => void locateFile()}>
+            <FiCrosshair size={16} aria-hidden="true" />
+          </Button>
+          <Button variant="ghost" size="icon" title={t(expanding ? "filetree.expanding" : "filetree.expandAll")}
+            disabled={!workspaces.length || expanding} onClick={() => void expandAll()}>
+            <ExpandCollapseIcon expand />
+          </Button>
+          <Button variant="ghost" size="icon" title={t("filetree.collapseAll")}
+            disabled={!workspaces.length} onClick={collapseAll}>
+            <ExpandCollapseIcon />
+          </Button>
+        </div>
       </div>
       {error && (
         <div
@@ -218,6 +359,7 @@ function FileTreeImpl() {
         </div>
       )}
       <div
+        ref={treeRef}
         className="filetree-workspaces flex-1"
         style={{ overflowY: "auto", overflowX: "hidden" }}
       >
@@ -594,13 +736,14 @@ const FileNode = memo(function FileNode({
   activePath: string | null;
   onFileContextMenu: (e: React.MouseEvent, file: string) => void;
 }) {
-  const active = entry.path === activePath;
+  const active = activePath !== null && treePath(entry.path) === treePath(activePath);
   const marked = useEditorStore((s) => s.compareMarkPath === entry.path);
   return (
     <Row
       depth={depth}
       active={active}
       marked={marked}
+      filePath={entry.path}
       onClick={() => void openFileByPath(entry.path)}
       onContextMenu={(e) => onFileContextMenu(e, entry.path)}
       title={marked ? `${entry.path}\n(selected for compare)` : entry.path}
@@ -621,6 +764,7 @@ function Row({
   onContextMenu,
   children,
   title,
+  filePath,
 }: {
   depth: number;
   active: boolean;
@@ -630,6 +774,7 @@ function Row({
   onContextMenu?: (e: React.MouseEvent) => void;
   children: React.ReactNode;
   title?: string;
+  filePath?: string;
 }) {
   return (
     <button
@@ -639,6 +784,7 @@ function Row({
       title={title}
       className="filetree-row"
       data-active={active || undefined}
+      data-file-path={filePath}
       data-marked={marked || undefined}
       aria-current={active ? "page" : undefined}
       aria-expanded={expanded}
@@ -651,6 +797,13 @@ function Row({
 
 function Caret({ open }: { open: boolean }) {
   return <FiChevronRight size={12} className="filetree-caret" data-open={open} aria-hidden="true" />;
+}
+
+function ExpandCollapseIcon({ expand = false }: { expand?: boolean }) {
+  return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d={expand ? "m7 8 5-5 5 5 M7 16l5 5 5-5" : "m7 3 5 5 5-5 M7 21l5-5 5 5"} />
+  </svg>;
 }
 
 function Spinner() {

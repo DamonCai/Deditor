@@ -46,8 +46,8 @@ export default function MarkdownToolbar() {
   );
   const activeId = useEditorStore((s) => s.activeId);
   const reading = useEditorStore((s) => s.previewMaximized && s.showPreview);
-  const editorFontSize = useEditorStore((s) => s.editorFontSize);
-  const setEditorFontSize = useEditorStore((s) => s.setEditorFontSize);
+  const editorFontSize = useEditorStore((s) => s.tabs.find((tab) => tab.id === s.activeId)?.zoomFontSize ?? s.editorFontSize);
+  const setEditorZoomFontSize = useEditorStore((s) => s.setEditorZoomFontSize);
   const disabled = reading || !state;
   const [dialog, setDialog] = useState<{
     kind: InsertKind;
@@ -270,7 +270,7 @@ export default function MarkdownToolbar() {
             <Tool
               title={t("md.smaller")}
               disabled={disabled || editorFontSize <= 10}
-              onClick={() => setEditorFontSize(editorFontSize - 1)}
+              onClick={() => activeId && setEditorZoomFontSize(activeId, editorFontSize - 1)}
             >
               <FiMinus />
             </Tool>
@@ -278,7 +278,7 @@ export default function MarkdownToolbar() {
             <Tool
               title={t("md.bigger")}
               disabled={disabled || editorFontSize >= 28}
-              onClick={() => setEditorFontSize(editorFontSize + 1)}
+              onClick={() => activeId && setEditorZoomFontSize(activeId, editorFontSize + 1)}
             >
               <FiPlus />
             </Tool>

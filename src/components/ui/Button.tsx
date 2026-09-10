@@ -8,7 +8,7 @@ interface Props extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "style"> {
   /** sm / md = text rows. icon = 24x24 square (toolbar). iconLg = 28x28. */
   size?: "sm" | "md" | "icon" | "iconLg";
   /** Visually-active state for two-state toggles (Aa, ▸ etc). */
-  pressed?: boolean;
+  pressed?: boolean | "mixed";
   style?: CSSProperties;
 }
 
@@ -56,7 +56,7 @@ export const Button = forwardRef<HTMLButtonElement, Props>(function Button(
       disabled={disabled}
       data-variant={variant}
       data-size={size}
-      data-pressed={pressed ? "true" : undefined}
+      data-pressed={pressed === "mixed" ? "mixed" : pressed ? "true" : undefined}
       className={[rest.className ?? "", "deditor-btn"].join(" ").trim()}
       style={{
         padding,

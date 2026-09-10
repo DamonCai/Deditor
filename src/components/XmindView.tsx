@@ -1,3 +1,4 @@
+import { TOPIC_SHAPES } from "../lib/xmind/shapes";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   useCallback,
@@ -29,6 +30,11 @@ import { logError } from "../lib/logger";
 import { useT } from "../lib/i18n";
 import { Button } from "./ui/Button";
 import "./xmind.css";
+
+// Native themes also use #RRGGBBAA. The color well accepts RGB only;
+// displaying it must not replace or discard the alpha stored in the archive.
+const colorInputValue = (value?: string, fallback = "#EEEEEE") =>
+  /^#[\da-f]{6}(?:[\da-f]{2})?$/i.test(value ?? "") ? value!.slice(0, 7) : fallback;
 
 interface Props {
   dataUrl: string;
@@ -263,7 +269,7 @@ export default function XmindView({ dataUrl, tabId }: Props) {
   historyActions.current = {undo,redo};
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
-      if(e.defaultPrevented || !(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z" ||
+      if(e.defaultPrevented || e.isComposing || e.keyCode === 229 || !(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z" ||
         !tabId || useEditorStore.getState().activeId !== tabId) return;
       const target=e.target instanceof Element ? e.target : null;
       if(target?.closest('input,textarea,select,[contenteditable="true"],[role="dialog"]')) return;
@@ -285,6 +291,10 @@ export default function XmindView({ dataUrl, tabId }: Props) {
     });
     return found;
   }, [sheet, selectedGroup]);
+  const selectedGroupStyle = sheet && groupInfo ? groupStyle(sheet, groupInfo.group, groupInfo.summary) : {};
+  const updateGroupStyle = (properties: Record<string, string>) => {
+    if (groupInfo) execute({type:"group-update", id:groupInfo.group.id, parent:groupInfo.parent, properties});
+  };
   const topic = sheet ? findTopic(sheet.rootTopic, selected[0]) : undefined;
   const parents = useMemo(() => {
     const map = new Map<string, string>();
@@ -403,7 +413,18 @@ export default function XmindView({ dataUrl, tabId }: Props) {
       </div>
     );
   const resolved = topicStyle(sheet, topic?.id ?? sheet.rootTopic.id);
-  const p = resolved.properties;
+  const styles = selected.length > 1 ? selected.map(id => topicStyle(sheet, id)) : [resolved];
+  const multiple = styles.length > 1;
+  const common = <T,>(read: (style: typeof resolved) => T): T | undefined => {
+    const first = read(styles[0]);
+    return styles.every(style => read(style) === first) ? first : undefined;
+  };
+  const fontSize = common(style => style.fontSize);
+  const shapeValue = (shape: string) => shape.startsWith("org.xmind.topicShape.") ? shape : `org.xmind.topicShape.${shape}`;
+  const shape = common(style => shapeValue(style.shape));
+  const noFill = common(style => style.fill === "none");
+  const bold = common(style => style.properties["fo:font-weight"] === "bold" || Number(style.properties["fo:font-weight"]) >= 600);
+  const shapeOptions = TOPIC_SHAPES;
   return (
     <div className="xm-workbench" data-xmind-tab={tabId}>
       <header className="document-toolbar xm-tools">
@@ -551,12 +572,34 @@ export default function XmindView({ dataUrl, tabId }: Props) {
               <div className="xm-color-row">
                 {[["svg:fill","fill","#E9F1FA"],["line-color","lineColor","#A2B3C9"]].map(([key,label,fallback]) =>
                   <label key={key}>{t(`xmind.${label}`)}<input type="color" aria-label={t(`xmind.${label}`)}
-                    disabled={!editing} value={groupStyle(sheet,groupInfo.group,groupInfo.summary)[key] ?? fallback}
-                    onChange={e=>execute({type:"group-update",id:groupInfo.group.id,parent:groupInfo.parent,properties:{[key]:e.target.value}})} /></label>)}
+                    disabled={!editing} value={colorInputValue(groupStyle(sheet,groupInfo.group,groupInfo.summary)[key],fallback)}
+                    onChange={e=>execute({type:"group-update",id:groupInfo.group.id,parent:groupInfo.parent,properties:{[key]:e.target.value,...(key === "svg:fill" ? {"fill-pattern":"solid"} : {})}})} /></label>)}
               </div>
+              {!groupInfo.summary && <Button size="sm" disabled={!editing} pressed={selectedGroupStyle["fill-pattern"] === "none"}
+                onClick={() => updateGroupStyle({"fill-pattern":selectedGroupStyle["fill-pattern"] === "none" ? "solid" : "none"})}>{t("xmind.noFill")}</Button>}
+              <label className="xm-field">{t("xmind.lineWidth")}
+                <input type="number" min={0} max={20} step={0.5} disabled={!editing}
+                  value={parseFloat(selectedGroupStyle["line-width"] ?? "2") || 0}
+                  onChange={e => { const width = e.target.valueAsNumber; if (Number.isFinite(width) && width >= 0 && width <= 20) updateGroupStyle({"line-width":String(width)}); }} />
+              </label>
+              <label className="xm-field">{t("xmind.linePattern")}
+                <select disabled={!editing} value={selectedGroupStyle["line-pattern"] ?? (groupInfo.summary ? "solid" : "dash")}
+                  onChange={e => updateGroupStyle({"line-pattern":e.target.value})}>
+                  {selectedGroupStyle["line-pattern"] && !["solid","dash","dot","dash-dot"].includes(selectedGroupStyle["line-pattern"]) && <option value={selectedGroupStyle["line-pattern"]}>{t("xmind.originalStyle")}</option>}
+                  {["solid","dash","dot","dash-dot"].map(value => <option key={value} value={value}>{t(`xmind.linePattern.${value}`)}</option>)}
+                </select>
+              </label>
+              {!groupInfo.summary && <label className="xm-field">{t("xmind.shape")}
+                <select disabled={!editing} value={selectedGroupStyle["shape-class"] ?? "org.xmind.boundaryShape.roundedRect"}
+                  onChange={e => updateGroupStyle({"shape-class":e.target.value})}>
+                  {selectedGroupStyle["shape-class"] && !["org.xmind.boundaryShape.rect","org.xmind.boundaryShape.roundedRect"].includes(selectedGroupStyle["shape-class"]) && <option value={selectedGroupStyle["shape-class"]}>{t("xmind.originalShape")}</option>}
+                  {["roundedRect","rect"].map(value => <option key={value} value={`org.xmind.boundaryShape.${value}`}>{t(`xmind.shape.${value}`)}</option>)}
+                </select>
+              </label>}
               <Button size="sm" disabled={!editing} onClick={()=>{execute({type:"group-delete",id:groupInfo.group.id,parent:groupInfo.parent});setSelectedGroup(null);}}>{t("common.delete")}</Button>
             </> : topic ? (
               <>
+                {multiple ? <p className="xm-help" role="status">{t("xmind.selectionCount", { count: String(styles.length) })}</p> : <>
                 {field(
                   t("xmind.title"),
                   topic.title,
@@ -590,31 +633,33 @@ export default function XmindView({ dataUrl, tabId }: Props) {
                       )}
                   </select>
                 </label>
+                </>}
                 <div className="xm-panel-section">{t("xmind.style")}</div>
                 <div className="xm-color-row">
-                  {[
-                    ["svg:fill", "fill", resolved.fill],
-                    ["fo:color", "textColor", resolved.color],
-                    ["line-color", "lineColor", resolved.lineColor],
-                  ].map(([key, label, fallback]) => (
-                    <label key={key}>
+                  {([
+                    ["svg:fill", "fill", "fill"],
+                    ["fo:color", "textColor", "color"],
+                    ["line-color", "lineColor", "lineColor"],
+                  ] as const).map(([key, label, field]) => {
+                    const color = common(style => style[field].toLowerCase());
+                    return <label key={key}>
                       {t(`xmind.${label}`)}
-                      <input
-                        aria-label={t(`xmind.${label}`)}
-                        type="color"
-                        value={
-                          /^#[\da-fA-F]{6}$/.test(p[key] ?? "")
-                            ? p[key]
-                            : /^#[\da-fA-F]{6}$/.test(fallback) ? fallback : "#EEEEEE"
-                        }
-                        disabled={!editing}
-                        onChange={(e) => properties({ [key]: e.target.value })}
-                      />
-                    </label>
-                  ))}
+                      <span className="xm-color-value" data-mixed={color === undefined || undefined}>
+                        <input
+                          aria-label={t(`xmind.${label}`)}
+                          aria-description={color === undefined ? t("xmind.mixed") : color === "none" ? t("xmind.noFill") : undefined}
+                          type="color"
+                          value={colorInputValue(color)}
+                          disabled={!editing}
+                          onChange={(e) => properties({ [key]: e.target.value })}
+                        />
+                        {color === undefined && <span className="xm-mixed-label">{t("xmind.mixed")}</span>}
+                      </span>
+                    </label>;
+                  })}
                 </div>
-                <Button size="sm" disabled={!editing} pressed={resolved.fill === "none"}
-                  onClick={() => properties(resolved.fill === "none" ? {"fill-pattern":"solid", "svg:fill": /^#[\da-fA-F]{6}$/.test(p["svg:fill"] ?? "") ? p["svg:fill"] : "#EEEEEE"} : {"fill-pattern":"none"})}>
+                <Button size="sm" disabled={!editing} pressed={noFill ?? "mixed"}
+                  onClick={() => properties({"fill-pattern":noFill === true ? "solid" : "none"})}>
                   {t("xmind.noFill")}
                 </Button>
                 <label className="xm-field">
@@ -623,7 +668,8 @@ export default function XmindView({ dataUrl, tabId }: Props) {
                     type="number"
                     min={9}
                     max={64}
-                    value={resolved.fontSize}
+                    value={fontSize ?? ""}
+                    placeholder={t("xmind.mixed")}
                     disabled={!editing}
                     onChange={(e) => {
                       const n = +e.target.value;
@@ -636,21 +682,14 @@ export default function XmindView({ dataUrl, tabId }: Props) {
                   {t("xmind.shape")}
                   <select
                     disabled={!editing}
-                    value={
-                      p["shape-class"] ??
-                      `org.xmind.topicShape.${resolved.shape}`
-                    }
+                    value={shape ?? ""}
                     onChange={(e) =>
                       properties({ "shape-class": e.target.value })
                     }
                   >
-                    {[
-                      "roundedRect",
-                      "rect",
-                      "ellipse",
-                      "diamond",
-                      "underline",
-                    ].map((shape) => (
+                    {shape === undefined && <option value="" disabled>{t("xmind.mixed")}</option>}
+                    {shape && !shapeOptions.some(name => shapeValue(name) === shape) && <option value={shape}>{t("xmind.originalShape")}</option>}
+                    {shapeOptions.map((shape) => (
                       <option
                         key={shape}
                         value={`org.xmind.topicShape.${shape}`}
@@ -663,15 +702,11 @@ export default function XmindView({ dataUrl, tabId }: Props) {
                 <Button
                   size="sm"
                   disabled={!editing}
-                  pressed={
-                    p["fo:font-weight"] === "bold" ||
-                    Number(p["fo:font-weight"]) >= 600
-                  }
+                  pressed={bold ?? "mixed"}
                   onClick={() =>
                     properties({
                       "fo:font-weight":
-                        p["fo:font-weight"] === "bold" ||
-                        Number(p["fo:font-weight"]) >= 600
+                        bold === true
                           ? "normal"
                           : "bold",
                     })
@@ -679,6 +714,7 @@ export default function XmindView({ dataUrl, tabId }: Props) {
                 >
                   {t("xmind.bold")}
                 </Button>
+                {!multiple && <>
                 <div className="xm-panel-section">{t("xmind.content")}</div>
                 {field(
                   t("xmind.notes"),
@@ -703,6 +739,7 @@ export default function XmindView({ dataUrl, tabId }: Props) {
                 {field(t("xmind.link"), topic.href ?? "",
                   href => execute({ type: "href", id: topic.id, href }), false, "href")}
                 {topic.href && <Button size="sm" onClick={() => followLink(topic.href!)}>{t("xmind.openLink")}</Button>}
+                </>}
                 <p className="xm-help">{t("xmind.help")}</p>
               </>
             ) : (

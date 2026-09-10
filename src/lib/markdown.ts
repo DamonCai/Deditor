@@ -234,6 +234,10 @@ export async function renderCode(
   const resolved = await ensureLanguage(hl, langDef.shiki);
   const shikiTheme = opts.theme === "dark" ? "one-dark-pro" : "github-light";
   try {
+    if (resolved === "text" && langDef.shiki === "text" && langDef.label !== "Text") {
+      const { renderLanguageFallback } = await import("./codeHighlightFallback");
+      return await renderLanguageFallback(source, langDef, opts.theme);
+    }
     return hl.codeToHtml(source, { lang: resolved, theme: shikiTheme });
   } catch {
     return hl.codeToHtml(source, { lang: "text", theme: shikiTheme });

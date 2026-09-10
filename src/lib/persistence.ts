@@ -38,6 +38,8 @@ interface PersistedV3 {
   sidebarPx: number;
   previewPct: number;
   editorFontSize?: number;
+  /** Legacy global zoom snapshot: migrate its configured baseline only. */
+  editorBaseFontSize?: number;
   previewMaximized?: boolean;
   /** Right-side TOC visibility in markdown reading mode. Default true. */
   tocVisible?: boolean; // Legacy expanded state; hover outlines start unpinned.
@@ -264,8 +266,9 @@ export async function loadPersisted(): Promise<UiExtras | null> {
   if (data.language === "zh" || data.language === "en") {
     store.setLanguage(data.language);
   }
-  if (typeof data.editorFontSize === "number") {
-    store.setEditorFontSize(data.editorFontSize);
+  const configuredFontSize = data.editorBaseFontSize ?? data.editorFontSize;
+  if (typeof configuredFontSize === "number" && Number.isFinite(configuredFontSize)) {
+    store.setEditorFontSize(configuredFontSize);
   }
 
   useEditorStore.setState({

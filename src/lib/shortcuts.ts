@@ -37,6 +37,7 @@ export type ShortcutId =
   // editor (CodeMirror custom keymap)
   | "editor_add_cursor_above"
   | "editor_add_cursor_below"
+  | "editor_font_zoom"
   | "editor_select_all_matches";
 
 export interface ShortcutMeta {
@@ -73,6 +74,7 @@ export const SHORTCUTS: ShortcutMeta[] = [
   { id: "app_split_editor",    display: "Cmd/Ctrl+\\",      labelKey: "shortcut.nav.splitEditor",    layer: "app", group: "nav" },
 
   // Editor
+  { id: "editor_font_zoom", display: "Cmd/Ctrl+Wheel", labelKey: "shortcut.editor.fontZoom", layer: "editor", group: "editor" },
   { id: "editor_add_cursor_above",    display: "Cmd/Ctrl+Alt+↑",  labelKey: "shortcut.editor.addCursorAbove",    layer: "editor", group: "editor" },
   { id: "editor_add_cursor_below",    display: "Cmd/Ctrl+Alt+↓",  labelKey: "shortcut.editor.addCursorBelow",    layer: "editor", group: "editor" },
   { id: "editor_select_all_matches",  display: "Cmd/Ctrl+Shift+L", labelKey: "shortcut.editor.selectAllMatches",  layer: "editor", group: "editor" },

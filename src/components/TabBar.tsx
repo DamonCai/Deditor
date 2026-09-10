@@ -39,8 +39,51 @@ function TabBarImpl() {
   const reorderTabs = useEditorStore((s) => s.reorderTabs);
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const [overflowOpen, setOverflowOpen] = useState(false);
+  const [hiddenTabIds, setHiddenTabIds] = useState<string[]>([]);
   const stripRef = useRef<HTMLDivElement>(null);
   const overflowBtnRef = useRef<HTMLButtonElement>(null);
+  const tabOrder = JSON.stringify(tabs.map((tab) => tab.id));
+  const hiddenTabs = tabs.filter((tab) => hiddenTabIds.includes(tab.id));
+
+  const measureOverflow = useCallback(() => {
+    const strip = stripRef.current;
+    if (!strip) return;
+    const bounds = strip.getBoundingClientRect();
+    // Include the space returned when the dropdown button disappears, so
+    // showing the button cannot itself keep an otherwise fitting tab hidden.
+    const available = strip.clientWidth + (overflowBtnRef.current?.getBoundingClientRect().width ?? 0);
+    const next = strip.scrollWidth <= available + 1 ? [] :
+      [...strip.querySelectorAll<HTMLElement>("[data-tab-id]")]
+        .filter((el) => {
+          const rect = el.getBoundingClientRect();
+          return rect.left < bounds.left - 1 || rect.right > bounds.right + 1;
+        })
+        .map((el) => el.dataset.tabId!);
+    setHiddenTabIds((previous) => previous.length === next.length && previous.every((id, i) => id === next[i]) ? previous : next);
+    if (!next.length) setOverflowOpen(false);
+  }, []);
+
+  useLayoutEffect(() => {
+    const strip = stripRef.current;
+    if (!strip) return;
+    let frame = 0;
+    const schedule = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measureOverflow);
+    };
+    const observer = new ResizeObserver(schedule);
+    observer.observe(strip);
+    strip.querySelectorAll<HTMLElement>("[data-tab-id]").forEach((el) => observer.observe(el));
+    strip.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("resize", schedule);
+    measureOverflow();
+    return () => {
+      observer.disconnect();
+      strip.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", schedule);
+      cancelAnimationFrame(frame);
+    };
+  }, [tabOrder, measureOverflow]);
 
   const dragState = useRef<{ fromIdx: number; startX: number } | null>(null);
   const dropIndicator = useRef<number | null>(null);
@@ -116,13 +159,16 @@ function TabBarImpl() {
     };
   }, [reorderTabs]);
 
-  // Scroll active tab into view whenever it changes
-  useLayoutEffect(() => {
+  const revealTab = useCallback((id: string | null) => {
     const strip = stripRef.current;
     if (!strip) return;
-    const el = strip.querySelector<HTMLElement>(`[data-tab-id="${activeId}"]`);
+    const el = strip.querySelector<HTMLElement>(`[data-tab-id="${id}"]`);
     if (el) el.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [activeId]);
+    measureOverflow();
+  }, [measureOverflow]);
+
+  // Scroll active tab into view whenever it changes.
+  useLayoutEffect(() => { revealTab(activeId); }, [activeId, revealTab]);
 
   // Stable callbacks so memo'd TabItem children don't all re-render when
   // some unrelated tab field changes. They receive tab data via params
@@ -224,12 +270,14 @@ function TabBarImpl() {
       >
         <FiPlus size={14} />
       </Button>
-      <Button
+      {hiddenTabs.length > 0 && <Button
         ref={overflowBtnRef}
         variant="ghost"
         size="icon"
         onClick={() => setOverflowOpen((v) => !v)}
-        title={t("tabbar.allTabs", { n: tabs.length })}
+        title={t("tabbar.hiddenTabs", { n: hiddenTabs.length })}
+        aria-expanded={overflowOpen}
+        aria-controls={overflowOpen ? "tab-overflow-dropdown" : undefined}
         style={{ ...iconBtnStyle, position: "relative" }}
       >
         <FiChevronDown size={14} />
@@ -243,16 +291,18 @@ function TabBarImpl() {
             lineHeight: 1,
           }}
         >
-          {tabs.length}
+          {hiddenTabs.length}
         </span>
-      </Button>
-      {overflowOpen && (
+      </Button>}
+      {overflowOpen && hiddenTabs.length > 0 && (
         <OverflowDropdown
-          tabs={tabs}
+          tabs={hiddenTabs}
           activeId={activeId}
           anchorRef={overflowBtnRef}
           onPick={(id) => {
             setActive(id);
+            // The active tab can also be outside the strip after manual scroll.
+            revealTab(id);
             setOverflowOpen(false);
           }}
           onClose={(id) => {
@@ -390,8 +440,19 @@ function OverflowDropdown({
   useLayoutEffect(() => {
     const btn = anchorRef.current;
     if (!btn) return;
-    const r = btn.getBoundingClientRect();
-    setPos({ top: r.bottom + 2, right: window.innerWidth - r.right });
+    const updatePosition = () => {
+      const r = btn.getBoundingClientRect();
+      const next = { top: r.bottom + 2, right: window.innerWidth - r.right };
+      setPos((previous) => previous.top === next.top && previous.right === next.right ? previous : next);
+    };
+    updatePosition();
+    const observer = new ResizeObserver(updatePosition);
+    if (btn.parentElement) observer.observe(btn.parentElement);
+    window.addEventListener("resize", updatePosition);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updatePosition);
+    };
   }, [anchorRef]);
 
   useEffect(() => {

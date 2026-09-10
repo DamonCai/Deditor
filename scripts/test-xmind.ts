@@ -1,3 +1,5 @@
+import { draftBox } from "../src/lib/xmind/draft";
+import { TOPIC_SHAPES, shapePolygon, shapeSize } from "../src/lib/xmind/shapes";
 import { topicDropTarget } from "../src/lib/xmind/drop";
 import { relationshipGeometry, topicAnchor } from "../src/lib/xmind/relationship";
 import { readFileSync } from "node:fs";
@@ -15,6 +17,7 @@ import {
   type Sheet,
 } from "../src/lib/xmind/document";
 import { buildScene, edgePath, STRUCTURES, topicStyle, groupStyle } from "../src/lib/xmind/scene";
+import { round6Sheets } from "../tests/fixtures/xmind-round6";
 import { sampleArchive, sampleSheets } from "../tests/fixtures/xmind";
 // Preserve the original CLI smoke-test entry point.
 if (process.argv[2]) {
@@ -982,5 +985,142 @@ test(5, "fishbone upper ribs close the gap independently of longer lower content
   assert.equal(after.edges.find(e=>e.to==='cause-2')!.points![0].x,base);
   for(const a of after.nodes)for(const b of after.nodes)if(a!==b)
     assert.ok(a.x+a.width<=b.x+1e-8||b.x+b.width<=a.x+1e-8||a.y+a.height<=b.y+1e-8||b.y+b.height<=a.y+1e-8,`fishbone overlap ${a.topic.id}/${b.topic.id}`);
+});
+test(1, "native vertical, off-axis and leftward timeline axes remain distinct", () => {
+  for (const sheet of round6Sheets()) {
+    const before = JSON.stringify(sheet), scene = buildScene(sheet), nodes = scene.nodes;
+    const root = nodes[0], main = nodes.filter(n => n.parent === root.topic.id);
+    assert.equal(scene.warnings.length, 0);
+    assert.equal(nodes.length, 13);
+    if (sheet.rootTopic.structureClass!.includes("vertical")) {
+      assert.equal(root.direction, "down");
+      for (const [i,n] of main.entries()) {
+        assert.ok(Math.abs(n.x + n.width / 2) < 0.001);
+        assert.ok(n.y > (i ? main[i-1].y + main[i-1].height : root.y + root.height));
+        const detail=nodes.find(child=>child.parent===n.topic.id)!;
+        assert.ok(i%2 ? detail.x+detail.width<n.x : detail.x>n.x+n.width);
+      }
+    } else if (sheet.rootTopic.structureClass!.includes("sided")) {
+      main.forEach((n,i) => assert.ok(i % 2 ? n.y > 0 : n.y + n.height < 0));
+      assert.equal(scene.edges.filter(e=>e.trunk).length,4);
+    } else {
+      main.forEach(n => assert.ok(Math.abs(n.y+n.height/2)<0.001));
+      if (sheet.rootTopic.structureClass!.endsWith("rtl")) {
+        assert.equal(root.direction,"left");
+        assert.ok(main.every(n=>n.x+n.width<root.x));
+        const detail=nodes.find(n=>n.parent===main[0].topic.id)!;
+        assert.ok(detail.x+detail.width<main[0].x+main[0].width/2);
+      }
+    }
+    assert.equal(JSON.stringify(sheet),before);
+  }
+});
+test(2, "timeline variants keep long, mixed and grouped subtrees separate at every fold state", () => {
+  for (const sheet of round6Sheets()) {
+    const children=sheet.rootTopic.children!.attached!;
+    children[0].children!.attached![0].title="中文 Long title ".repeat(24);
+    children[1].structureClass="org.xmind.ui.org-chart.down";
+    children[2].boundaries=[{id:sheet.id+"-boundary",range:"(0,1)",title:"分组长标题"}];
+    for(const fold of [new Set<string>(),new Set([children[0].id]),new Set(children.map(t=>t.id))]) {
+      const scene=buildScene(sheet,fold);
+      for(const [i,a] of scene.nodes.entries()) {
+        assert.ok(Number.isFinite(a.x+a.y+a.width+a.height));
+        for(const b of scene.nodes.slice(i+1)) {
+          assert.ok(a.x+a.width<=b.x+0.01 || b.x+b.width<=a.x+0.01 || a.y+a.height<=b.y+0.01 || b.y+b.height<=a.y+0.01,`${sheet.title}: ${a.topic.title} overlaps ${b.topic.title}`);
+        }
+      }
+      for(const e of scene.edges) assert.ok(!/NaN|Infinity/.test(edgePath(e,scene.nodes.find(n=>n.topic.id===e.from)!,scene.nodes.find(n=>n.topic.id===e.to)!)));
+    }
+  }
+});
+test(3, "timeline variants and native theme survive edits and archive reopen", () => {
+  const sheets=round6Sheets(),doc=openDocument(sampleArchive(sheets));
+  for(const sheet of sheets) {
+    const child=sheet.rootTopic.children!.attached![0];
+    const edited=editDocument(doc.sheets,sheet.id,{type:"fold",ids:[child.id],folded:true});
+    const reopened=openDocument(writeDocument(doc,edited));
+    assert.equal(reopened.sheets.find(s=>s.id===sheet.id)!.rootTopic.children!.attached![0].branch,"folded");
+    assert.deepEqual(reopened.sheets.map(s=>s.theme),sheets.map(s=>s.theme));
+    assert.deepEqual(reopened.sheets.map(s=>s.rootTopic.structureClass),sheets.map(s=>s.rootTopic.structureClass));
+  }
+});
+test(1, "native inherited rainbow fill, level style and automatic text stay visible", () => {
+  const sheet=round6Sheets()[0], scene=buildScene(sheet);
+  assert.equal(scene.nodes[0].fill,"none");assert.equal(scene.nodes[0].color,"#000000");
+  const main=scene.nodes.find(n=>n.topic.id==='vertical-main-0')!;
+  const detail=scene.nodes.find(n=>n.topic.id==='vertical-detail-0-a')!;
+  assert.equal(main.fill,"#FF6B6B");assert.equal(detail.fill,"#FF6B6B");
+  assert.equal(detail.properties['svg:fill-opacity'],'0.2');
+  assert.equal(detail.fillOpacity,0.2);assert.equal(detail.color,'#660000');
+  assert.equal(scene.nodes.find(n=>n.topic.id==='vertical-detail-2-a')!.color,'#1E4733');
+  const topic=sheet.rootTopic.children!.attached![0].children!.attached![0];
+  topic.style={properties:{'svg:fill':'#123456','svg:fill-opacity':'0.7','fo:color':'#FEDCBA','fo:font-size':'22pt'}};
+  const overridden=topicStyle(sheet,topic.id);
+  assert.equal(overridden.fill,'#123456');assert.equal(overridden.properties['svg:fill-opacity'],'0.7');
+  assert.equal(overridden.color,'#FEDCBA');assert.equal(overridden.fontSize,22);
+});
+test(2, "basic shapes contain padded content and have finite outline anchors", () => {
+  for (const shape of TOPIC_SHAPES) for (const [w,h] of [[50,24],[70,300],[450,34]]) {
+    const size=shapeSize(shape,w,h);
+    const sheet:Sheet={id:'shape-test',title:'Shape',rootTopic:{id:'shape-root',title:'Title',style:{properties:{'shape-class':shape}}}};
+    const node={...buildScene(sheet).nodes[0],...size,x:0,y:0};
+    const polygon=shapePolygon(shape,size.width,size.height);
+    if(polygon) for(const x of [(size.width-w)/2,(size.width+w)/2]) for(const y of [(size.height-h)/2,(size.height+h)/2]) {
+      const crosses=polygon.map((a,i)=>{const b=polygon[(i+1)%polygon.length];return (b[0]-a[0])*(y-a[1])-(b[1]-a[1])*(x-a[0]);});
+      assert.ok(crosses.every(c=>c>=-1e-8)||crosses.every(c=>c<=1e-8),`${shape} clips padded corner`);
+    }
+    for(let angle=0;angle<Math.PI*2;angle+=Math.PI/12) {
+      const dx=Math.cos(angle),dy=Math.sin(angle),c={x:size.width/2,y:size.height/2};
+      const anchor=topicAnchor(node,{x:c.x+dx*1000,y:c.y+dy*1000});
+      assert.ok(Number.isFinite(anchor.x+anchor.y));
+      assert.ok(anchor.x>=-1e-8&&anchor.x<=size.width+1e-8&&anchor.y>=-1e-8&&anchor.y<=size.height+1e-8);
+      assert.ok(Math.abs((anchor.x-c.x)*dy-(anchor.y-c.y)*dx)<1e-7,'endpoint stays on ray');
+      if(shape==='circle.compact') assert.ok(Math.abs(Math.hypot(anchor.x-c.x,anchor.y-c.y)-size.width/2)<1e-7);
+      if(shape==='ellipticrectangle'&&Math.abs(anchor.x-c.x)<size.width/2-1e-6)
+        assert.ok(Math.abs(Math.abs(anchor.y-c.y)-(size.height/2-.8*size.height*((anchor.x-c.x)/size.width)**2))<1e-7);
+      if(shape==='ellipserect.compact') {
+        const radius=size.height/2;
+        const distance=Math.hypot(Math.max(0,Math.abs(anchor.x-c.x)-(size.width/2-radius)),anchor.y-c.y);
+        assert.ok(Math.abs(distance-radius)<1e-7,'pill endpoints meet capsule');
+      }
+    }
+  }
+});
+test(1, "saved text alignment reserves inline icons and preserves original title", () => {
+  for(const alignment of ['left','center','right']) {
+    const title='Long first line\n短行';
+    const sheet:Sheet={id:'align-test',title:'Alignment',rootTopic:{id:'align-root',title,href:'https://example.com',image:{src:'xap:resources/test.png',width:240,height:60},style:{properties:{'fo:text-align':alignment}}}};
+    const node=buildScene(sheet).nodes[0];
+    assert.equal(node.titleAnchor,alignment==='left'?'start':alignment==='right'?'end':'middle');
+    if(alignment==='left') assert.equal(node.titleX,node.content.x);
+    if(alignment==='right') assert.equal(node.titleX,node.content.x+node.content.width-24);
+    assert.ok(node.indicatorPositions[0].x+16<=node.content.x+node.content.width+1e-6);
+    assert.equal(sheet.rootTopic.title,title);
+  }
+});
+test(5, "relationship inherited overrides preserve theme colors and finite widths", () => {
+  const sheet=round6Sheets()[0],scene=buildScene(sheet);
+  const relation={id:'rel-style',end1Id:scene.nodes[0].topic.id,end2Id:scene.nodes[1].topic.id,style:{properties:{'line-color':'inherited','fo:color':'inherited','line-width':'invalid'}}};
+  const g=relationshipGeometry(sheet,relation,scene.nodes[0],scene.nodes[1]);
+  assert.equal(g.color,'#00000066');assert.equal(g.properties['fo:color'],undefined);assert.equal(g.width,1.5);
+  assert.ok(!/NaN|Infinity/.test(g.path));
+});
+test(2, "long draft editors stay visible at 10 and 400 percent without changing topic styles", () => {
+  const node=buildScene(round6Sheets()[0]).nodes[0],original=structuredClone(node.topic);
+  const measure=(text:string,size:number)=>Array.from(text).length*size;
+  for(const zoom of [.1,1,4]) for(const [w,h] of [[320,240],[720,480],[1280,800]]) {
+    const viewport={x:1000,y:-1000,width:w/zoom,height:h/zoom};
+    for(const draft of ['','中文','Long 中文\n'.repeat(500)]) {
+      const box=draftBox(node,draft,viewport,zoom,measure);
+      assert.ok(box.x+node.x>=viewport.x && box.y+node.y>=viewport.y);
+      assert.ok(box.x+node.x+box.width<=viewport.x+viewport.width);
+      assert.ok(box.y+node.y+box.height<=viewport.y+viewport.height-60/zoom);
+      assert.ok(box.fontSize*zoom>=12);
+      assert.ok(box.width>0&&box.height>0);
+      const single=draftBox(node,draft,viewport,zoom,measure,true);
+      assert.ok(single.height<=single.fontSize*1.4+single.padding*2+2+1e-8,'relationship labels stay one scrollable line');
+    }
+  }
+  assert.deepEqual(node.topic,original);
 });
 console.log(`${passed} XMind tests passed`);

@@ -1,6 +1,6 @@
 import { showError } from "../lib/feedback";
 import { documentStatsField } from "../lib/documentStats";
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { EditorState, EditorSelection, Compartment, StateEffect } from "@codemirror/state";
 import {
   EditorView,
@@ -49,6 +49,8 @@ import DiffView from "./DiffView";
 // never pay for it on cold start.
 const XmindView = lazy(() => import("./XmindView"));
 import { isEnabled } from "../lib/shortcuts";
+import { installEditorFontZoom } from "../lib/editorFontZoom";
+import EditorFontZoomNotice from "./EditorFontZoomNotice";
 import {
   bookmarkExtension,
   toggleBookmark,
@@ -211,6 +213,10 @@ function TextEditor({
 }: Props) {
   const t = useT();
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
+  const effectiveFontSize = useEditorStore((s) => s.tabs.find((tab) => tab.id === tabId)?.zoomFontSize ?? fontSize);
+  const [fontZoomRevision, setFontZoomRevision] = useState(0);
+  const dismissFontZoom = useCallback(() => setFontZoomRevision(0), []);
+  const returnEditorFocus = useCallback(() => viewRef.current?.focus(), []);
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const themeCompartment = useRef(new Compartment());
@@ -433,6 +439,7 @@ function TextEditor({
     }
 
     const view = new EditorView({ state, parent: hostRef.current });
+    const removeFontZoom = installEditorFontZoom(view.scrollDOM, tabId, () => setFontZoomRevision((n) => n + 1));
     viewRef.current = view;
     setActiveView(view, tabId);
 
@@ -500,6 +507,7 @@ function TextEditor({
     view.scrollDOM.addEventListener("scroll", onScrollEvt, { passive: true });
 
     return () => {
+      removeFontZoom();
       view.scrollDOM.removeEventListener("scroll", onScrollEvt);
       if (scrollRafId) cancelAnimationFrame(scrollRafId);
       // Final flush so the very last position isn't lost on tab switch / unmount.
@@ -544,6 +552,8 @@ function TextEditor({
     view.requestMeasure();
     useEditorStore.getState().setActiveSelectionLength(view.state.selection.ranges.reduce((n, r) => n + r.to - r.from, 0));
   }, [active]);
+
+  useEffect(() => { viewRef.current?.requestMeasure(); }, [effectiveFontSize]);
 
   // Apply external scroll requests (e.g. from preview). Accepts a *fractional*
   // line so preview can drive editor to a sub-line pixel offset; any value
@@ -688,8 +698,8 @@ function TextEditor({
         logInfo(`lang set: ${def.label} for ${filePath ?? "(no path)"}`);
       })
       .catch((err) => {
+        if (cancelled || !viewRef.current) return;
         logError(`load language failed for ${filePath ?? "(no path)"}`, err);
-        if (!viewRef.current) return;
         viewRef.current.dispatch({
           effects: langCompartment.current.reconfigure([]),
         });
@@ -746,8 +756,10 @@ function TextEditor({
         <div
           ref={hostRef}
           className="h-full w-full overflow-hidden"
-          style={{ ["--editor-font-size" as string]: `${fontSize}px` }}
+          style={{ ["--editor-font-size" as string]: `${effectiveFontSize}px` }}
         />
+        {tabId && fontZoomRevision > 0 && <EditorFontZoomNotice tabId={tabId} revision={fontZoomRevision}
+          onDismiss={dismissFontZoom} onReturnFocus={returnEditorFocus} />}
       </div>
       {ctxMenu && (
         <ContextMenu

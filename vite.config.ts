@@ -1,8 +1,19 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { visualizer } from "rollup-plugin-visualizer";
+import { readFileSync, readdirSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, resolve } from "node:path";
 
 const host = process.env.TAURI_DEV_HOST;
+const require = createRequire(import.meta.url);
+const languageDependencies = JSON.parse(readFileSync(
+  resolve(dirname(require.resolve("@codemirror/language-data")), "../package.json"), "utf8",
+)).dependencies;
+const editorDependencies = Object.keys(languageDependencies).filter((name) => name.startsWith("@codemirror/lang-"));
+const legacyModes = readdirSync(dirname(require.resolve("@codemirror/legacy-modes/mode/shell")))
+  .filter((name) => name.endsWith(".js"))
+  .map((name) => `@codemirror/legacy-modes/mode/${name.slice(0, -3)}`);
 
 export default defineConfig(async () => ({
   plugins: [
@@ -25,6 +36,20 @@ export default defineConfig(async () => ({
       }),
   ].filter(Boolean) as any,
   clearScreen: false,
+  // Discover lazy parsers before serving the first editor. Otherwise opening
+  // another language can rebuild the shared chunks while a live editor still
+  // holds the old State/Facet constructors ("Unrecognized extension value").
+  optimizeDeps: {
+    include: [
+      ...editorDependencies,
+      "@codemirror/state", "@codemirror/view", "@codemirror/language",
+      "@codemirror/autocomplete", "@codemirror/language-data",
+      ...legacyModes, "@replit/codemirror-lang-svelte",
+    ],
+  },
+  resolve: {
+    dedupe: ["@codemirror/state", "@codemirror/view", "@codemirror/language", "@codemirror/autocomplete", "@lezer/common", "@lezer/highlight", "@lezer/lr"],
+  },
   server: {
     port: 5173,
     strictPort: true,

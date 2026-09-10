@@ -3,6 +3,7 @@ import {
   type Highlighter,
   type BundledLanguage,
   bundledLanguages,
+  bundledLanguagesAlias,
 } from "shiki";
 
 let highlighterPromise: Promise<Highlighter> | null = null;
@@ -35,7 +36,7 @@ export async function ensureLanguage(
 ): Promise<string> {
   const normalized = lang.toLowerCase();
   if (loadedLangs.has(normalized)) return normalized;
-  if (normalized in bundledLanguages) {
+  if (normalized in bundledLanguages || normalized in bundledLanguagesAlias) {
     try {
       await hl.loadLanguage(normalized as BundledLanguage);
       loadedLangs.add(normalized);

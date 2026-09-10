@@ -1,3 +1,5 @@
+import { draftBox } from "../lib/xmind/draft";
+import { shapeName, shapePolygon, strokeDash, ellipticRectanglePath } from "../lib/xmind/shapes";
 import { topicDropTarget, type DropTarget } from "../lib/xmind/drop";
 import XmindRelationship from "./XmindRelationship";
 import XmindIndicator from "./XmindIndicator";
@@ -64,32 +66,31 @@ const measure: Measure = (text, size, p) => {
   return Math.max(metrics.width, (metrics.actualBoundingBoxLeft || 0) + (metrics.actualBoundingBoxRight || 0));
 };
 function NodeShape({ node: n }: { node: SceneNode }) {
-  const shape = n.shape.toLowerCase(),
+  const shape = shapeName(n.shape),
     w = n.width,
     h = n.height;
   const props = {
     fill: n.fill,
+    fillOpacity: n.fillOpacity,
     stroke: n.stroke,
-    strokeWidth: parseFloat(n.properties["border-line-width"] ?? "1.5"),
+    strokeWidth: Math.max(0, Number.isFinite(parseFloat(n.properties["border-line-width"] ?? "")) ? parseFloat(n.properties["border-line-width"]) : 1.5),
+    strokeDasharray: strokeDash(n.properties["border-line-pattern"]),
   };
-  if (/ellipse|oval/.test(shape))
+  if (/ellipse|oval|^circle/.test(shape))
     return <ellipse cx={w / 2} cy={h / 2} rx={w / 2} ry={h / 2} {...props} />;
-  if (shape.includes("diamond"))
-    return (
-      <path
-        d={`M${w / 2},0 L${w},${h / 2} ${w / 2},${h} 0,${h / 2} Z`}
-        {...props}
-      />
-    );
+  if (shape === "ellipticrectangle") return <path d={ellipticRectanglePath(w,h)} {...props} />;
+  const polygon = shapePolygon(shape, w, h);
+  if (polygon) return <polygon points={polygon.map(p => p.join(",")).join(" ")} strokeLinejoin={shape === "roundedhexagon" ? "round" : undefined} {...props} />;
   if (shape.includes("underline"))
     return (
       <>
-        <rect width={w} height={h} rx={4} fill={n.fill} />
+        <rect width={w} height={h} rx={4} fill={n.fill} fillOpacity={props.fillOpacity} />
         <path
-          d={`M0,${h} H${w}`}
+          d={`M0,${h} H${w}${shape === "doubleunderline" ? ` M0,${h - 4} H${w}` : ""}`}
           fill="none"
           stroke={n.stroke}
           strokeWidth={props.strokeWidth}
+          strokeDasharray={props.strokeDasharray}
         />
       </>
     );
@@ -357,18 +358,6 @@ export default function XmindCanvas({
       setEditing(null);
     }
   }, [editing, draft, onCommand]);
-  useLayoutEffect(() => {
-    const input = host.current?.querySelector<HTMLTextAreaElement>("foreignObject textarea");
-    if (!input) return;
-    // Browser line breaking can differ from canvas metrics (CJK punctuation,
-    // fallback fonts, scrollbar gutters). Size to the actual rendered draft.
-    input.style.height = "0px";
-    const height = input.scrollHeight + 2;
-    const box = input.parentElement;
-    if (box && height > 2) box.setAttribute("height", String(height));
-    input.style.height = "100%";
-    input.scrollTop = 0;
-  }, [editing, draft, scene]);
   const commitRef = useRef(commitEdit);
   commitRef.current = commitEdit;
   useEffect(() => registerFlush(() => { commitRef.current(); relationshipFlush.current?.(); }), [registerFlush]);
@@ -429,7 +418,7 @@ export default function XmindCanvas({
     if ((e.target as HTMLElement).closest("input,textarea,select,button") && e.key !== "Escape")
       return;
     const mod = e.metaKey || e.ctrlKey;
-    if (e.nativeEvent.isComposing) return;
+    if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
     if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
@@ -580,96 +569,7 @@ export default function XmindCanvas({
   }, [scene]);
   const sceneContent = useMemo(() => {
     const selectedIds = new Set(selected);
-    return <>
-        {scene.groups.map((g) => (
-          <g key={g.id} data-group={g.id} role="button" tabIndex={0} aria-label={g.title || t(g.summary ? "xmind.summary" : "xmind.boundary")}
-            aria-pressed={selectedGroup === g.id}
-            onKeyDown={e=>{if(e.key==='Enter'||e.key===' ') {e.preventDefault();e.stopPropagation();setSelectedRelationship(null);onSelectGroup(g.id);host.current?.focus();}}}
-            onPointerDown={e=>{e.stopPropagation();host.current?.focus();setSelectedRelationship(null);onSelectGroup(g.id);}}
-            onDoubleClick={e=>{e.stopPropagation();onSelectGroup(g.id);}}
-            style={{cursor:"pointer"}} transform={dragOffset && draggedIds.has(g.parent) ? `translate(${dragOffset.x},${dragOffset.y})` : undefined}>
-            {selectedGroup === g.id && <rect x={g.x-4} y={g.y-4} width={g.width+8} height={g.height+8} rx={16} fill="none" stroke="var(--accent)" strokeWidth={2} pointerEvents="none" />}
-            <rect x={g.x} y={g.y} width={g.width} height={g.height} rx={14} fill="none" stroke="transparent" strokeWidth={14} pointerEvents="stroke" />
-            {g.summary ? (
-              <path
-                transform={
-                  g.side === "left"
-                    ? `translate(${g.x},${g.y}) scale(-1,1)`
-                    : g.side === "down"
-                      ? `translate(${g.x},${g.y + g.height}) matrix(0,1,1,0,0,0)`
-                      : g.side === "up"
-                        ? `translate(${g.x},${g.y}) matrix(0,-1,1,0,0,0)`
-                        : `translate(${g.x + g.width},${g.y})`
-                }
-                d={`M0,0 C18,0 18,0 18,${(g.side === "up" || g.side === "down" ? g.width : g.height) / 2 - 10} Q18,${(g.side === "up" || g.side === "down" ? g.width : g.height) / 2} 30,${(g.side === "up" || g.side === "down" ? g.width : g.height) / 2} Q18,${(g.side === "up" || g.side === "down" ? g.width : g.height) / 2} 18,${(g.side === "up" || g.side === "down" ? g.width : g.height) / 2 + 10} C18,${g.side === "up" || g.side === "down" ? g.width : g.height} 18,${g.side === "up" || g.side === "down" ? g.width : g.height} 0,${g.side === "up" || g.side === "down" ? g.width : g.height}`}
-                fill="none"
-                stroke={g.properties["line-color"] ?? "#94a3b8"}
-                strokeWidth={2}
-              />
-            ) : (
-              <rect
-                x={g.x}
-                y={g.y}
-                width={g.width}
-                height={g.height}
-                rx={14}
-                fill={g.properties["svg:fill"] ?? "#e9f1fa"}
-                pointerEvents="none"
-                fillOpacity={Number(g.properties["svg:fill-opacity"] ?? 0.45)}
-                stroke={g.properties["line-color"] ?? "#a2b3c9"}
-                strokeDasharray={g.properties["line-pattern"] === "solid" ? undefined : g.properties["line-pattern"] === "dot" ? "1 3" : "5 3"}
-              />
-            )}
-            {g.titleLines.length > 0 && <g data-group-title={g.id}>
-              <rect x={g.x+(g.width-g.titleWidth)/2} y={g.y-g.titleHeight}
-                width={g.titleWidth} height={g.titleHeight} rx={4} fill={g.properties["line-color"]} />
-              <text x={g.x+g.width/2} y={g.y-g.titleHeight+4+g.titleFontSize}
-                textAnchor="middle" fill={g.properties["fo:color"]} fontSize={g.titleFontSize}
-                fontFamily={g.properties["fo:font-family"]} fontWeight={g.properties["fo:font-weight"]}>
-                {g.titleLines.map((line,i)=><tspan key={i} x={g.x+g.width/2} dy={i?g.titleLineHeight:0}>{line}</tspan>)}
-              </text>
-            </g>}
-          </g>
-        ))}
-        {[...braceEdges].map(([id, edges]) => {
-          const from = displayById.get(id)!;
-          return (
-            <path
-              key={`brace-${id}`}
-              d={braceConnector(
-                from,
-                edges.map((e) => displayById.get(e.to)!),
-                edges[0].direction === "left",
-              )}
-              fill="none"
-              stroke={from.lineColor}
-              strokeWidth={2}
-            />
-          );
-        })}
-        {scene.edges.map((e, i) => {
-          if (e.brace) return null;
-          const from = displayById.get(e.from),
-            to = displayById.get(e.to);
-          return from && to ? (
-            <path
-              key={i}
-              d={edgePath(dragOffset && draggedIds.has(e.from) && draggedIds.has(e.to) ? {
-                ...e,
-                points: e.points?.map(p => ({x:p.x+dragOffset.x,y:p.y+dragOffset.y})),
-                trunk: e.trunk?.map(p => ({x:p.x+dragOffset.x,y:p.y+dragOffset.y})),
-              } : e, from, to)}
-              data-callout-tail={e.callout || undefined}
-              fill={e.callout ? to.fill : "none"}
-              stroke={e.callout ? "none" : to.lineColor}
-              strokeWidth={parseFloat(
-                (e.points ? to : from).properties["line-width"] ?? (to.depth === 1 ? "2.5" : "1.5"),
-              )}
-            />
-          ) : null;
-        })}
-        {[...scene.nodes.filter((n) => n.topic.id !== editing),
-          ...scene.nodes.filter((n) => n.topic.id === editing)].map((n) => {
+    const renderNode = (n: SceneNode) => {
           const chosen = selectedIds.has(n.topic.id),
             match =
               query &&
@@ -677,13 +577,10 @@ export default function XmindCanvas({
           const offset = draggedIds.has(n.topic.id) ? dragOffset : null;
           const img = imageSource(n.topic, resources),
             imageHeight = n.imageHeight;
-          // The editor grows independently of the saved node, so long drafts
-          // and Shift+Enter remain visible before they are committed.
-          const editWidth = editing !== n.topic.id ? n.content.width : Math.max(n.content.width, Math.min(480,
-            Math.max(80, ...draft.split("\n").map((line) => measure(line, n.fontSize, n.properties) + 12))));
-          const editRows = editing !== n.topic.id ? 1 : draft.split("\n").reduce((rows, line) => rows +
-            Math.max(1, Math.ceil(measure(line, n.fontSize, n.properties) / (editWidth - 8))), 0);
-          const editHeight = Math.max(n.fontSize * 1.4 + 8, editRows * n.fontSize * 1.4 + 8);
+          // Keep the caret and the scrollable draft inside the visible canvas,
+          // including when zoomed into a small part of a very large topic.
+          const editorViewport = query ? { ...viewport, y: viewport.y + 40 / camera.zoom, height: viewport.height - 40 / camera.zoom } : viewport;
+          const editor = editing === n.topic.id ? draftBox(n, draft, editorViewport, camera.zoom, measure) : null;
           const isFolded = folded.has(n.topic.id);
           let hiddenCount = 0;
           const countChildren = (topic: Topic) => {
@@ -746,10 +643,10 @@ export default function XmindCanvas({
               )}
               {editing === n.topic.id ? (
                 <foreignObject
-                  x={(n.width - editWidth) / 2}
-                  y={n.content.y + (imageHeight ? imageHeight + 8 : 0) - 4}
-                  width={editWidth}
-                  height={editHeight}
+                  x={editor!.x}
+                  y={editor!.y}
+                  width={editor!.width}
+                  height={editor!.height}
                 >
                   <textarea
                     aria-label={t("xmind.editTitle")}
@@ -760,7 +657,7 @@ export default function XmindCanvas({
                     onFocus={(e) => e.target.select()}
                     onKeyDown={(e) => {
                       e.stopPropagation();
-                      if (e.nativeEvent.isComposing) return;
+                      if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
                       if (e.key === "Enter" && !e.shiftKey) {
                         e.preventDefault();
                         commitEdit();
@@ -776,18 +673,19 @@ export default function XmindCanvas({
                       width: "100%",
                       height: "100%",
                       resize: "none",
-                      fontSize: n.fontSize,
+                      fontSize: editor!.fontSize,
                       fontFamily: n.properties["fo:font-family"] ?? "NeverMind, PingFang SC, Microsoft YaHei, sans-serif",
                       fontWeight: n.properties["fo:font-weight"] ?? 400,
                       fontStyle: n.properties["fo:font-style"],
                       lineHeight: 1.4,
-                      padding: "3px",
+                      padding: editor!.padding,
+                      overflow: "auto",
                       margin: 0,
                       boxSizing: "border-box",
                       color: n.color,
                       background: n.fill === "none" || n.fill === "transparent" ? scene.background : n.fill,
                       border: "1px solid #4787ed",
-                      textAlign: "center",
+                      textAlign: n.titleAnchor === "start" ? "left" : n.titleAnchor === "end" ? "right" : "center",
                       outline: "none",
                     }}
                   />
@@ -796,7 +694,7 @@ export default function XmindCanvas({
                 <text
                   x={n.titleX}
                   y={n.content.y + (imageHeight ? imageHeight + 8 : 0) + n.fontSize * 1.05}
-                  textAnchor="middle"
+                  textAnchor={n.titleAnchor}
                   fill={n.color}
                   fontFamily={
                     n.properties["fo:font-family"] ??
@@ -807,6 +705,7 @@ export default function XmindCanvas({
                     n.properties["fo:font-weight"] ?? (n.depth < 2 ? 600 : 400)
                   }
                   fontStyle={n.properties["fo:font-style"]}
+                  textDecoration={n.properties["fo:text-decoration"]}
                   pointerEvents="none"
                 >
                   {n.lines.map((line, i) => (
@@ -880,7 +779,103 @@ export default function XmindCanvas({
               )}
             </g>
           );
+    };
+    return <>
+        {scene.groups.map((g) => {
+          const lineWidth = parseFloat(g.properties["line-width"] ?? "2");
+          const opacity = parseFloat(g.properties["svg:fill-opacity"] ?? "0.2");
+          const strokeWidth = Number.isFinite(lineWidth) ? Math.max(0, lineWidth) : 2;
+          const dash = strokeDash(g.properties["line-pattern"] ?? (g.summary ? "solid" : "dash"));
+          return (
+          <g key={g.id} data-group={g.id} role="button" tabIndex={0} aria-label={g.title || t(g.summary ? "xmind.summary" : "xmind.boundary")}
+            aria-pressed={selectedGroup === g.id}
+            onKeyDown={e=>{if(e.key==='Enter'||e.key===' ') {e.preventDefault();e.stopPropagation();setSelectedRelationship(null);onSelectGroup(g.id);host.current?.focus();}}}
+            onPointerDown={e=>{e.stopPropagation();host.current?.focus();setSelectedRelationship(null);onSelectGroup(g.id);}}
+            onDoubleClick={e=>{e.stopPropagation();onSelectGroup(g.id);}}
+            style={{cursor:"pointer"}} transform={dragOffset && draggedIds.has(g.parent) ? `translate(${dragOffset.x},${dragOffset.y})` : undefined}>
+            {selectedGroup === g.id && <rect x={g.x-4} y={g.y-4} width={g.width+8} height={g.height+8} rx={16} fill="none" stroke="var(--accent)" strokeWidth={2} pointerEvents="none" />}
+            <rect x={g.x} y={g.y} width={g.width} height={g.height} rx={14} fill="none" stroke="transparent" strokeWidth={14} pointerEvents="stroke" />
+            {g.summary ? (
+              <path
+                transform={
+                  g.side === "left"
+                    ? `translate(${g.x},${g.y}) scale(-1,1)`
+                    : g.side === "down"
+                      ? `translate(${g.x},${g.y + g.height}) matrix(0,1,1,0,0,0)`
+                      : g.side === "up"
+                        ? `translate(${g.x},${g.y}) matrix(0,-1,1,0,0,0)`
+                        : `translate(${g.x + g.width},${g.y})`
+                }
+                d={`M0,0 C18,0 18,0 18,${(g.side === "up" || g.side === "down" ? g.width : g.height) / 2 - 10} Q18,${(g.side === "up" || g.side === "down" ? g.width : g.height) / 2} 30,${(g.side === "up" || g.side === "down" ? g.width : g.height) / 2} Q18,${(g.side === "up" || g.side === "down" ? g.width : g.height) / 2} 18,${(g.side === "up" || g.side === "down" ? g.width : g.height) / 2 + 10} C18,${g.side === "up" || g.side === "down" ? g.width : g.height} 18,${g.side === "up" || g.side === "down" ? g.width : g.height} 0,${g.side === "up" || g.side === "down" ? g.width : g.height}`}
+                fill="none"
+                stroke={g.properties["line-color"] ?? "#94a3b8"}
+                strokeWidth={strokeWidth}
+                strokeDasharray={dash}
+              />
+            ) : (
+              <rect
+                x={g.x}
+                y={g.y}
+                width={g.width}
+                height={g.height}
+                rx={g.properties["shape-class"]?.split(".").pop()?.toLowerCase() === "rect" ? 0 : 14}
+                fill={g.properties["fill-pattern"] === "none" ? "none" : g.properties["svg:fill"] ?? "#e9f1fa"}
+                pointerEvents="none"
+                fillOpacity={Number.isFinite(opacity) ? Math.max(0, Math.min(1, opacity)) : 0.2}
+                stroke={g.properties["line-color"] ?? "#a2b3c9"}
+                strokeWidth={strokeWidth}
+                strokeDasharray={dash}
+              />
+            )}
+            {g.titleLines.length > 0 && <g data-group-title={g.id}>
+              <rect x={g.x+(g.width-g.titleWidth)/2} y={g.y-g.titleHeight}
+                width={g.titleWidth} height={g.titleHeight} rx={4} fill={g.properties["line-color"]} />
+              <text x={g.x+g.width/2} y={g.y-g.titleHeight+4+g.titleFontSize}
+                textAnchor="middle" fill={g.properties["fo:color"]} fontSize={g.titleFontSize}
+                fontFamily={g.properties["fo:font-family"]} fontWeight={g.properties["fo:font-weight"]}>
+                {g.titleLines.map((line,i)=><tspan key={i} x={g.x+g.width/2} dy={i?g.titleLineHeight:0}>{line}</tspan>)}
+              </text>
+            </g>}
+          </g>
+        );})}
+        {[...braceEdges].map(([id, edges]) => {
+          const from = displayById.get(id)!;
+          return (
+            <path
+              key={`brace-${id}`}
+              d={braceConnector(
+                from,
+                edges.map((e) => displayById.get(e.to)!),
+                edges[0].direction === "left",
+              )}
+              fill="none"
+              stroke={from.lineColor}
+              strokeWidth={2}
+            />
+          );
         })}
+        {scene.edges.map((e, i) => {
+          if (e.brace) return null;
+          const from = displayById.get(e.from),
+            to = displayById.get(e.to);
+          return from && to ? (
+            <path
+              key={i}
+              d={edgePath(dragOffset && draggedIds.has(e.from) && draggedIds.has(e.to) ? {
+                ...e,
+                points: e.points?.map(p => ({x:p.x+dragOffset.x,y:p.y+dragOffset.y})),
+                trunk: e.trunk?.map(p => ({x:p.x+dragOffset.x,y:p.y+dragOffset.y})),
+              } : e, from, to)}
+              data-callout-tail={e.callout || undefined}
+              fill={e.callout ? to.fill : "none"}
+              stroke={e.callout ? "none" : to.lineColor}
+              strokeWidth={parseFloat(
+                (e.points ? to : from).properties["line-width"] ?? (to.depth === 1 ? "2.5" : "1.5"),
+              )}
+            />
+          ) : null;
+        })}
+        {scene.nodes.filter(n => n.topic.id !== editing).map(renderNode)}
         {(sheet.relationships ?? []).map((relation) => {
           const from = displayById.get(relation.end1Id), to = displayById.get(relation.end2Id);
           if (!from || !to) return null;
@@ -888,6 +883,7 @@ export default function XmindCanvas({
             readonly={readonly} selected={selectedRelationship === relation.id} markerPrefix={viewId}
             onSelect={() => { onSelectGroup(null); onSelect([]); setSelectedRelationship(relation.id); }}
             onCommand={onCommand} registerFlush={setRelationshipFlush}
+            viewport={viewport} zoom={camera.zoom} measure={measure}
             toWorld={(x, y) => {
               const rect = svg.current!.getBoundingClientRect();
               const c = cameraRef.current;
@@ -895,8 +891,9 @@ export default function XmindCanvas({
                 y: c.y + (y - rect.top - rect.height / 2) / c.zoom };
             }} />;
         })}
+        {scene.nodes.filter(n => n.topic.id === editing).map(renderNode)}
     </>;
-  }, [scene, selected, query, dragOffset, resources, readonly, editing, draft,
+  }, [scene, selected, query, dragOffset, resources, readonly, editing, draft, editing || selectedRelationship ? camera : null, size.width, size.height,
     folded, t, commitEdit, toggleFold, byId, displayById, draggedIds, braceEdges, fishboneRibs, sheet, viewId,
     selectedRelationship, selectedGroup, onSelectGroup, onCommand, onSelect, onInspect, onLink, setRelationshipFlush]);
 

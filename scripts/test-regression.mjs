@@ -82,7 +82,7 @@ const stubs = {
   "@tauri-apps/plugin-dialog":
     "export const save=(...args)=>globalThis.__save(...args); export const open=(...args)=>globalThis.__open(...args);",
   "@tauri-apps/plugin-opener":
-    "export const revealItemInDir=async()=>{}; export const openUrl=async()=>{}; export const openPath=async()=>{};",
+    "export const revealItemInDir=async(...args)=>globalThis.__reveal?.(...args); export const openUrl=async()=>{}; export const openPath=async()=>{};",
   "./markdownExport/mathCss": "export const katexExportCss=()=>\"\";",
   "./format":
     "export const formatBuffer=(...args)=>globalThis.__format(...args);",
@@ -95,8 +95,9 @@ await build({
   stdin: {
     contents: `
 export * from './src/lib/fileio';
-export {loadPersisted} from './src/lib/persistence';
+export {loadPersisted, schedulePersist} from './src/lib/persistence';
 export {default as FileTree} from './src/components/FileTree';
+export {default as TabBar} from './src/components/TabBar';
 export {useFileWatch} from './src/lib/fileWatch';
 export {default as XmindView} from './src/components/XmindView';
 export {sampleArchive} from './tests/fixtures/xmind';
@@ -120,7 +121,9 @@ export {default as JsonToolbar} from './src/components/JsonToolbar';
 export {showError} from './src/lib/feedback';
 export {default as HtmlPreview} from './src/components/HtmlPreview';
 export {buildHtmlPreview} from './src/lib/htmlPreview';
-export {isHtml} from './src/lib/lang';
+export {isHtml, detectLang} from './src/lib/lang';
+export {syntaxSamples} from './tests/fixtures/syntax-highlighting';
+export {renderCode} from './src/lib/markdown';
 export {default as ConfirmDialog, chooseAction} from './src/components/ConfirmDialog';
 export {default as FindInFiles} from './src/components/FindInFiles';
 export {default as SettingsDialog} from './src/components/SettingsDialog';
@@ -209,6 +212,7 @@ function reset(tabs = [tab("a"), tab("b", "other")]) {
     return undefined;
   };
   globalThis.__open = async () => null;
+  globalThis.__reveal = async () => {};
   globalThis.__save = async () => "/test/saved.txt";
   globalThis.__format = async (content) => content;
   globalThis.__confirm = async () => "save";
@@ -451,6 +455,417 @@ test(2, "same-name workspace groups collapse independently and preserve file sel
   await act(async () => { roots[0].click(); await flush(); });
   assert.equal(document.querySelector('.filetree-row[aria-current="page"]').title, "/work/docs/readme.md");
   assert.ok(calls.every(c=>c.cmd === "list_dir"), "disclosure performs only directory reads");
+});
+
+test(1, "XML mapper and new language mappings create highlighted editor spans in both themes", async () => {
+  reset([tab('syntax','','/generated/Mapper.xml')]);
+  const paths=['Mapper.xml','schema.XSD','sample.json5','sample.kt','sample.scss','sample.svelte','sample.properties','sample.mts','sample.diff'];
+  for(const theme of ['light','dark']){
+    for(const file of paths){
+      await app.detectLang(file).cm();
+      await render(React.createElement(app.Editor,{tabId:'syntax',value:app.syntaxSamples[file],filePath:'/generated/'+file,theme,fontSize:14,onChange:()=>{}}));
+      await act(async()=>pause(30));
+      const spans=[...document.querySelectorAll('.cm-line span[class]')];
+      assert.ok(spans.length>0,`${file} ${theme} has highlighted spans`);
+      assert.equal(document.querySelector('.cm-content').textContent.replace(/\n/g,''),app.syntaxSamples[file].replace(/\n/g,''));
+    }
+  }
+});
+
+test(2, "a late failed language load cannot clear the next file's highlighting", async () => {
+  reset([tab('syntax')]);
+  const definition=app.detectLang('first.xml');
+  const original=definition.cm;
+  const waiting=deferred();
+  definition.cm=()=>waiting.promise;
+  const editor=(file,value)=>React.createElement(app.Editor,{tabId:'syntax',filePath:file,value,theme:'light',fontSize:14,onChange:()=>{}});
+  try {
+    await render(editor('/generated/first.xml','<first/>'));
+    await app.detectLang('next.py').cm();
+    await render(editor('/generated/next.py','def title():\n    return "demo"'));
+    await act(async()=>pause(30));
+    const before=document.querySelector('.cm-content').innerHTML;
+    assert.ok(document.querySelector('.cm-line span[class]'));
+    await act(async()=>{waiting.reject(new Error('old request failed'));await flush();});
+    assert.equal(document.querySelector('.cm-content').innerHTML,before);
+  } finally { definition.cm=original; }
+});
+
+test(3, "preview highlights aliases and catalog fallback without interpreting source HTML", async () => {
+  for(const [file,source] of [['sample.sh','if true; then echo "demo"; fi'],['.gitignore','# generated\n*.log\n!keep.log\n<script>alert(1)</script>']]){
+    for(const theme of ['light','dark']){
+      const html=await app.renderCode(source,file,{theme});
+      const host=document.createElement('div');host.innerHTML=html;
+      assert.ok(host.querySelector('code span[style]'),`${file}: colored preview`);
+      assert.equal(host.querySelector('script'),null);
+      assert.equal(host.querySelector('code').textContent,source);
+    }
+  }
+});
+
+function FontZoomEditors({split = false}) {
+  const size = app.useEditorStore(s=>s.editorFontSize);
+  const value = app.useEditorStore(s=>s.tabs[0].content);
+  const editor = (secondary) => React.createElement(app.Editor, {
+    key:secondary ? "split" : "primary", tabId:"a", value, filePath:"/test/a.txt", theme:"light", fontSize:size,
+    active:!secondary, noStateCache:secondary, onChange:(text)=>store.getState().setContent(text,"a"),
+  });
+  return React.createElement(React.Fragment,null,editor(false),split ? editor(true) : null);
+}
+async function fontWheel(target, options = {}) {
+  const event = new window.WheelEvent("wheel", {bubbles:true,cancelable:true,deltaY:-100,metaKey:true,...options});
+  await act(async()=>{ target.dispatchEvent(event); await flush(); });
+  return event;
+}
+
+function fontSizeFor(id) {
+  const state=store.getState();
+  return state.tabs.find(tab=>tab.id===id)?.zoomFontSize ?? state.editorFontSize;
+}
+
+test(1, "editor Cmd/Ctrl wheel changes font size without editing or replacing undo history", async () => {
+  reset([tab("a","original","/test/a.txt","original")]);
+  store.setState({editorFontSize:14});
+  await render(React.createElement(FontZoomEditors));
+  const view = app.getActiveView();
+  await act(async()=>view.dispatch({changes:{from:8,insert:" draft"},selection:{anchor:4}}));
+  const historyBefore = undoDepth(view.state);
+  const scroller = document.querySelector('.cm-scroller');
+  assert.equal((await fontWheel(scroller)).defaultPrevented,true);
+  assert.equal(fontSizeFor("a"),15);
+  assert.equal(scroller.closest('[style*="--editor-font-size"]').style.getPropertyValue('--editor-font-size'),'15px');
+  assert.equal((await fontWheel(scroller,{metaKey:false,ctrlKey:true,deltaY:100})).defaultPrevented,true);
+  assert.equal(fontSizeFor("a"),14);
+  assert.equal(app.getActiveView(),view);
+  assert.equal(view.state.selection.main.head,4);
+  assert.equal(view.state.doc.toString(),"original draft");
+  assert.equal(undoDepth(view.state),historyBefore);
+  await act(async()=>undo(view));
+  assert.equal(view.state.doc.toString(),"original");
+});
+
+test(2, "font wheel accumulates small deltas, handles units and respects both limits", async () => {
+  reset([tab("a")]);store.setState({editorFontSize:14});
+  await render(React.createElement(FontZoomEditors));
+  const scroller = document.querySelector('.cm-scroller');
+  for(let i=0;i<4;i++)await fontWheel(scroller,{deltaY:-20});
+  assert.equal(fontSizeFor("a"),14);
+  await fontWheel(scroller,{deltaY:-20});
+  assert.equal(fontSizeFor("a"),15);
+  await fontWheel(scroller,{deltaMode:1,deltaY:3});
+  assert.equal(fontSizeFor("a"),14);
+  await fontWheel(scroller,{deltaMode:2,deltaY:-1});
+  assert.equal(fontSizeFor("a"),15);
+  await act(async()=>store.getState().setEditorZoomFontSize("a",28));
+  assert.equal((await fontWheel(scroller)).defaultPrevented,true);
+  assert.equal(fontSizeFor("a"),28);
+  await fontWheel(scroller,{deltaY:100});
+  assert.equal(fontSizeFor("a"),27);
+  await act(async()=>store.getState().setEditorZoomFontSize("a",10));
+  await fontWheel(scroller,{deltaY:10000});
+  assert.equal(fontSizeFor("a"),10);
+  await fontWheel(scroller);
+  assert.equal(fontSizeFor("a"),11);
+});
+
+test(3, "font wheel preserves ordinary scrolling, supports disabling and synchronizes split editors", async () => {
+  reset([tab("a")]);store.setState({editorFontSize:14});
+  await render(React.createElement(FontZoomEditors,{split:true}));
+  const scrollers = [...document.querySelectorAll('.cm-scroller')];
+  for(const options of [{metaKey:false},{shiftKey:true},{altKey:true},{deltaY:0,deltaX:100}]) {
+    assert.equal((await fontWheel(scrollers[0],options)).defaultPrevented,false);
+  }
+  assert.equal(fontSizeFor("a"),14);
+  await act(async()=>store.getState().setShortcutEnabled('editor_font_zoom',false));
+  assert.equal((await fontWheel(scrollers[0])).defaultPrevented,false);
+  await act(async()=>store.getState().setShortcutEnabled('editor_font_zoom',true));
+  await fontWheel(scrollers[1]);
+  assert.equal(fontSizeFor("a"),15);
+  assert.ok(scrollers.every(el=>el.closest('[style*="--editor-font-size"]').style.getPropertyValue('--editor-font-size')==='15px'));
+  assert.equal((await fontWheel(document.body)).defaultPrevented,false);
+  assert.equal(fontSizeFor("a"),15);
+  await act(async()=>root.render(null));
+  await fontWheel(scrollers[1]);
+  assert.equal(fontSizeFor("a"),15,"unmounted editors remove the wheel listener");
+});
+
+test(1, "font zoom notice retains configured size across gestures and resets with editor focus", async () => {
+  reset([tab("a","draft")]);
+  store.getState().setEditorFontSize(17);
+  await render(React.createElement(FontZoomEditors));
+  const scroller=document.querySelector('.cm-scroller');
+  await fontWheel(scroller);
+  assert.match(document.querySelector('.editor-font-zoom-notice').textContent,/Font size: 18px/);
+  assert.ok(button('Reset to 17px'));
+  await fontWheel(scroller);
+  assert.equal(store.getState().editorFontSize,17);
+  assert.match(document.querySelector('.editor-font-zoom-notice').textContent,/Font size: 19px/);
+  await click('Reset to 17px');
+  assert.equal(fontSizeFor("a"),17);
+  assert.equal(document.querySelector('.editor-font-zoom-notice'),null);
+  assert.ok(document.activeElement.classList.contains('cm-content'));
+  assert.equal(store.getState().tabs[0].content,'draft');
+});
+
+test(2, "font zoom is transient in persistence; legacy global zoom restores only its baseline", async () => {
+  reset([tab('a')]);
+  store.getState().setEditorFontSize(18);
+  store.getState().setEditorZoomFontSize('a',24);
+  let snapshot;
+  globalThis.__invoke=async (cmd,args)=> {
+    if(cmd==='write_app_state')snapshot=JSON.parse(args.content);
+    if(cmd==='read_app_state')return JSON.stringify(snapshot);
+    if(cmd==='read_text_file')return 'draft';
+  };
+  app.schedulePersist({sidebarPx:240,previewPct:50});
+  await pause(650);
+  assert.equal(snapshot.editorFontSize,18);
+  assert.equal(snapshot.editorBaseFontSize,undefined);
+  assert.ok(snapshot.tabs.every(tab=>!('zoomFontSize' in tab)));
+  await app.loadPersisted();
+  assert.equal(store.getState().editorFontSize,18);
+  assert.ok(store.getState().tabs.every(tab=>tab.zoomFontSize===undefined));
+  snapshot.editorFontSize=24;
+  snapshot.editorBaseFontSize=16;
+  await app.loadPersisted();
+  assert.equal(store.getState().editorFontSize,16);
+  delete snapshot.editorBaseFontSize;
+  await app.loadPersisted();
+  assert.equal(store.getState().editorFontSize,24);
+});
+
+test(1, "font zoom is independent per file, survives switching and resets only its target", async () => {
+  reset([tab('a'),tab('b')]);
+  const editor=id=>React.createElement(app.Editor,{key:id,tabId:id,value:'draft',filePath:`/test/${id}.txt`,theme:'light',fontSize:14,active:id==='a',onChange:()=>{}});
+  await render(React.createElement('div',null,editor('a'),editor('b')));
+  const [a,b]=document.querySelectorAll('.cm-scroller');
+  await fontWheel(a);
+  await fontWheel(a);
+  assert.equal(fontSizeFor('a'),16);
+  assert.equal(fontSizeFor('b'),14);
+  await act(async()=>store.getState().setActive('b'));
+  await fontWheel(b,{deltaY:100});
+  assert.equal(fontSizeFor('b'),13);
+  await act(async()=>store.getState().setActive('a'));
+  assert.equal(fontSizeFor('a'),16);
+  assert.equal(store.getState().editorFontSize,14);
+  const resetA=a.closest('.relative').querySelector('.editor-font-zoom-reset');
+  await act(async()=>resetA.click());
+  assert.equal(fontSizeFor('a'),14);
+  assert.equal(fontSizeFor('b'),13);
+  assert.equal(store.getState().tabs[0].zoomFontSize,undefined);
+  assert.equal(b.closest('[style*="--editor-font-size"]').style.getPropertyValue('--editor-font-size'),'13px');
+});
+
+test(2, "closing files clears temporary zoom from reopen history and fresh tabs", async () => {
+  reset([tab('a'),tab('b')]);
+  store.getState().setEditorFontSize(17);
+  store.getState().setEditorZoomFontSize('a',22);
+  store.getState().setEditorZoomFontSize('b',12);
+  store.getState().closeTab('a');
+  assert.ok(store.getState().closedTabsStack.every(tab=>!('zoomFontSize' in tab)));
+  store.getState().openTab('/test/a.txt','draft');
+  const reopened=store.getState().tabs.find(tab=>tab.filePath==='/test/a.txt');
+  assert.equal(fontSizeFor(reopened.id),17);
+  assert.equal(fontSizeFor('b'),12);
+  store.getState().setEditorZoomFontSize(reopened.id,24);
+  store.getState().closeOthers('b');
+  assert.equal(fontSizeFor('b'),12);
+  assert.ok(store.getState().closedTabsStack.every(tab=>!('zoomFontSize' in tab)));
+  store.getState().openTab('/test/a.txt','draft');
+  assert.equal(fontSizeFor(store.getState().activeId),17);
+});
+
+test(3, "font notice settings and Escape work; focused controls pause automatic dismissal", async () => {
+  reset([tab('a')]);store.getState().setEditorFontSize(14);
+  await render(React.createElement(FontZoomEditors));
+  const scroller=document.querySelector('.cm-scroller');
+  await fontWheel(scroller);
+  await act(async()=>document.querySelector('button[aria-label="Font size settings"]').click());
+  assert.equal(store.getState().settingsOpen,true);
+  assert.equal(document.querySelector('.editor-font-zoom-notice'),null);
+  await act(async()=>store.getState().setSettingsOpen(false));
+  await fontWheel(scroller);
+  await act(async()=>button('Reset to 14px').focus());
+  await act(async()=>pause(4100));
+  assert.ok(document.querySelector('.editor-font-zoom-notice'),'focused reset remains available');
+  await act(async()=>document.activeElement.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true})));
+  assert.equal(document.querySelector('.editor-font-zoom-notice'),null);
+  assert.ok(document.activeElement.classList.contains('cm-content'));
+  await fontWheel(scroller);
+  await act(async()=>pause(4100));
+  assert.equal(document.querySelector('.editor-font-zoom-notice'),null,'idle notice dismisses automatically');
+});
+
+test(1, "tab dropdown contains only clipped tabs and follows scrolling, resizing and order", async () => {
+  reset([tab("one", "", "/test/one.md", ""), tab("two", "", "/test/two.md", ""), tab("three", "", "/test/three.md", "")]);
+  const originalRect = HTMLElement.prototype.getBoundingClientRect;
+  const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+  const revealed = [];
+  HTMLElement.prototype.scrollIntoView = function () { revealed.push(this.dataset.tabId); };
+  const originalClientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth");
+  const originalScrollWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollWidth");
+  let width = 180;
+  let scroll = 0;
+  const rectangle = (left, width) => ({ left, right:left+width, top:0, bottom:28, width, height:28, x:left, y:0, toJSON(){} });
+  HTMLElement.prototype.getBoundingClientRect = function () {
+    if (this.classList.contains("tab-strip")) return rectangle(0, width);
+    if (this.dataset.tabId) return rectangle([...this.parentElement.children].indexOf(this)*100-scroll,100);
+    if (this.getAttribute("aria-label")?.startsWith("Hidden tabs")) return rectangle(width,32);
+    return originalRect.call(this);
+  };
+  Object.defineProperty(HTMLElement.prototype, "clientWidth", {configurable:true,get(){return this.classList.contains("tab-strip") ? width : 0;}});
+  Object.defineProperty(HTMLElement.prototype, "scrollWidth", {configurable:true,get(){return this.classList.contains("tab-strip") ? 300 : 0;}});
+  const dropdownPaths = () => [...document.querySelectorAll('#tab-overflow-dropdown div[title]')].map(e=>e.title).filter(Boolean);
+  const refresh = async () => act(async () => { window.dispatchEvent(new window.Event('resize')); await pause(40); });
+  try {
+    await render(React.createElement(app.TabBar));
+    const more = () => document.querySelector('button[aria-label^="Hidden tabs"]');
+    assert.equal(more().getAttribute("aria-label"), "Hidden tabs (2)");
+    await act(async () => more().click());
+    assert.deepEqual(dropdownPaths(), ["/test/two.md", "/test/three.md"]);
+    await act(async () => { setInput(document.querySelector('#tab-overflow-dropdown input'), "one"); });
+    assert.deepEqual(dropdownPaths(), [], "visible tabs cannot reappear through search");
+    await act(async () => { setInput(document.querySelector('#tab-overflow-dropdown input'), ""); });
+    scroll = 120;
+    await act(async () => { document.querySelector('.tab-strip').dispatchEvent(new window.Event('scroll')); await pause(40); });
+    assert.deepEqual(dropdownPaths(), ["/test/one.md", "/test/two.md"]);
+    revealed.length = 0;
+    await act(async () => document.querySelector('#tab-overflow-dropdown div[title="/test/one.md"]').click());
+    assert.deepEqual(revealed, ["one"], "picking the already active hidden tab still reveals it");
+    await act(async () => more().click());
+    width = 280; // All tabs fit once the 32px overflow button is removed.
+    await refresh();
+    assert.equal(more(), null);
+    assert.equal(document.getElementById('tab-overflow-dropdown'), null);
+    width = 180; scroll = 0;
+    await refresh();
+    await act(async () => store.setState({tabs:[...store.getState().tabs].reverse()}));
+    await act(async () => more().click());
+    assert.deepEqual(dropdownPaths(), ["/test/two.md", "/test/one.md"]);
+  } finally {
+    HTMLElement.prototype.getBoundingClientRect = originalRect;
+    HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+    if(originalClientWidth) Object.defineProperty(HTMLElement.prototype,"clientWidth",originalClientWidth); else delete HTMLElement.prototype.clientWidth;
+    if(originalScrollWidth) Object.defineProperty(HTMLElement.prototype,"scrollWidth",originalScrollWidth); else delete HTMLElement.prototype.scrollWidth;
+  }
+});
+
+function treeButton(label) {
+  const button = document.querySelector(`.filetree-toolbar button[aria-label="${label}"]`);
+  assert.ok(button, label);
+  return button;
+}
+
+function treeFixture() {
+  return {
+    "/work": [{ name: "src", path: "/work/src", is_dir: true }],
+    "/work/src": [{ name: "中文", path: "/work/src/中文", is_dir: true }],
+    "/work/src/中文": [{ name: "note.md", path: "/work/src/中文/note.md", is_dir: false }],
+    "/other": [],
+  };
+}
+
+test(1, "tree controls expand all depths, collapse descendants, and reveal without reopening the file", async () => {
+  reset([tab("a", "unsaved", "/work/src/中文/note.md")]);
+  store.setState({ workspaces: ["/work", "/other"], expandedDirs: {} });
+  const fixture = treeFixture();
+  const calls = [];
+  globalThis.__invoke = async (cmd, args) => { calls.push(cmd); return fixture[args.path]; };
+  await render(React.createElement(app.FileTree));
+  await act(async () => { treeButton("Expand all").click(); await flush(); });
+  assert.equal(document.querySelectorAll('.workspace-toggle[aria-expanded="true"]').length, 2);
+  assert.ok(document.querySelector('[data-file-path="/work/src/中文/note.md"]'));
+  await act(async () => treeButton("Collapse all").click());
+  assert.ok(Object.values(store.getState().expandedDirs).every(v => v === false));
+  assert.equal(document.querySelectorAll(".filetree-row").length, 0);
+  await act(async () => { treeButton("Locate current file").click(); await flush(); });
+  await act(flush);
+  assert.equal(document.activeElement.dataset.filePath, "/work/src/中文/note.md");
+  assert.equal(store.getState().expandedDirs["/other"], false);
+  assert.equal(store.getState().tabs[0].content, "unsaved");
+  assert.ok(calls.every(cmd => cmd === "list_dir"));
+});
+
+test(2, "tree locate opens external file location without adding roots and handles Windows path spelling", async () => {
+  reset([tab("a", "draft", "/workspace-sibling/a.md")]);
+  store.setState({ workspaces: ["/workspace"], expandedDirs: {} });
+  globalThis.__invoke = async () => [];
+  await render(React.createElement(app.FileTree));
+  const revealed=[];
+  globalThis.__reveal=async path=>revealed.push(path);
+  assert.equal(treeButton("Locate current file").disabled, false);
+  await act(async () => { treeButton("Locate current file").click(); await flush(); });
+  assert.deepEqual(revealed,["/workspace-sibling/a.md"]);
+  assert.deepEqual(store.getState().workspaces,["/workspace"]);
+  assert.equal(store.getState().tabs[0].content,"draft");
+  await act(async () => store.setState({ workspaces: [] }));
+  assert.equal(treeButton("Locate current file").disabled,false);
+  assert.equal(treeButton("Expand all").disabled,true);
+  await act(async () => { treeButton("Locate current file").click(); await flush(); });
+  assert.equal(revealed.length,2);
+  assert.deepEqual(store.getState().workspaces,[]);
+  await act(async () => store.setState({tabs:[tab("a","draft",null)]}));
+  assert.equal(treeButton("Locate current file").disabled,true);
+  const rootPath = "C:/Work";
+  await act(async () => {
+    globalThis.__invoke = async (_, args) => args.path === rootPath
+      ? [{ name: "Src", path: "C:/Work/Src", is_dir: true }]
+      : [{ name: "a.md", path: "C:/Work/Src/a.md", is_dir: false }];
+    store.setState({ tabs: [tab("a", "draft", "c:/work/src/a.md")], workspaces: [rootPath], expandedDirs: { [rootPath]: false } });
+  });
+  await act(async () => { treeButton("Locate current file").click(); await flush(); });
+  await act(flush);
+  assert.equal(document.activeElement.dataset.filePath, "C:/Work/Src/a.md");
+  assert.equal(revealed.length,2,"existing workspace still locates in the tree");
+});
+
+test(3, "external locate failures are recoverable and switching files uses the new path", async () => {
+  reset([tab('a','draft','/generated/中文目录/a.md'),tab('b','second','C:\\Generated\\b.txt')]);
+  store.setState({workspaces:[]});
+  globalThis.__reveal=async()=>{throw new Error('Permission denied');};
+  await render(React.createElement(React.Fragment,null,React.createElement(app.FileTree),React.createElement(app.ConfirmDialog)));
+  await act(async()=>{treeButton('Locate current file').click();await flush();});
+  assert.match(document.querySelector('[role="dialog"]').textContent,/Cannot open location: Permission denied/);
+  await click('Close');
+  const revealed=[];
+  globalThis.__reveal=async path=>revealed.push(path);
+  await act(async()=>store.getState().setActive('b'));
+  await act(async()=>{treeButton('Locate current file').click();await flush();});
+  assert.deepEqual(revealed,['C:\\Generated\\b.txt']);
+  assert.deepEqual(store.getState().workspaces,[]);
+  assert.equal(document.querySelector('[role="dialog"]'),null);
+});
+
+test(3, "collapse cancels pending expansion and delayed results never reopen folders", async () => {
+  reset();
+  store.setState({ workspaces: ["/work"], expandedDirs: { "/work": false } });
+  const waiting = deferred();
+  globalThis.__invoke = () => waiting.promise;
+  await render(React.createElement(app.FileTree));
+  await act(async () => treeButton("Expand all").click());
+  assert.equal(treeButton("Expanding…").disabled, true);
+  await act(async () => treeButton("Collapse all").click());
+  await act(async () => { waiting.resolve([{ name: "src", path: "/work/src", is_dir: true }]); await flush(); });
+  assert.deepEqual(store.getState().expandedDirs, { "/work": false });
+  assert.equal(treeButton("Expand all").disabled, false);
+});
+
+test(4, "tree directory failure keeps readable roots usable and missing locate is recoverable", async () => {
+  reset([tab("a", "draft", "/work/missing.md")]);
+  store.setState({ workspaces: ["/denied", "/work"], expandedDirs: { "/denied": false, "/work": false } });
+  globalThis.__invoke = async (_, args) => {
+    if (args.path === "/denied") throw new Error("Permission denied");
+    return [];
+  };
+  await render(React.createElement(app.FileTree));
+  await act(async () => { treeButton("Expand all").click(); await flush(); });
+  assert.match(document.querySelector(".filetree-path-error").textContent, /Some folders/);
+  assert.equal(store.getState().expandedDirs["/work"], true);
+  await act(async () => { treeButton("Locate current file").click(); await flush(); });
+  assert.match(document.querySelector(".filetree-path-error").textContent, /Cannot locate/);
+  await act(async () => treeButton("Collapse all").click());
+  assert.equal(document.querySelectorAll(".filetree-row").length, 0);
 });
 
 test(1, "HTML reading renders current unsaved content and preserves document styles", async () => {
@@ -1879,12 +2294,119 @@ test(1,'XMind transparent topics have a full hit area and multi-selection format
   await selectR3('r3a1');await selectR3('r3a2',true);
   const original=store.getState().tabs[0].content;
   await click('No fill');
-  assert.deepEqual(xmindSheets()[0].rootTopic.children.attached[0].children.attached.map(n=>n.style.properties['svg:fill']),['#EEEEEE','#EEEEEE']);
+  assert.deepEqual(xmindSheets()[0].rootTopic.children.attached[0].children.attached.map(n=>n.style.properties['fill-pattern']),['solid','solid']);
+  for(const id of ['r3a1','r3a2']) assert.ok([...document.querySelector(`[data-topic="${id}"]`).children].some(el=>el.getAttribute('fill')==='#EEEEEE'),'enabling fill has a visible fallback without overwriting inherited colors');
   await click('Undo');assert.equal(store.getState().tabs[0].content,original);
   await click('Bold');
   const leaves=xmindSheets()[0].rootTopic.children.attached[0].children.attached;
   assert.deepEqual(leaves.map(n=>n.style.properties['fo:font-weight']),['bold','bold']);
   await click('Undo');assert.equal(store.getState().tabs[0].content,original);
+});
+test(1,'XMind mixed styles show no first-topic value and batch formatting is one undo',async()=>{
+  const sheets=[{id:'mixed-sheet',title:'Mixed',rootTopic:{id:'mixed-root',title:'Root',children:{attached:[
+    {id:'mix-a',title:'First',style:{properties:{'fo:font-size':'18pt','fo:font-weight':'bold','svg:fill':'#FF0000','shape-class':'org.xmind.topicShape.rect'}}},
+    {id:'mix-b',title:'Second',style:{properties:{'fo:font-size':'26pt','fo:font-weight':'normal','fill-pattern':'none','shape-class':'org.xmind.topicShape.ellipse'}}}
+  ]}}}];
+  await mountXmind(true,zipSync({'content.json':strToU8(JSON.stringify(sheets))}));
+  await selectR3('mix-a');await selectR3('mix-b',true);
+  assert.equal(document.querySelector('input[type="number"]').value,'');
+  assert.equal(document.querySelector('input[type="number"]').placeholder,'Mixed');
+  assert.equal(document.querySelectorAll('.xm-color-value[data-mixed]').length,1);
+  assert.equal(button('Bold').getAttribute('aria-pressed'),'mixed');
+  assert.equal(button('No fill').getAttribute('aria-pressed'),'mixed');
+  assert.equal(document.querySelector('textarea[aria-label="Topic text"]'),null);
+  const original=store.getState().tabs[0].content;
+  await click('Bold');
+  assert.deepEqual(xmindSheets()[0].rootTopic.children.attached.map(t=>t.style.properties['fo:font-weight']),['bold','bold']);
+  await click('Undo');assert.equal(store.getState().tabs[0].content,original);
+  await click('No fill');
+  assert.deepEqual(xmindSheets()[0].rootTopic.children.attached.map(t=>t.style.properties['fill-pattern']),['none','none']);
+  await click('Undo');assert.equal(store.getState().tabs[0].content,original);
+  await act(async()=>setInput(document.querySelector('input[type="number"]'),'32'));
+  assert.deepEqual(xmindSheets()[0].rootTopic.children.attached.map(t=>t.style.properties['fo:font-size']),['32pt','32pt']);
+  await click('Undo');assert.equal(store.getState().tabs[0].content,original);
+});
+test(2,'XMind inherited, pill and unknown shapes keep their actual inspector selection',async()=>{
+  const sheets=[{id:'shape-sheet',title:'Shapes',theme:{mainTopic:{properties:{'shape-class':'org.xmind.topicShape.ellipse'}}},rootTopic:{id:'shape-root',title:'Root',children:{attached:[
+    {id:'shape-inherit',title:'Inherited'},
+    {id:'shape-pill',title:'Pill',style:{properties:{'shape-class':'org.xmind.topicShape.pill'}}},
+    {id:'shape-unknown',title:'Unknown',style:{properties:{'shape-class':'org.xmind.topicShape.cloud'}}}
+  ]}}}];
+  await mountXmind(true,zipSync({'content.json':strToU8(JSON.stringify(sheets))}));
+  for(const [id,shape] of [['shape-inherit','ellipse'],['shape-pill','pill'],['shape-unknown','cloud']]) {
+    await selectR3(id);
+    const select=[...document.querySelectorAll('.xm-field select')].find(el=>el.parentElement.textContent.includes('Shape'));
+    assert.equal(select.value,`org.xmind.topicShape.${shape}`);
+  }
+  assert.equal(button('Undo').disabled,true,'reading an unknown shape never changes the archive');
+});
+test(3,'XMind composing Enter and Escape leave topic and relationship drafts open',async()=>{
+  await mountXmind(true,interactionArchive());await selectR3('r3a');await keyR3(' ');
+  const before=store.getState().tabs[0].content;
+  const input=document.querySelector('textarea[aria-label="Edit topic text"]');
+  await act(async()=>setInput(input,'中文候选\nSecond line'));
+  for(const extra of [{isComposing:true},{keyCode:229}]) for(const key of ['Enter','Escape']) {
+    await act(async()=>input.dispatchEvent(new window.KeyboardEvent('keydown',{key,bubbles:true,cancelable:true,...extra})));
+    assert.equal(document.querySelector('textarea[aria-label="Edit topic text"]'),input);
+    assert.equal(store.getState().tabs[0].content,before);
+  }
+  await act(async()=>input.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true})));
+  assert.equal(xmindSheets()[0].rootTopic.children.attached[0].title,'中文候选\nSecond line');
+  await selectR3('r3a');await selectR3('r3b',true);await click('Relationship');
+  const relation=document.querySelector('[data-relationship]');
+  await act(async()=>relation.dispatchEvent(new window.MouseEvent('dblclick',{bubbles:true})));
+  const relationInput=document.querySelector('input[aria-label="Edit relationship text"]');assert.ok(relationInput);
+  await act(async()=>setInput(relationInput,'联系候选'));
+  const pending=store.getState().tabs[0].content;
+  for(const extra of [{isComposing:true},{keyCode:229}]) for(const key of ['Enter','Escape']) {
+    await act(async()=>relationInput.dispatchEvent(new window.KeyboardEvent('keydown',{key,bubbles:true,cancelable:true,...extra})));
+    assert.equal(document.querySelector('input[aria-label="Edit relationship text"]'),relationInput);
+    assert.equal(store.getState().tabs[0].content,pending);
+  }
+  await act(async()=>relationInput.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true})));
+  assert.equal(store.getState().tabs[0].content,pending);
+});
+test(2,'XMind saved shape, text and group strokes render without losing archive fields',async()=>{
+  const sheets=[{id:'style-svg',title:'Style',rootTopic:{id:'style-root',title:'Title',children:{attached:[
+    {id:'style-a',title:'Text\n短',style:{properties:{'shape-class':'org.xmind.topicShape.doubleunderline','svg:fill-opacity':'0.25','border-line-pattern':'dash-dot','border-line-width':'3pt','fo:text-align':'right','fo:text-decoration':'line-through'}}},
+    {id:'style-b',title:'Circle',style:{properties:{'shape-class':'org.xmind.topicShape.circle.compact'}}}
+  ]},boundaries:[{id:'style-boundary',range:'(0,1)',title:'Group',style:{properties:{'shape-class':'org.xmind.boundaryShape.rect','line-width':'5pt','line-pattern':'dash-dot','fill-pattern':'none','svg:fill':'#123456','vendor-preserved':'yes'}}}]}}];
+  await mountXmind(true,zipSync({'content.json':strToU8(JSON.stringify(sheets))}));
+  const topic=document.querySelector('[data-topic="style-a"]');
+  const text=[...topic.children].find(el=>el.tagName.toLowerCase()==='text');
+  assert.equal(text.getAttribute('text-anchor'),'end');assert.equal(text.getAttribute('text-decoration'),'line-through');
+  const underline=[...topic.children].find(el=>el.tagName.toLowerCase()==='path');assert.equal(underline.getAttribute('stroke-width'),'3');assert.equal(underline.getAttribute('stroke-dasharray'),'6 3 1 3');
+  assert.equal((underline.getAttribute('d').match(/M/g)||[]).length,2);
+  const circle=document.querySelector('[data-topic="style-b"] > ellipse');assert.equal(circle.getAttribute('rx'),circle.getAttribute('ry'));
+  const group=document.querySelector('[data-group="style-boundary"] rect[pointer-events="none"]');
+  assert.equal(group.getAttribute('fill'),'none');assert.equal(group.getAttribute('stroke-width'),'5');assert.equal(group.getAttribute('rx'),'0');assert.equal(group.getAttribute('stroke-dasharray'),'6 3 1 3');
+  await selectR3('style-a');await click('Bold');await act(async()=>app.saveFile());
+  assert.deepEqual(xmindSheets()[0].rootTopic.boundaries,sheets[0].rootTopic.boundaries);
+});
+test(3,'XMind group style controls round-trip and undo without changing member topics',async()=>{
+  await mountXmind(true,interactionArchive());await selectR3('r3a1');await selectR3('r3a2',true);await click('Boundary');
+  const group=document.querySelector('[data-group]');await act(async()=>group.dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true,button:0})));
+  const before=store.getState().tabs[0].content;
+  const input=document.querySelector('input[type="number"]');await act(async()=>setInput(input,'5'));
+  const select=[...document.querySelectorAll('.xm-field select')].find(el=>el.parentElement.textContent.includes('Line pattern'));
+  await act(async()=>{select.value='dash-dot';select.dispatchEvent(new window.Event('change',{bubbles:true}));});
+  await click('No fill');await act(async()=>app.saveFile());
+  const owner=xmindSheets()[0].rootTopic.children.attached[0];
+  assert.equal(owner.boundaries[0].style.properties['line-width'],'5');assert.equal(owner.boundaries[0].style.properties['line-pattern'],'dash-dot');assert.equal(owner.boundaries[0].style.properties['fill-pattern'],'none');
+  assert.deepEqual(owner.children.attached.map(n=>n.id),['r3a1','r3a2']);
+  await click('Undo');await click('Undo');await click('Undo');assert.equal(store.getState().tabs[0].content,before);
+});
+test(3,'XMind removing and restoring a batch fill preserves individual saved colors',async()=>{
+  const sheets=[{id:'fill-batch',title:'Fill',rootTopic:{id:'fill-root',title:'Root',children:{attached:[
+    {id:'fill-a',title:'A',style:{properties:{'svg:fill':'#11223388'}}},
+    {id:'fill-b',title:'B',style:{properties:{'svg:fill':'#AABBCC'}}}
+  ]}}}];
+  await mountXmind(true,zipSync({'content.json':strToU8(JSON.stringify(sheets))}));
+  await selectR3('fill-a');assert.equal(document.querySelector('input[aria-label="Fill"]').value,'#112233');
+  await selectR3('fill-b',true);await click('No fill');await click('No fill');
+  const children=xmindSheets()[0].rootTopic.children.attached;
+  assert.deepEqual(children.map(n=>n.style.properties['svg:fill']),['#11223388','#AABBCC']);
+  assert.deepEqual(children.map(n=>n.style.properties['fill-pattern']),['solid','solid']);
 });
 test(3,'XMind native topic shortcuts edit text, reorder, add a parent and reveal the root',async()=>{
   await mountXmind(true,interactionArchive());await selectR3('r3b');

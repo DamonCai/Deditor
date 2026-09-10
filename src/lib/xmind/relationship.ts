@@ -1,3 +1,4 @@
+import { shapeName, shapePolygon } from "./shapes";
 import type { Relationship, Sheet } from "./document";
 import type { Box, SceneNode } from "./scene";
 
@@ -14,16 +15,49 @@ export function topicAnchor(node: SceneNode, toward: Point): Point {
   const c = center(node), dx = toward.x - c.x, dy = toward.y - c.y;
   if (!dx && !dy) return { x: node.x + node.width, y: c.y };
   const rx = node.width / 2, ry = node.height / 2;
-  const shape = node.shape.toLowerCase();
-  const ratio = /ellipse|oval/.test(shape) ? 1 / Math.hypot(dx / rx, dy / ry)
-    : shape.includes("diamond") ? 1 / (Math.abs(dx) / rx + Math.abs(dy) / ry)
+  const shape = shapeName(node.shape);
+  const polygon = shapePolygon(shape,node.width,node.height);
+  let ratio: number;
+  if (polygon) {
+    ratio = Infinity;
+    for (const [i,a] of polygon.entries()) {
+      const b=polygon[(i+1)%polygon.length], ex=b[0]-a[0], ey=b[1]-a[1];
+      const ax=a[0]-rx, ay=a[1]-ry, determinant=dx*ey-dy*ex;
+      if (Math.abs(determinant)<1e-10) continue;
+      const t=(ax*ey-ay*ex)/determinant, u=(ax*dy-ay*dx)/determinant;
+      if(t>=0 && u>=0 && u<=1) ratio=Math.min(ratio,t);
+    }
+    if(!Number.isFinite(ratio)) ratio=1/Math.max(Math.abs(dx)/rx,Math.abs(dy)/ry);
+  } else {
+    ratio = /ellipse|oval|^circle/.test(shape) ? 1 / Math.hypot(dx / rx, dy / ry)
       : 1 / Math.max(Math.abs(dx) / rx, Math.abs(dy) / ry);
+    if (shape === "pill" || shape.includes("round") || shape === "ellipticrectangle") {
+      const radius = Math.min(rx, ry, shape === "pill" ? ry : 8);
+      const inside = (t: number) => {
+        const x = Math.abs(dx * t), y = Math.abs(dy * t);
+        if (shape === "ellipticrectangle")
+          return y <= ry - 0.8 * node.height * (x / node.width) ** 2;
+        return Math.hypot(Math.max(0, x - rx + radius), Math.max(0, y - ry + radius)) <= radius;
+      };
+      // These outlines are convex. Bisect the centre-to-box ray to find the
+      // actual curved edge instead of leaving an arrow in an empty corner.
+      let lo = 0, hi = ratio;
+      for (let i = 0; i < 48; i++) {
+        const mid = (lo + hi) / 2;
+        if (inside(mid)) lo = mid; else hi = mid;
+      }
+      ratio = lo;
+    }
+  }
   return { x: c.x + dx * ratio, y: c.y + dy * ratio };
 }
 
 export function relationshipGeometry(sheet: Sheet, relation: Relationship, a: SceneNode, b: SceneNode) {
   const ca = center(a), cb = center(b);
-  const properties = { ...sheet.theme?.relationship?.properties, ...relation.style?.properties };
+  const defined = (p?: Record<string, string>) => Object.fromEntries(
+    Object.entries(p ?? {}).filter(([, value]) => value !== "inherited"),
+  );
+  const properties = { ...defined(sheet.theme?.relationship?.properties), ...defined(relation.style?.properties) };
   const shape = (properties["shape-class"] ?? "curve").toLowerCase();
   const controls = relation.controlPoints as Record<string, { x?: number; y?: number; amount?: number; angle?: number }> | undefined;
   // Current XMind's Cartesian control vectors are relative to each topic's

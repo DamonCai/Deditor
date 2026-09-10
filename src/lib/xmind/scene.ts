@@ -1,3 +1,4 @@
+import { shapeSize, shapeName, TOPIC_SHAPES } from "./shapes";
 import { relationshipGeometry } from "./relationship";
 import { topicIndicators, type TopicIndicator } from "./indicators";
 import {
@@ -27,9 +28,11 @@ export interface SceneNode extends Box {
   labelY: number;
   indicatorY: number;
   titleX: number;
+  titleAnchor: "start" | "middle" | "end";
   indicatorPositions: { x: number; y: number }[];
   fontSize: number;
   fill: string;
+  fillOpacity: number;
   color: string;
   stroke: string;
   lineColor: string;
@@ -86,6 +89,9 @@ export const STRUCTURES = [
   ["org.xmind.ui.org-chart.up", "up"],
   ["org.xmind.ui.brace.right", "brace"],
   ["org.xmind.ui.timeline.horizontal", "timeline"],
+  ["org.xmind.ui.timeline.horizontal.rtl", "timelineLeft"],
+  ["org.xmind.ui.timeline.through.vertical", "timelineVertical"],
+  ["org.xmind.ui.timeline.sided.horizontal", "timelineSided"],
   ["org.xmind.ui.fishbone.leftHeaded", "fishbone"],
   ["org.xmind.ui.fishbone.rightHeaded", "fishboneRight"],
 ] as const;
@@ -107,6 +113,24 @@ const defined = (p?: Properties): Properties =>
   Object.fromEntries(
     Object.entries(p ?? {}).filter(([, v]) => v !== "inherited"),
   );
+function automaticTextColor(fill: string): string {
+  const hex = /^#([\da-f]{6})/i.exec(fill)?.[1];
+  if (!hex) return "#000000";
+  const rgb = [0, 2, 4].map(index => parseInt(hex.slice(index, index + 2), 16) / 255);
+  const [r, g, b] = rgb.map(c => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.179 ? "#000000" : "#FFFFFF";
+}
+/** Native level styles keep hue/saturation and use 20% HSL lightness. */
+function levelTextColor(fill: string): string {
+  const hex = /^#([\da-f]{6})$/i.exec(fill)?.[1];
+  if (!hex) return automaticTextColor(fill);
+  const rgb = [0, 2, 4].map(index => parseInt(hex.slice(index, index + 2), 16) / 255);
+  const min = Math.min(...rgb), max = Math.max(...rgb), delta = max - min;
+  if (!delta) return "#333333";
+  const saturation = delta / (1 - Math.abs(max + min - 1));
+  const low = 0.2 * (1 - saturation), span = 0.4 * saturation;
+  return "#" + rgb.map(value => Math.floor((low + (value - min) / delta * span) * 255 + 1e-8).toString(16).padStart(2,"0")).join("").toUpperCase();
+}
 export function styleFor(
   sheet: Sheet,
   topic: Topic,
@@ -125,21 +149,25 @@ export function styleFor(
       .filter(Boolean) ??
     [theme.centralTopic?.properties?.["line-color"] ?? "#141414"];
   const branchColor = colors[branch % colors.length] ?? "#141414";
+  const tier = theme[kind ?? (depth === 0 ? "centralTopic" : depth === 1 ? "mainTopic" : "subTopic")]?.properties;
+  const level = !kind && depth > 1 ? theme[`level${depth + 1}`]?.properties : undefined;
+  const themeProperties = { ...tier, ...level };
+  const autoFill = themeProperties["svg:fill"] === "inherited";
+  const autoText = themeProperties["fo:color"] === "inherited";
   const p: Properties = {
     "fo:font-weight": kind === "summaryTopic" ? "400" : kind === "floatingTopic" ? "500" : depth === 0 ? "800" : depth === 1 ? "500" : "400",
     ...connection,
-    ...defined(
-      theme[
-        kind ??
-          (depth === 0
-            ? "centralTopic"
-            : depth === 1
-              ? "mainTopic"
-              : "subTopic")
-      ]?.properties,
-    ),
+    ...(autoFill && depth > 0 ? { "svg:fill": connection?.["line-color"] ?? branchColor,
+      ...(depth > 1 && level ? { "svg:fill-opacity": "0.2" } : {}) } : {}),
+    ...defined(themeProperties),
     ...defined(topic.style?.properties),
   };
+  const fill = p["fill-pattern"] === "none" ? "none" : p["svg:fill"] ??
+    (kind === "floatingTopic" || kind === "summaryTopic" ? "#00897B" : kind === "calloutTopic" ? "#EEEEEE" : depth === 0 ? "#3949AB" : depth === 1 || p["fill-pattern"] === "solid" ? "#EEEEEE" : "none");
+  const color = p["fo:color"] ?? (autoText
+    ? level && autoFill ? levelTextColor(p["svg:fill"] ?? branchColor)
+      : automaticTextColor(fill === "none" ? sheet.theme?.map?.properties?.["svg:fill"] ?? "#ffffff" : fill)
+    : depth === 0 || kind === "floatingTopic" || kind === "summaryTopic" ? "#FFFFFF" : "#333333");
   return {
     properties: p,
     fontSize: Math.max(
@@ -149,9 +177,9 @@ export function styleFor(
         number(p["fo:font-size"], kind === "floatingTopic" || kind === "summaryTopic" ? 14 : depth === 0 ? 30 : depth === 1 ? 18 : 14),
       ),
     ),
-    fill: p["fill-pattern"] === "none" ? "none" : p["svg:fill"] ??
-      (kind === "floatingTopic" || kind === "summaryTopic" ? "#00897B" : kind === "calloutTopic" ? "#EEEEEE" : depth === 0 ? "#3949AB" : depth === 1 ? "#EEEEEE" : "none"),
-    color: p["fo:color"] ?? (depth === 0 || kind === "floatingTopic" || kind === "summaryTopic" ? "#FFFFFF" : "#333333"),
+    fill,
+    fillOpacity: Math.max(0, Math.min(1, number(p["svg:fill-opacity"], 1))),
+    color,
     stroke: p["border-line-color"] ?? (kind === "calloutTopic" ? "none" : p["line-color"] ?? branchColor),
     lineColor: p["line-color"] ?? branchColor,
     shape: p["shape-class"] ?? (kind === "calloutTopic" || kind === "floatingTopic" || kind === "summaryTopic" || depth < 2 ? "roundedRect" : "underline"),
@@ -277,6 +305,8 @@ export function buildScene(
   ): Fragment {
     const style = styleFor(sheet, topic, depth, branch, kind, connection),
       p = style.properties;
+    if (![...TOPIC_SHAPES.map(shapeName), "oval"].includes(shapeName(style.shape)))
+      warnings.add(style.shape);
     const widthHint = number(
       p["fo:max-width"] ?? p["fo:width"],
       depth === 0 ? 260 : 210,
@@ -327,11 +357,7 @@ export function buildScene(
     const paddedWidth = Math.max(depth === 0 ? 100 : 50,
       contentWidth + (kind === "floatingTopic" ? 26 : depth === 0 ? 64 : depth === 1 ? 40 : 12));
     const paddedHeight = contentHeight + (depth === 0 ? 36 : depth === 1 && !kind ? 22 : 18);
-    const shape = style.shape.toLowerCase();
-    // Inscribe the padded content rectangle in curved / tapered shapes.
-    const factor = shape.includes("diamond") ? 2 : /ellipse|oval/.test(shape) ? Math.SQRT2 : 1;
-    const width = /pill/.test(shape) ? paddedWidth + paddedHeight : paddedWidth * factor;
-    const height = paddedHeight * factor;
+    const { width, height } = shapeSize(style.shape, paddedWidth, paddedHeight);
     const content = { x: (width - contentWidth) / 2, y: (height - contentHeight) / 2,
       width: contentWidth, height: contentHeight };
     const labelY = content.y + pictureHeight + titleHeight + 6;
@@ -343,11 +369,16 @@ export function buildScene(
     }
     const indicatorY = content.y + pictureHeight + titleHeight +
       (labels.length ? 4 + labelsHeight : 0) + 4;
-    const titleX = (width - inlineWidth) / 2;
+    const align = p["fo:text-align"];
+    const titleAnchor = align === "left" || align === "start" ? "start"
+      : align === "right" || align === "end" ? "end" : "middle";
+    const titleX = titleAnchor === "start" ? content.x
+      : titleAnchor === "end" ? content.x + content.width - inlineWidth : (width - inlineWidth) / 2;
+    const titleRight = titleX + (titleAnchor === "start" ? titleWidth : titleAnchor === "middle" ? titleWidth / 2 : 0);
     let inlineIndex = 0, rowIndex = 0;
     const indicatorPositions = indicators.map(icon => {
       if (icon.kind === "notes" || icon.kind === "link") return {
-        x: titleX + titleWidth / 2 + 6 + inlineIndex++ * 20,
+        x: titleRight + 6 + inlineIndex++ * 20,
         y: content.y + pictureHeight + (titleHeight - 16) / 2,
       };
       const index = rowIndex++, row = Math.floor(index / indicatorColumns);
@@ -363,7 +394,7 @@ export function buildScene(
       detached,
       direction: inherited,
       lines,
-      content, imageHeight, labelLines, labels, indicators, indicatorColumns, labelY, indicatorY, titleX, indicatorPositions,
+      content, imageHeight, labelLines, labels, indicators, indicatorColumns, labelY, indicatorY, titleX, titleAnchor, indicatorPositions,
       ...style,
       x: -width / 2,
       y: -height / 2,
@@ -384,7 +415,7 @@ export function buildScene(
     if (
       sc &&
       (!/map|logic|org-chart|tree|brace|timeline|fishbone/.test(sc) ||
-        (/timeline/.test(sc) && sc !== "org.xmind.ui.timeline.horizontal"))
+        (/timeline/.test(sc) && !STRUCTURES.some(([value]) => value === sc)))
     )
       warnings.add(sc);
     const brace = topic.structureClass ? sc.includes("brace") : inheritedBrace;
@@ -570,10 +601,37 @@ export function buildScene(
           else if (edge.direction === "left") edge.direction = "right";
         }
       }
-    } else if (direction === "timeline" && sc === "org.xmind.ui.timeline.horizontal") {
+    } else if (sc === "org.xmind.ui.timeline.through.vertical") {
+      // Native through-vertical: the milestones share the central axis and
+      // their ordinary logic subtrees alternate right and left.
+      node.direction = "down";
+      let cursor = height / 2 + 100;
+      let previous = node;
+      children.forEach((child, i) => {
+        const part = layout(child, depth + 1, depth === 0 ? i : branch, i % 2 ? "left" : "right", topic.id,
+          false, undefined, depth > 0 ? connectionStyle(node) : undefined);
+        const milestone = part.nodes[0];
+        shift(part, -milestone.x - milestone.width / 2, cursor - milestone.y);
+        let clearance = 0;
+        for (const next of [...part.nodes, ...part.groups.map(groupBounds)]) {
+          for (const prior of [...fragment.nodes, ...fragment.groups.map(groupBounds)]) {
+            if (next.x < prior.x + prior.width && prior.x < next.x + next.width)
+              clearance = Math.max(clearance, prior.y + prior.height + 24 - next.y);
+          }
+        }
+        if (clearance > 0) shift(part, 0, clearance);
+        fragment.nodes.push(...part.nodes);
+        fragment.groups.push(...part.groups);
+        fragment.edges.push({ from: topic.id, to: child.id, direction: "down", brace: false,
+          points: [{ x: 0, y: previous.y + previous.height }, { x: 0, y: milestone.y }] }, ...part.edges);
+        previous = milestone;
+        cursor = milestone.y + milestone.height + 100;
+      });
+    } else if (direction === "timeline" && ["org.xmind.ui.timeline.horizontal", "org.xmind.ui.timeline.horizontal.rtl", "org.xmind.ui.timeline.sided.horizontal"].includes(sc)) {
       // Milestones sit on the axis. Their details alternate above and below,
       // with a shared vertical stem beside a compact stack of rightward topics.
-      let cursor = width / 2 + 100;
+      const sided = sc === "org.xmind.ui.timeline.sided.horizontal";
+      let cursor = width / 2 + (sided ? 24 : 100);
       let previous = node;
       children.forEach((child, i) => {
         const branchIndex = depth === 0 ? i : branch;
@@ -582,7 +640,7 @@ export function buildScene(
         const part = layout(bare, depth + 1, branchIndex, "right", topic.id);
         const milestone = part.nodes[0];
         milestone.topic = child;
-        shift(part, cursor - milestone.x, -milestone.y - milestone.height / 2);
+        shift(part, cursor - milestone.x, -milestone.y + (sided ? above ? -24 - milestone.height : 24 : -milestone.height / 2));
         if (!child.structureClass) {
           milestone.direction = above ? "up" : "down";
           const details = (folded.has(child.id) ? [] : child.children?.attached ?? [])
@@ -619,10 +677,32 @@ export function buildScene(
         fragment.nodes.push(...part.nodes);
         fragment.groups.push(...part.groups);
         fragment.edges.push({ from: topic.id, to: child.id, direction: "timeline", brace: false,
-          points: [{ x: previous.x + previous.width, y: 0 }, { x: milestone.x, y: 0 }] }, ...part.edges);
+          points: sided
+            ? [{ x: milestone.x + milestone.width / 2, y: 0 }, { x: milestone.x + milestone.width / 2, y: above ? milestone.y + milestone.height : milestone.y }]
+            : [{ x: previous.x + previous.width, y: 0 }, { x: milestone.x, y: 0 }],
+          trunk: sided ? [{ x: i ? previous.x + previous.width / 2 : width / 2, y: 0 },
+            { x: milestone.x + (i === children.length - 1 ? milestone.width : milestone.width / 2), y: 0 }] : undefined }, ...part.edges);
         previous = milestone;
-        cursor = milestone.x + milestone.width + 100;
+        cursor = milestone.x + (sided ? milestone.width / 2 + 36 : milestone.width + 100);
       });
+      if (sc.endsWith(".rtl")) {
+        node.direction = "left";
+        for (const n of fragment.nodes.slice(1)) {
+          n.x = -n.x - n.width;
+          if (n.direction === "right") n.direction = "left";
+          else if (n.direction === "left") n.direction = "right";
+        }
+        for (const g of fragment.groups) {
+          g.x = -g.x - g.width;
+          if (g.side === "right") g.side = "left";
+          else if (g.side === "left") g.side = "right";
+        }
+        for (const edge of fragment.edges) {
+          for (const point of [...(edge.points ?? []), ...(edge.trunk ?? [])]) point.x = -point.x;
+          if (edge.direction === "right") edge.direction = "left";
+          else if (edge.direction === "left") edge.direction = "right";
+        }
+      }
     } else if (direction === "timeline") {
       let cursor = width / 2 + 90;
       children.forEach((child, i) => {
@@ -773,6 +853,12 @@ export function buildScene(
     }
   }
   const groups = initial.groups;
+  for (const group of groups) {
+    const shape = group.properties["shape-class"];
+    const name = shape?.split(".").pop()?.toLowerCase();
+    if (name && !(group.summary ? ["round"] : ["rect", "roundedrect"]).includes(name))
+      warnings.add(shape!);
+  }
   const relationBoxes: Box[] = [];
   const nodeMap = new Map(initial.nodes.map((n) => [n.topic.id, n]));
   for (const relation of sheet.relationships ?? []) {

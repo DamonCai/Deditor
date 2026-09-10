@@ -41,6 +41,8 @@ export interface Tab {
    *  we stash the on-disk content here and surface a banner so the user can
    *  pick "reload from disk" or "keep my edits". Cleared once the user chooses. */
   externalChange?: string;
+  /** Temporary size for this open file only; excluded from persistence and reopen history. */
+  zoomFontSize?: number;
 }
 
 export interface TabPosition {
@@ -185,6 +187,7 @@ interface EditorState {
   toggleTocVisible: () => void;
   setTocVisible: (v: boolean) => void;
   setEditorFontSize: (px: number) => void;
+  setEditorZoomFontSize: (tabId: string, px: number | null) => void;
   isActiveDirty: () => boolean;
 }
 
@@ -696,8 +699,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setShowSidebar: (v) => set({ showSidebar: v }),
   toggleTocVisible: () => set({ tocVisible: !get().tocVisible }),
   setTocVisible: (v) => set({ tocVisible: v }),
-  setEditorFontSize: (px) =>
-    set({ editorFontSize: Math.max(10, Math.min(28, Math.round(px))) }),
+  setEditorFontSize: (px) => {
+    const size = Math.max(10, Math.min(28, Math.round(px)));
+    set({ editorFontSize: size });
+  },
+  setEditorZoomFontSize: (tabId, px) => {
+    if (px !== null && !Number.isFinite(px)) return;
+    const size = px === null ? undefined : Math.max(10, Math.min(28, Math.round(px)));
+    set((state) => ({ tabs: state.tabs.map((tab) => tab.id === tabId
+      ? { ...tab, zoomFontSize: size === state.editorFontSize ? undefined : size }
+      : tab) }));
+  },
   isActiveDirty: () => {
     const { tabs, activeId } = get();
     const t = tabs.find((x) => x.id === activeId);

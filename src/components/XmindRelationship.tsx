@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Command, Relationship, Sheet } from "../lib/xmind/document";
-import type { SceneNode } from "../lib/xmind/scene";
+import type { Box, Measure, SceneNode } from "../lib/xmind/scene";
+import { draftBox } from "../lib/xmind/draft";
 import { relationshipGeometry, type Point } from "../lib/xmind/relationship";
 import { useT } from "../lib/i18n";
 
@@ -26,6 +27,9 @@ interface Props {
   onSelect: () => void;
   onCommand: (command: Command) => void;
   toWorld: (x: number, y: number) => Point;
+  viewport: Box;
+  zoom: number;
+  measure: Measure;
   registerFlush: (flush: (() => void) | null) => void;
 }
 export default function XmindRelationship(props: Props) {
@@ -41,6 +45,9 @@ export default function XmindRelationship(props: Props) {
     ...(relation.controlPoints as object ?? {}), ...preview,
   } } : relation, from, to);
   const { start, end, c1, c2, label, path, color, width, properties } = geometry;
+  const editor = editing ? draftBox({ ...from, x: label.x - 100, y: label.y - 18, width: 200, height: 36,
+    content: { x: 0, y: 0, width: 200, height: 36 }, imageHeight: 0, fontSize: geometry.fontSize, properties },
+    draft, props.viewport, props.zoom, props.measure, true) : null;
   const id = `${props.markerPrefix}-${relation.id.replace(/[^a-zA-Z0-9]/g, "")}`;
   const commit = useCallback(() => {
     if (editing && !cancelled.current) {
@@ -56,7 +63,7 @@ export default function XmindRelationship(props: Props) {
   }, [editing, props.registerFlush]);
   const cancelDrag = () => { dragging.current = null; setPreview(null); };
   useEffect(() => {
-    const cancel = (e: globalThis.KeyboardEvent) => { if (e.key === "Escape") cancelDrag(); };
+    const cancel = (e: globalThis.KeyboardEvent) => { if (e.key === "Escape" && !e.isComposing && e.keyCode !== 229) cancelDrag(); };
     window.addEventListener("keydown", cancel);
     window.addEventListener("blur", cancelDrag);
     return () => { window.removeEventListener("keydown", cancel); window.removeEventListener("blur", cancelDrag); };
@@ -113,13 +120,15 @@ export default function XmindRelationship(props: Props) {
           onPointerCancel={cancelDrag} />
       </g>;
     })}
-    {editing ? <foreignObject x={label.x - 100} y={label.y - 18} width={200} height={38}>
+    {editing ? <foreignObject x={label.x - 100 + editor!.x} y={label.y - 18 + editor!.y} width={editor!.width} height={editor!.height}>
       <input autoFocus aria-label={t("xmind.editRelationship")} value={draft}
+        style={{width:"100%",height:"100%",boxSizing:"border-box",fontSize:editor!.fontSize,padding:editor!.padding,
+          fontFamily:properties["fo:font-family"],fontWeight:properties["fo:font-weight"]}}
         className="deditor-input" onFocus={(e) => e.target.select()}
         onChange={(e) => setDraft(e.target.value)} onBlur={commit}
         onKeyDown={(e) => {
           if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") return;
-          e.stopPropagation(); if (e.nativeEvent.isComposing) return;
+          e.stopPropagation(); if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
           if (e.key === "Enter") { e.preventDefault(); commit(); focusCanvas(); }
           if (e.key === "Escape") { e.preventDefault(); cancelled.current = true; setEditing(false); focusCanvas(); }
         }} />

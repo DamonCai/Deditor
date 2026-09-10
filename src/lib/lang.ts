@@ -8,6 +8,7 @@
 // EditorHost / EditorSlot chunk. Use `LanguageSupport` only via lazy import.
 import type { LanguageSupport as LanguageSupportT } from "@codemirror/language";
 import type { Tag } from "@lezer/highlight";
+import { languageCatalog } from "./languageCatalog";
 import { LuFileText, LuFileImage, LuFileAudio, LuFileVideo, LuFileCog, LuDatabase, LuType, LuNetwork } from "react-icons/lu";
 import { FaRegFilePdf, FaRegFileWord, FaRegFileExcel, FaRegFilePowerpoint, FaRegFileArchive } from "react-icons/fa";
 // @codemirror/legacy-modes is a ~150 KB combined chunk; we used to static-
@@ -148,6 +149,19 @@ const cmLua = () => import("@codemirror/legacy-modes/mode/lua").then((m) => wrap
 const cmDocker = () => import("@codemirror/legacy-modes/mode/dockerfile").then((m) => wrapStream(m.dockerFile));
 const cmPowerShell = () => import("@codemirror/legacy-modes/mode/powershell").then((m) => wrapStream(m.powerShell));
 
+// The catalog itself is small metadata; its parsers remain lazy.
+const cmCatalog = (name: string) => async () => {
+  const { languages } = await import("@codemirror/language-data");
+  const description = languages.find((language) => language.name === name);
+  if (!description) throw new Error(`Missing language parser: ${name}`);
+  return description.load();
+};
+const cmPlain = () => import("./textLanguages").then((m) => m.plainText());
+const cmJson5 = () => import("@codemirror/legacy-modes/mode/javascript").then((m) => wrapStream(m.json));
+const cmXml = async () => (await import("@codemirror/lang-xml")).xml();
+const cmIgnore = () => import("./textLanguages").then((m) => m.ignoreLanguage());
+const cmMakefile = () => import("./textLanguages").then((m) => m.makefileLanguage());
+
 // @codemirror/lang-markdown drags @lezer/markdown (~85 KB) + @lezer/common.
 // Lazy-import on demand so the cold bundle doesn't include it.
 const cmMarkdown = async () => {
@@ -184,9 +198,9 @@ const ext: Record<string, LangDef> = {
 
   // JVM
   java: { label: "Java",   shiki: "java",   cm: async () => (await import("@codemirror/lang-java")).java(), icon: I("JV", "#ED8B00", SiOpenjdk) },
-  kt:   { label: "Kotlin", shiki: "kotlin", cm: async () => (await import("@codemirror/lang-java")).java(), icon: I("KT", "#A97BFF", SiKotlin) },
-  kts:  { label: "Kotlin", shiki: "kotlin", cm: async () => (await import("@codemirror/lang-java")).java(), icon: I("KT", "#A97BFF", SiKotlin) },
-  scala:{ label: "Scala",  shiki: "scala",  cm: async () => (await import("@codemirror/lang-java")).java(), icon: I("SC", "#c22d40", SiScala) },
+  kt:   { label: "Kotlin", shiki: "kotlin", cm: cmCatalog("Kotlin"), icon: I("KT", "#A97BFF", SiKotlin) },
+  kts:  { label: "Kotlin", shiki: "kotlin", cm: cmCatalog("Kotlin"), icon: I("KT", "#A97BFF", SiKotlin) },
+  scala:{ label: "Scala",  shiki: "scala",  cm: cmCatalog("Scala"), icon: I("SC", "#c22d40", SiScala) },
 
   // C family
   c:   { label: "C",   shiki: "c",       cm: async () => (await import("@codemirror/lang-cpp")).cpp(), icon: I("C",   "#A8B9CC", SiC) },
@@ -195,26 +209,26 @@ const ext: Record<string, LangDef> = {
   cxx: { label: "C++", shiki: "cpp",     cm: async () => (await import("@codemirror/lang-cpp")).cpp(), icon: I("C++", "#00599C", SiCplusplus) },
   cc:  { label: "C++", shiki: "cpp",     cm: async () => (await import("@codemirror/lang-cpp")).cpp(), icon: I("C++", "#00599C", SiCplusplus) },
   hpp: { label: "C++", shiki: "cpp",     cm: async () => (await import("@codemirror/lang-cpp")).cpp(), icon: I("HPP", "#00599C", SiCplusplus) },
-  cs:  { label: "C#",  shiki: "csharp",  cm: async () => (await import("@codemirror/lang-cpp")).cpp(), icon: I("C#",  "#239120", SiSharp) },
+  cs:  { label: "C#",  shiki: "csharp",  cm: cmCatalog("C#"), icon: I("C#",  "#239120", SiSharp) },
 
   // Web
   html:   { label: "HTML",   shiki: "html",   cm: async () => (await import("@codemirror/lang-html")).html(), icon: I("HTM",  "#e34c26", SiHtml5) },
   htm:    { label: "HTML",   shiki: "html",   cm: async () => (await import("@codemirror/lang-html")).html(), icon: I("HTM",  "#e34c26", SiHtml5) },
   css:    { label: "CSS",    shiki: "css",    cm: async () => (await import("@codemirror/lang-css")).css(),   icon: I("CSS",  "#1572B6", SiCss) },
-  scss:   { label: "SCSS",   shiki: "scss",   cm: async () => (await import("@codemirror/lang-css")).css(),   icon: I("SCS",  "#cf649a", SiSass) },
-  sass:   { label: "Sass",   shiki: "sass",   cm: async () => (await import("@codemirror/lang-css")).css(),   icon: I("SAS",  "#cf649a", SiSass) },
-  less:   { label: "Less",   shiki: "less",   cm: async () => (await import("@codemirror/lang-css")).css(),   icon: I("LES",  "#1d365d", SiCss) },
-  vue:    { label: "Vue",    shiki: "vue",    cm: async () => (await import("@codemirror/lang-html")).html(), icon: I("VUE",  "#41b883", SiVuedotjs) },
-  svelte: { label: "Svelte", shiki: "svelte", cm: async () => (await import("@codemirror/lang-html")).html(), icon: I("SVL",  "#ff3e00", SiSvelte) },
+  scss:   { label: "SCSS",   shiki: "scss",   cm: cmCatalog("SCSS"), icon: I("SCS",  "#cf649a", SiSass) },
+  sass:   { label: "Sass",   shiki: "sass",   cm: cmCatalog("Sass"), icon: I("SAS",  "#cf649a", SiSass) },
+  less:   { label: "Less",   shiki: "less",   cm: cmCatalog("LESS"), icon: I("LES",  "#1d365d", SiCss) },
+  vue:    { label: "Vue",    shiki: "vue",    cm: cmCatalog("Vue"), icon: I("VUE",  "#41b883", SiVuedotjs) },
+  svelte: { label: "Svelte", shiki: "svelte", cm: async () => (await import("@replit/codemirror-lang-svelte")).svelte(), icon: I("SVL",  "#ff3e00", SiSvelte) },
 
   // Data / Config
   json:  { label: "JSON",  shiki: "json",  cm: async () => (await import("@codemirror/lang-json")).json(), icon: I("{}", "#cbcb41", SiJson) },
-  jsonc: { label: "JSONC", shiki: "jsonc", cm: async () => (await import("@codemirror/lang-json")).json(), icon: I("{}", "#cbcb41", SiJson) },
+  jsonc: { label: "JSONC", shiki: "jsonc", cm: cmJson5, icon: I("{}", "#cbcb41", SiJson) },
   yaml:  { label: "YAML",  shiki: "yaml",  cm: async () => (await import("@codemirror/lang-yaml")).yaml(), icon: I("YML", "#cb171e", SiYaml) },
   yml:   { label: "YAML",  shiki: "yaml",  cm: async () => (await import("@codemirror/lang-yaml")).yaml(), icon: I("YML", "#cb171e", SiYaml) },
   toml:  { label: "TOML",  shiki: "toml",  cm: cmToml,                                  icon: I("TOM", "#9c4221", SiToml) },
-  xml:   { label: "XML",   shiki: "xml",   cm: async () => (await import("@codemirror/lang-xml")).xml(),    icon: I("XML", "#0060ac") },
-  ini:   { label: "INI",   shiki: "ini",   cm: cmToml,                                  icon: I("INI", "#6b6b6b") },
+  xml:   { label: "XML",   shiki: "xml",   cm: cmXml, icon: I("XML", "#0060ac") },
+  ini:   { label: "INI",   shiki: "ini",   cm: cmCatalog("Properties files"), icon: I("INI", "#6b6b6b") },
   env:   { label: "Env",   shiki: "shellscript", cm: cmShell,                          icon: I("ENV", "#509941") },
 
   // SQL / PHP / Ruby
@@ -225,7 +239,7 @@ const ext: Record<string, LangDef> = {
   // Swift / Lua / Perl
   swift: { label: "Swift", shiki: "swift", cm: cmSwift, icon: I("SW",  "#FA7343", SiSwift) },
   lua:   { label: "Lua",   shiki: "lua",   cm: cmLua,     icon: I("LUA", "#000080", SiLua) },
-  pl:    { label: "Perl",  shiki: "perl",  cm: cmShell, icon: I("PL",  "#39457E", SiPerl) },
+  pl:    { label: "Perl",  shiki: "perl",  cm: cmCatalog("Perl"), icon: I("PL",  "#39457E", SiPerl) },
 
   // Shell
   sh:    { label: "Shell",      shiki: "bash",       cm: cmShell,         icon: I("SH",  "#4EAA25", SiGnubash) },
@@ -235,11 +249,11 @@ const ext: Record<string, LangDef> = {
   ps1:   { label: "PowerShell", shiki: "powershell", cm: cmPowerShell, icon: I("PS",  "#012456") },
 
   // Misc
-  txt:   { label: "Text",  shiki: "text", cm: cmShell, icon: I("TXT", "#888888") },
-  log:   { label: "Log",   shiki: "log",  cm: cmShell, icon: I("LOG", "#888888") },
-  csv:   { label: "CSV",   shiki: "csv",  cm: cmShell, icon: I("CSV", "#237346") },
-  diff:  { label: "Diff",  shiki: "diff", cm: cmShell, icon: I("DIF", "#0a8c0a") },
-  patch: { label: "Patch", shiki: "diff", cm: cmShell, icon: I("PAT", "#0a8c0a") },
+  txt:   { label: "Text",  shiki: "text", cm: cmPlain, icon: I("TXT", "#888888") },
+  log:   { label: "Log",   shiki: "log",  cm: () => import("./textLanguages").then((m) => m.logLanguage()), icon: I("LOG", "#888888") },
+  csv:   { label: "CSV",   shiki: "csv",  cm: () => import("./textLanguages").then((m) => m.delimitedText(",")), icon: I("CSV", "#237346") },
+  diff:  { label: "Diff",  shiki: "diff", cm: cmCatalog("diff"), icon: I("DIF", "#0a8c0a") },
+  patch: { label: "Patch", shiki: "diff", cm: cmCatalog("diff"), icon: I("PAT", "#0a8c0a") },
 
   // Images (cm/shiki are no-ops; rendered inline in Editor.tsx)
   png:  { label: "Image", shiki: "text", cm: cmShell, icon: I("IMG", "#a78bfa", LuFileImage) },
@@ -251,7 +265,7 @@ const ext: Record<string, LangDef> = {
   ico:  { label: "Icon",  shiki: "text", cm: cmShell, icon: I("ICO", "#a78bfa", LuFileImage) },
   tiff: { label: "Image", shiki: "text", cm: cmShell, icon: I("TIF", "#a78bfa", LuFileImage) },
   tif:  { label: "Image", shiki: "text", cm: cmShell, icon: I("TIF", "#a78bfa", LuFileImage) },
-  svg:  { label: "SVG",   shiki: "xml",  cm: cmShell, icon: I("SVG", "#ffb013", LuFileImage) },
+  svg:  { label: "SVG",   shiki: "xml",  cm: cmXml, icon: I("SVG", "#ffb013", LuFileImage) },
 
   // PDF (rendered inline in Editor.tsx)
   pdf:  { label: "PDF", shiki: "text", cm: cmShell, icon: I("PDF", "#dc2626", FaRegFilePdf) },
@@ -350,7 +364,7 @@ const ext: Record<string, LangDef> = {
   flv:   { label: "Video", shiki: "text", cm: cmShell, icon: I("FLV",  "#7c3aed", LuFileVideo) },
   mpg:   { label: "Video", shiki: "text", cm: cmShell, icon: I("MPG",  "#7c3aed", LuFileVideo) },
   mpeg:  { label: "Video", shiki: "text", cm: cmShell, icon: I("MPG",  "#7c3aed", LuFileVideo) },
-  mts:   { label: "Video", shiki: "text", cm: cmShell, icon: I("MTS",  "#7c3aed", LuFileVideo) },
+
   m2ts:  { label: "Video", shiki: "text", cm: cmShell, icon: I("M2T",  "#7c3aed", LuFileVideo) },
   vob:   { label: "Video", shiki: "text", cm: cmShell, icon: I("VOB",  "#7c3aed", LuFileVideo) },
   rm:    { label: "Video", shiki: "text", cm: cmShell, icon: I("RM",   "#7c3aed", LuFileVideo) },
@@ -366,19 +380,41 @@ const ext: Record<string, LangDef> = {
   wma:   { label: "Audio", shiki: "text", cm: cmShell, icon: I("WMA",  "#0ea5e9", LuFileAudio) },
 };
 
+// Fill gaps from every installed catalog language, preserving explicit icons
+// and the dedicated image/binary viewers above.
+const catalogFilenames = languageCatalog.filter((language) => language.filename);
+const catalogCompoundSuffixes = languageCatalog.filter((language) => language.extensions.some((suffix) => suffix.includes(".")));
+const catalogDefinitions = new Map(languageCatalog.map((language) => [language.name, {
+  label: language.name,
+  shiki: language.shiki,
+  cm: cmCatalog(language.name),
+  icon: I(language.name.slice(0, 3).toUpperCase(), "#687bc4"),
+}]));
+for (const language of languageCatalog) {
+  for (const suffix of language.extensions) ext[suffix] ??= catalogDefinitions.get(language.name)!;
+}
+// XML families and common filename variants absent from the upstream catalog.
+for (const suffix of ["xsl", "xslt", "xsd", "xhtml", "xaml", "wsdl", "pom", "tld", "jspf", "resx", "csproj", "fsproj", "vbproj", "props", "targets", "nuspec", "iml"])
+  ext[suffix] = ext.xml;
+for (const [suffix, source] of Object.entries({ json5: "jsonc", jsonl: "json", ndjson: "json", cts: "ts", mts: "ts", psd1: "ps1", psm1: "ps1" })) {
+  ext[suffix] = { ...ext[source], ...(suffix === "json5" ? { label: "JSON5", shiki: "json5" } : {}) };
+}
+ext.mk = { label: "Makefile", shiki: "makefile", cm: cmMakefile, icon: I("MK", "#427819") };
+ext.tsv = { label: "TSV", shiki: "tsv", cm: () => import("./textLanguages").then((m) => m.delimitedText("\t")), icon: I("TSV", "#237346") };
+
 const FILENAME_MAP: Record<string, LangDef> = {
   Dockerfile:      { label: "Dockerfile", shiki: "docker", cm: cmDocker, icon: I("DKR", "#0db7ed", SiDocker) },
-  Makefile:        { label: "Makefile",   shiki: "makefile", cm: cmShell,         icon: I("MK",  "#427819") },
-  ".gitignore":    { label: "Text",       shiki: "text",     cm: cmShell,         icon: I("GIT", "#f05133") },
-  ".dockerignore": { label: "Text",       shiki: "text",     cm: cmShell,         icon: I("DKR", "#0db7ed", SiDocker) },
-  ".editorconfig": { label: "Text",       shiki: "text",     cm: cmShell,         icon: I("CFG", "#888888") },
+  Makefile:        { label: "Makefile",   shiki: "makefile", cm: cmMakefile,         icon: I("MK",  "#427819") },
+  ".gitignore":    { label: "Git Ignore", shiki: "text", cm: cmIgnore,         icon: I("GIT", "#f05133") },
+  ".dockerignore": { label: "Docker Ignore", shiki: "text", cm: cmIgnore,         icon: I("DKR", "#0db7ed", SiDocker) },
+  ".editorconfig": { label: "EditorConfig", shiki: "ini", cm: cmCatalog("Properties files"),         icon: I("CFG", "#888888") },
   ".env":          { label: "Env",        shiki: "shellscript", cm: cmShell,      icon: I("ENV", "#509941") },
 };
 
 const FALLBACK: LangDef = {
   label: "Text",
   shiki: "text",
-  cm: cmShell,
+  cm: cmPlain,
   icon: I("·", "#9aa0a6", LuFileText),
 };
 
@@ -415,7 +451,7 @@ export const HEX_EXTS = [
   // video containers Chromium can't render via <video>
   // (".ts" is omitted — it conflicts with TypeScript and "MPEG transport
   //  stream" .ts files are vanishingly rare in editor workflows.)
-  "mkv", "avi", "wmv", "flv", "mpg", "mpeg", "mts", "m2ts",
+  "mkv", "avi", "wmv", "flv", "mpg", "mpeg", "m2ts",
   "vob", "rm", "rmvb", "asf", "3gp",
   // audio formats browsers don't play
   "aiff", "aif", "mka", "ape", "wma",
@@ -446,6 +482,15 @@ export function detectLang(filePath: string | null): LangDef {
   const slash = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
   const base = slash >= 0 ? filePath.slice(slash + 1) : filePath;
   if (FILENAME_MAP[base]) return FILENAME_MAP[base];
+  const lower = base.toLowerCase();
+  if (/^(?:dockerfile|containerfile)(?:\..+)?$/.test(lower)) return FILENAME_MAP.Dockerfile;
+  if (/^(?:gnu)?makefile(?:\..+)?$/.test(lower)) return FILENAME_MAP.Makefile;
+  if (/^\.env(?:\..+)?$/.test(lower) || /^\.(?:bashrc|bash_profile|zshrc|zprofile)$/.test(lower)) return ext.env;
+  const named = catalogFilenames.find((language) => language.filename?.test(base));
+  if (named) return catalogDefinitions.get(named.name)!;
+  // Long suffixes (for example .cmake.in) take precedence over .in.
+  const compound = catalogCompoundSuffixes.find((language) => language.extensions.some((suffix) => suffix.includes(".") && lower.endsWith(`.${suffix}`)));
+  if (compound) return catalogDefinitions.get(compound.name)!;
   const dot = base.lastIndexOf(".");
   if (dot < 0) return FALLBACK;
   const e = base.slice(dot + 1).toLowerCase();
