@@ -744,3 +744,6 @@ summary:focus-visible, .preview-toc-item:focus-visible, .cm-button:focus-visible
 .md-export-dialog select { width: 100%; }
 .md-export-status:empty { display: none; }
 .md-export-status { font-size: 11px; color: var(--text-soft); }
+
+.filetree-path-error { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; }
+.filetree-path-error > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }

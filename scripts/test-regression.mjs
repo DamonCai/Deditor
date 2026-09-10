@@ -1615,6 +1615,60 @@ test(8, "All Mermaid templates parse with the bundled Mermaid version", async ()
   }
 });
 
+test(9, "workspace path errors dismiss, expire, reset on retry and preserve the path for correction", async () => {
+  reset(); store.setState({ workspaces: [], language: "zh" });
+  let failure = "No such file or directory (os error 2)";
+  globalThis.__invoke = async (cmd, args) => {
+    if (cmd === "resolve_path") { if (failure) throw failure; return args.path; }
+    if (cmd === "list_dir") return [];
+  };
+  const realSet = globalThis.setTimeout, realClear = globalThis.clearTimeout;
+  const timers = new Map(); let tick = 0;
+  globalThis.setTimeout = (callback, delay, ...args) => {
+    if (delay !== 5000) return realSet(callback, delay, ...args);
+    const id = {tick: ++tick}; timers.set(id, callback); return id;
+  };
+  globalThis.clearTimeout = id => { if (!timers.delete(id)) realClear(id); };
+  try {
+    await render(React.createElement(app.FileTree));
+    const input = document.querySelector('.filetree input');
+    const edit = value => act(async () => { setInput(input, value); });
+    const enter = () => act(async () => { input.dispatchEvent(new window.KeyboardEvent('keydown', {key:'Enter', bubbles:true})); await flush(); });
+    const error = () => document.querySelector('.filetree-path-error');
+    await edit('/missing'); await enter();
+    assert.match(error().textContent, /路径不存在/);
+    assert.doesNotMatch(error().textContent, /os error|No such file/);
+    assert.equal(input.value, '/missing');
+    assert.equal(input.getAttribute('aria-invalid'), 'true');
+    assert.equal(timers.size, 1);
+    await act(async () => error().querySelector('button').click());
+    assert.equal(error(), null); assert.equal(timers.size, 0);
+    assert.equal(document.activeElement, input);
+    await enter(); const firstTimer = [...timers.keys()][0];
+    await enter();
+    assert.equal(timers.size, 1); assert.equal(timers.has(firstTimer), false, 'retry gives the new error its full display time');
+    await act(async () => { const callback=[...timers.values()][0];timers.clear();callback(); });
+    assert.equal(error(), null); assert.equal(input.value, '/missing');
+    await enter(); await edit('/corrected');
+    assert.equal(error(), null); assert.equal(timers.size, 0);
+    await enter();
+    await act(async () => input.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+    assert.equal(error(), null);
+    await enter();
+    await act(async () => document.querySelector('button[data-tooltip="选择文件夹（可多选）"]').click());
+    assert.equal(error(), null, 'opening folder picker clears the stale path error, even if canceled');
+    failure = '';
+    await enter();
+    assert.equal(error(), null); assert.equal(input.value, '');
+    assert.deepEqual(store.getState().workspaces, ['/corrected']);
+    failure = 'Permission denied (os error 13)';
+    await edit('/denied');await enter();
+    assert.match(error().textContent, /访问权限/);
+    await act(async () => {root.unmount();}); root=undefined;
+    assert.equal(timers.size, 0, 'unmount cancels the pending dismissal');
+  } finally { globalThis.setTimeout=realSet;globalThis.clearTimeout=realClear; }
+});
+
 let failed = 0,
   passed = 0;
 const round = process.argv.find((a) => a.startsWith("--round="))?.split("=")[1];

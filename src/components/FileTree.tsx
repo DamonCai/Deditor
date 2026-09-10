@@ -1,5 +1,5 @@
 import { showError } from "../lib/feedback";
-import { memo, useCallback, useEffect, useId, useState } from "react";
+import { memo, useCallback, useEffect, useId, useRef, useState } from "react";
 import { useShallow } from "zustand/shallow";
 import { useEditorStore, useActiveTabFilePath } from "../store/editor";
 import {
@@ -22,7 +22,7 @@ import { promptInput } from "./PromptDialog";
 import { confirmDelete } from "./ConfirmDialog";
 import { logError } from "../lib/logger";
 import { useT, tStatic } from "../lib/i18n";
-import { FiChevronRight, FiFolder, FiFolderPlus, FiMoreHorizontal } from "react-icons/fi";
+import { FiChevronRight, FiFolder, FiFolderPlus, FiMoreHorizontal, FiX } from "react-icons/fi";
 import { Button } from "./ui/Button";
 
 const FOLDER_COLOR = "#dcb67a"; // soft amber, matches VSCode default folder icon
@@ -48,23 +48,53 @@ function FileTreeImpl() {
   const filePath = useActiveTabFilePath();
   const setCompareMarkPath = useEditorStore((s) => s.setCompareMarkPath);
   const [pathInput, setPathInput] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string } | null>(null);
+  const errorId = useId();
+  const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [menu, setMenu] = useState<MenuState | null>(null);
 
+  useEffect(() => {
+    if (!error) return;
+    const timer = setTimeout(() => setError(null), 5000);
+    return () => clearTimeout(timer);
+  }, [error]);
+
+  const reportPathError = (err: unknown) => {
+    const detail = err instanceof Error ? err.message : String(err);
+    const key = /os error (2|3)\b|no such file|not found/i.test(detail)
+      ? "filetree.pathMissing"
+      : /os error (20|267)\b|not a directory/i.test(detail)
+        ? "filetree.pathNotDirectory"
+        : /os error (13|5)\b|permission denied|access.*denied/i.test(detail)
+          ? "filetree.pathDenied"
+          : "filetree.pathFailed";
+    logError("Add workspace failed", err);
+    setError({ message: t(key) });
+  };
+
   const submit = async () => {
     const p = pathInput.trim();
-    if (!p) return;
+    if (!p || busy) return;
     setBusy(true);
     setError(null);
     try {
       await setWorkspaceByPath(p);
       setPathInput("");
     } catch (e) {
-      setError(typeof e === "string" ? e : (e as Error).message);
+      reportPathError(e);
     } finally {
       setBusy(false);
     }
+  };
+
+  const chooseFolder = async () => {
+    if (busy) return;
+    setError(null);
+    setBusy(true);
+    try { await openFolder(); }
+    catch (e) { reportPathError(e); }
+    finally { setBusy(false); }
   };
 
   const openMenu = useCallback((e: React.MouseEvent, items: MenuItem[]) => {
@@ -151,10 +181,14 @@ function FileTreeImpl() {
         }}
       >
         <input
+          ref={inputRef}
           value={pathInput}
-          onChange={(e) => setPathInput(e.target.value)}
+          aria-invalid={!!error}
+          aria-describedby={error ? errorId : undefined}
+          onChange={(e) => { setPathInput(e.target.value); setError(null); }}
           onKeyDown={(e) => {
-            if (e.key === "Enter") submit();
+            if (e.key === "Enter") void submit();
+            if (e.key === "Escape") setError(null);
           }}
           placeholder={t("filetree.pathPlaceholder")}
           spellCheck={false}
@@ -164,7 +198,8 @@ function FileTreeImpl() {
         <Button
           variant="ghost"
           size="icon"
-          onClick={openFolder}
+          onClick={() => void chooseFolder()}
+          disabled={busy}
           title={t("filetree.selectFolder")}
         >
           <FiFolderPlus size={16} />
@@ -172,9 +207,14 @@ function FileTreeImpl() {
       </div>
       {error && (
         <div
-          className="deditor-notice" role="alert" data-tone="error"
+          id={errorId}
+          className="deditor-notice filetree-path-error" role="alert" data-tone="error"
         >
-          {error}
+          <span>{error.message}</span>
+          <Button variant="ghost" size="icon" title={t("common.close")} onClick={() => {
+            setError(null);
+            inputRef.current?.focus();
+          }}><FiX size={14} /></Button>
         </div>
       )}
       <div

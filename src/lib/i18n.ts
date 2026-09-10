@@ -171,6 +171,10 @@ const ZH: Record<string, string> = {
 
   // file tree
   "filetree.folderActions": "文件夹操作：{name}",
+  "filetree.pathMissing": "路径不存在，请检查后重试。",
+  "filetree.pathNotDirectory": "这不是文件夹，请输入文件夹路径。",
+  "filetree.pathDenied": "无法访问此文件夹，请检查访问权限。",
+  "filetree.pathFailed": "无法添加工作区，请检查路径后重试。",
   "filetree.pathPlaceholder": "输入路径添加工作区 (~ 支持)",
   "filetree.selectFolder": "选择文件夹（可多选）",
   "filetree.emptyHint": "上方粘路径回车，或点 📂 选择文件夹（可一次选多个）",
@@ -646,6 +650,10 @@ const EN: Record<string, string> = {
 
   // file tree
   "filetree.folderActions": "Folder actions: {name}",
+  "filetree.pathMissing": "Path not found. Check it and try again.",
+  "filetree.pathNotDirectory": "Enter a folder path, not a file.",
+  "filetree.pathDenied": "Cannot access this folder. Check its permissions.",
+  "filetree.pathFailed": "Could not add the workspace. Check the path and try again.",
   "filetree.pathPlaceholder": "Type a path to add a workspace (~ supported)",
   "filetree.selectFolder": "Select folder (multi-select)",
   "filetree.emptyHint": "Paste a path above and press Enter, or click 📂 to pick folders",
