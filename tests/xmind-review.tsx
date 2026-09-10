@@ -15,7 +15,11 @@ sheets.push({ ...structuredClone(sheets[1]), id: "up-sheet", title: "向上组�
   rootTopic: { ...structuredClone(sheets[1].rootTopic), structureClass: "org.xmind.ui.org-chart.up" } });
 const probe = new URLSearchParams(location.search).get("probe");
 const generatedProbes = ["control-probe", "direction-probe", "count-probe"];
-const archive = probe && generatedProbes.includes(probe)
+const archive = probe && ["layout-baseline", "structure-baseline", "native-edit"].includes(probe)
+  ? new Uint8Array(await (await fetch(`/tests/artifacts/xmind-round5/${probe}.xmind`)).arrayBuffer())
+  : probe === "interaction-probe"
+  ? new Uint8Array(await (await fetch(`/tests/artifacts/xmind-round3/interaction-probe.xmind`)).arrayBuffer())
+  : probe && generatedProbes.includes(probe)
   ? new Uint8Array(await (await fetch(`/tests/artifacts/xmind-native-round2/${probe}.xmind`)).arrayBuffer())
   : sampleArchive(sheets);
 const content = bytesToXmindDataUrl(archive);

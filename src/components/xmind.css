@@ -296,19 +296,11 @@
 }
 @media (max-width: 650px) {
   .xm-inspector {
-    position: absolute;
-    right: 0;
-    top: 0;
-    bottom: 0;
-    z-index: 25;
-    box-shadow: -4px 0 20px #0002;
+    width: min(205px, 42%);
   }
   .xm-outline {
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    z-index: 25;
+    width: min(165px, 30%);
+    min-width: 0;
   }
   .xm-tools .xm-spacer {
     display: none;

@@ -150,6 +150,8 @@ export function writeDocument(doc: XmindDocument, sheets: Sheet[]): Uint8Array {
 export type Command =
   | { type: "title"; id: string; title: string }
   | { type: "properties"; id: string; properties: Properties }
+  | { type: "properties-many"; ids: string[]; properties: Properties }
+  | { type: "href"; id: string; href: string }
   | { type: "notes"; id: string; text: string }
   | { type: "labels"; id: string; labels: string[] }
   | { type: "structure"; id: string; structure: string }
@@ -160,9 +162,13 @@ export type Command =
       topic: Topic;
       kind?: "attached" | "detached" | "callout";
       after?: string;
+      before?: string;
     }
+  | { type: "parent"; id: string; topic: Topic }
   | { type: "delete"; ids: string[] }
   | { type: "paste"; parent: string; topics: Topic[] }
+  | { type: "move-many"; ids: string[]; parent: string; before?: string; after?: string;
+      positions?: Record<string, { x: number; y: number }> }
   | {
       type: "move";
       id: string;
@@ -174,6 +180,8 @@ export type Command =
   | { type: "relationship"; from: string; to: string; title: string }
   | { type: "relationship-update"; id: string; title?: string; controlPoints?: Record<string, { x: number; y: number }> }
   | { type: "relationship-delete"; id: string }
+  | { type: "group-update"; parent: string; id: string; title?: string; properties?: Properties }
+  | { type: "group-delete"; parent: string; id: string }
   | {
       type: "group";
       parent: string;
@@ -219,7 +227,11 @@ function repairGroups(root: Topic, original: Topic) {
           prev.slice(+match[1], +match[2] + 1).map((c) => c.id),
         );
         const indices = next.flatMap((c, i) => (members.has(c.id) ? [i] : []));
-        if (!indices.length) return [];
+        if (!indices.length) {
+          if (key === "summaries" && g.topicId && t.children?.summary)
+            t.children.summary = t.children.summary.filter(topic => topic.id !== g.topicId);
+          return [];
+        }
         return [
           { ...g, range: `(${Math.min(...indices)},${Math.max(...indices)})` },
         ];
@@ -239,6 +251,44 @@ export function editDocument(
     root = sheet.rootTopic;
   const topic = "id" in command ? findTopic(root, command.id) : undefined;
   switch (command.type) {
+    case "parent": {
+      if (!topic || topic === root) throw new Error("Cannot insert above root");
+      let replaced = false;
+      walkTopics(root, owner => {
+        if(replaced) return;
+        for(const kind of ["attached","detached"] as const) {
+          const list=owner.children?.[kind], at=list?.findIndex(n=>n.id===topic.id) ?? -1;
+          if(list && at>=0) {
+            if(findTopic(root,command.topic.id)) throw new Error("Duplicate topic ID");
+            const parent=structuredClone(command.topic);
+            parent.children={attached:[topic]};
+            if(kind==='detached') { parent.position=topic.position; delete topic.position; }
+            list.splice(at,1,parent);replaced=true;break;
+          }
+        }
+      });
+      if(!replaced) throw new Error("Cannot insert a parent for this topic type");
+      break;
+    }
+    case "group-update":
+    case "group-delete": {
+      const owner = findTopic(root, command.parent);
+      const group = [...(owner?.boundaries ?? []), ...(owner?.summaries ?? [])].find(g => g.id === command.id);
+      if (!owner || !group) throw new Error("Group not found");
+      if (command.type === "group-delete") {
+        owner.boundaries = owner.boundaries?.filter(g => g.id !== command.id);
+        owner.summaries = owner.summaries?.filter(g => g.id !== command.id);
+        if (group.topicId) removeTopic(owner, group.topicId);
+      } else {
+        if (command.title !== undefined) {
+          group.title = command.title;
+          const summary = group.topicId && findTopic(owner, group.topicId);
+          if (summary) { summary.title = command.title; delete summary.titleUnedited; }
+        }
+        if (command.properties) group.style = { ...group.style, properties: { ...group.style?.properties, ...command.properties } };
+      }
+      break;
+    }
     case "relationship-update": {
       const relation = sheet.relationships?.find((r) => r.id === command.id);
       if (!relation) throw new Error("Relationship not found");
@@ -265,6 +315,18 @@ export function editDocument(
       if (!topic) throw new Error("Topic not found");
       if (topic.title !== command.title) delete topic.titleUnedited;
       topic.title = command.title;
+      break;
+    case "properties-many":
+      for (const id of command.ids) {
+        const target = findTopic(root, id);
+        if (!target) throw new Error("Topic not found");
+        target.style = { ...target.style, properties: { ...target.style?.properties, ...command.properties } };
+      }
+      break;
+    case "href":
+      if (!topic) throw new Error("Topic not found");
+      if (command.href.trim()) topic.href = command.href.trim();
+      else delete topic.href;
       break;
     case "properties":
       if (!topic) throw new Error("Topic not found");
@@ -307,11 +369,11 @@ export function editDocument(
       if (command.type === "paste" || !command.kind || command.kind === "attached")
         delete p.branch;
       const list = (p.children[command.type === "add" ? command.kind ?? "attached" : "attached"] ??= []);
-      const i = command.type === "add" && command.after
-        ? list.findIndex((c) => c.id === command.after)
+      const i = command.type === "add" && (command.before || command.after)
+        ? list.findIndex((c) => c.id === (command.before ?? command.after))
         : -1;
       list.splice(
-        i < 0 ? list.length : i + 1,
+        i < 0 ? list.length : i + (command.type === "add" && command.before ? 0 : 1),
         0,
         ...structuredClone(incoming),
       );
@@ -322,6 +384,30 @@ export function editDocument(
         if (id !== root.id) removeTopic(root, id);
       }
       break;
+    case "move-many": {
+      const moving = selectedTopicRoots(root, command.ids);
+      if (!moving.length || moving.some(t => t === root)) throw new Error("Cannot move root");
+      const p = findTopic(root, command.parent);
+      if (!p) throw new Error("Parent not found");
+      if (moving.some(t => findTopic(t, p.id))) throw new Error("Cannot move a topic into its descendant");
+      if (command.positions && moving.some(t => {
+        const point = command.positions![t.id];
+        return !point || !Number.isFinite(point.x) || !Number.isFinite(point.y);
+      })) throw new Error("Invalid topic position");
+      const anchor = command.before ?? command.after;
+      if (anchor && moving.some(t => t.id === anchor)) throw new Error("Cannot insert relative to a moving topic");
+      for (const t of moving) removeTopic(root, t.id);
+      p.children ??= {};
+      const list = (p.children[command.positions ? "detached" : "attached"] ??= []);
+      for (const t of moving) {
+        if (command.positions) t.position = command.positions[t.id];
+        else delete t.position;
+      }
+      if (!command.positions) delete p.branch;
+      const at = anchor ? list.findIndex(t => t.id === anchor) : -1;
+      list.splice(at < 0 ? list.length : at + (command.before ? 0 : 1), 0, ...moving);
+      break;
+    }
     case "move": {
       if (!topic || topic === root) throw new Error("Cannot move root");
       if (findTopic(topic, command.parent))
@@ -330,6 +416,7 @@ export function editDocument(
       if (!p) throw new Error("Parent not found");
       removeTopic(root, topic.id);
       p.children ??= {};
+      if (!command.position) delete p.branch;
       const list = (p.children[command.position ? "detached" : "attached"] ??=
         []);
       if (command.position) topic.position = command.position;
@@ -382,7 +469,7 @@ export function editDocument(
       break;
     }
   }
-  if (["add", "paste", "delete", "move"].includes(command.type))
+  if (["add", "paste", "delete", "move", "move-many"].includes(command.type))
     repairGroups(root, original.rootTopic);
   const collectIds = (tree: Topic) => {
     const ids = new Set<string>();

@@ -1,3 +1,4 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   useCallback,
   useEffect,
@@ -17,9 +18,10 @@ import {
   walkTopics,
   type XmindDocument,
   type Sheet,
+  type Group,
   type Command,
 } from "../lib/xmind/document";
-import { STRUCTURES, styleFor } from "../lib/xmind/scene";
+import { STRUCTURES, topicStyle, groupStyle } from "../lib/xmind/scene";
 import XmindCanvas, { type Camera } from "./XmindCanvas";
 import { useEditorStore } from "../store/editor";
 import { registerDocumentFlush } from "../lib/documentFlush";
@@ -61,6 +63,8 @@ export default function XmindView({ dataUrl, tabId }: Props) {
     echo = useRef("");
   const [sheetId, setSheetId] = useState(""),
     [selected, setSelected] = useState<string[]>([]);
+  const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
+  useEffect(() => { if(selected.length) setSelectedGroup(null); }, [selected]);
   const [inspector, setInspector] = useState(true),
     [outline, setOutline] = useState(false),
     [query, setQuery] = useState("");
@@ -209,10 +213,25 @@ export default function XmindView({ dataUrl, tabId }: Props) {
     },
     [sheetId, tabId, publish],
   );
+  const restoreSelection = (sheets: Sheet[], previous: Sheet[]) => {
+    const target = sheets.find(s=>s.id===sheetId) ?? sheets[0];
+    if(!target) return;
+    setSheetId(target.id);
+    const valid=selected.filter(id=>!!findTopic(target.rootTopic,id));
+    if(!valid.length && selected.length) {
+      const old=previous.find(s=>s.id===sheetId);
+      const removed=old && findTopic(old.rootTopic,selected[0]);
+      if(removed) walkTopics(removed,n=>{if(!valid.length && findTopic(target.rootTopic,n.id)) valid.push(n.id);});
+      if(!valid.length) valid.push(target.rootTopic.id);
+    }
+    setSelected(valid);
+    setSelectedGroup(null);
+  };
   const undo = () => {
     const s = current.current;
     if (!s?.past.length) return;
     try {
+      restoreSelection(s.past[s.past.length - 1],s.sheets);
       publish({
         ...s,
         sheets: s.past[s.past.length - 1],
@@ -228,6 +247,7 @@ export default function XmindView({ dataUrl, tabId }: Props) {
     const s = current.current;
     if (!s?.future.length) return;
     try {
+      restoreSelection(s.future[0],s.sheets);
       publish({
         ...s,
         sheets: s.future[0],
@@ -239,8 +259,32 @@ export default function XmindView({ dataUrl, tabId }: Props) {
       setError(String(err));
     }
   };
+  const historyActions = useRef({undo,redo});
+  historyActions.current = {undo,redo};
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if(e.defaultPrevented || !(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z" ||
+        !tabId || useEditorStore.getState().activeId !== tabId) return;
+      const target=e.target instanceof Element ? e.target : null;
+      if(target?.closest('input,textarea,select,[contenteditable="true"],[role="dialog"]')) return;
+      e.preventDefault();e.stopPropagation();
+      e.shiftKey ? historyActions.current.redo() : historyActions.current.undo();
+    };
+    window.addEventListener("keydown",key);
+    return () => window.removeEventListener("keydown",key);
+  },[tabId]);
   const sheet =
     session?.sheets.find((s) => s.id === sheetId) ?? session?.sheets[0];
+  const groupInfo = useMemo(() => {
+    let found: {group: Group; parent: string; summary: boolean} | undefined;
+    if (sheet && selectedGroup) walkTopics(sheet.rootTopic, owner => {
+      for (const [kind, groups] of [[false, owner.boundaries], [true, owner.summaries]] as const) {
+        const group = groups?.find(g => g.id === selectedGroup);
+        if (group) found = {group, parent:owner.id, summary:kind};
+      }
+    });
+    return found;
+  }, [sheet, selectedGroup]);
   const topic = sheet ? findTopic(sheet.rootTopic, selected[0]) : undefined;
   const parents = useMemo(() => {
     const map = new Map<string, string>();
@@ -297,12 +341,25 @@ export default function XmindView({ dataUrl, tabId }: Props) {
   const changeSheet = (id: string) => {
     flush();
     setSheetId(id);
+    setSelectedGroup(null);
     const s = current.current?.sheets.find((s) => s.id === id);
     setSelected(s ? [s.rootTopic.id] : []);
     setQuery("");
   };
+  const followLink = async (href: string) => {
+    try {
+      const match = /^(?:xmind:)?#(.+)$/i.exec(href);
+      if (match) {
+        const id = decodeURIComponent(match[1]);
+        const target = current.current?.sheets.find(s => findTopic(s.rootTopic, id));
+        if (!target) throw new Error(t("xmind.linkMissing"));
+        flush(); setSheetId(target.id); setSelected([id]); setQuery("");
+      } else if (/^(https?:|mailto:)/i.test(href)) await openUrl(href);
+      else throw new Error(t("xmind.linkUnsupported"));
+    } catch (err) { logError("xmind link failed", err); setError(String(err)); }
+  };
   const properties = (p: Record<string, string>) => {
-    if (topic) execute({ type: "properties", id: topic.id, properties: p });
+    if (topic) execute({ type: "properties-many", ids: selected, properties: p["svg:fill"] ? { ...p, "fill-pattern": "solid" } : p });
   };
   const field = (
     label: string,
@@ -315,7 +372,7 @@ export default function XmindView({ dataUrl, tabId }: Props) {
       {label}
       {multiline ? (
         <textarea
-          key={`${topic?.id}-${label}-${value}`}
+          key={`${topic?.id ?? selectedGroup}-${label}-${value}`}
           aria-label={label}
           data-field={fieldKey}
           defaultValue={value}
@@ -327,7 +384,7 @@ export default function XmindView({ dataUrl, tabId }: Props) {
         />
       ) : (
         <input
-          key={`${topic?.id}-${label}-${value}`}
+          key={`${topic?.id ?? selectedGroup}-${label}-${value}`}
           aria-label={label}
           data-field={fieldKey}
           defaultValue={value}
@@ -345,20 +402,7 @@ export default function XmindView({ dataUrl, tabId }: Props) {
         {error ? t("xmind.openError", { error }) : t("xmind.loading")}
       </div>
     );
-  let depth = 0,
-    ancestor = topic?.id;
-  while (ancestor && parents.has(ancestor)) {
-    ancestor = parents.get(ancestor);
-    depth++;
-  }
-  let main = topic?.id;
-  while (main && parents.get(main) && parents.get(main) !== sheet.rootTopic.id)
-    main = parents.get(main);
-  const branch = Math.max(
-    0,
-    sheet.rootTopic.children?.attached?.findIndex((n) => n.id === main) ?? 0,
-  );
-  const resolved = styleFor(sheet, topic ?? sheet.rootTopic, depth, branch);
+  const resolved = topicStyle(sheet, topic?.id ?? sheet.rootTopic.id);
   const p = resolved.properties;
   return (
     <div className="xm-workbench" data-xmind-tab={tabId}>
@@ -453,6 +497,8 @@ export default function XmindView({ dataUrl, tabId }: Props) {
                 for (const c of [
                   ...(n.children?.attached ?? []),
                   ...(n.children?.detached ?? []),
+                  ...(n.children?.callout ?? []),
+                  ...(n.children?.summary ?? []),
                 ])
                   visit(c, depth + 1);
               };
@@ -475,7 +521,9 @@ export default function XmindView({ dataUrl, tabId }: Props) {
           sheet={sheet}
           readonly={!editing}
           selected={selected}
-          onSelect={setSelected}
+          onSelect={(ids) => { setSelected(ids); if(ids.length) setSelectedGroup(null); }}
+          selectedGroup={groupInfo ? selectedGroup : null}
+          onSelectGroup={(id) => { setSelectedGroup(id); if(id) { setSelected([]); setInspector(true); } }}
           onCommand={execute}
           onUndo={undo}
           onRedo={redo}
@@ -483,8 +531,9 @@ export default function XmindView({ dataUrl, tabId }: Props) {
           query={query}
           camera={cameras.current.get(sheet.id)}
           onCamera={saveCamera}
+          onLink={followLink}
           onInspect={(field, id) => {
-            if (id) setSelected([id]);
+            if (id) { setSelected([id]); setSelectedGroup(null); }
             setInspector(true);
             if (field) setInspectField(field);
           }}
@@ -495,7 +544,18 @@ export default function XmindView({ dataUrl, tabId }: Props) {
             <div className="xm-panel-title">
               {t("xmind.inspector")}
             </div>
-            {topic ? (
+            {groupInfo ? <>
+              <div className="xm-panel-section">{t(groupInfo.summary ? "xmind.summary" : "xmind.boundary")}</div>
+              {field(t("xmind.title"), (groupInfo.group.topicId && findTopic(sheet.rootTopic,groupInfo.group.topicId)?.title) || groupInfo.group.title || "",
+                title => execute({type:"group-update",id:groupInfo.group.id,parent:groupInfo.parent,title}))}
+              <div className="xm-color-row">
+                {[["svg:fill","fill","#E9F1FA"],["line-color","lineColor","#A2B3C9"]].map(([key,label,fallback]) =>
+                  <label key={key}>{t(`xmind.${label}`)}<input type="color" aria-label={t(`xmind.${label}`)}
+                    disabled={!editing} value={groupStyle(sheet,groupInfo.group,groupInfo.summary)[key] ?? fallback}
+                    onChange={e=>execute({type:"group-update",id:groupInfo.group.id,parent:groupInfo.parent,properties:{[key]:e.target.value}})} /></label>)}
+              </div>
+              <Button size="sm" disabled={!editing} onClick={()=>{execute({type:"group-delete",id:groupInfo.group.id,parent:groupInfo.parent});setSelectedGroup(null);}}>{t("common.delete")}</Button>
+            </> : topic ? (
               <>
                 {field(
                   t("xmind.title"),
@@ -545,7 +605,7 @@ export default function XmindView({ dataUrl, tabId }: Props) {
                         value={
                           /^#[\da-fA-F]{6}$/.test(p[key] ?? "")
                             ? p[key]
-                            : fallback
+                            : /^#[\da-fA-F]{6}$/.test(fallback) ? fallback : "#EEEEEE"
                         }
                         disabled={!editing}
                         onChange={(e) => properties({ [key]: e.target.value })}
@@ -553,6 +613,10 @@ export default function XmindView({ dataUrl, tabId }: Props) {
                     </label>
                   ))}
                 </div>
+                <Button size="sm" disabled={!editing} pressed={resolved.fill === "none"}
+                  onClick={() => properties(resolved.fill === "none" ? {"fill-pattern":"solid", "svg:fill": /^#[\da-fA-F]{6}$/.test(p["svg:fill"] ?? "") ? p["svg:fill"] : "#EEEEEE"} : {"fill-pattern":"none"})}>
+                  {t("xmind.noFill")}
+                </Button>
                 <label className="xm-field">
                   {t("xmind.fontSize")}
                   <input
@@ -636,12 +700,9 @@ export default function XmindView({ dataUrl, tabId }: Props) {
                         .filter(Boolean),
                     }),
                 )}
-                {topic.href && (
-                  <div className="xm-field">
-                    {t("xmind.link")}
-                    <span className="xm-link">{topic.href}</span>
-                  </div>
-                )}
+                {field(t("xmind.link"), topic.href ?? "",
+                  href => execute({ type: "href", id: topic.id, href }), false, "href")}
+                {topic.href && <Button size="sm" onClick={() => followLink(topic.href!)}>{t("xmind.openLink")}</Button>}
                 <p className="xm-help">{t("xmind.help")}</p>
               </>
             ) : (

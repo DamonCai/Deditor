@@ -1,3 +1,4 @@
+import { topicDropTarget, type DropTarget } from "../lib/xmind/drop";
 import XmindRelationship from "./XmindRelationship";
 import XmindIndicator from "./XmindIndicator";
 import { logError } from "../lib/logger";
@@ -39,6 +40,8 @@ interface Props {
   sheet: Sheet;
   readonly: boolean;
   selected: string[];
+  selectedGroup: string | null;
+  onSelectGroup: (id: string | null) => void;
   onSelect: (ids: string[]) => void;
   onCommand: (command: Command) => void;
   onUndo: () => void;
@@ -47,6 +50,7 @@ interface Props {
   query: string;
   camera?: Camera;
   onCamera: (camera: Camera) => void;
+  onLink: (href: string) => void;
   onInspect: (field?: "notes", id?: string) => void;
   registerFlush: (flush: () => void) => () => void;
 }
@@ -108,6 +112,8 @@ export default function XmindCanvas({
   sheet,
   readonly,
   selected,
+  selectedGroup,
+  onSelectGroup,
   onSelect,
   onCommand,
   onUndo,
@@ -117,6 +123,7 @@ export default function XmindCanvas({
   camera: saved,
   onCamera,
   onInspect,
+  onLink,
   registerFlush,
 }: Props) {
   const t = useT(),
@@ -159,15 +166,19 @@ export default function XmindCanvas({
   }, [context, size]);
   const [dragOffset, setDragOffset] = useState<{
     id: string;
+    ids: string[];
     x: number;
     y: number;
   } | null>(null);
+  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
   const pointer = useRef<{
     x: number;
     y: number;
     cx: number;
     cy: number;
     id?: string;
+    ids: string[];
+    multi: boolean;
     dragged: boolean;
   } | null>(null);
   const [fontsReady, setFontsReady] = useState(!document.fonts);
@@ -198,6 +209,27 @@ export default function XmindCanvas({
     () => new Map(scene.nodes.map((n) => [n.topic.id, n])),
     [scene],
   );
+  const fishboneRibs = useMemo(() => new Map(scene.edges
+    .filter(edge => edge.direction === "fishbone" && edge.points?.length === 2)
+    .map(edge => [edge.to, edge.points!])), [scene]);
+  const draggedIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const id of dragOffset?.ids ?? []) {
+      const topic = findTopic(sheet.rootTopic, id);
+      if (topic) walkTopics(topic, t => ids.add(t.id));
+    }
+    return ids;
+  }, [sheet, dragOffset?.ids]);
+  const displayById = useMemo(() => new Map(scene.nodes.map(n => [n.topic.id,
+    dragOffset && draggedIds.has(n.topic.id) ? { ...n, x: n.x + dragOffset.x, y: n.y + dragOffset.y } : n])),
+    [scene, dragOffset, draggedIds]);
+  const dropAt = (x: number, y: number, ids: string[]) => {
+    const moving = new Set<string>();
+    ids.forEach(id => { const n = findTopic(sheet.rootTopic, id); if (n) walkTopics(n, t => moving.add(t.id)); });
+    const r = svg.current!.getBoundingClientRect(), c = cameraRef.current;
+    return topicDropTarget(scene.nodes, moving, c.x + (x-r.left-r.width/2)/c.zoom,
+      c.y + (y-r.top-r.height/2)/c.zoom, c.zoom);
+  };
   const cameraRef = useRef(camera);
   cameraRef.current = camera;
   const initialFit = useRef(!!saved);
@@ -340,14 +372,14 @@ export default function XmindCanvas({
   const commitRef = useRef(commitEdit);
   commitRef.current = commitEdit;
   useEffect(() => registerFlush(() => { commitRef.current(); relationshipFlush.current?.(); }), [registerFlush]);
-  const add = (sibling = false) => {
+  const add = (sibling = false, before = false) => {
     cancelEditing.current = false;
     if (readonly) return;
     const id = selected[0] ?? sheet.rootTopic.id,
       node = byId.get(id);
     const parent = sibling ? (node?.parent ?? id) : id;
     const topic = newTopic(t("xmind.topic"));
-    onCommand({ type: "add", parent, topic, after: sibling ? id : undefined });
+    onCommand({ type: "add", parent, topic, after: sibling && !before ? id : undefined, before: sibling && before ? id : undefined });
     onSelect([topic.id]);
     setDraft(topic.title);
     setEditing(topic.id);
@@ -403,10 +435,36 @@ export default function XmindCanvas({
       e.stopPropagation();
       pointer.current = null;
       setDragOffset(null);
+      setDropTarget(null);
       setContext(null);
       setEditing(null);
       setSelectedRelationship(null);
+      onSelectGroup(null);
       host.current?.focus();
+      return;
+    }
+    if (mod && e.key.toLowerCase() === "r") {
+      e.preventDefault(); e.stopPropagation(); focusNode(sheet.rootTopic.id); return;
+    }
+    if (mod && e.key === "Enter" && !readonly) {
+      e.preventDefault(); e.stopPropagation();
+      const id=selected[0];
+      if(!id || id===sheet.rootTopic.id) return;
+      const topic=newTopic(t("xmind.topic"));
+      onCommand({type:"parent",id,topic});onSelect([topic.id]);return;
+    }
+    if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown") && !readonly) {
+      e.preventDefault(); e.stopPropagation();
+      const roots=selectedTopicRoots(sheet.rootTopic,selected), parentId=parents.get(roots[0]?.id);
+      const parent=parentId && findTopic(sheet.rootTopic,parentId);
+      if(!parent || roots.some(n=>parents.get(n.id)!==parentId)) return;
+      const siblings=parent.children?.attached ?? [], ids=new Set(roots.map(n=>n.id));
+      const indices=siblings.flatMap((n,i)=>ids.has(n.id)?[i]:[]);
+      if(!indices.length) return;
+      const reversed=byId.get(parentId!)?.direction==='side' && byId.get(roots[0].id)?.direction==='left';
+      const before=(e.key==='ArrowUp')!==reversed;
+      const target=siblings[before ? Math.min(...indices)-1 : Math.max(...indices)+1];
+      if(target) onCommand({type:"move-many",ids:[...ids],parent:parentId!,...(before?{before:target.id}:{after:target.id})});
       return;
     }
     if (mod && e.key === "/" && selected[0]) {
@@ -451,7 +509,7 @@ export default function XmindCanvas({
     } else if (e.key === "Enter" && !readonly) {
       e.preventDefault();
       e.stopPropagation();
-      add(true);
+      add(true, e.shiftKey);
     } else if (e.key === "F2" && !readonly && selected[0]) {
       e.preventDefault();
       e.stopPropagation();
@@ -459,14 +517,18 @@ export default function XmindCanvas({
     } else if ((e.key === "Delete" || e.key === "Backspace") && !readonly) {
       e.preventDefault();
       e.stopPropagation();
-      if (selectedRelationship) {
+      if (selectedGroup) {
+        const group=scene.groups.find(g=>g.id===selectedGroup);
+        if(group) onCommand({type:"group-delete",id:group.id,parent:group.parent});
+        onSelectGroup(null);
+      } else if (selectedRelationship) {
         onCommand({ type: "relationship-delete", id: selectedRelationship });
         setSelectedRelationship(null);
       } else remove();
-    } else if (e.key === " " && selected[0]) {
+    } else if (e.key === " " && selected[0] && !readonly) {
       e.preventDefault();
       e.stopPropagation();
-      toggleFold(selected[0]);
+      startEdit(selected[0]);
     } else if (e.key.startsWith("Arrow")) {
       e.preventDefault();
       const current = byId.get(selected[0]);
@@ -520,7 +582,14 @@ export default function XmindCanvas({
     const selectedIds = new Set(selected);
     return <>
         {scene.groups.map((g) => (
-          <g key={g.id} pointerEvents="none">
+          <g key={g.id} data-group={g.id} role="button" tabIndex={0} aria-label={g.title || t(g.summary ? "xmind.summary" : "xmind.boundary")}
+            aria-pressed={selectedGroup === g.id}
+            onKeyDown={e=>{if(e.key==='Enter'||e.key===' ') {e.preventDefault();e.stopPropagation();setSelectedRelationship(null);onSelectGroup(g.id);host.current?.focus();}}}
+            onPointerDown={e=>{e.stopPropagation();host.current?.focus();setSelectedRelationship(null);onSelectGroup(g.id);}}
+            onDoubleClick={e=>{e.stopPropagation();onSelectGroup(g.id);}}
+            style={{cursor:"pointer"}} transform={dragOffset && draggedIds.has(g.parent) ? `translate(${dragOffset.x},${dragOffset.y})` : undefined}>
+            {selectedGroup === g.id && <rect x={g.x-4} y={g.y-4} width={g.width+8} height={g.height+8} rx={16} fill="none" stroke="var(--accent)" strokeWidth={2} pointerEvents="none" />}
+            <rect x={g.x} y={g.y} width={g.width} height={g.height} rx={14} fill="none" stroke="transparent" strokeWidth={14} pointerEvents="stroke" />
             {g.summary ? (
               <path
                 transform={
@@ -545,24 +614,31 @@ export default function XmindCanvas({
                 height={g.height}
                 rx={14}
                 fill={g.properties["svg:fill"] ?? "#e9f1fa"}
-                fillOpacity={0.45}
+                pointerEvents="none"
+                fillOpacity={Number(g.properties["svg:fill-opacity"] ?? 0.45)}
                 stroke={g.properties["line-color"] ?? "#a2b3c9"}
-                strokeDasharray="5 3"
+                strokeDasharray={g.properties["line-pattern"] === "solid" ? undefined : g.properties["line-pattern"] === "dot" ? "1 3" : "5 3"}
               />
             )}
-            <text x={g.x + 10} y={g.y - 5} fill="#64748b" fontSize={12}>
-              {g.title}
-            </text>
+            {g.titleLines.length > 0 && <g data-group-title={g.id}>
+              <rect x={g.x+(g.width-g.titleWidth)/2} y={g.y-g.titleHeight}
+                width={g.titleWidth} height={g.titleHeight} rx={4} fill={g.properties["line-color"]} />
+              <text x={g.x+g.width/2} y={g.y-g.titleHeight+4+g.titleFontSize}
+                textAnchor="middle" fill={g.properties["fo:color"]} fontSize={g.titleFontSize}
+                fontFamily={g.properties["fo:font-family"]} fontWeight={g.properties["fo:font-weight"]}>
+                {g.titleLines.map((line,i)=><tspan key={i} x={g.x+g.width/2} dy={i?g.titleLineHeight:0}>{line}</tspan>)}
+              </text>
+            </g>}
           </g>
         ))}
         {[...braceEdges].map(([id, edges]) => {
-          const from = byId.get(id)!;
+          const from = displayById.get(id)!;
           return (
             <path
               key={`brace-${id}`}
               d={braceConnector(
                 from,
-                edges.map((e) => byId.get(e.to)!),
+                edges.map((e) => displayById.get(e.to)!),
                 edges[0].direction === "left",
               )}
               fill="none"
@@ -573,14 +649,16 @@ export default function XmindCanvas({
         })}
         {scene.edges.map((e, i) => {
           if (e.brace) return null;
-          const from = byId.get(e.from),
-            to = byId.get(e.to);
+          const from = displayById.get(e.from),
+            to = displayById.get(e.to);
           return from && to ? (
             <path
               key={i}
-              d={edgePath(e, from, e.callout && dragOffset?.id === e.to
-                ? { ...to, x: to.x + dragOffset.x, y: to.y + dragOffset.y }
-                : to)}
+              d={edgePath(dragOffset && draggedIds.has(e.from) && draggedIds.has(e.to) ? {
+                ...e,
+                points: e.points?.map(p => ({x:p.x+dragOffset.x,y:p.y+dragOffset.y})),
+                trunk: e.trunk?.map(p => ({x:p.x+dragOffset.x,y:p.y+dragOffset.y})),
+              } : e, from, to)}
               data-callout-tail={e.callout || undefined}
               fill={e.callout ? to.fill : "none"}
               stroke={e.callout ? "none" : to.lineColor}
@@ -596,7 +674,7 @@ export default function XmindCanvas({
             match =
               query &&
               n.topic.title.toLowerCase().includes(query.toLowerCase());
-          const offset = dragOffset?.id === n.topic.id ? dragOffset : null;
+          const offset = draggedIds.has(n.topic.id) ? dragOffset : null;
           const img = imageSource(n.topic, resources),
             imageHeight = n.imageHeight;
           // The editor grows independently of the saved node, so long drafts
@@ -613,10 +691,18 @@ export default function XmindCanvas({
           };
           if (isFolded) countChildren(n.topic);
           const foldRadius = isFolded ? Math.max(9, String(hiddenCount).length * 3.5 + 4) : 8;
-          const foldX = n.direction === "left" ? -foldRadius - 4
+          const foldLeft = n.direction === "left" || (n.direction === "fishbone" && n.topic.structureClass?.toLowerCase().includes("rightheaded"));
+          let foldX = foldLeft ? -foldRadius - 4
             : n.direction === "down" || n.direction === "up" ? n.width / 2 : n.width + foldRadius + 4;
-          const foldY = n.direction === "down" ? n.height + foldRadius + 4
+          let foldY = n.direction === "down" ? n.height + foldRadius + 4
             : n.direction === "up" ? -foldRadius - 4 : n.height / 2;
+          const rib = fishboneRibs.get(n.topic.id);
+          if (rib) {
+            const [base, tip] = rib;
+            const distance = foldRadius + 4;
+            foldX = tip.x - n.x + (base.x - tip.x) / Math.abs(base.y - tip.y) * distance;
+            foldY = tip.y - n.y + Math.sign(base.y - tip.y) * distance;
+          }
           return (
             <g
               key={n.topic.id}
@@ -634,6 +720,7 @@ export default function XmindCanvas({
               transform={`translate(${n.x + (offset?.x ?? 0)},${n.y + (offset?.y ?? 0)})`}
               style={{ cursor: readonly ? "pointer" : "grab" }}
             >
+              <rect data-topic-hitbox width={n.width} height={n.height} fill="transparent" stroke="none" />
               {(chosen || match) && (
                 <rect
                   x={-5}
@@ -707,7 +794,7 @@ export default function XmindCanvas({
                 </foreignObject>
               ) : (
                 <text
-                  x={n.width / 2}
+                  x={n.titleX}
                   y={n.content.y + (imageHeight ? imageHeight + 8 : 0) + n.fontSize * 1.05}
                   textAnchor="middle"
                   fill={n.color}
@@ -725,7 +812,7 @@ export default function XmindCanvas({
                   {n.lines.map((line, i) => (
                     <tspan
                       key={i}
-                      x={n.width / 2}
+                      x={n.titleX}
                       dy={i ? n.fontSize * 1.4 : 0}
                     >
                       {line}
@@ -745,23 +832,21 @@ export default function XmindCanvas({
                   </text>
                 </g>
               ))}
-              {n.indicators.map((icon, i) => {
-                const row = Math.floor(i / n.indicatorColumns);
-                const columns = Math.min(n.indicatorColumns, n.indicators.length - row * n.indicatorColumns);
+              {editing !== n.topic.id && n.indicators.map((icon, i) => {
                 const label = icon.kind === "task"
                   ? t("xmind.indicator.task", { percent: Math.round((icon.value ?? 0) * 100) })
                   : icon.kind === "priority" ? t("xmind.indicator.priority", { value: icon.value ?? 1 })
                     : t(`xmind.indicator.${icon.kind}`);
                 const indicator = <XmindIndicator icon={icon} label={label} color={n.color}
-                  x={(n.width - (columns * 20 - 4)) / 2 + (i % n.indicatorColumns) * 20}
-                  y={n.indicatorY + row * 20} />;
-                return icon.kind === "notes" ? <g key={i} data-note-button role="button" tabIndex={0}
-                  aria-label={t("xmind.openNotes")} style={{ cursor: "pointer" }}
+                  x={n.indicatorPositions[i].x}
+                  y={n.indicatorPositions[i].y} />;
+                return icon.kind === "notes" || icon.kind === "link" ? <g key={i} data-note-button={icon.kind === "notes" ? true : undefined} data-link-button={icon.kind === "link" ? true : undefined} role="button" tabIndex={0}
+                  aria-label={t(icon.kind === "notes" ? "xmind.openNotes" : "xmind.openLink")} style={{ cursor: "pointer" }}
                   onPointerDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}
-                  onClick={(e) => { e.stopPropagation(); onInspect("notes", n.topic.id); }}
+                  onClick={(e) => { e.stopPropagation(); icon.kind === "notes" ? onInspect("notes", n.topic.id) : onLink(n.topic.href!); }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault(); e.stopPropagation(); onInspect("notes", n.topic.id);
+                      e.preventDefault(); e.stopPropagation(); icon.kind === "notes" ? onInspect("notes", n.topic.id) : onLink(n.topic.href!);
                     }
                   }}>{indicator}</g> : <g key={i}>{indicator}</g>;
               })}
@@ -797,11 +882,11 @@ export default function XmindCanvas({
           );
         })}
         {(sheet.relationships ?? []).map((relation) => {
-          const from = byId.get(relation.end1Id), to = byId.get(relation.end2Id);
+          const from = displayById.get(relation.end1Id), to = displayById.get(relation.end2Id);
           if (!from || !to) return null;
           return <XmindRelationship key={relation.id} relation={relation} sheet={sheet} from={from} to={to}
             readonly={readonly} selected={selectedRelationship === relation.id} markerPrefix={viewId}
-            onSelect={() => { onSelect([]); setSelectedRelationship(relation.id); }}
+            onSelect={() => { onSelectGroup(null); onSelect([]); setSelectedRelationship(relation.id); }}
             onCommand={onCommand} registerFlush={setRelationshipFlush}
             toWorld={(x, y) => {
               const rect = svg.current!.getBoundingClientRect();
@@ -812,8 +897,8 @@ export default function XmindCanvas({
         })}
     </>;
   }, [scene, selected, query, dragOffset, resources, readonly, editing, draft,
-    folded, t, commitEdit, toggleFold, byId, braceEdges, sheet, viewId,
-    selectedRelationship, onCommand, onSelect, onInspect, setRelationshipFlush]);
+    folded, t, commitEdit, toggleFold, byId, displayById, draggedIds, braceEdges, fishboneRibs, sheet, viewId,
+    selectedRelationship, selectedGroup, onSelectGroup, onCommand, onSelect, onInspect, onLink, setRelationshipFlush]);
 
   return (
     <div
@@ -886,21 +971,28 @@ export default function XmindCanvas({
           if ((e.target as Element).closest("textarea,[data-fold]")) return;
           setContext(null);
           setSelectedRelationship(null);
+          onSelectGroup(null);
           host.current?.focus();
           const id =
             (e.target as Element)
               .closest("[data-topic]")
               ?.getAttribute("data-topic") ?? undefined;
+          const multi = e.shiftKey || e.metaKey || e.ctrlKey;
+          const ids = id && selected.includes(id) && !multi ? selected : id ? [id] : [];
           if (e.button === 0) {
-            if (id) select(id, e.shiftKey || e.metaKey || e.ctrlKey);
-            else onSelect([]);
+            if (id && (multi || !selected.includes(id))) select(id, multi);
+            else if (!id) onSelect([]);
           }
+          const roots = selectedTopicRoots(sheet.rootTopic, ids.filter(id => id !== sheet.rootTopic.id));
+          const callout = scene.edges.some(edge => edge.callout && edge.to === id);
           pointer.current = {
             x: e.clientX,
             y: e.clientY,
             cx: camera.x,
             cy: camera.y,
             id: !readonly && e.button === 0 ? id : undefined,
+            ids: callout && id ? [id] : roots.map(n => n.id),
+            multi,
             dragged: false,
           };
         }}
@@ -912,13 +1004,10 @@ export default function XmindCanvas({
           if (Math.hypot(dx, dy) < 5 && !p.dragged) return;
           if (!p.dragged) e.currentTarget.setPointerCapture(e.pointerId);
           p.dragged = true;
-          if (p.id && p.id !== sheet.rootTopic.id)
-            setDragOffset({
-              id: p.id,
-              x: dx / camera.zoom,
-              y: dy / camera.zoom,
-            });
-          else
+          if (p.id && p.id !== sheet.rootTopic.id) {
+            setDragOffset({ id: p.id, ids: p.ids, x: dx / camera.zoom, y: dy / camera.zoom });
+            setDropTarget(scene.edges.some(edge => edge.callout && edge.to === p.id) ? null : dropAt(e.clientX,e.clientY,p.ids));
+          } else
             setCamera((c) => ({
               ...c,
               x: p.cx - dx / c.zoom,
@@ -929,7 +1018,9 @@ export default function XmindCanvas({
           const p = pointer.current;
           pointer.current = null;
           setDragOffset(null);
-          if (!p?.dragged || !p.id || p.id === sheet.rootTopic.id) return;
+          setDropTarget(null);
+          if (!p?.dragged) { if (p?.id && !p.multi) onSelect([p.id]); return; }
+          if (!p.id || p.id === sheet.rootTopic.id) return;
           const callout = scene.edges.find((edge) => edge.callout && edge.to === p.id);
           if (callout) {
             const node = byId.get(p.id)!, parent = byId.get(callout.from)!;
@@ -942,29 +1033,23 @@ export default function XmindCanvas({
             });
             return;
           }
-          const target = document
-            .elementFromPoint(e.clientX, e.clientY)
-            ?.closest("[data-topic]")
-            ?.getAttribute("data-topic");
-          if (target && target !== p.id) {
-            onCommand({ type: "move", id: p.id, parent: target });
+          const drop = dropAt(e.clientX, e.clientY, p.ids);
+          if (drop?.kind === "invalid") return;
+          if (drop) {
+            onCommand({ type: "move-many", ids: p.ids, parent: drop.parent,
+              ...(drop.kind === "before" ? { before: drop.target } : drop.kind === "after" ? { after: drop.target } : {}) });
           } else {
-            const node = byId.get(p.id);
-            if (node)
-              onCommand({
-                type: "move",
-                id: p.id,
-                parent: sheet.rootTopic.id,
-                position: {
-                  x: node.x + node.width / 2 + (e.clientX - p.x) / camera.zoom,
-                  y: node.y + node.height / 2 + (e.clientY - p.y) / camera.zoom,
-                },
-              });
+            const positions: Record<string, {x:number;y:number}> = {};
+            p.ids.forEach(id => { const n=byId.get(id); if(n) positions[id]={
+              x:n.x+n.width/2+(e.clientX-p.x)/camera.zoom, y:n.y+n.height/2+(e.clientY-p.y)/camera.zoom }; });
+            onCommand({ type: "move-many", ids: p.ids, parent: sheet.rootTopic.id, positions });
           }
+          onSelect(p.ids);
         }}
         onPointerCancel={() => {
           pointer.current = null;
           setDragOffset(null);
+          setDropTarget(null);
         }}
         onDoubleClick={(e) => {
           const id = (e.target as Element)
@@ -990,6 +1075,12 @@ export default function XmindCanvas({
         }}
       >
         {sceneContent}
+        {dropTarget && (() => {
+          const n=byId.get(dropTarget.target); if(!n) return null;
+          return <g data-drop-kind={dropTarget.kind} pointerEvents="none" stroke={dropTarget.kind === "invalid" ? "var(--error-text)" : "var(--accent)"} fill="none" strokeWidth={2/camera.zoom}>
+            {dropTarget.line ? <line {...dropTarget.line} /> : <rect x={n.x-4} y={n.y-4} width={n.width+8} height={n.height+8} rx={8} />}
+          </g>;
+        })()}
       </svg>
       <div className="xm-zoom">
         <Button

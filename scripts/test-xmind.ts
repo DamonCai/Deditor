@@ -1,3 +1,4 @@
+import { topicDropTarget } from "../src/lib/xmind/drop";
 import { relationshipGeometry, topicAnchor } from "../src/lib/xmind/relationship";
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
@@ -13,7 +14,7 @@ import {
   duplicateTopic,
   type Sheet,
 } from "../src/lib/xmind/document";
-import { buildScene, edgePath, STRUCTURES } from "../src/lib/xmind/scene";
+import { buildScene, edgePath, STRUCTURES, topicStyle, groupStyle } from "../src/lib/xmind/scene";
 import { sampleArchive, sampleSheets } from "../tests/fixtures/xmind";
 // Preserve the original CLI smoke-test entry point.
 if (process.argv[2]) {
@@ -491,7 +492,10 @@ test(1, "diamond and ellipse contain title, labels and metadata", () => {
       assert.ok(shape === "diamond" ? dx + dy < 1 : shape === "ellipse" ? dx * dx + dy * dy < 1 : dx < 1 && dy < 1);
     }
     assert.ok(n.labelLines.length > 1);
-    assert.ok(n.indicatorY + Math.ceil(n.indicators.length / n.indicatorColumns) * 20 <= c.y + c.height);
+    for (const icon of n.indicatorPositions) {
+      assert.ok(icon.x >= c.x && icon.x + 16 <= c.x + c.width);
+      assert.ok(icon.y >= c.y && icon.y + 16 <= c.y + c.height);
+    }
   }
 });
 const fishSheet = (structure = "org.xmind.ui.fishbone.leftHeaded", count = 4): Sheet => ({
@@ -652,7 +656,7 @@ test(1, "rounded branches inherit color, share a spine and join underline endpoi
       assert.equal(node(id).properties["line-class"], "org.xmind.branchConnection.roundedElbow");
     }
     const paths = ["a", "b"].map(id => edgePath(scene.edges.find(e=>e.to===id)!,node("main"),node(id)));
-    const stems = paths.map(p => p.match(/^M[^ ]+ H([^ ]+)/)![1]);
+    const stems = ['a','c'].map(id=>edgePath(scene.edges.find(e=>e.to===id)!,node('main'),node(id)).match(/^M[^ ]+ H([^ ]+)/)![1]);
     assert.equal(stems[0],stems[1]);
     assert.ok(paths[0].includes(" Q"));
     assert.ok(!paths[1].includes(" Q"), "middle child joins the shared trunk without an extra bend");
@@ -662,7 +666,7 @@ test(1, "rounded branches inherit color, share a spine and join underline endpoi
       const endY = node(i ? "b" : "a").y + node(i ? "b" : "a").height;
       assert.ok(p.includes(`,${endY}`) || p.includes(`V${endY}`));
     });
-    assert.ok(edgePath(scene.edges.find(e=>e.to==="main")!,node("root"),node("main")).includes(" Q"));
+    assert.ok(edgePath(scene.edges.find(e=>e.to==="main")!,node("root"),node("main")).includes(" C"));
   }
 });
 test(2, "callout positions control filled tails above, below and beside their parent", () => {
@@ -765,4 +769,218 @@ test(1, "native default branch counts keep two topics on the right before balanc
   }
 });
 
+test(1, "native no-theme defaults distinguish central, main, leaf and floating topics", () => {
+  const sheet: Sheet = {id:'defaults',title:'默认',rootTopic:{id:'r',title:'核对',children:{attached:[{id:'a',title:'设计',children:{attached:[{id:'l',title:'视觉规范'}]}}],detached:[{id:'f',title:'自由主题'}]}}};
+  const nodes=buildScene(sheet).nodes, get=(id:string)=>nodes.find(n=>n.topic.id===id)!;
+  assert.deepEqual(['r','a','l','f'].map(id=>get(id).fontSize),[30,18,14,14]);
+  assert.deepEqual(['r','a','l','f'].map(id=>get(id).fill),['#3949AB','#EEEEEE','none','#00897B']);
+  assert.equal(get('a').width,76);assert.equal(get('l').width,68);assert.equal(get('f').width,82);
+  const note=structuredClone(sheet);note.rootTopic.children!.attached![0].notes={plain:{content:'新建测试备注'}};
+  const withNote=buildScene(note).nodes.find(n=>n.topic.id==='a')!;
+  assert.equal(withNote.height,get('a').height);assert.equal(withNote.width,get('a').width+24);
+  assert.ok(withNote.indicatorPositions[0].x>withNote.titleX);
+});
+test(3, "multi-topic moves keep document order, descendants, metadata and atomic archive edits", () => {
+  const doc=openDocument(sampleArchive()), sheet=doc.sheets[0], roots=sheet.rootTopic.children!.attached!;
+  const first=roots[0],second=roots[1],target=roots[2];
+  assert.ok(target);
+  const moved=editDocument(doc.sheets,sheet.id,{type:'move-many',ids:[second.id,first.id,...childrenOf(first).map(n=>n.id)],parent:target.id});
+  const dest=findTopic(moved[0].rootTopic,target.id)!;
+  assert.deepEqual(dest.children!.attached!.slice(-2),[first,second]);
+  assert.deepEqual(doc.sheets[0],sheet);
+  const back=openDocument(writeDocument(doc,moved));
+  assert.deepEqual(back.sheets,moved);assert.deepEqual(back.files['attachments/keep.bin'],doc.files['attachments/keep.bin']);
+  assert.throws(()=>editDocument(doc.sheets,sheet.id,{type:'move-many',ids:[first.id],parent:childrenOf(first)[0].id}),/descendant/);
+  const detached=editDocument(doc.sheets,sheet.id,{type:'move-many',ids:[first.id,second.id],parent:sheet.rootTopic.id,positions:{[first.id]:{x:0,y:40},[second.id]:{x:20,y:90}}});
+  assert.equal(findTopic(detached[0].rootTopic,first.id)!.position!.x,0);
+  assert.throws(()=>editDocument(doc.sheets,sheet.id,{type:'move-many',ids:[first.id,second.id],parent:sheet.rootTopic.id,positions:{[first.id]:{x:0,y:0}}}),/Invalid topic position/);
+});
+test(2, "drop geometry rejects descendants and distinguishes child and sibling insertion", () => {
+  const sheet:Sheet={id:'drag',title:'Drag',rootTopic:{id:'r',title:'Root',structureClass:'org.xmind.ui.logic.right',children:{attached:[{id:'a',title:'A',children:{attached:[{id:'a1',title:'A1'}]}},{id:'b',title:'B'},{id:'c',title:'C'}]}}};
+  const nodes=buildScene(sheet).nodes,get=(id:string)=>nodes.find(n=>n.topic.id===id)!,moving=new Set(['a','a1']);
+  const b=get('b');
+  assert.equal(topicDropTarget(nodes,moving,b.x+b.width/2,b.y+b.height/2,1)!.kind,'child');
+  assert.equal(topicDropTarget(nodes,moving,b.x+b.width/2,b.y+b.height/2,0.1)!.target,'b');
+  assert.equal(topicDropTarget(nodes,moving,b.x+b.width/2,b.y,1)!.kind,'before');
+  assert.equal(topicDropTarget(nodes,moving,b.x+b.width/2,b.y+b.height,1)!.kind,'after');
+  const a1=get('a1');assert.equal(topicDropTarget(nodes,moving,a1.x+a1.width/2,a1.y+a1.height/2,1)!.kind,'invalid');
+  const result=editDocument([sheet],sheet.id,{type:'move-many',ids:['c','a'],parent:'r',before:'b'});
+  assert.deepEqual(result[0].rootTopic.children!.attached!.map(n=>n.id),['a','c','b']);
+  assert.equal(topicDropTarget(nodes,moving,10000,10000,1),null);
+});
+test(2, "boundaries and summary subtrees reserve space during sibling layout", () => {
+  for(const direction of ['right','left','down','up']) {
+    const sheet:Sheet={id:'spacing',title:'Spacing',rootTopic:{id:'r',title:'Root',structureClass:direction==='up'||direction==='down'?'org.xmind.ui.org-chart.'+direction:'org.xmind.ui.logic.'+direction,children:{attached:[{id:'a',title:'A',children:{attached:[{id:'a1',title:'Previous'},{id:'a2',title:'Grouped'},{id:'a3',title:'Following'}],summary:[{id:'sum',title:'A summary with descendants',children:{attached:[{id:'sum1',title:'Detail'}]}}]},boundaries:[{id:'bound',range:'(1,1)',title:'Boundary long label '.repeat(8)}],summaries:[{id:'sum-group',range:'(1,1)',topicId:'sum'}]},{id:'b',title:'B'}]}}};
+    const scene=buildScene(sheet),group=scene.groups.find(g=>g.id==='bound')!;
+    const others=scene.nodes.filter(n=>n.topic.id==='a1'||n.topic.id==='a3'||n.topic.id==='b');
+    const titleBox={...group,y:group.y-group.titleHeight,height:group.height+group.titleHeight};
+    const overlaps=(a:{x:number;y:number;width:number;height:number},b:typeof a)=>a.x<b.x+b.width&&a.x+a.width>b.x&&a.y<b.y+b.height&&a.y+a.height>b.y;
+    for(const n of others)assert.equal(overlaps(titleBox,n),false,`${direction} ${n.topic.id}`);
+    const summary=scene.nodes.find(n=>n.topic.id==='sum')!;
+    assert.ok(scene.nodes.some(n=>n.topic.id==='sum1'));
+    for(const n of others)assert.equal(overlaps(summary,n),false,`${direction} summary ${n.topic.id}`);
+  }
+});
+test(3, "moving every grouped member removes the empty group and its orphan summary", () => {
+  const sheet:Sheet={id:'groups',title:'Groups',rootTopic:{id:'r',title:'R',children:{attached:[{id:'a',title:'A'},{id:'b',title:'B'},{id:'c',title:'C'}],summary:[{id:'sum',title:'Summary'}]},boundaries:[{id:'bound',range:'(0,1)'}],summaries:[{id:'summary',range:'(0,1)',topicId:'sum'}]}};
+  const result=editDocument([sheet],sheet.id,{type:'move-many',ids:['a','b'],parent:'c'})[0];
+  assert.equal(result.rootTopic.boundaries!.length,0);assert.equal(result.rootTopic.summaries!.length,0);
+  assert.equal(result.rootTopic.children!.summary!.length,0);
+  assert.equal(sheet.rootTopic.children!.summary!.length,1);
+});
+test(4, "inspector styles match rendered topic kinds and inherited branch lines", () => {
+  const sheet:Sheet={id:'styles',title:'Styles',rootTopic:{id:'r',title:'Root',children:{attached:[{id:'a',title:'A',style:{properties:{'line-color':'#ff0000'}},children:{attached:[{id:'leaf',title:'Leaf'}],callout:[{id:'call',title:'Callout'}],summary:[{id:'sum',title:'Summary'}]},summaries:[{id:'sg',range:'(0,0)',topicId:'sum'}]}],detached:[{id:'free',title:'Free',children:{attached:[{id:'free-child',title:'Child'}]}}]}}};
+  for(const node of buildScene(sheet).nodes) {
+    const resolved=topicStyle(sheet,node.topic.id);
+    for(const key of ['fontSize','fill','color','shape','lineColor'] as const) assert.equal(resolved[key],node[key],`${node.topic.id} ${key}`);
+  }
+  const summary=topicStyle(sheet,'sum');
+  assert.deepEqual([summary.fill,summary.color,summary.shape,summary.fontSize],['#00897B','#FFFFFF','roundedRect',14]);
+  sheet.rootTopic.children!.attached![0].children!.summary![0].style={properties:{'svg:fill':'#123456','fo:color':'#abcdef','shape-class':'ellipse'}};
+  const custom=topicStyle(sheet,'sum');assert.deepEqual([custom.fill,custom.color,custom.shape],['#123456','#abcdef','ellipse']);
+});
+test(4, "three-branch maps put the lone left topic below center without shifting logic trees", () => {
+  const sheet:Sheet={id:'quadrants',title:'Quadrants',rootTopic:{id:'r',title:'Root',structureClass:'org.xmind.ui.map.unbalanced',children:{attached:[{id:'a',title:'A'},{id:'b',title:'B'},{id:'c',title:'C'}]}}};
+  const scene=buildScene(sheet),r=scene.nodes[0],left=scene.nodes.find(n=>n.topic.id==='c')!;
+  assert.ok(left.y>r.y+r.height/2);
+  sheet.rootTopic.structureClass='org.xmind.ui.logic.left';sheet.rootTopic.children!.attached=sheet.rootTopic.children!.attached!.slice(0,1);
+  const logic=buildScene(sheet);assert.equal(logic.nodes[0].y+logic.nodes[0].height/2,logic.nodes[1].y+logic.nodes[1].height/2);
+});
+test(4, "native group defaults and inherited colors resolve consistently", () => {
+  const sheet=sampleSheets()[0], group={id:'test',range:'(0,0)'};
+  assert.equal(groupStyle(sheet,group,false)['svg:fill-opacity'],'0.2');
+  assert.equal(groupStyle({...sheet,theme:{}},group,true)['line-color'],'#00897B');
+  sheet.theme={boundary:{properties:{'svg:fill':'#123456','line-color':'#654321'}}};
+  assert.equal(groupStyle(sheet,{...group,style:{properties:{'svg:fill':'inherited'}}},false)['svg:fill'],'#123456');
+  assert.equal(groupStyle(sheet,{...group,style:{properties:{'line-color':'#abcdef'}}},false)['line-color'],'#abcdef');
+});
+test(1, "native mind-map quadrants leave the center clear and preserve clockwise order", () => {
+  for(const count of [1,2,3,4,5,6]) {
+    const sheet:Sheet={id:'map',title:'Map',rootTopic:{id:'r',title:'中心主题',structureClass:'org.xmind.ui.map.unbalanced',children:{attached:Array.from({length:count},(_,i)=>({id:'n'+i,title:'主题'+i}))}}};
+    const original=structuredClone(sheet),scene=buildScene(sheet),root=scene.nodes[0];
+    const node=(i:number)=>scene.nodes.find(n=>n.topic.id==='n'+i)!;
+    const cy=(n:typeof root)=>n.y+n.height/2;
+    assert.equal(root.height,78);
+    if(count<=4) {
+      assert.ok(node(0).y+node(0).height<=root.y,'first branch occupies upper quadrant');
+      if(count>1)assert.ok(node(1).y>=root.y+root.height,'second branch occupies lower quadrant');
+      if(count>2)assert.ok(node(2).y>=root.y+root.height,'first left branch occupies lower quadrant');
+    } else {
+      assert.ok(Math.abs(cy(node(1))-cy(root))<1e-8,'odd branch stack has a centered middle topic');
+    }
+    if(count===2||count===3||count===4)assert.ok(Math.abs((cy(node(0))+cy(node(1)))/2-cy(root))<1e-8);
+    if(count===4)assert.ok(cy(node(3))<cy(node(2)),'left branches reverse document order');
+    assert.deepEqual(sheet,original,'layout never writes topic positions');
+  }
+});
+test(2, "asymmetric branches center their actual connection anchors in either direction", () => {
+  for(const direction of ['left','right']) {
+    const sheet:Sheet={id:'anchors',title:'Anchors',rootTopic:{id:'r',title:'中心',structureClass:'org.xmind.ui.logic.'+direction,children:{attached:[{id:'a',title:'Parent',children:{attached:[{id:'a1',title:'First'},{id:'a2',title:'Middle'},{id:'a3',title:'Last'}]}},{id:'b',title:'Other',children:{attached:[{id:'b1',title:'First'},{id:'b2',title:'Last'}]}}]}}};
+    const scene=buildScene(sheet),node=(id:string)=>scene.nodes.find(n=>n.topic.id===id)!;
+    const cy=(id:string)=>node(id).y+node(id).height/2;
+    const baseline=(id:string)=>node(id).y+node(id).height;
+    assert.ok(Math.abs(cy('a')-baseline('a2'))<1e-8);
+    assert.ok(Math.abs(cy('b')-(baseline('b1')+baseline('b2'))/2)<1e-8);
+    assert.ok(Math.abs(cy('r')-(cy('a')+cy('b'))/2)<1e-8);
+  }
+});
+test(3, "logic roots use longer side connections while mind maps keep their own curves", () => {
+  for(const direction of ['left','right']) {
+    const sheet:Sheet={id:'logic',title:'Logic',rootTopic:{id:'r',title:'中心',structureClass:'org.xmind.ui.logic.'+direction,children:{attached:[{id:'a',title:'A'},{id:'b',title:'B'}]}}};
+    const scene=buildScene(sheet),root=scene.nodes[0],child=scene.nodes[1];
+    assert.equal(direction==='right'?child.x-root.x-root.width:root.x-child.x-child.width,100);
+    const path=edgePath(scene.edges[0],root,child);
+    assert.ok(path.startsWith(`M${direction==='right'?root.x+root.width:root.x},${root.y+root.height/2} C`));
+  }
+});
+test(3, "organization levels use compact subtopics and center unequal child widths", () => {
+  for(const direction of ['up','down']) {
+    const sheet:Sheet={id:'org',title:'Org',rootTopic:{id:'r',title:'中心',structureClass:'org.xmind.ui.org-chart.'+direction,children:{attached:[{id:'a',title:'A',children:{attached:[{id:'a1',title:'Short'},{id:'a2',title:'Much wider topic'},{id:'a3',title:'Third'}]}},{id:'b',title:'B'}]}}};
+    const scene=buildScene(sheet),get=(id:string)=>scene.nodes.find(n=>n.topic.id===id)!,cx=(id:string)=>get(id).x+get(id).width/2;
+    assert.ok(Math.abs(cx('r')-(cx('a')+cx('b'))/2)<1e-8);
+    assert.ok(Math.abs(cx('a')-(cx('a1')+cx('a3'))/2)<1e-8);
+    const rootGap=direction==='down'?get('a').y-get('r').y-get('r').height:get('r').y-get('a').y-get('a').height;
+    assert.ok(Math.abs(rootGap-100)<1e-8);
+    assert.ok(Math.abs(get('a2').x-get('a1').x-get('a1').width-6)<1e-8);
+  }
+});
+test(3, "brace structure inherits into descendants but explicit child structure overrides it", () => {
+  const sheet:Sheet={id:'brace',title:'Brace',rootTopic:{id:'r',title:'中心',structureClass:'org.xmind.ui.brace.right',children:{attached:[{id:'a',title:'A',children:{attached:[{id:'a1',title:'One'},{id:'a2',title:'Two'}]}},{id:'b',title:'B',structureClass:'org.xmind.ui.logic.right',children:{attached:[{id:'b1',title:'Override'}]}}]}}};
+  const scene=buildScene(sheet);assert.ok(scene.edges.filter(e=>e.from==='a').every(e=>e.brace));
+  assert.equal(scene.edges.find(e=>e.to==='b1')!.brace,false);
+});
+test(5, "horizontal timeline milestones share one axis with alternating compact detail stacks", () => {
+  const sheet=fishSheet("org.xmind.ui.timeline.horizontal",3);
+  const before=structuredClone(sheet),scene=buildScene(sheet),get=(id:string)=>scene.nodes.find(n=>n.topic.id===id)!;
+  assert.deepEqual(scene.warnings,[]);
+  for(let i=0;i<3;i++) {
+    const main=get(`cause-${i}`),previous=i?get(`cause-${i-1}`):scene.nodes[0];
+    assert.ok(Math.abs(main.y+main.height/2)<1e-8);
+    assert.ok(main.x>=previous.x+previous.width+100-1e-8);
+    const axis=scene.edges.find(e=>e.to===main.topic.id)!.points!;
+    assert.equal(axis[0].x,previous.x+previous.width);
+    assert.equal(axis[1].x,main.x);
+    assert.ok(axis.every(p=>p.y===0));
+    for(let j=0;j<3;j++) {
+      const leaf=get(`leaf-${i}-${j}`),edge=scene.edges.find(e=>e.to===leaf.topic.id)!;
+      assert.ok(i%2===0?leaf.y+leaf.height<main.y:leaf.y>main.y+main.height);
+      assert.ok(leaf.x>main.x+main.width/2);
+      assert.ok(edgePath(edge,main,leaf).includes('Q'));
+      if(j) { const previousLeaf=get(`leaf-${i}-${j-1}`); assert.ok(Math.abs(leaf.y-previousLeaf.y-previousLeaf.height-3)<1e-8); }
+    }
+  }
+  assert.deepEqual(sheet,before);
+});
+test(5, "timeline folding, explicit structures and deep content remain visible without overlaps", () => {
+  const sheet=fishSheet("org.xmind.ui.timeline.horizontal",4);
+  const first=sheet.rootTopic.children!.attached![0];
+  first.children!.attached![0].title='Multi-line content '.repeat(30);
+  first.children!.attached![0].children={attached:[{id:'timeline-deep',title:'Nested child'}]};
+  sheet.rootTopic.children!.attached![2].structureClass='org.xmind.ui.logic.right';
+  const scene=buildScene(sheet),folded=buildScene(sheet,new Set(['cause-0']));
+  assert.ok(scene.nodes.some(n=>n.topic.id==='timeline-deep'));
+  assert.ok(!folded.nodes.some(n=>n.topic.id==='timeline-deep'));
+  assert.ok(folded.nodes.some(n=>n.topic.id==='cause-0'));
+  assert.equal(buildScene(sheet,new Set(['fish'])).nodes.length,1);
+  for(const current of [scene,folded]) for(const a of current.nodes) for(const b of current.nodes) if(a!==b) {
+    assert.ok(a.x+a.width<=b.x+1e-8||b.x+b.width<=a.x+1e-8||a.y+a.height<=b.y+1e-8||b.y+b.height<=a.y+1e-8,`timeline overlap ${a.topic.id}/${b.topic.id}`);
+  }
+  sheet.rootTopic.structureClass='org.xmind.ui.timeline.vertical';
+  assert.ok(buildScene(sheet).warnings.includes('org.xmind.ui.timeline.vertical'),'unverified variants must remain identified');
+});
+test(5, "fishbone detail spacing matches compact native stacks in both orientations", () => {
+  for(const structure of ['leftHeaded','rightHeaded']) {
+    const scene=buildScene(fishSheet('org.xmind.ui.fishbone.'+structure,2));
+    for(let i=0;i<2;i++) {
+      const leaves=[0,1,2].map(j=>scene.nodes.find(n=>n.topic.id===`leaf-${i}-${j}`)!);
+      assert.ok(Math.abs(Math.abs(leaves[1].y-leaves[0].y)-leaves[0].height-3)<1e-8);
+    }
+  }
+});
+test(5, "timeline long upper details do not push the next lower milestone away", () => {
+  const sheet=fishSheet("org.xmind.ui.timeline.horizontal",3);
+  const baseline=buildScene(sheet),before=baseline.nodes.find(n=>n.topic.id==='cause-1')!;
+  sheet.rootTopic.children!.attached![0].children!.attached![0].title='第一项·原生保存核对';
+  const after=buildScene(sheet).nodes.find(n=>n.topic.id==='cause-1')!;
+  assert.equal(after.x,before.x);
+  assert.equal(after.y,before.y);
+});
+test(5, "fishbone empty and folded causes reserve distinct native rib lengths", () => {
+  const sheet=fishSheet(undefined,2);sheet.rootTopic.children!.attached![1].children={attached:[]};
+  const scene=buildScene(sheet,new Set(['cause-0']));
+  for(const [id,reach] of [['cause-0',70],['cause-1',50]] as const) {
+    const [base,tip]=scene.edges.find(e=>e.to===id)!.points!;
+    assert.equal(Math.abs(base.y-tip.y),reach);
+  }
+});
+test(5, "fishbone upper ribs close the gap independently of longer lower content", () => {
+  const sheet=fishSheet(undefined,3),folded=new Set(['cause-0']);
+  sheet.rootTopic.children!.attached![2].children={attached:[]};
+  const before=buildScene(sheet,folded),base=before.edges.find(e=>e.to==='cause-2')!.points![0].x;
+  sheet.rootTopic.children!.attached![1].children!.attached![0].title='Extremely long lower detail '.repeat(20);
+  const after=buildScene(sheet,folded);
+  assert.equal(after.edges.find(e=>e.to==='cause-2')!.points![0].x,base);
+  for(const a of after.nodes)for(const b of after.nodes)if(a!==b)
+    assert.ok(a.x+a.width<=b.x+1e-8||b.x+b.width<=a.x+1e-8||a.y+a.height<=b.y+1e-8||b.y+b.height<=a.y+1e-8,`fishbone overlap ${a.topic.id}/${b.topic.id}`);
+});
 console.log(`${passed} XMind tests passed`);

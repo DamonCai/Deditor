@@ -80,7 +80,7 @@ const stubs = {
   "@tauri-apps/api/core":
     "export const invoke=(...args)=>globalThis.__invoke(...args); export const convertFileSrc=(p)=>'http://asset.localhost/'+encodeURIComponent(p);",
   "@tauri-apps/plugin-dialog":
-    "export const save=(...args)=>globalThis.__save(...args); export const open=async()=>null;",
+    "export const save=(...args)=>globalThis.__save(...args); export const open=(...args)=>globalThis.__open(...args);",
   "@tauri-apps/plugin-opener":
     "export const revealItemInDir=async()=>{}; export const openUrl=async()=>{}; export const openPath=async()=>{};",
   "./markdownExport/mathCss": "export const katexExportCss=()=>\"\";",
@@ -208,6 +208,7 @@ function reset(tabs = [tab("a"), tab("b", "other")]) {
     if (cmd.startsWith("write_")) writes.push({ cmd, ...args });
     return undefined;
   };
+  globalThis.__open = async () => null;
   globalThis.__save = async () => "/test/saved.txt";
   globalThis.__format = async (content) => content;
   globalThis.__confirm = async () => "save";
@@ -1208,8 +1209,8 @@ test(1, 'XMind opens editable even with an old read preference and has no separa
   assert.equal(xmindSheets()[0].rootTopic.title,'直接编辑中文');
   assert.equal(writes.at(-1).cmd,'write_binary_file');
 });
-test(1, 'Timeline compatibility hints do not block direct editing or standard saving',async()=>{
-  const timeline={id:'timeline',title:'时间轴',rootTopic:{id:'timeline-root',title:'2026 · 版本演进',structureClass:'org.xmind.ui.timeline.horizontal',children:{attached:[{id:'q1',title:'Q1 · 发现'}]}}};
+test(1, 'Unverified timeline variants retain compatibility hints without blocking editing or saving',async()=>{
+  const timeline={id:'timeline',title:'时间轴',rootTopic:{id:'timeline-root',title:'2026 · 版本演进',structureClass:'org.xmind.ui.timeline.vertical',children:{attached:[{id:'q1',title:'Q1 · 发现'}]}}};
   await mountXmind(false,zipSync({'content.json':strToU8(JSON.stringify([timeline]))}));
   assert.ok(document.querySelector('.xm-warning'));
   assert.equal(document.querySelector('.xm-warning').textContent,'');
@@ -1405,10 +1406,16 @@ test(6, 'XMind dragged node lets the underlying drop target receive hit testing'
   const previous = document.elementFromPoint;
   try {
     await act(async()=>moved.dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true,button:0,clientX:100,clientY:100})));
+    await act(async()=>svg.dispatchEvent(new window.MouseEvent('pointerup',{bubbles:true,button:0,clientX:100,clientY:100})));
+    await act(async()=>moved.dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true,button:0,clientX:100,clientY:100})));
     await act(async()=>svg.dispatchEvent(new window.MouseEvent('pointermove',{bubbles:true,clientX:160,clientY:150})));
     assert.equal(moved.getAttribute('pointer-events'),'none');
-    document.elementFromPoint=()=>target;
-    await act(async()=>svg.dispatchEvent(new window.MouseEvent('pointerup',{bubbles:true,clientX:160,clientY:150})));
+    const [tx,ty]=target.getAttribute('transform').match(/-?[\d.]+/g).map(Number);
+    const shape=target.querySelector('rect');
+    const [vx,vy,vw,vh]=svg.getAttribute('viewBox').split(' ').map(Number),zoom=800/vw;
+    const clientX=(tx+Number(shape.getAttribute('width'))/2-vx-vw/2)*zoom;
+    const clientY=(ty+Number(shape.getAttribute('height'))/2-vy-vh/2)*zoom;
+    await act(async()=>svg.dispatchEvent(new window.MouseEvent('pointerup',{bubbles:true,clientX,clientY})));
     const sheets=xmindSheets();
     const read=sheets[0].rootTopic.children.attached.find(n=>n.id==='read');
     assert.ok(read.children.attached.some(n=>n.id==='local'));
@@ -1854,6 +1861,176 @@ test(4, 'one editor tab can switch XMind, text and binary hydration without chan
   assert.ok(document.querySelector('img'));
 });
 
+function interactionArchive() {
+  return zipSync({'content.json':strToU8(JSON.stringify([{id:'r3',title:'Round 3',rootTopic:{id:'r3root',title:'Root',structureClass:'org.xmind.ui.logic.right',children:{attached:[{id:'r3a',title:'A',children:{attached:[{id:'r3a1',title:'A1'},{id:'r3a2',title:'A2'}]}},{id:'r3b',title:'B'},{id:'r3c',title:'C'}]}}}]))});
+}
+async function selectR3(id,multi=false) {
+  const node=document.querySelector(`[data-topic="${id}"]`);
+  await act(async()=>node.dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true,button:0,shiftKey:multi})));
+  await act(async()=>node.dispatchEvent(new window.MouseEvent('pointerup',{bubbles:true,button:0,shiftKey:multi})));
+}
+async function keyR3(key,extra={}) {
+  await act(async()=>document.querySelector('.xm-canvas').dispatchEvent(new window.KeyboardEvent('keydown',{key,bubbles:true,cancelable:true,...extra})));
+}
+test(1,'XMind transparent topics have a full hit area and multi-selection formatting is one undo',async()=>{
+  await mountXmind(true,interactionArchive());
+  const hit=document.querySelector('[data-topic="r3a1"] > [data-topic-hitbox]');
+  assert.ok(hit);assert.equal(hit.getAttribute('fill'),'transparent');
+  await selectR3('r3a1');await selectR3('r3a2',true);
+  const original=store.getState().tabs[0].content;
+  await click('No fill');
+  assert.deepEqual(xmindSheets()[0].rootTopic.children.attached[0].children.attached.map(n=>n.style.properties['svg:fill']),['#EEEEEE','#EEEEEE']);
+  await click('Undo');assert.equal(store.getState().tabs[0].content,original);
+  await click('Bold');
+  const leaves=xmindSheets()[0].rootTopic.children.attached[0].children.attached;
+  assert.deepEqual(leaves.map(n=>n.style.properties['fo:font-weight']),['bold','bold']);
+  await click('Undo');assert.equal(store.getState().tabs[0].content,original);
+});
+test(3,'XMind native topic shortcuts edit text, reorder, add a parent and reveal the root',async()=>{
+  await mountXmind(true,interactionArchive());await selectR3('r3b');
+  const before=store.getState().tabs[0].content;
+  await keyR3(' ');assert.ok(document.querySelector('textarea[aria-label="Edit topic text"]'));
+  await keyR3('Escape');assert.equal(store.getState().tabs[0].content,before);
+  await keyR3('ArrowUp',{altKey:true});assert.deepEqual(xmindSheets()[0].rootTopic.children.attached.map(n=>n.id),['r3b','r3a','r3c']);
+  await click('Undo');await selectR3('r3a1');await keyR3('Enter',{metaKey:true});
+  const inserted=xmindSheets()[0].rootTopic.children.attached[0].children.attached[0];
+  assert.notEqual(inserted.id,'r3a1');assert.equal(inserted.children.attached[0].id,'r3a1');
+  await click('Undo');assert.equal(store.getState().tabs[0].content,before);
+  assert.equal(document.querySelector('[data-topic][aria-selected="true"]').getAttribute('data-topic'),'r3a1');
+  await keyR3('r',{metaKey:true});assert.equal(document.querySelector('[data-topic][aria-selected="true"]').getAttribute('data-topic'),'r3root');
+});
+test(3,'XMind link edits flush to save, internal links reveal folded targets, invalid links remain recoverable',async()=>{
+  await mountXmind(true,interactionArchive());await selectR3('r3a');await keyR3('/',{metaKey:true});await selectR3('r3b');
+  const link=document.querySelector('input[aria-label="Link"]');
+  await act(async()=>{link.focus();setInput(link,'#r3a1');});await act(async()=>app.saveFile());
+  assert.equal(xmindSheets()[0].rootTopic.children.attached[1].href,'#r3a1');
+  const saved=store.getState().tabs[0].content;
+  await act(async()=>document.querySelector('[data-link-button]').dispatchEvent(new window.MouseEvent('click',{bubbles:true})));
+  assert.equal(document.querySelector('[data-topic][aria-selected="true"]').getAttribute('data-topic'),'r3a1');
+  assert.equal(store.getState().tabs[0].content,saved);
+  await selectR3('r3b');const input=document.querySelector('input[aria-label="Link"]');
+  await act(async()=>{input.focus();setInput(input,'javascript:alert(1)');input.blur();});
+  await act(async()=>document.querySelector('[data-link-button]').dispatchEvent(new window.MouseEvent('click',{bubbles:true})));
+  assert.match(document.querySelector('[role="alert"]').textContent,/not supported/);
+  await click('Undo');assert.equal(xmindSheets()[0].rootTopic.children.attached[1].href,'#r3a1');
+});
+test(3,'XMind boundary and summary editing save their titles and deleting a group preserves members',async()=>{
+  for(const kind of ['Boundary','Summary']) {
+    await mountXmind(true,interactionArchive());await selectR3('r3a1');await selectR3('r3a2',true);await click(kind);
+    const group=document.querySelector('[data-group]');
+    await act(async()=>group.dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true,button:0})));
+    const input=document.querySelector('input[aria-label="Topic text"]');assert.ok(input);
+    await act(async()=>{input.focus();setInput(input,`${kind} 保存核对`);});await act(async()=>app.saveFile());
+    const owner=xmindSheets()[0].rootTopic.children.attached[0];
+    assert.equal(owner[kind==='Boundary'?'boundaries':'summaries'][0].title,`${kind} 保存核对`);
+    if(kind==='Boundary') {
+      const badge=document.querySelector('[data-group-title]');assert.ok(badge);
+      assert.equal(badge.querySelector('rect').getAttribute('fill'),'#00897B');
+      assert.equal(badge.querySelector('text').getAttribute('fill'),'#FFFFFF');
+      assert.equal(badge.querySelector('text').getAttribute('font-size'),'14');
+    }
+    if(kind==='Summary')assert.equal(owner.children.summary[0].title,'Summary 保存核对');
+    const saved=store.getState().tabs[0].content;
+    await keyR3('Delete');assert.equal(document.querySelectorAll('[data-group]').length,0);
+    assert.deepEqual(xmindSheets()[0].rootTopic.children.attached[0].children.attached.map(n=>n.id),['r3a1','r3a2']);
+    if(kind==='Summary')assert.equal(xmindSheets()[0].rootTopic.children.attached[0].children.summary.length,0);
+    await click('Undo');assert.equal(store.getState().tabs[0].content,saved);
+  }
+});
+
+test(3,'XMind undoing a new sheet restores a usable active sheet and edit target',async()=>{
+  await mountXmind(true,interactionArchive());
+  await act(async()=>document.querySelector('button[aria-label="New sheet"]').click());
+  assert.equal(xmindSheets().length,2);
+  await click('Undo');assert.equal(xmindSheets().length,1);
+  await click('Subtopic');assert.equal(xmindSheets()[0].rootTopic.children.attached.length,4);
+  assert.equal(document.querySelector('[role="alert"]'),null);
+});
+test(4,'XMind floating inspector matches the canvas and window undo works outside canvas',async()=>{
+  await mountXmind(true,interactionArchive());await click('Floating topic');
+  assert.equal(document.querySelector('input[type="number"]').value,'14');
+  const added=store.getState().tabs[0].content;
+  const key=async(target,extra={})=>{
+    const event=new window.KeyboardEvent('keydown',{key:'z',metaKey:true,bubbles:true,cancelable:true,...extra});
+    await act(async()=>target.dispatchEvent(event));return event;
+  };
+  const field=document.querySelector('textarea[aria-label="Topic text"]');
+  assert.equal((await key(field)).defaultPrevented,false);
+  assert.equal(store.getState().tabs[0].content,added);
+  await key(document.body);assert.equal(xmindSheets()[0].rootTopic.children.detached?.length??0,0);
+  await key(document.body,{shiftKey:true});assert.equal(store.getState().tabs[0].content,added);
+  await selectR3('r3a1');await click('Boundary');
+  await act(async()=>document.querySelector('[data-group]').dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true,button:0})));
+  const grouped=store.getState().tabs[0].content;
+  await click('Delete');assert.equal(document.querySelectorAll('[data-group]').length,0);
+  await key(document.body);assert.equal(store.getState().tabs[0].content,grouped);
+  await keyR3('z',{metaKey:true});assert.equal(document.querySelectorAll('[data-group]').length,0);
+  assert.equal(xmindSheets()[0].rootTopic.children.detached.length,1,'canvas undo must not run twice');
+});
+test(4,'XMind outline includes summary and callout topics and can select them',async()=>{
+  await mountXmind(true,interactionArchive());await selectR3('r3a1');await click('Summary');await click('Callout');await click('Outline');
+  const owner=xmindSheets()[0].rootTopic.children.attached[0];
+  const summary=owner.children.summary[0], callout=owner.children.attached[0].children.callout[0];
+  const outline=document.querySelector('.xm-outline');
+  for(const topic of [summary,callout]) {
+    const button=[...outline.querySelectorAll('button')].find(b=>b.textContent===topic.title);assert.ok(button);
+    await act(async()=>button.click());assert.ok(document.querySelector(`[data-topic="${topic.id}"][aria-selected="true"]`));
+  }
+});
+test(5,'XMind horizontal timeline folding and undo keep milestones on the axis and save correctly',async()=>{
+  const sheet={id:'tl',title:'Timeline',rootTopic:{id:'troot',title:'Timeline',structureClass:'org.xmind.ui.timeline.horizontal',children:{attached:[{id:'ta',title:'Design',children:{attached:[{id:'ta1',title:'First'},{id:'ta2',title:'Second'}]}},{id:'tb',title:'Build'}]}}};
+  await mountXmind(true,zipSync({'content.json':strToU8(JSON.stringify([sheet]))}));
+  assert.equal(document.querySelector('.xm-warning'),null);
+  const node=()=>document.querySelector('[data-topic="ta"]');
+  const before=node().getAttribute('transform');
+  await act(async()=>node().querySelector('[data-fold]').dispatchEvent(new window.MouseEvent('click',{bubbles:true})));
+  assert.equal(document.querySelector('[data-topic="ta1"]'),null);
+  assert.equal(node().getAttribute('transform'),before);
+  await act(async()=>app.saveFile());
+  assert.equal(xmindSheets()[0].rootTopic.children.attached[0].branch,'folded');
+  await click('Undo');assert.ok(document.querySelector('[data-topic="ta1"]'));
+  assert.equal(node().getAttribute('transform'),before);
+  await act(async()=>app.saveFile());
+  assert.equal(xmindSheets()[0].rootTopic.structureClass,'org.xmind.ui.timeline.horizontal');
+});
+test(5,'XMind right-headed fishbone exposes its structure and folds on the spine side',async()=>{
+  const sheet={id:'fb',title:'Fishbone',rootTopic:{id:'froot',title:'Fishbone',structureClass:'org.xmind.ui.fishbone.rightHeaded',children:{attached:[{id:'fa',title:'Cause'}]}}};
+  await mountXmind(true,zipSync({'content.json':strToU8(JSON.stringify([sheet]))}));
+  const option=[...document.querySelectorAll('option')].find(o=>o.value==='org.xmind.ui.fishbone.rightHeaded');
+  assert.equal(option.textContent,'Right-headed fishbone');
+  assert.equal(option.parentElement.value,option.value);
+  const fold=document.querySelector('[data-topic="froot"] [data-fold]');
+  assert.match(fold.getAttribute('transform'),/^translate\(-/);
+  await act(async()=>fold.dispatchEvent(new window.MouseEvent('click',{bubbles:true})));
+  assert.equal(document.querySelector('[data-topic="fa"]'),null);
+  await click('Undo');assert.ok(document.querySelector('[data-topic="fa"]'));
+});
+test(5,'Native open dialog includes XMind and routes the selected file through binary loading',async()=>{
+  reset(); const bytes=app.sampleArchive();const requests=[];
+  globalThis.__open=async(options)=>{assert.ok(options.filters.some(f=>f.extensions.includes('xmind')));return '/generated/open-test.xmind';};
+  globalThis.__invoke=async(cmd,args)=>{requests.push(cmd);if(cmd==='read_binary_as_base64')return Buffer.from(bytes).toString('base64');};
+  await act(async()=>app.openFile());
+  const opened=store.getState().tabs.find(t=>t.filePath==='/generated/open-test.xmind');
+  assert.ok(opened?.content.startsWith('data:application/vnd.xmind.workbook;base64,'));
+  assert.ok(requests.includes('read_binary_as_base64'));assert.ok(!requests.includes('read_text_file'));
+  const count=store.getState().tabs.length;globalThis.__open=async()=>null;
+  await act(async()=>app.openFile());assert.equal(store.getState().tabs.length,count);
+});
+test(5,'Fishbone cause folding controls stay on diagonal ribs above and below the spine',async()=>{
+  for(const orientation of ['leftHeaded','rightHeaded']) {
+    const sheet={id:'fish-controls',title:'Fish',rootTopic:{id:'fr',title:'Fish',structureClass:'org.xmind.ui.fishbone.'+orientation,children:{attached:[0,1].map(i=>({id:'fc'+i,title:'Cause',children:{attached:[{id:'fl'+i,title:'Detail'}]}}))}}};
+    await mountXmind(true,zipSync({'content.json':strToU8(JSON.stringify([sheet]))}));
+    for(const i of [0,1]) {
+      const node=document.querySelector(`[data-topic="fc${i}"]`),hit=node.querySelector('[data-topic-hitbox]'),fold=node.querySelector('[data-fold]');
+      const [,x,y]=/^translate\(([^,]+),([^\)]+)\)$/.exec(fold.getAttribute('transform'));
+      assert.ok(orientation==='rightHeaded'?+x>+hit.getAttribute('width')/2:+x<+hit.getAttribute('width')/2);
+      assert.ok(i===0?+y>+hit.getAttribute('height'):+y<0);
+      await act(async()=>fold.dispatchEvent(new window.MouseEvent('click',{bubbles:true})));
+      assert.equal(document.querySelector(`[data-topic="fl${i}"]`),null);
+      await click('Undo');assert.ok(document.querySelector(`[data-topic="fl${i}"]`));
+    }
+  }
+});
 let failed = 0,
   passed = 0;
 const round = process.argv.find((a) => a.startsWith("--round="))?.split("=")[1];

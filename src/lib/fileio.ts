@@ -32,6 +32,7 @@ const MD_FILTER = [
     extensions: ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico", "tiff", "tif"],
   },
   { name: "PDF", extensions: ["pdf"] },
+  { name: "XMind", extensions: ["xmind"] },
   {
     name: "Audio",
     extensions: ["mp3", "wav", "ogg", "flac", "m4a", "aac", "opus"],
