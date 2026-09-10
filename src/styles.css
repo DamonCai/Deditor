@@ -1,6 +1,25 @@
+@import "./preview.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+.deditor-tooltip {
+  position: fixed;
+  z-index: 10000;
+  pointer-events: none;
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-soft);
+  color: var(--text);
+  box-shadow: var(--shadow-popup);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 
 :root {
   /* JetBrains IntelliJ Light 2024.x palette. Three-tier surface model:
@@ -152,377 +171,6 @@ body,
   font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
   font-size: var(--editor-font-size, 14px);
   line-height: 1.6;
-}
-
-/* Document typography is scoped to the preview, independent of IDE chrome.
-   Keep blocks in normal flow: scroll sync relies on their offsetTop values. */
-.preview {
-  --preview-text: #343b46;
-  --preview-heading: #202631;
-  --preview-muted: #606b7a;
-  --preview-link: #2864cf;
-  --preview-code: #7350a2;
-  --preview-code-bg: #f5f6f8;
-  --preview-rule: #e5e8ed;
-  padding: 32px 32px 72px;
-  font-size: 16px;
-  line-height: 1.85;
-  color: var(--preview-text);
-  overflow-y: auto;
-  min-width: 0;
-  height: 100%;
-  box-sizing: border-box;
-  overflow-wrap: anywhere;
-  font-family:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-    "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial,
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-}
-.dark .preview {
-  --preview-text: #cbd0d9;
-  --preview-heading: #edf0f5;
-  --preview-muted: #a1a9b6;
-  --preview-link: #8ab4ff;
-  --preview-code: #c6a4ed;
-  --preview-code-bg: #25272c;
-  --preview-rule: #363a42;
-  color-scheme: dark;
-}
-.preview > * {
-  /* Left-aligned reading column — content keeps a comfortable line length
-     (860px cap) but every block (paragraph, heading, table) shares the same
-     left edge for a clean visual baseline. */
-  max-width: 860px;
-  margin-left: 0;
-  margin-right: 0;
-}
-.preview h1,
-.preview h2,
-.preview h3,
-.preview h4,
-.preview h5,
-.preview h6 {
-  color: var(--preview-heading);
-  font-weight: 650;
-  margin: 1.7em 0 0.65em;
-  line-height: 1.45;
-  scroll-margin-top: 24px;
-}
-.preview h1 {
-  font-size: 2em;
-  font-weight: 700;
-  letter-spacing: -0.025em;
-  margin-bottom: 0.8em;
-}
-.preview h2 {
-  font-size: 1.45em;
-  letter-spacing: -0.015em;
-  border-bottom: 1px solid var(--preview-rule);
-  padding-bottom: 0.45em;
-}
-.preview h3 {
-  font-size: 1.25em;
-}
-.preview h4 {
-  font-size: 1.1em;
-}
-.preview h5 {
-  font-size: 1em;
-}
-.preview h6 {
-  font-size: 0.95em;
-  color: var(--preview-muted);
-}
-.preview > :first-child {
-  margin-top: 0;
-}
-.preview :is(h1, h2, h3, h4, h5, h6) + :is(h2, h3, h4, h5, h6) {
-  margin-top: 1em;
-}
-.preview p {
-  margin: 0 0 1em;
-}
-.preview a {
-  color: var(--preview-link);
-  text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, var(--preview-link) 35%, transparent);
-  text-underline-offset: 3px;
-}
-.preview a:hover {
-  text-decoration-color: currentColor;
-}
-.preview a:focus-visible {
-  outline: 2px solid var(--preview-link);
-  outline-offset: 3px;
-  border-radius: 2px;
-}
-/* Inline code stays quieter than syntax-highlighted fenced blocks. */
-.preview code {
-  background: var(--preview-code-bg);
-  color: var(--preview-code);
-  padding: 0.18em 0.4em;
-  border-radius: 4px;
-  font-size: 0.88em;
-  font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
-}
-.preview pre {
-  margin: 1.4em 0;
-  padding: 0;
-  border-radius: 8px;
-  overflow: auto;
-  overflow-wrap: normal;
-  tab-size: 4;
-  background: var(--preview-code-bg);
-  border: 1px solid var(--preview-rule);
-}
-/* pre > code: reset the inline-code coloring inside fenced blocks. */
-.preview pre code {
-  background: transparent;
-  color: inherit;
-  padding: 18px 20px;
-  display: block;
-  font-size: 13px;
-  line-height: 1.75;
-  border-radius: 0;
-}
-.preview pre.shiki {
-  padding: 18px 20px;
-  /* Shiki owns token colors; the document owns the code block surface. */
-  background-color: var(--preview-code-bg) !important;
-}
-.preview pre.shiki code {
-  padding: 0;
-}
-/* A restrained accent distinguishes quotations without competing with text. */
-.preview blockquote {
-  margin: 1.4em 0;
-  padding: 12px 18px;
-  color: var(--preview-muted);
-  border-left: 3px solid color-mix(in srgb, var(--preview-link) 55%, var(--bg));
-  border-radius: 0 6px 6px 0;
-  background: color-mix(in srgb, var(--preview-link) 5%, var(--bg));
-}
-.preview blockquote > :first-child {
-  margin-top: 0;
-}
-.preview blockquote > :last-child {
-  margin-bottom: 0;
-}
-.preview ul,
-.preview ol {
-  padding-left: 1.65em;
-  margin: 0 0 1em;
-}
-.preview ul {
-  list-style: disc outside;
-}
-.preview ol {
-  list-style: decimal outside;
-}
-.preview ul ul,
-.preview ol ul {
-  list-style: circle outside;
-}
-.preview ul ul ul,
-.preview ol ul ul {
-  list-style: square outside;
-}
-.preview li {
-  margin: 0.35em 0;
-  padding-left: 0.15em;
-}
-.preview li > :is(ul, ol) {
-  margin-top: 0.35em;
-  margin-bottom: 0.5em;
-}
-.preview li > p {
-  margin: 0;
-}
-.preview li > p + p {
-  margin-top: 0.5em;
-}
-.preview li::marker {
-  color: var(--preview-muted);
-}
-.preview li.task-list-item,
-.preview li:has(> input[type="checkbox"]) {
-  list-style: none;
-  margin-left: -1.4em;
-}
-.preview .task-list-item-checkbox {
-  width: 14px;
-  height: 14px;
-  margin: 0 0.5em 0 0;
-  vertical-align: -1px;
-  accent-color: var(--preview-link);
-}
-/* Table: GitHub/Typora style — full border, zebra rows. Left-aligned with
-   the rest of the reading column; if the table is wider than the preview pane
-   it gets its own horizontal scrollbar instead of pushing the pane wider. */
-.preview table {
-  border-collapse: collapse;
-  margin: 1.4em 0;
-  display: block;
-  width: fit-content;
-  max-width: 100%;
-  overflow-x: auto;
-  font-size: 0.9em;
-  line-height: 1.65;
-  /* Wide tables scroll within the document instead of widening its pane. */
-  overflow-wrap: normal;
-}
-.preview th,
-.preview td {
-  border: 1px solid var(--preview-rule);
-  padding: 10px 16px;
-  vertical-align: top;
-}
-.preview th {
-  background: var(--preview-code-bg);
-  color: var(--preview-heading);
-  font-weight: 600;
-  text-align: left;
-}
-.preview tr:nth-child(2n) td {
-  background: color-mix(in srgb, var(--preview-text) 2%, var(--bg));
-}
-.preview hr {
-  border: none;
-  border-top: 1px solid var(--preview-rule);
-  margin: 2.5em 0;
-  height: 0;
-}
-.preview img {
-  max-width: 100%;
-  height: auto;
-  display: block;
-  margin: 16px 0;
-}
-.preview kbd {
-  padding: 2px 6px;
-  font: 0.8em "SF Mono", Menlo, Consolas, monospace;
-  color: var(--preview-muted);
-  background: var(--preview-code-bg);
-  border: 1px solid var(--preview-rule);
-  border-bottom-width: 2px;
-  border-radius: 4px;
-}
-.preview .katex-display {
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding: 4px 0;
-}
-
-/* PlantUML diagram */
-.preview .plantuml-diagram {
-  display: flex;
-  justify-content: flex-start;
-  margin: 1.2em 0;
-  padding: 12px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  overflow-x: auto;
-}
-.preview .plantuml-diagram img,
-.preview .plantuml-diagram svg {
-  max-width: 100%;
-  height: auto;
-}
-.preview .plantuml-diagram .plantuml-loading {
-  color: var(--text-soft);
-  font-size: 12px;
-  font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
-  padding: 8px 12px;
-}
-.preview .plantuml-diagram.error {
-  flex-direction: column;
-  align-items: stretch;
-  color: var(--error-text);
-  background: var(--error-bg);
-  border-color: color-mix(in srgb, var(--error-text) 30%, transparent);
-  font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
-  font-size: 13px;
-}
-.preview .plantuml-diagram.error .plantuml-error-msg {
-  font-size: 12px;
-  margin-bottom: 6px;
-}
-.preview .plantuml-diagram.error .plantuml-source {
-  background: var(--bg-mute);
-  color: var(--text-soft);
-  padding: 8px 12px;
-  font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
-  font-size: 11px;
-  white-space: pre;
-  overflow-x: auto;
-  border-radius: 4px;
-  margin: 0;
-}
-
-/* Mermaid diagram */
-.preview .mermaid-diagram {
-  display: flex;
-  justify-content: flex-start;
-  margin: 1.2em 0;
-  padding: 12px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  overflow-x: auto;
-}
-.preview .mermaid-diagram svg {
-  max-width: 100%;
-  height: auto;
-}
-.preview .mermaid-diagram .mermaid-loading {
-  color: var(--text-soft);
-  font-size: 12px;
-  font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
-  padding: 8px 12px;
-}
-.preview .mermaid-diagram.error {
-  flex-direction: column;
-  align-items: stretch;
-  color: var(--error-text);
-  background: var(--error-bg);
-  border-color: color-mix(in srgb, var(--error-text) 30%, transparent);
-  font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
-  font-size: 13px;
-}
-.preview .mermaid-diagram.error .mermaid-error-msg {
-  font-size: 12px;
-  margin-bottom: 6px;
-}
-.preview .mermaid-diagram.error .mermaid-source {
-  background: var(--bg-mute);
-  color: var(--text-soft);
-  padding: 8px 12px;
-  font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
-  font-size: 11px;
-  white-space: pre;
-  overflow-x: auto;
-  border-radius: 4px;
-  margin: 0;
-}
-
-/* Reading mode uses the available width, but wide tables/images must still
-   stay inside the pane. `none` here would override their overflow guards. */
-.preview.preview-fullwidth > *,
-.preview.preview-fullwidth h1,
-.preview.preview-fullwidth h2,
-.preview.preview-fullwidth h3,
-.preview.preview-fullwidth h4,
-.preview.preview-fullwidth h5,
-.preview.preview-fullwidth h6,
-.preview.preview-fullwidth p,
-.preview.preview-fullwidth ul,
-.preview.preview-fullwidth ol,
-.preview.preview-fullwidth pre,
-.preview.preview-fullwidth blockquote,
-.preview.preview-fullwidth table {
-  max-width: 100%;
 }
 
 /* Reading-mode chrome: the host wraps Preview + right-side TOC in a flex row
@@ -1039,6 +687,13 @@ summary:focus-visible, .preview-toc-item:focus-visible, .cm-button:focus-visible
 .md-color-letter--highlight { font-style: italic; }
 .md-color-indicator { position: absolute; left: 0; right: 0; bottom: -1px; height: 3px; border-radius: 1px; }
 .md-color-popover { position: fixed; z-index: 3000; width: 272px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow-y: auto; padding: 14px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow-popup); }
+.md-diagram-trigger { display: inline-flex; align-items: center; gap: 5px; height: 24px; }
+.md-diagram-popover { position: fixed; z-index: 3000; width: 320px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow-y: auto; padding: 14px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow-popup); }
+.md-diagram-heading { margin-bottom: 10px; font-size: 13px; font-weight: 600; }
+.md-diagram-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
+.md-diagram-item.deditor-btn { display: flex; align-items: center; gap: 8px; min-height: 42px; text-align: left; }
+.md-diagram-item svg { flex-shrink: 0; color: var(--text-soft); }
+.md-diagram-item span { font-size: 12px; line-height: 1.4; color: var(--text); }
 .md-color-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; font-weight: 600; }
 .md-color-heading code { color: var(--text-soft); font-size: 11px; font-weight: 400; }
 .md-color-caption { display: block; font-size: 11px; color: var(--text-soft); margin: 12px 0 7px; }
@@ -1072,3 +727,20 @@ summary:focus-visible, .preview-toc-item:focus-visible, .cm-button:focus-visible
 @media (max-width: 850px) {
   .statusbar-secondary { display: none; }
 }
+
+/* Document export: a compact format chooser, usable in edit and reading modes. */
+.md-export-dialog { width: min(580px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow-y: auto; }
+.md-export-filename { color: var(--text-soft); font-size: 12px; overflow-wrap: anywhere; margin: -2px 0 16px; }
+.md-export-formats { border: 0; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.md-export-formats legend { font-size: 12px; margin-bottom: 8px; }
+.md-export-formats label { display: flex !important; flex-direction: row !important; align-items: center; gap: 9px; padding: 10px; margin-bottom: 0; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
+.md-export-formats label.selected { border-color: var(--accent); background: var(--hover-bg); }
+.md-export-formats input[type="radio"] { accent-color: var(--accent); width: auto; }
+.md-export-formats span { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.md-export-formats strong { font-size: 13px; font-weight: 600; }
+.md-export-formats small, .md-export-note { color: var(--text-soft); font-size: 11px; line-height: 1.6; }
+.md-export-hint { font-size: 12px; line-height: 1.7; margin: 12px 0; }
+.md-export-note { margin: 8px 0; }
+.md-export-dialog select { width: 100%; }
+.md-export-status:empty { display: none; }
+.md-export-status { font-size: 11px; color: var(--text-soft); }

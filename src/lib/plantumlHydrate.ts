@@ -55,10 +55,7 @@ function scheduleDiskFlush(): void {
   }, 1000);
 }
 
-async function fetchSvg(
-  encoded: string,
-  signal: AbortSignal,
-): Promise<string> {
+async function fetchSvg(encoded: string, signal: AbortSignal): Promise<string> {
   // Fast path: in-memory cache.
   const mem = memCache.get(encoded);
   if (mem) return mem;
@@ -108,10 +105,7 @@ async function fetchSvg(
 }
 
 function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function failureMarkup(err: unknown, source: string): string {
@@ -126,9 +120,7 @@ function failureMarkup(err: unknown, source: string): string {
     : tStatic("markdown.plantumlError", { error: raw });
   return (
     `<div class="plantuml-error-msg">${escapeHtml(headline)}</div>` +
-    (source
-      ? `<pre class="plantuml-source">${escapeHtml(source)}</pre>`
-      : "")
+    (source ? `<pre class="plantuml-source">${escapeHtml(source)}</pre>` : "")
   );
 }
 
@@ -139,29 +131,35 @@ function failureMarkup(err: unknown, source: string): string {
  * AbortController so the caller can cancel pending fetches when the
  * preview unmounts or re-renders.
  */
-export function hydratePlantuml(root: HTMLElement): AbortController {
-  const ctrl = new AbortController();
+export function hydratePlantuml(
+  root: HTMLElement,
+): AbortController & { done: Promise<void> } {
+  const ctrl = Object.assign(new AbortController(), {
+    done: Promise.resolve(),
+  });
   const placeholders = root.querySelectorAll<HTMLElement>(
     ".plantuml-diagram[data-plantuml-encoded]",
   );
-  placeholders.forEach((el) => {
-    if (el.dataset.plantumlHydrated === "1") return;
-    const encoded = el.dataset.plantumlEncoded || "";
-    if (!encoded) return;
-    el.dataset.plantumlHydrated = "1";
-    const source = el.dataset.plantumlSource || "";
-    fetchSvg(encoded, ctrl.signal)
-      .then((svg) => {
-        if (ctrl.signal.aborted) return;
-        // Inline the raw SVG. The CSS in styles.css scopes `.preview
-        // .plantuml-diagram svg { max-width: 100% }` so it shrinks to fit.
-        el.innerHTML = svg;
-      })
-      .catch((err) => {
-        if (ctrl.signal.aborted) return;
-        el.classList.add("error");
-        el.innerHTML = failureMarkup(err, source);
-      });
-  });
+  ctrl.done = Promise.all(
+    Array.from(placeholders, (el) => {
+      if (el.dataset.plantumlHydrated === "1") return;
+      const encoded = el.dataset.plantumlEncoded || "";
+      if (!encoded) return;
+      el.dataset.plantumlHydrated = "1";
+      const source = el.dataset.plantumlSource || "";
+      return fetchSvg(encoded, ctrl.signal)
+        .then((svg) => {
+          if (ctrl.signal.aborted) return;
+          // Inline the raw SVG. The CSS in styles.css scopes `.preview
+          // .plantuml-diagram svg { max-width: 100% }` so it shrinks to fit.
+          el.innerHTML = svg;
+        })
+        .catch((err) => {
+          if (ctrl.signal.aborted) return;
+          el.classList.add("error");
+          el.innerHTML = failureMarkup(err, source);
+        });
+    }),
+  ).then(() => undefined);
   return ctrl;
 }

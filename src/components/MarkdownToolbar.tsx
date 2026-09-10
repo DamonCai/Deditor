@@ -1,5 +1,6 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { lazy, Suspense, useEffect, useState, useSyncExternalStore } from "react";
 import {
+  FiDownload,
   FiBold,
   FiItalic,
   FiCode,
@@ -13,8 +14,8 @@ import {
   FiCheckSquare,
   FiRotateCcw,
   FiRotateCw,
-  FiGitBranch,
   FiTerminal,
+  FiChevronDown,
 } from "react-icons/fi";
 import { undo, redo, undoDepth, redoDepth } from "@codemirror/commands";
 import {
@@ -32,7 +33,10 @@ import { useT } from "../lib/i18n";
 import { Button } from "./ui/Button";
 import PreviewModeSwitch from "./PreviewModeSwitch";
 import MarkdownColorPicker from "./MarkdownColorPicker";
+import MarkdownDiagramPicker from "./MarkdownDiagramPicker";
 import MarkdownInsertDialog, { type InsertKind } from "./MarkdownInsertDialog";
+
+const MarkdownExportDialog = lazy(() => import("./MarkdownExportDialog"));
 
 export default function MarkdownToolbar() {
   const t = useT();
@@ -49,6 +53,7 @@ export default function MarkdownToolbar() {
     kind: InsertKind;
     target: NonNullable<ReturnType<typeof captureEditorTarget>>;
   } | null>(null);
+  const [exportSnapshot, setExportSnapshot] = useState<{ content: string; filePath: string | null; theme: "light" | "dark" } | null>(null);
   const [color, setColor] = useState("#e53e3e");
   const [highlight, setHighlight] = useState("#fff59d");
   useEffect(() => {
@@ -180,6 +185,11 @@ export default function MarkdownToolbar() {
             {emphasis}
           </div>
           <div className="md-tool-group">
+            {item("md.underline", () => wrapSelection("<u>", "</u>"), <span style={{ textDecoration: "underline" }}>U</span>)}
+            {item("md.superscript", () => wrapSelection("<sup>", "</sup>"), <span>x<sup>2</sup></span>)}
+            {item("md.subscript", () => wrapSelection("<sub>", "</sub>"), <span>x<sub>2</sub></span>)}
+          </div>
+          <div className="md-tool-group">
             {item("md.ulist", () => prefixLines("- "), <FiList />)}
             {item(
               "md.olist",
@@ -226,6 +236,11 @@ export default function MarkdownToolbar() {
               <FiTerminal />,
             )}
             {item("md.hr", () => insertBlock("---", 3, 0), <FiMinus />)}
+            {item("md.details", () => {
+              const opening = `<details>\n<summary>${t("md.detailsTitle")}</summary>\n\n`;
+              const body = selected || t("md.detailsBody");
+              insertBlock(`${opening}${body}\n\n</details>`, opening.length, body.length);
+            }, <FiChevronDown />)}
           </div>
           <div className="md-tool-group">
             {item(
@@ -241,15 +256,10 @@ export default function MarkdownToolbar() {
               },
               <span className="md-symbol">∑</span>,
             )}
-            {item(
-              "md.mermaid",
-              () => {
-                const diagram =
-                  "```mermaid\nflowchart LR\n  A[Start] --> B[End]\n```";
-                insertBlock(diagram, diagram.indexOf("Start"), 5);
-              },
-              <FiGitBranch />,
-            )}
+          </div>
+          <div className="md-tool-group">
+            <MarkdownDiagramPicker key={`mermaid-${activeId}`} family="mermaid" disabled={disabled} />
+            <MarkdownDiagramPicker key={`plantuml-${activeId}`} family="plantuml" disabled={disabled} />
           </div>
           <div
             className="md-tool-group md-font-controls"
@@ -273,11 +283,19 @@ export default function MarkdownToolbar() {
               <FiPlus />
             </Tool>
           </div>
+          <div className="md-tool-group">
+            <Button variant="ghost" size="sm" title={t("export.title")} onClick={() => {
+              const current = useEditorStore.getState();
+              const tab = current.tabs.find(tab => tab.id === current.activeId);
+              if (tab) setExportSnapshot({ content: tab.content, filePath: tab.filePath, theme: current.theme });
+            }}><FiDownload style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} />{t("export.button")}</Button>
+          </div>
           <div className="md-toolbar-views">
             <PreviewModeSwitch />
           </div>
         </div>
       </div>
+      {exportSnapshot && <Suspense fallback={null}><MarkdownExportDialog snapshot={exportSnapshot} onClose={() => setExportSnapshot(null)} /></Suspense>}
       {dialog && (
         <MarkdownInsertDialog {...dialog} onClose={() => setDialog(null)} />
       )}

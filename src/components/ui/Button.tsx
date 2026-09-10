@@ -30,6 +30,7 @@ export const Button = forwardRef<HTMLButtonElement, Props>(function Button(
     style,
     disabled,
     children,
+    title,
     ...rest
   },
   ref,
@@ -49,7 +50,9 @@ export const Button = forwardRef<HTMLButtonElement, Props>(function Button(
       ref={ref}
       type={rest.type ?? "button"}
       aria-pressed={pressed}
-      aria-label={rest["aria-label"] ?? (isIcon ? rest.title : undefined)}
+      aria-label={rest["aria-label"] ?? (isIcon ? title : undefined)}
+      data-tooltip={title ?? (isIcon ? rest["aria-label"] : undefined)}
+      title=""
       disabled={disabled}
       data-variant={variant}
       data-size={size}

@@ -161,6 +161,7 @@ export type Command =
       after?: string;
     }
   | { type: "delete"; ids: string[] }
+  | { type: "paste"; parent: string; topics: Topic[] }
   | {
       type: "move";
       id: string;
@@ -264,20 +265,27 @@ export function editDocument(
       if (!topic) throw new Error("Topic not found");
       topic.position = { x: command.x, y: command.y };
       break;
-    case "add": {
+    case "add":
+    case "paste": {
       const p = findTopic(root, command.parent);
       if (!p) throw new Error("Parent not found");
-      if (findTopic(root, command.topic.id))
-        throw new Error("Duplicate topic ID");
+      const incoming = command.type === "paste" ? command.topics : [command.topic];
+      const ids = new Set<string>();
+      walkTopics(root, (t) => ids.add(t.id));
+      for (const tree of incoming) walkTopics(tree, (t) => {
+        if (!t.id || typeof t.title !== "string" || ids.has(t.id))
+          throw new Error("Invalid or duplicate topic ID");
+        ids.add(t.id);
+      });
       p.children ??= {};
-      const list = (p.children[command.kind ?? "attached"] ??= []);
-      const i = command.after
+      const list = (p.children[command.type === "add" ? command.kind ?? "attached" : "attached"] ??= []);
+      const i = command.type === "add" && command.after
         ? list.findIndex((c) => c.id === command.after)
         : -1;
       list.splice(
         i < 0 ? list.length : i + 1,
         0,
-        structuredClone(command.topic),
+        ...structuredClone(incoming),
       );
       break;
     }
@@ -346,7 +354,7 @@ export function editDocument(
       break;
     }
   }
-  if (["add", "delete", "move"].includes(command.type))
+  if (["add", "paste", "delete", "move"].includes(command.type))
     repairGroups(root, original.rootTopic);
   const collectIds = (tree: Topic) => {
     const ids = new Set<string>();
@@ -376,7 +384,7 @@ export function duplicateTopic(source: Topic): Topic {
   const result = structuredClone(source),
     ids = new Map<string, string>();
   walkTopics(result, (n) => {
-    if (!n.id || typeof n.title !== "string")
+    if (!n.id || typeof n.title !== "string" || ids.has(n.id))
       throw new Error("Invalid clipboard topic");
     ids.set(n.id, newId());
     for (const g of [...(n.boundaries ?? []), ...(n.summaries ?? [])])
@@ -389,5 +397,16 @@ export function duplicateTopic(source: Topic): Topic {
       if (g.topicId && ids.has(g.topicId)) g.topicId = ids.get(g.topicId);
     }
   });
+  return result;
+}
+
+/** Copy each selected subtree once, even when both a parent and child are selected. */
+export function selectedTopicRoots(root: Topic, selected: string[]): Topic[] {
+  const ids = new Set(selected), result: Topic[] = [];
+  const visit = (topic: Topic) => {
+    if (ids.has(topic.id)) result.push(topic);
+    else childrenOf(topic).forEach(visit);
+  };
+  visit(root);
   return result;
 }

@@ -24,9 +24,9 @@ export default function XmindIndicator({
       viewBox="0 0 16 16"
       role="img"
       aria-label={label}
+      data-tooltip={label}
       pointerEvents="auto"
     >
-      <title>{label}</title>
       {icon.kind === "priority" ? (
         <>
           <circle cx={8} cy={8} r={7} fill={ink} />

@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import Tooltip from "./components/ui/Tooltip";
 import { installGlobalLogHandlers } from "./lib/logger";
 import { useEditorStore } from "./store/editor";
 // Import the cache module directly (not from components/Editor) so this
@@ -41,5 +42,6 @@ useEditorStore.subscribe((next, prev) => {
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <App />
+    <Tooltip />
   </React.StrictMode>,
 );

@@ -690,4 +690,18 @@ test(3, "callout and rounded branches survive edit, save, reopen and folding wit
   assert.deepEqual(writeDocument(doc,doc.sheets),bytes);
 });
 
+test(6, "pasting subtrees rejects nested duplicate IDs and preserves the original document", () => {
+  const sheets=sampleSheets(), before=JSON.stringify(sheets);
+  assert.throws(()=>editDocument(sheets,sheets[0].id,{type:"paste",parent:"root",topics:[
+    {id:"fresh",title:"Fresh"},
+    {id:"another",title:"Another",children:{attached:[{id:"read",title:"Duplicate"}]}}
+  ]}),/duplicate topic ID/);
+  assert.equal(JSON.stringify(sheets),before);
+  assert.throws(()=>duplicateTopic({id:"same",title:"Parent",children:{attached:[{id:"same",title:"Child"}]}}),/Invalid clipboard/);
+  const changed=editDocument(sheets,sheets[0].id,{type:"paste",parent:"root",topics:[{id:"a1",title:"A"},{id:"b1",title:"B"}]});
+  const archive=openDocument(sampleArchive());
+  const reopened=openDocument(writeDocument(archive,changed));
+  assert.deepEqual(reopened.sheets[0].rootTopic.children!.attached!.slice(-2).map(t=>t.title),["A","B"]);
+});
+
 console.log(`${passed} XMind tests passed`);

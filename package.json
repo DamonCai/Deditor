@@ -32,7 +32,8 @@
     "test:regression": "node scripts/test-regression.mjs",
     "perf:document": "tsx scripts/perf-document.ts",
     "test:xmind": "tsx scripts/test-xmind.ts",
-    "perf:xmind": "tsx scripts/perf-xmind.ts"
+    "perf:xmind": "tsx scripts/perf-xmind.ts",
+    "test:export": "node scripts/test-export.mjs"
   },
   "dependencies": {
     "@codemirror/commands": "^6.7.1",
@@ -69,6 +70,7 @@
     "@vscode/markdown-it-katex": "^1.1.2",
     "codemirror": "^6.0.1",
     "diff": "^9.0.0",
+    "docx": "^9.7.1",
     "fflate": "^0.8.2",
     "json5": "^2.2.3",
     "katex": "^0.16.45",
@@ -77,6 +79,7 @@
     "markdown-it-task-lists": "^2.1.1",
     "mermaid": "^11.14.0",
     "plantuml-encoder": "^1.4.0",
+    "pptxgenjs": "^4.0.1",
     "prettier": "^3.8.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useEditorStore } from "../store/editor";
-import { logInfo, logWarn } from "./logger";
+import { logError, logInfo, logWarn } from "./logger";
 import { isBinaryRenderable } from "./lang";
 
 const POLL_MS = 3000;
@@ -13,6 +13,7 @@ export function useFileWatch(): void {
   useEffect(() => {
     const lastMtimes = new Map<string, number>();
     let stopped = false;
+    let running = false;
 
     const tick = async () => {
       const tabs = useEditorStore.getState().tabs;
@@ -26,6 +27,9 @@ export function useFileWatch(): void {
         if (isBinaryRenderable(t.filePath)) continue;
         paths.push(t.filePath);
       }
+      const openPaths = new Set(paths);
+      for (const path of lastMtimes.keys())
+        if (!openPaths.has(path)) lastMtimes.delete(path);
       if (paths.length === 0) return;
 
       let mtimes: (number | null)[];
@@ -36,9 +40,8 @@ export function useFileWatch(): void {
       }
       if (stopped) return;
 
-      // First pass: figure out which paths actually changed, update the
-      // baseline cache for them. We do this before any I/O so we don't
-      // double-read the same path on the next tick if the IPC is in flight.
+      // A changed mtime is acknowledged only after a successful read.
+      // The serialized poll below prevents overlapping/out-of-order reads.
       const changedPaths: string[] = [];
       for (let i = 0; i < paths.length; i++) {
         const path = paths[i];
@@ -50,7 +53,6 @@ export function useFileWatch(): void {
           continue;
         }
         if (prev === mt) continue;
-        lastMtimes.set(path, mt);
         changedPaths.push(path);
       }
       if (changedPaths.length === 0) return;
@@ -60,7 +62,10 @@ export function useFileWatch(): void {
       // several open tabs) took 5× the IPC latency to settle.
       const reads = await Promise.all(
         changedPaths.map((p) =>
-          invoke<string>("read_text_file", { path: p }).catch(() => null),
+          invoke<string>("read_text_file", { path: p }).catch((err) => {
+            logError(`external file reload failed: ${p}`, err);
+            return null;
+          }),
         ),
       );
       if (stopped) return;
@@ -71,6 +76,10 @@ export function useFileWatch(): void {
         if (fresh == null) continue;
         const cur = useEditorStore.getState().tabs.find((t) => t.filePath === path);
         if (!cur) continue;
+        const original = tabs.find((t) => t.filePath === path);
+        // A save, save-as or close/reopen during I/O makes this read stale.
+        if (cur.id !== original?.id || cur.savedContent !== original.savedContent) continue;
+        lastMtimes.set(path, mtimes[paths.indexOf(path)]!);
         if (fresh === cur.content) continue;
         if (fresh === cur.savedContent) continue;
 
@@ -92,8 +101,13 @@ export function useFileWatch(): void {
       }
     };
 
-    const iv = setInterval(() => void tick(), POLL_MS);
-    void tick();
+    const poll = async () => {
+      if (stopped || running) return;
+      running = true;
+      try { await tick(); } finally { running = false; }
+    };
+    const iv = setInterval(() => void poll(), POLL_MS);
+    void poll();
     return () => {
       stopped = true;
       clearInterval(iv);

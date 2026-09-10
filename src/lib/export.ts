@@ -1,11 +1,37 @@
-import { showError } from "./feedback";
+import previewCss from "../preview.css?raw";
 import { save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
-import { renderMarkdown, renderCode } from "./markdown";
-import { isMarkdown } from "./lang";
 import { useEditorStore } from "../store/editor";
-import { logError, logInfo } from "./logger";
+import { logInfo } from "./logger";
 import { tStatic } from "./i18n";
+import {
+  blobData,
+  documentBlocks,
+  plainText,
+  prepareDocument,
+  rasterImage,
+  svgData,
+  svgSource,
+  type ExportSnapshot,
+} from "./markdownExport/document";
+
+export type ExportFormat =
+  | "html"
+  | "pdf"
+  | "docx"
+  | "pptx"
+  | "txt"
+  | "svg"
+  | "png";
+export const EXPORT_FORMATS: ExportFormat[] = [
+  "html",
+  "pdf",
+  "docx",
+  "pptx",
+  "txt",
+  "svg",
+  "png",
+];
 
 const PRINT_AREA_ID = "deditor-print-area";
 
@@ -37,120 +63,161 @@ const PRINT_CSS = `
   #${PRINT_AREA_ID} th, #${PRINT_AREA_ID} td { border: 1px solid #d0d7de; padding: 6px 12px; }
   #${PRINT_AREA_ID} th { background: #f6f8fa; }
   #${PRINT_AREA_ID} hr { border: none; border-top: 1px solid #d0d7de; margin: 1.6em 0; }
-  #${PRINT_AREA_ID} img { max-width: 100%; }
+  #${PRINT_AREA_ID} img, #${PRINT_AREA_ID} svg { max-width: 100%; height: auto; }
+  #${PRINT_AREA_ID} pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+  #${PRINT_AREA_ID} table { width: 100%; table-layout: fixed; overflow-wrap: anywhere; }
+  #${PRINT_AREA_ID} thead { display: table-header-group; }
+  #${PRINT_AREA_ID} .katex { font-size: 1.1em; }
   #${PRINT_AREA_ID} pre, #${PRINT_AREA_ID} table, #${PRINT_AREA_ID} blockquote, #${PRINT_AREA_ID} img {
-    page-break-inside: avoid;
+    break-inside: auto;
   }
   #${PRINT_AREA_ID} h1, #${PRINT_AREA_ID} h2, #${PRINT_AREA_ID} h3 {
     page-break-after: avoid;
   }
 `;
 
-let printStyleEl: HTMLStyleElement | null = null;
-
-function ensurePrintCss() {
-  if (printStyleEl) return;
-  printStyleEl = document.createElement("style");
-  printStyleEl.id = "deditor-print-style";
-  printStyleEl.textContent = PRINT_CSS;
-  document.head.appendChild(printStyleEl);
+export function defaultName(filePath: string | null, ext: string): string {
+  const base = filePath?.split(/[\\/]/).pop() || "untitled";
+  return base.replace(/\.[^.]+$/, "") + "." + ext;
 }
 
-function ensurePrintArea(): HTMLDivElement {
-  let area = document.getElementById(PRINT_AREA_ID) as HTMLDivElement | null;
+export async function standalonePage(
+  body: string,
+  title: string,
+  theme: "light" | "dark" = "light",
+): Promise<string> {
+  let mathCss = "";
+  if (body.includes('class="katex')) {
+    const { katexExportCss } = await import("./markdownExport/mathCss");
+    mathCss = katexExportCss();
+  }
+  const escaped = title.replace(
+    /[&<>"]/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!,
+  );
+  const dark = theme === "dark";
+  const colors = dark
+    ? "--bg:#1e1f22;--border:#34363a;--text-soft:#868a91;--bg-mute:#393b40;--error-text:#ff8e96;--error-bg:rgba(255,142,150,.1)"
+    : "--bg:#fff;--border:#e2e4e8;--text-soft:#6c707e;--bg-mute:#ebecf0;--error-text:#c22932;--error-bg:rgba(217,45,54,.08)";
+  return `<!doctype html>\n<html${dark ? ' class="dark"' : ""} lang="${useEditorStore.getState().language === "zh" ? "zh-CN" : "en"}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escaped}</title><style>
+:root{${colors};color-scheme:${theme}}*{box-sizing:border-box}body{margin:0;background:var(--bg)}
+${previewCss}
+.preview{height:auto;overflow:visible;max-width:924px;margin:0 auto}
+@media(max-width:600px){.preview{padding:24px 20px 48px}}
+@media print{body{print-color-adjust:exact;-webkit-print-color-adjust:exact}.preview{height:auto;overflow:visible}}
+${mathCss}</style></head><body><main class="preview">${body}</main></body></html>`;
+}
+
+let exporting = false;
+/** The caller owns the immutable snapshot. Dialog cancellation causes no write. */
+export async function exportMarkdown(
+  snapshot: ExportSnapshot,
+  format: ExportFormat,
+  diagramIndex = 0,
+): Promise<boolean> {
+  if (exporting) throw new Error(tStatic("export.busy"));
+  const theme =
+    format === "html"
+      ? (snapshot.theme ?? useEditorStore.getState().theme)
+      : "light";
+  exporting = true;
+  let prepared: Awaited<ReturnType<typeof prepareDocument>> | undefined;
+  try {
+    const diagram = format === "svg" || format === "png";
+    const name = defaultName(snapshot.filePath, format);
+    const target =
+      format === "pdf"
+        ? null
+        : await save({
+            defaultPath: diagram
+              ? name.replace(
+                  `.${format}`,
+                  `-diagram-${diagramIndex + 1}.${format}`,
+                )
+              : name,
+            filters: [{ name: format.toUpperCase(), extensions: [format] }],
+          });
+    if (format !== "pdf" && !target) return false;
+    prepared = await prepareDocument(snapshot, {
+      diagramsOnly: diagram,
+      diagramIndex: diagram ? diagramIndex : undefined,
+      plain: format === "txt",
+      theme,
+    });
+    const { root } = prepared;
+    if (format === "pdf") {
+      await printDocument(root);
+    } else if (format === "html") {
+      await invoke("write_text_file", {
+        path: target,
+        content: await standalonePage(
+          root.innerHTML,
+          name.replace(/\.html$/, ""),
+          theme,
+        ),
+      });
+    } else if (diagram) {
+      const svg = root.querySelector("svg");
+      if (!svg) throw new Error(tStatic("export.noDiagrams"));
+      const source = svgSource(svg);
+      if (format === "svg")
+        await invoke("write_text_file", { path: target, content: source });
+      else
+        await invoke("write_binary_file", {
+          path: target,
+          data: (await rasterImage(svgData(source), 2)).data.split(",")[1],
+        });
+    } else {
+      const blocks = await documentBlocks(root, format !== "txt");
+      if (format === "txt")
+        await invoke("write_text_file", {
+          path: target,
+          content: plainText(blocks),
+        });
+      else {
+        const { wordDocument, slideDocument } =
+          await import("./markdownExport/office");
+        const blob = await (format === "docx" ? wordDocument : slideDocument)(
+          blocks,
+          name.replace(/\.[^.]+$/, ""),
+        );
+        await invoke("write_binary_file", {
+          path: target,
+          data: (await blobData(blob)).split(",")[1],
+        });
+      }
+    }
+    logInfo(`exported ${format.toUpperCase()}: ${target || "print dialog"}`);
+    return true;
+  } finally {
+    prepared?.dispose();
+    exporting = false;
+  }
+}
+
+async function printDocument(root: HTMLElement) {
+  let style = document.getElementById("deditor-print-style");
+  if (!style) {
+    style = document.createElement("style");
+    style.id = "deditor-print-style";
+    document.head.appendChild(style);
+  }
+  style.textContent = PRINT_CSS;
+  let area = document.getElementById(PRINT_AREA_ID);
   if (!area) {
     area = document.createElement("div");
     area.id = PRINT_AREA_ID;
     document.body.appendChild(area);
   }
-  return area;
-}
-
-async function buildBodyHtml(source: string, filePath: string | null): Promise<string> {
-  if (isMarkdown(filePath)) {
-    return await renderMarkdown(source, { theme: "light" });
-  }
-  return await renderCode(source, filePath, { theme: "light" });
-}
-
-function buildStandalonePage(body: string, title: string): string {
-  // KaTeX CSS via CDN — inlining the stylesheet would still leave font files
-  // unresolved, and the standalone HTML is most often viewed online anyway.
-  const katexCdn =
-    '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">';
-  return `<!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<title>${escapeHtml(title)}</title>
-${katexCdn}
-<style>${PRINT_CSS.replace(new RegExp(`#${PRINT_AREA_ID}`, "g"), "body")}</style>
-</head>
-<body>
-${body}
-</body>
-</html>`;
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function activeTab() {
-  const { tabs, activeId } = useEditorStore.getState();
-  return tabs.find((t) => t.id === activeId) ?? null;
-}
-
-export async function exportHtml() {
-  const t = activeTab();
-  if (!t) return;
-  const target = await save({
-    defaultPath: defaultName(t.filePath, "html"),
-    filters: [{ name: "HTML", extensions: ["html"] }],
-  });
-  if (!target) return;
-  const body = await buildBodyHtml(t.content, t.filePath);
-  const html = buildStandalonePage(body, t.filePath?.split(/[\\/]/).pop() ?? "Document");
-  await invoke("write_text_file", { path: target, content: html });
-  logInfo(`exported HTML: ${target}`);
-}
-
-export async function exportPdf() {
-  const t = activeTab();
-  if (!t) return;
-  ensurePrintCss();
-  const area = ensurePrintArea();
-  try {
-    const body = await buildBodyHtml(t.content, t.filePath);
-    area.innerHTML = body;
-    // give the layout/style engine one frame so the print snapshot includes it
-    await new Promise<void>((resolve) =>
-      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-    );
-    await invoke("print_window");
-    logInfo("export PDF: print dialog opened");
-  } catch (err) {
-    logError("export PDF failed", err);
-    void showError(
-      tStatic("export.pdfFailed", {
-        err: err instanceof Error ? err.message : String(err),
-      }),
-    );
-  } finally {
-    // Print dialog is async; clear after a delay so the print snapshot is preserved.
-    setTimeout(() => {
-      area.innerHTML = "";
-    }, 4000);
-  }
-}
-
-function defaultName(filePath: string | null, ext: string): string {
-  if (!filePath) return `untitled.${ext}`;
-  const base = filePath.split(/[\\/]/).pop() ?? `untitled.${ext}`;
-  const dot = base.lastIndexOf(".");
-  return (dot > 0 ? base.slice(0, dot) : base) + "." + ext;
+  area.innerHTML = root.innerHTML;
+  await Promise.all(
+    Array.from(area.querySelectorAll("img"), (img) => img.decode()),
+  );
+  await document.fonts?.ready;
+  await new Promise<void>((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+  );
+  // Keep the last snapshot until replaced. Native print_window can return before
+  // the dialog closes; no timer may erase a pending print preview.
+  await invoke("print_window");
 }

@@ -76,12 +76,14 @@ fs.symlinkSync(
   "dir",
 );
 const stubs = {
+  "../preview.css?raw": `export default ${JSON.stringify(fs.readFileSync("src/preview.css", "utf8"))};`,
   "@tauri-apps/api/core":
     "export const invoke=(...args)=>globalThis.__invoke(...args); export const convertFileSrc=(p)=>'http://asset.localhost/'+encodeURIComponent(p);",
   "@tauri-apps/plugin-dialog":
     "export const save=(...args)=>globalThis.__save(...args); export const open=async()=>null;",
   "@tauri-apps/plugin-opener":
     "export const revealItemInDir=async()=>{}; export const openUrl=async()=>{}; export const openPath=async()=>{};",
+  "./markdownExport/mathCss": "export const katexExportCss=()=>\"\";",
   "./format":
     "export const formatBuffer=(...args)=>globalThis.__format(...args);",
   "./logger":
@@ -95,6 +97,7 @@ await build({
 export * from './src/lib/fileio';
 export {loadPersisted} from './src/lib/persistence';
 export {default as FileTree} from './src/components/FileTree';
+export {useFileWatch} from './src/lib/fileWatch';
 export {default as XmindView} from './src/components/XmindView';
 export {sampleArchive} from './tests/fixtures/xmind';
 export {openDocument as openXmindDocument} from './src/lib/xmind/document';
@@ -106,6 +109,10 @@ export * from './src/lib/bookmarks';
 export * from './src/lib/retainedTabs';
 export {default as EditorHost} from './src/components/EditorHost';
 export {default as PreviewHost} from './src/components/PreviewHost';
+export {default as Tooltip} from './src/components/ui/Tooltip';
+export {Button} from './src/components/ui/Button';
+export {default as XmindIndicator} from './src/components/XmindIndicator';
+export {DIAGRAM_TEMPLATES, diagramBlock} from './src/lib/diagramTemplates';
 export {default as MarkdownToolbar} from './src/components/MarkdownToolbar';
 export {default as HtmlToolbar} from './src/components/HtmlToolbar';
 export {default as JsonToolbar} from './src/components/JsonToolbar';
@@ -994,7 +1001,7 @@ test(
     await act(async () => setInput(document.querySelector("input"), "match"));
     await act(async () => pause(350));
     await act(async () =>
-      document.querySelector('button[title="Toggle replace input"]').click(),
+      document.querySelector('button[aria-label="Toggle replace input"]').click(),
     );
     await click("Replace All");
     assert.equal(replaced, 0);
@@ -1356,6 +1363,256 @@ test(4, "queued error dialogs reset their appearance before a normal confirmatio
   assert.equal(document.querySelector('[data-tone="error"]'), null);
   assert.match(document.querySelector('[role="dialog"]').textContent, /Normal confirmation/);
   await click("Done"); assert.equal(await next, "done");
+});
+
+test(6, 'XMind paste is atomic and one undo removes the whole pasted group', async () => {
+  await mountXmind();
+  const original = store.getState().tabs[0].content;
+  const canvas = document.querySelector('.xm-canvas');
+  const paste = data => {
+    const event = new window.Event('paste', {bubbles:true,cancelable:true});
+    Object.defineProperty(event, 'clipboardData', {value:{getData:type=>type==='application/x-deditor-topics'?data:''}});
+    canvas.dispatchEvent(event);
+  };
+  await act(async()=>paste(JSON.stringify([{id:'paste1',title:'First'}, {id:'paste2',title:'Second'}])));
+  assert.equal(xmindSheets()[0].rootTopic.children.attached.length, 6);
+  await click('Undo');
+  assert.equal(store.getState().tabs[0].content, original);
+  await act(async()=>paste(JSON.stringify([{id:'valid',title:'Valid'}, {id:'invalid'}])));
+  assert.equal(store.getState().tabs[0].content, original, 'invalid clipboard must not partially apply');
+});
+
+test(6, 'XMind copying parent and child includes that child only once', async () => {
+  await mountXmind();
+  const canvas = document.querySelector('.xm-canvas');
+  await act(async()=>canvas.dispatchEvent(new window.KeyboardEvent('keydown',{key:'a',metaKey:true,bubbles:true})));
+  const copied = {};
+  const event = new window.Event('copy', {bubbles:true,cancelable:true});
+  Object.defineProperty(event,'clipboardData',{value:{setData:(type,value)=>{copied[type]=value;}}});
+  await act(async()=>canvas.dispatchEvent(event));
+  const topics = JSON.parse(copied['application/x-deditor-topics']);
+  assert.equal(topics.length,1);
+  assert.equal(topics[0].id,'root');
+});
+
+test(6, 'XMind dragged node lets the underlying drop target receive hit testing', async () => {
+  await mountXmind();
+  const svg = document.querySelector('.xm-svg');
+  const moved = document.querySelector('[data-topic="local"]');
+  const target = document.querySelector('[data-topic="read"]');
+  svg.setPointerCapture = () => {};
+  const previous = document.elementFromPoint;
+  try {
+    await act(async()=>moved.dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true,button:0,clientX:100,clientY:100})));
+    await act(async()=>svg.dispatchEvent(new window.MouseEvent('pointermove',{bubbles:true,clientX:160,clientY:150})));
+    assert.equal(moved.getAttribute('pointer-events'),'none');
+    document.elementFromPoint=()=>target;
+    await act(async()=>svg.dispatchEvent(new window.MouseEvent('pointerup',{bubbles:true,clientX:160,clientY:150})));
+    const sheets=xmindSheets();
+    const read=sheets[0].rootTopic.children.attached.find(n=>n.id==='read');
+    assert.ok(read.children.attached.some(n=>n.id==='local'));
+    assert.equal(document.querySelector('[data-topic="local"]').getAttribute('data-detached'),null);
+    await click('Undo');
+    assert.ok(xmindSheets()[0].rootTopic.children.attached.some(n=>n.id==='local'));
+  } finally {document.elementFromPoint=previous;}
+});
+
+test(6, 'XMind camera benchmark preserves all 1001 topics during zoom', async () => {
+  const sheets=[{id:'perf',title:'Performance',rootTopic:{id:'root',title:'Root',children:{attached:Array.from({length:1000},(_,i)=>({id:'n'+i,title:'Topic '+i}))}}}];
+  await mountXmind(true,zipSync({'content.json':strToU8(JSON.stringify(sheets))}));
+  await act(async()=>root.unmount());root=undefined;
+  const durations=[];
+  await render(React.createElement(React.Profiler,{id:'xmind',onRender:(_id,phase,duration)=>{if(phase==='update')durations.push(duration);}},
+    React.createElement(app.XmindView,{dataUrl:store.getState().tabs[0].content,tabId:'xm',filePath:'/test/perf.xmind'})));
+  const zoom=document.querySelector('button[aria-label="Zoom in"]');
+  durations.length=0;
+  for(let i=0;i<8;i++)await act(async()=>zoom.click());
+  assert.equal(document.querySelectorAll('[data-topic]').length,1001);
+  console.log('XMIND_CAMERA_PROFILE',JSON.stringify({samples:durations,median_ms:[...durations].sort((a,b)=>a-b)[Math.floor(durations.length/2)]}));
+});
+
+test(6, "External file monitoring retries failed reads and ignores overlapping or stale reads", async () => {
+  reset([tab('watch','original','/test/watch.md','original')]);
+  let poll, mtime=1, reads=0, fail=true, pending=null;
+  const realInterval=globalThis.setInterval;
+  globalThis.setInterval=(callback,ms,...args)=>{
+    if(ms===3000){poll=callback;return -1;}
+    return realInterval(callback,ms,...args);
+  };
+  globalThis.__invoke=async(cmd)=>{
+    if(cmd==='file_mtimes')return [mtime];
+    if(cmd==='read_text_file'){
+      reads++;
+      if(fail)throw new Error('temporarily unavailable');
+      return pending?pending.promise:'external';
+    }
+  };
+  function Watch(){app.useFileWatch();return null;}
+  try {
+    await render(React.createElement(Watch));
+    mtime=2;
+    await act(async()=>{poll();await flush();});
+    assert.equal(reads,1);
+    assert.equal(store.getState().tabs[0].content,'original');
+    fail=false;
+    await act(async()=>{poll();await flush();});
+    assert.equal(reads,2,'retry even when mtime is unchanged');
+    assert.equal(store.getState().tabs[0].content,'external');
+    mtime=3;pending=deferred();
+    await act(async()=>{poll();await flush();poll();await flush();});
+    assert.equal(reads,3,'only one read can be in flight');
+    store.setState({tabs:[tab('watch','locally saved','/test/watch.md','locally saved')]});
+    await act(async()=>{pending.resolve('older disk content');await flush();});
+    assert.equal(store.getState().tabs[0].content,'locally saved');
+    assert.equal(store.getState().tabs[0].externalChange,undefined);
+  } finally {globalThis.setInterval=realInterval;}
+});
+
+test(6, "Markdown extra tools keep selections, produce previewable syntax and undo cleanly", async () => {
+  reset();
+  for(const [label,tag] of [['Underline','u'],['Superscript','sup'],['Subscript','sub']]) {
+    await withToolbarEditor('sample',async view=>{
+      await render(React.createElement(app.MarkdownToolbar));
+      const tool=document.querySelector(`button[aria-label="${label}"]`);
+      await act(async()=>tool.click());
+      assert.equal(new MarkdownIt({html:true}).renderInline(view.state.doc.toString()),`<${tag}>sample</${tag}>`);
+      await act(async()=>tool.click());assert.equal(view.state.doc.toString(),'sample');
+      await act(async()=>root.unmount());root=undefined;
+    });
+  }
+  for(const [label,kind] of [['Collapsible details','details']]) {
+    await withToolbarEditor('beforeafter',async view=>{
+      await render(React.createElement(app.MarkdownToolbar));
+      await act(async()=>document.querySelector(`button[aria-label="${label}"]`).click());
+      const markdown=view.state.doc.toString();
+      const parser=new MarkdownIt({html:true});
+      if(kind==='details')assert.match(parser.render(markdown),/<details>\n<summary>Show details<\/summary>\n<p>Write details here.<\/p>/);
+      else {
+        const fence=parser.parse(markdown,{}).find(t=>t.type==='fence');
+        assert.equal(fence.info,kind==='plantuml'?'plantuml':'mermaid');
+        if(kind!=='plantuml')assert.ok(fence.content.startsWith(kind));
+      }
+      assert.ok(markdown.startsWith('before\n\n'));
+      assert.ok(markdown.endsWith('\n\nafter'));
+      await act(async()=>undo(view));assert.equal(view.state.doc.toString(),'beforeafter');
+      await act(async()=>root.unmount());root=undefined;
+    },{anchor:6});
+  }
+});
+
+test(7, "Immediate tooltips handle SVG, keyboard, clicks and disappearing controls without stealing focus", async () => {
+  reset();
+  let clicks=0;
+  await render(React.createElement(React.Fragment,null,
+    React.createElement(app.Tooltip),
+    React.createElement(app.Button,{title:'First tool',size:'icon','aria-describedby':'existing',onClick:()=>clicks++},React.createElement('span',null,'A')),
+    React.createElement(app.Button,{title:'Disabled tool',size:'icon',disabled:true},'B'),
+    React.createElement('svg',null,React.createElement(app.XmindIndicator,{icon:{kind:'notes'},x:0,y:0,label:'Has notes',color:'#555'}))));
+  const first=document.querySelector('[data-tooltip="First tool"]');
+  const disabled=document.querySelector('[data-tooltip="Disabled tool"]');
+  const icon=document.querySelector('svg[data-tooltip="Has notes"]');
+  for(const el of [first,disabled,icon]) {
+    el.getClientRects=()=>[{left:0,top:0,width:16,height:16}];
+    el.getBoundingClientRect=()=>({left:0,top:0,width:16,height:16,bottom:16,right:16});
+  }
+  const over=el=>el.dispatchEvent(new window.MouseEvent('pointerover',{bubbles:true}));
+  await act(async()=>over(first.firstChild));
+  assert.equal(document.querySelector('[role="tooltip"]').textContent,'First tool');
+  assert.equal(first.getAttribute('title'),'','no delayed or inherited native tooltip');
+  assert.ok(first.getAttribute('aria-describedby').startsWith('existing '));
+  await act(async()=>over(disabled));
+  assert.equal(document.querySelector('[role="tooltip"]').textContent,'Disabled tool');
+  assert.equal(first.getAttribute('aria-describedby'),'existing');
+  await act(async()=>over(icon.firstChild));
+  assert.equal(document.querySelectorAll('[role="tooltip"]').length,1);
+  assert.equal(document.querySelector('[role="tooltip"]').textContent,'Has notes');
+  assert.equal(icon.querySelector('title'),null);
+  await act(async()=>{icon.dispatchEvent(new window.MouseEvent('pointerout',{bubbles:true,relatedTarget:first}));});
+  assert.equal(document.querySelector('[role="tooltip"]'),null);
+  await act(async()=>first.focus());
+  assert.equal(document.querySelector('[role="tooltip"]').textContent,'First tool');
+  assert.equal(document.activeElement,first);
+  await act(async()=>first.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+  assert.equal(document.querySelector('[role="tooltip"]'),null);
+  assert.equal(document.activeElement,first);
+  await act(async()=>{over(first);});
+  await act(async()=>{first.dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true}));first.click();});
+  assert.equal(clicks,1);assert.equal(document.querySelector('[role="tooltip"]'),null);
+  await act(async()=>over(icon));
+  await act(async()=>{icon.setAttribute('hidden','');await flush();});
+  assert.equal(document.querySelector('[role="tooltip"]'),null);
+});
+
+test(8, "Diagram family menus insert all 22 templates at the captured selection as a single undo step", async () => {
+  reset();
+  for(const family of ['mermaid','plantuml']) {
+    const templates=app.DIAGRAM_TEMPLATES[family];
+    for(let index=0;index<templates.length;index++) {
+      await withToolbarEditor('before selected after',async view=>{
+        await render(React.createElement(app.MarkdownToolbar));
+        const trigger=document.querySelector(`button[aria-label="${family==='mermaid'?'Mermaid':'PlantUML'}"]`);
+        await act(async()=>trigger.click());
+        const menu=document.querySelector('[role="menu"]');
+        assert.ok(menu);assert.equal(trigger.getAttribute('aria-expanded'),'true');
+        assert.equal(view.state.doc.toString(),'before selected after','opening does not change text');
+        assert.equal(menu.querySelectorAll('[role="menuitem"]').length,11);
+        await act(async()=>menu.querySelectorAll('[role="menuitem"]')[index].click());
+        const markdown=view.state.doc.toString();
+        const fence=new MarkdownIt().parse(markdown,{}).find(token=>token.type==='fence');
+        assert.equal(fence.info,family);
+        assert.equal(fence.content,templates[index].source+'\n');
+        assert.ok(markdown.startsWith('before \n\n'));
+        assert.ok(markdown.endsWith('\n\n after'));
+        assert.equal(view.state.sliceDoc(view.state.selection.main.from,view.state.selection.main.to),templates[index].selection);
+        assert.equal(document.querySelector('[role="menu"]'),null);
+        assert.ok(view.hasFocus);
+        await act(async()=>undo(view));assert.equal(view.state.doc.toString(),'before selected after');
+        await act(async()=>root.unmount());root=undefined;
+      },{anchor:7,head:15});
+    }
+  }
+});
+
+test(8, "Diagram menus switch families, restore keyboard focus and reject stale document targets", async () => {
+  reset();
+  await withToolbarEditor('original',async view=>{
+    await render(React.createElement(app.MarkdownToolbar));
+    const mermaid=document.querySelector('button[aria-label="Mermaid"]');
+    const plantuml=document.querySelector('button[aria-label="PlantUML"]');
+    await act(async()=>mermaid.click());
+    assert.ok(document.activeElement.matches('[role="menuitem"]'));
+    await act(async()=>{plantuml.dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true}));plantuml.click();});
+    assert.equal(document.querySelectorAll('[role="menu"]').length,1);
+    assert.equal(document.querySelector('[role="menu"]').getAttribute('aria-label'),'PlantUML');
+    await act(async()=>document.activeElement.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+    assert.equal(document.querySelector('[role="menu"]'),null);assert.equal(document.activeElement,plantuml);
+    assert.equal(view.state.doc.toString(),'original');
+    await act(async()=>mermaid.dispatchEvent(new window.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true})));
+    await act(async()=>document.activeElement.dispatchEvent(new window.KeyboardEvent('keydown',{key:'End',bubbles:true})));
+    assert.equal(document.activeElement.textContent,'Git branches');
+    await act(async()=>document.body.dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true})));
+    assert.equal(document.querySelector('[role="menu"]'),null);
+    await act(async()=>mermaid.click());
+    await act(async()=>view.dispatch({changes:{from:0,insert:'changed '}}));
+    await act(async()=>document.querySelector('[role="menuitem"]').click());
+    assert.equal(view.state.doc.toString(),'changed original');
+    assert.match(document.querySelector('[role="alert"]').textContent,/document changed/i);
+    await act(async()=>store.setState({previewMaximized:true,showPreview:true}));
+    assert.equal(document.querySelector('[role="menu"]'),null);assert.equal(mermaid.disabled,true);
+    await act(async()=>store.setState({previewMaximized:false}));
+    await act(async()=>mermaid.click());
+    await act(async()=>store.setState({activeId:'another'}));
+    assert.equal(document.querySelector('[role="menu"]'),null);
+    assert.equal(view.state.doc.toString(),'changed original');
+  });
+});
+
+test(8, "All Mermaid templates parse with the bundled Mermaid version", async () => {
+  const {default:mermaid}=await import('mermaid');
+  mermaid.initialize({startOnLoad:false,securityLevel:'loose'});
+  for(const template of app.DIAGRAM_TEMPLATES.mermaid) {
+    assert.ok(await mermaid.parse(template.source),template.id);
+  }
 });
 
 let failed = 0,

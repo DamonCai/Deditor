@@ -322,6 +322,7 @@ export function buildScene(
     )
       warnings.add(sc);
     const brace = sc.includes("brace");
+    const childIndices = new Map(children.map((child, i) => [child.id, i]));
     const add = (f: Fragment, d: Direction) => {
       fragment.nodes.push(...f.nodes);
       fragment.edges.push(
@@ -332,7 +333,7 @@ export function buildScene(
     const arrange = (topics: Topic[], d: Direction) => {
       const vertical = d === "down" || d === "up";
       const parts = topics.map((t) =>
-        layout(t, depth + 1, depth === 0 ? children.indexOf(t) : branch, d, topic.id,
+        layout(t, depth + 1, depth === 0 ? childIndices.get(t.id)! : branch, d, topic.id,
           false, undefined, depth > 0 ? connectionStyle(node) : undefined),
       );
       const gap = vertical ? 36 : depth === 0 ? 35 : 18;
@@ -375,8 +376,9 @@ export function buildScene(
           return { id: n.topic.id, y: n.y + n.height * (n.shape.toLowerCase().includes("underline") ? 1 : 0.5) };
         });
         const top = Math.min(...anchors.map(a => a.y)), bottom = Math.max(...anchors.map(a => a.y));
+        const anchorById = new Map(anchors.map(a => [a.id, a]));
         for (const edge of fragment.edges.filter(e => e.from === topic.id)) {
-          const anchor = anchors.find(a => a.id === edge.to);
+          const anchor = anchorById.get(edge.to);
           if (anchor) edge.roundedCorner = anchor.y === top || anchor.y === bottom;
         }
       }
