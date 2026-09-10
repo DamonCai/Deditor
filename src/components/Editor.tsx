@@ -1,7 +1,9 @@
+import { markdownSession, sourceChange } from "../lib/markdownSession";
+import { markdownHistory } from "../lib/markdownHistory";
 import { showError } from "../lib/feedback";
 import { documentStatsField } from "../lib/documentStats";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { EditorState, EditorSelection, Compartment, StateEffect } from "@codemirror/state";
+import { EditorState, EditorSelection, Compartment, StateEffect, Transaction } from "@codemirror/state";
 import {
   EditorView,
   keymap,
@@ -293,6 +295,11 @@ function TextEditor({
         // false from `run` falls through to whatever else is bound — same as
         // not registering the key at all from CodeMirror's perspective.
         keymap.of([
+          ...(tabId && isMarkdown(filePath) ? [
+            { key: "Mod-z", run: () => markdownHistory(false, tabId) },
+            { key: "Mod-Shift-z", run: () => markdownHistory(true, tabId) },
+            { key: "Mod-y", run: () => markdownHistory(true, tabId) },
+          ] : []),
           {
             key: "Mod-Alt-ArrowUp",
             run: (view) =>
@@ -364,6 +371,9 @@ function TextEditor({
             onChangeRef.current(next);
           }
           if (u.selectionSet && !u.docChanged && getActiveView() === u.view) notifyActiveEditor();
+          if (u.selectionSet && getActiveView() === u.view && tabId && isMarkdown(filePath)) {
+            markdownSession(tabId, useEditorStore.getState().tabs.find(t => t.id === tabId)?.content ?? u.state.doc.toString()).sourceCursor = u.state.selection.main.head;
+          }
           if (u.selectionSet || u.docChanged) {
             positionRef.current.cursor = u.state.selection.main.head;
             schedulePositionFlush();
@@ -441,7 +451,14 @@ function TextEditor({
     const view = new EditorView({ state, parent: hostRef.current });
     const removeFontZoom = installEditorFontZoom(view.scrollDOM, tabId, () => setFontZoomRevision((n) => n + 1));
     viewRef.current = view;
-    setActiveView(view, tabId);
+    // Capture native menu/gesture history before CodeMirror's own history plugin.
+    const beforeNativeHistory = (event: InputEvent) => {
+      if (!tabId || !isMarkdown(filePath) || !["historyUndo", "historyRedo"].includes(event.inputType)) return;
+      event.preventDefault(); event.stopPropagation();
+      markdownHistory(event.inputType === "historyRedo", tabId);
+    };
+    view.contentDOM.addEventListener("beforeinput", beforeNativeHistory, true);
+    if (active !== false) setActiveView(view, tabId);
 
     // Restore first-visible line. Defer to next frame so CM has measured layout.
     if (initialScrollLine != null && initialScrollLine > 1) {
@@ -508,6 +525,7 @@ function TextEditor({
 
     return () => {
       removeFontZoom();
+      view.contentDOM.removeEventListener("beforeinput", beforeNativeHistory, true);
       view.scrollDOM.removeEventListener("scroll", onScrollEvt);
       if (scrollRafId) cancelAnimationFrame(scrollRafId);
       // Final flush so the very last position isn't lost on tab switch / unmount.
@@ -545,10 +563,15 @@ function TextEditor({
   // undefined there) so the primary tab keeps owning the toolbar even when
   // the user's focus is on the split clone.
   useEffect(() => {
-    if (!active) return;
     const view = viewRef.current;
     if (!view) return;
+    if (active === false) { if (getActiveView() === view) setActiveView(null); return; }
+    if (active === undefined) return;
     setActiveView(view, tabId);
+    if (tabId && isMarkdown(filePath)) {
+      const cursor = markdownSession(tabId, useEditorStore.getState().tabs.find(t => t.id === tabId)?.content ?? view.state.doc.toString()).sourceCursor;
+      if (cursor !== null) view.dispatch({ selection: { anchor: Math.min(view.state.doc.length, cursor) }, scrollIntoView: true });
+    }
     view.requestMeasure();
     useEditorStore.getState().setActiveSelectionLength(view.state.selection.ranges.reduce((n, r) => n + r.to - r.from, 0));
   }, [active]);
@@ -622,9 +645,10 @@ function TextEditor({
     // external file watch, programmatic setContent). Diff doc against the
     // new value, replace if different.
     if (view.state.doc.toString() === value) return;
-    view.dispatch({
-      changes: { from: 0, to: view.state.doc.length, insert: value },
-    });
+    if (isMarkdown(filePath)) {
+      const change = sourceChange(view.state.doc.toString(), value);
+      view.dispatch({ changes: { from: change.from, to: change.from + change.removed.length, insert: change.inserted }, annotations: Transaction.addToHistory.of(false) });
+    } else view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value } });
   }, [value]);
 
   useEffect(() => {

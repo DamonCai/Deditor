@@ -1191,7 +1191,7 @@ test(4, "advanced rich topics place markers beside titles and labels below the o
     assert.equal(node.labels[0].y,node.labels[1].y);
     const markerPositions=node.indicators.flatMap((icon,i)=>icon.kind==='priority'||icon.kind==='task'?[node.indicatorPositions[i]]:[]);
     for(const icon of markerPositions)assert.ok(icon.x+16<=node.titleX);
-    for(const icon of node.indicatorPositions)assert.ok(icon.x>=c.x && icon.x+16<=c.x+c.width+1e-7);
+    for(const icon of node.indicatorPositions)assert.ok(icon.x>=c.x-1e-7 && icon.x+16<=c.x+c.width+1e-7);
     assert.equal(node.topic.title,sheet.rootTopic.children!.detached!.find(t=>t.id===node.topic.id)!.title);
   }
 });

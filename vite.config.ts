@@ -35,6 +35,7 @@ export default defineConfig(async () => ({
         template: "raw-data",
       }),
   ].filter(Boolean) as any,
+  define: { __VUE_OPTIONS_API__: false, __VUE_PROD_DEVTOOLS__: false, __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: false },
   clearScreen: false,
   // Discover lazy parsers before serving the first editor. Otherwise opening
   // another language can rebuild the shared chunks while a live editor still

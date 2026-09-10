@@ -1,3 +1,5 @@
+import { markdownSession, type MarkdownOrigin } from "../lib/markdownSession";
+import { isMarkdown } from "../lib/lang";
 import { create } from "zustand";
 import { useShallow } from "zustand/shallow";
 import { DEFAULT_SHORTCUTS, type ShortcutId } from "../lib/shortcuts";
@@ -60,6 +62,7 @@ interface EditorState {
   tabPositions: Record<string, TabPosition>;
   theme: Theme;
   language: Lang;
+  markdownMode: "source" | "split" | "visual" | "read";
   showPreview: boolean;
   showSidebar: boolean;
   previewMaximized: boolean;
@@ -128,7 +131,7 @@ interface EditorState {
    *  formatter setup. */
   formatOnSave: boolean;
 
-  setContent: (content: string, tabId?: string) => void;
+  setContent: (content: string, tabId?: string, origin?: MarkdownOrigin) => void;
   // Open a new tab (or focus existing one for the same path).
   openTab: (filePath: string | null, content: string) => string;
   // Open a side-by-side diff tab. Dedupes on (leftPath, rightPath).
@@ -369,6 +372,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       ? "dark"
       : "light",
   language: detectLang(),
+  markdownMode: "split",
   showPreview: true,
   showSidebar: true,
   previewMaximized: false,
@@ -394,9 +398,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   autoSave: "off",
   formatOnSave: false,
 
-  setContent: (content, tabId) => {
+  setContent: (content, tabId, origin = "command") => {
     const { tabs, activeId } = get();
     const target = tabId ?? activeId;
+    const tab = tabs.find(t => t.id === target);
+    if (tab && !tab.diff && isMarkdown(tab.filePath)) markdownSession(tab.id, tab.content).commit(content, origin);
     set({
       tabs: tabs.map((t) => (t.id === target ? { ...t, content } : t)),
     });
@@ -686,11 +692,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({ language, tabs });
   },
   togglePreview: () => {
+    const tab = get().tabs.find(t => t.id === get().activeId);
+    if (tab && !tab.diff && isMarkdown(tab.filePath)) { set({ markdownMode: get().markdownMode === "source" ? "split" : "source" }); return; }
     const next = !get().showPreview;
     // turning preview off also exits maximized
     set({ showPreview: next, previewMaximized: next ? get().previewMaximized : false });
   },
   togglePreviewMaximized: () => {
+    const tab = get().tabs.find(t => t.id === get().activeId);
+    if (tab && !tab.diff && isMarkdown(tab.filePath)) { set({ markdownMode: ["visual", "read"].includes(get().markdownMode) ? "split" : "visual" }); return; }
     const next = !get().previewMaximized;
     // entering maximized also turns preview on
     set({ previewMaximized: next, showPreview: next ? true : get().showPreview });

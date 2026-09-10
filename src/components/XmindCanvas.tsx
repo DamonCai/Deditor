@@ -599,7 +599,7 @@ export default function XmindCanvas({
           const foldLeft = n.direction === "left" || (n.direction === "fishbone" && n.topic.structureClass?.toLowerCase().includes("rightheaded"));
           let foldX = foldLeft ? -foldRadius - 4
             : n.direction === "down" || n.direction === "up" ? n.width / 2 : n.width + foldRadius + 4;
-          let foldY = n.direction === "down" ? n.height + foldRadius + 4
+          let foldY = n.direction === "down" ? nodeVisualBounds(n).height + foldRadius + 4
             : n.direction === "up" ? -foldRadius - 4 : n.height / 2;
           const rib = fishboneRibs.get(n.topic.id);
           if (rib) {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 // @tauri-apps/api/webview transitively imports the full Window class (~62 KB).
 // We only need to listen for the file-drop event; subscribe to its raw Tauri
 // event name directly via @tauri-apps/api/event (which is already small +
@@ -23,6 +23,7 @@ interface TauriDragDropPayload {
 import EditorHost from "./components/EditorHost";
 import EditorSlot from "./components/EditorSlot";
 import PreviewHost from "./components/PreviewHost";
+const MarkdownVisualEditor = lazy(() => import("./components/MarkdownVisualEditor"));
 import HtmlPreview from "./components/HtmlPreview";
 import HtmlToolbar from "./components/HtmlToolbar";
 import TitleBar from "./components/TitleBar";
@@ -69,8 +70,9 @@ export default function App() {
   // on every store change (every keystroke, every cursor move). Slicing per
   // field keeps App quiet unless these specific values change.
   const theme = useEditorStore((s) => s.theme);
-  const showPreview = useEditorStore((s) => s.showPreview);
-  const previewMaximized = useEditorStore((s) => s.previewMaximized);
+  const htmlShowPreview = useEditorStore((s) => s.showPreview);
+  const markdownMode = useEditorStore(s => s.markdownMode);
+  const htmlPreviewMaximized = useEditorStore((s) => s.previewMaximized);
   const showSidebar = useEditorStore((s) => s.showSidebar);
   const editorFontSize = useEditorStore((s) => s.editorFontSize);
   const language = useEditorStore((s) => s.language);
@@ -81,6 +83,8 @@ export default function App() {
   const filePath = activeMeta?.filePath ?? null;
   const isDiffTab = !!activeMeta?.isDiff;
   const htmlFile = isHtml(filePath);
+  const showPreview = isMarkdown(filePath) ? markdownMode !== "source" : htmlShowPreview;
+  const previewMaximized = isMarkdown(filePath) ? ["visual", "read"].includes(markdownMode) : htmlPreviewMaximized;
   const previewEnabled = !isDiffTab && showPreview && (isMarkdown(filePath) || htmlFile);
   // Initial caret + scroll for the active tab. Read imperatively so subscribing
   // components don't re-render every cursor move; Editor only consumes these
@@ -212,11 +216,13 @@ export default function App() {
   // only handle the shortcuts the menu doesn't own here.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.isComposing) return;
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
       const prefs = useEditorStore.getState().shortcuts;
       const k = e.key.toLowerCase();
       if (k === "b" && !e.shiftKey && !e.altKey) {
+        if ((e.target as HTMLElement)?.closest?.('.md-visual-shell[data-readonly="false"] .ProseMirror')) return;
         if (!isEnabled(prefs, "app_toggle_sidebar")) return;
         e.preventDefault();
         useEditorStore.getState().toggleSidebar();
@@ -447,6 +453,7 @@ export default function App() {
           {!isDiffTab && htmlFile && activeMeta?.hasExternalChange && (
             <ExternalChangeBanner tabId={activeMeta.id} />
           )}
+          {isMarkdown(filePath) && activeMeta?.hasExternalChange && <ExternalChangeBanner tabId={activeMeta.id} />}
           {/* Editor + Preview row. Editor pane is ALWAYS mounted (display:none
               in reading mode) — not for memory but for sync correctness: when
               the user navigates preview to a section while in reading mode,
@@ -472,7 +479,7 @@ export default function App() {
             >
                 {!isDiffTab && isJson(filePath) && <JsonToolbar />}
                 {!isDiffTab && isSql(filePath) && <SqlToolbar />}
-                {!htmlFile && activeMeta?.hasExternalChange && (
+                {!htmlFile && !isMarkdown(filePath) && activeMeta?.hasExternalChange && (
                   <ExternalChangeBanner tabId={activeMeta.id} />
                 )}
                 <div className="flex-1 min-h-0 flex">
@@ -538,6 +545,8 @@ export default function App() {
               >
                 {htmlFile && activeTabId ? (
                   <HtmlPreview key={activeTabId} tabId={activeTabId} />
+                ) : activeTabId && (markdownMode === "visual" || markdownMode === "read") ? (
+                  <Suspense fallback={null}><MarkdownVisualEditor key={activeTabId} tabId={activeTabId} readonly={markdownMode === "read"} theme={theme} /></Suspense>
                 ) : (
                   <PreviewHost
                     activeId={activeTabId}

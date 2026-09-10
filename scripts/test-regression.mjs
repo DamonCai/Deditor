@@ -354,7 +354,7 @@ test(4, "Markdown toolbar dialogs validate tables and reading mode disables edit
     const html = new MarkdownIt().render(view.state.doc.toString());
     assert.equal((html.match(/<th>/g) || []).length, 3);
     assert.equal((html.match(/<td>/g) || []).length, 6);
-    await act(async () => store.setState({showPreview:true,previewMaximized:true}));
+    await act(async () => store.setState({markdownMode:"read"}));
     assert.ok([...document.querySelectorAll('.md-tool, .md-heading-select, .md-color-trigger')].every(b=>b.disabled));
     assert.ok([...document.querySelectorAll('.deditor-segment')].every(b=>!b.disabled));
   });
@@ -2033,9 +2033,9 @@ test(8, "Diagram menus switch families, restore keyboard focus and reject stale 
     await act(async()=>document.querySelector('[role="menuitem"]').click());
     assert.equal(view.state.doc.toString(),'changed original');
     assert.match(document.querySelector('[role="alert"]').textContent,/document changed/i);
-    await act(async()=>store.setState({previewMaximized:true,showPreview:true}));
+    await act(async()=>store.setState({markdownMode:"read"}));
     assert.equal(document.querySelector('[role="menu"]'),null);assert.equal(mermaid.disabled,true);
-    await act(async()=>store.setState({previewMaximized:false}));
+    await act(async()=>store.setState({markdownMode:"source"}));
     await act(async()=>mermaid.click());
     await act(async()=>store.setState({activeId:'another'}));
     assert.equal(document.querySelector('[role="menu"]'),null);
@@ -2138,6 +2138,11 @@ test(2, 'XMind fold controls follow left/up/down layout and labels remain separa
     assert.equal(node.querySelectorAll('[data-label]').length,2);
     assert.equal(node.querySelector('[data-label="0"] text').textContent,'visual-QA');
     assert.equal(node.querySelector('[data-label="1"] text').textContent,'跨平台');
+    for(const label of node.querySelectorAll('[data-label] rect')) {
+      const labelBottom=Number(label.getAttribute('y'))+Number(label.getAttribute('height'));
+      assert.ok(labelBottom<=Number(shape.getAttribute('height'))+1e-7,'label remains in the topic hit region');
+      if(direction==='down')assert.ok(y-8>labelBottom,'fold button clears the label rows');
+    }
   }
 });
 

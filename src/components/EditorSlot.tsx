@@ -1,3 +1,4 @@
+import { isMarkdown } from "../lib/lang";
 import { memo } from "react";
 import { useShallow } from "zustand/shallow";
 import Editor from "./Editor";
@@ -47,12 +48,13 @@ const EditorSlot = memo(function EditorSlot({
         : null;
     }),
   );
+  const sourceVisible = useEditorStore(s => s.markdownMode === "source" || s.markdownMode === "split");
   const setContent = useEditorStore((s) => s.setContent);
   if (!tab) return null;
   return (
     <Editor
       tabId={tabId}
-      active={active}
+      active={isMarkdown(tab.filePath) && !tab.diff ? (sourceVisible ? active : false) : active}
       value={tab.content}
       filePath={tab.filePath}
       diff={tab.diff}
@@ -62,7 +64,7 @@ const EditorSlot = memo(function EditorSlot({
       initialCursor={initialCursor}
       initialScrollLine={initialScrollLine}
       externalScrollLine={externalScrollLine}
-      onChange={(v) => setContent(v, tabId)}
+      onChange={(v) => setContent(v, tabId, "source")}
       onScroll={onScroll}
       onPositionChange={onPositionChange}
     />

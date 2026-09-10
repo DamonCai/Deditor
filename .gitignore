@@ -158,7 +158,6 @@ $RECYCLE.BIN/
 *.orig
 .history/
 
-/package-lock.json
 /DEditor*.dmg
 /test
 

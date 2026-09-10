@@ -1,3 +1,4 @@
+import { getVisualEditor } from "./markdownVisualBridge";
 import type { EditorView } from "@codemirror/view";
 import { EditorSelection, type EditorState } from "@codemirror/state";
 import { isolateHistory } from "@codemirror/commands";
@@ -46,6 +47,7 @@ function withView(fn: (v: EditorView) => void): void {
 
 /** Toggle inline markers, preserving the inner selection for the next action. */
 export function wrapSelection(prefix: string, suffix = prefix): void {
+  const visual = getVisualEditor(); if (visual?.editable) { visual.wrap(prefix, suffix); return; }
   withView((view) => {
     const { from, to } = view.state.selection.main;
     const selected = view.state.sliceDoc(from, to);
@@ -124,6 +126,7 @@ export function setSelectionColor(
   color: string,
 ): void {
   if (!/^#[\da-f]{6}$/i.test(color)) return;
+  const visual = getVisualEditor(); if (visual?.editable) { visual.color(property, color); return; }
   withView((view) => {
     const { from, to } = view.state.selection.main;
     const prefix = `<span style="${property}:${color}">`;
@@ -163,6 +166,7 @@ export function setSelectionColor(
 
 /** Set headings or toggle list/quote prefixes on precisely the selected lines. */
 export function prefixLines(prefix: string): void {
+  const visual = getVisualEditor(); if (visual?.editable) { visual.prefix(prefix); return; }
   withView((view) => {
     const numbers = new Set<number>();
     for (const { from, to } of view.state.selection.ranges) {
@@ -206,6 +210,7 @@ export function prefixLines(prefix: string): void {
 
 /** Literal inline insertion. */
 export function insertText(text: string, cursorOffset?: number): void {
+  const visual = getVisualEditor(); if (visual?.editable) { visual.insert(text, false); return; }
   withView((view) => {
     const { from, to } = view.state.selection.main;
     view.dispatch({
@@ -222,6 +227,7 @@ export function insertBlock(
   selectionStart = 0,
   selectionLength = text.length,
 ): void {
+  const visual = getVisualEditor(); if (visual?.editable) { visual.insert(text, true); return; }
   withView((view) => {
     const { from, to } = view.state.selection.main;
     const before = view.state.sliceDoc(Math.max(0, from - 2), from);
@@ -254,6 +260,7 @@ export function insertBlock(
   });
 }
 export function insertCodeBlock(lang = ""): void {
+  const visual = getVisualEditor(); if (visual?.editable) { const fence = "`".repeat(Math.max(3, ...Array.from(visual.selected.matchAll(/`+/g), m => m[0].length + 1))); visual.insert(`${fence}${lang.replace(/[\r\n`]/g, "")}\n${visual.selected}\n${fence}`, true); return; }
   const view = currentView;
   if (!view) return;
   const selected = view.state.sliceDoc(
@@ -283,6 +290,7 @@ export function markdownDestination(url: string): string {
   return `<${url.trim().replace(/[<>\r\n]/g, (c) => encodeURIComponent(c))}>`;
 }
 export function insertLink(url: string, displayText?: string): void {
+  const visual = getVisualEditor(); if (visual?.editable) { visual.link(url, displayText); return; }
   const view = currentView;
   if (!view) return;
   const { from, to } = view.state.selection.main;
@@ -296,6 +304,7 @@ export function insertLink(url: string, displayText?: string): void {
 
 /** A dialog must never apply its captured selection to a different/edited tab. */
 export function captureEditorTarget() {
+  const visual = getVisualEditor(); if (visual?.editable) return visual.capture();
   const view = currentView;
   if (!view) return null;
   const { from, to } = view.state.selection.main;

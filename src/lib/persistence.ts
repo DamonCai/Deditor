@@ -40,6 +40,7 @@ interface PersistedV3 {
   editorFontSize?: number;
   /** Legacy global zoom snapshot: migrate its configured baseline only. */
   editorBaseFontSize?: number;
+  markdownMode?: "source" | "split" | "visual" | "read";
   previewMaximized?: boolean;
   /** Right-side TOC visibility in markdown reading mode. Default true. */
   tocVisible?: boolean; // Legacy expanded state; hover outlines start unpinned.
@@ -272,6 +273,7 @@ export async function loadPersisted(): Promise<UiExtras | null> {
   }
 
   useEditorStore.setState({
+    markdownMode: ["source", "split", "visual", "read"].includes(data.markdownMode ?? "") ? data.markdownMode! : !data.showPreview ? "source" : data.previewMaximized ? "visual" : "split",
     showPreview: data.showPreview,
     showSidebar: data.showSidebar,
     previewMaximized: data.previewMaximized ?? false,
@@ -370,6 +372,7 @@ function doSave(extras: UiExtras): void {
     }),
     activeIndex,
     theme: s.theme,
+    markdownMode: s.markdownMode,
     showPreview: s.showPreview,
     showSidebar: s.showSidebar,
     sidebarPx: extras.sidebarPx,

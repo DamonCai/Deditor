@@ -1,234 +1,186 @@
 # DEditor
 
-> 一个**轻量、快、能直接看 Word 也能看视频**的跨平台代码 / Markdown 编辑器。
-> macOS（.dmg / .app）+ Windows（.msi / .exe），单文件包 ~10MB。
+DEditor 是基于 Tauri 2、React 和 TypeScript 的桌面 Markdown / 多语言代码编辑器，面向 macOS 和 Windows。使用系统 WebView，不随应用捆绑 Chromium。
 
-基于 **Tauri 2 + React 18 + CodeMirror 6** 构建。原生 WebView，无 Chromium 捆绑。
+当前开发版本为 **0.9.0**。Markdown 已接入阅读编辑内核；源码编辑、HTML 预览和 XMind 编辑各自保留独立处理路径。安装包大小、启动时间和内存占用取决于平台、构建方式及打开的文件，本项目不将历史测量值作为固定承诺。
 
----
+## Markdown 写作
 
-## 为什么选 DEditor
+打开 `.md` 或 `.markdown` 文件后，在工具条选择视图：
 
-| | DEditor | VSCode | Sublime Text | Typora |
-| --- | --- | --- | --- | --- |
-| 安装包 | **~10MB** | ~100MB | ~20MB | ~100MB |
-| 启动内存 | **~80MB** | ~300MB | ~70MB | ~250MB |
-| Markdown 实时分栏预览 | ✅ | 需插件 | ❌ | ✅（WYSIWYG） |
-| 50+ 语言代码高亮 | ✅ | ✅ | ✅ | ❌ |
-| Word / Excel / 压缩包 hex 预览 | ✅ | ❌ | ❌ | ❌ |
-| PDF / 图片 / 音视频内嵌 | ✅ | 需插件 | ❌ | ❌ |
-| 文件对比（双栏 diff） | ✅ | ✅ | 收费 | ❌ |
-| Goto Anything (Cmd+P) | ✅ | ✅ | ✅ | ❌ |
-| Find in Files (Cmd+Shift+F) | ✅ | ✅ | ✅ | ❌ |
-| 命令面板 (Cmd+Shift+P) | ✅ | ✅ | ✅ | ❌ |
-| 快捷键全部可在 UI 里禁用 | ✅ | 需改 JSON | 需改 JSON | ❌ |
-| 跨 Tab 撤销栈保留 | ✅ | ✅ | ✅ | ✅ |
-| 中英文界面实时切换 | ✅ | 需重启 | 不支持 | 不支持 |
-| 开源 | ✅ | ✅ | ❌ | ❌ |
+| 模式 | 用途 |
+| --- | --- |
+| 编辑 | 使用 CodeMirror 编辑完整 Markdown 源码 |
+| 实时预览 | 源码与渲染结果分栏显示，支持滚动联动 |
+| 阅读编辑 | 在排版后的文章中直接输入、选择、删除和修改内容 |
+| 只读 | 使用同一文章呈现组件，关闭编辑操作 |
 
-**特别擅长的场景**：
-- 临时打开一个项目就想找文件、读代码 → Cmd+P 模糊搜文件 + Cmd+R 跳函数
-- 同时看 Word 文档 / 图片 / PDF / 音视频 + 改代码 → 不用再切换三个应用
-- 边改边看（Markdown 写作 + 预览） → 实时分栏滚动联动
-- 多个项目并存 → 多工作区，文件树展开状态持久记忆
-- 系统快捷键冲突 → Cmd+, 进设置一键关掉冲突项
+阅读编辑基于 Milkdown / ProseMirror，支持标题、粗斜体、删除线、颜色与高亮、列表、引用、任务框、表格、链接、图片及公式。表格可直接编辑单元格，Tab / Shift+Tab 导航，末单元格 Tab 增加一行；兼容已有的表格内列表扩展。
 
-## 功能一览
+代码块内嵌 CodeMirror，支持高亮与语言设置。公式、Mermaid 和 PlantUML 显示渲染结果，并提供块源码编辑入口。Mermaid 与 KaTeX 在本地渲染，PlantUML 使用联网服务。
 
-**编辑核心**
+源码、阅读编辑和工具条共用每标签撤销历史；切换模式、切换标签后可以继续撤销。保存仍以 Markdown 原文为依据：普通文字编辑优先修改对应源范围，未编辑的块保留原样；结构调整可能规范化被修改的块。显式格式化及“保存时格式化”仍按设置执行。
 
-- CodeMirror 6 内核：多光标、列选、折叠、缩进引导线、显示空白、minimap、自动换行（运行时切换）
-- **撤销栈跨 Tab 保留** —— 切走再切回来还能 Cmd+Z
-- 50+ 文件类型识别：`.md` / `.py` / `.js` / `.ts` / `.tsx` / `.rs` / `.go` / `.java` / `.kt` / `.cpp` / `.cs` / `.html` / `.css` / `.vue` / `.svelte` / `.json` / `.yaml` / `.toml` / `.xml` / `.sql` / `.php` / `.rb` / `.swift` / `.lua` / `.sh` 等，及 `Dockerfile` / `Makefile` / `.gitignore` 等特殊文件名
-- Bookmarks（F2 / F8 跳转） + 自动保存（关 / 失焦 / 停止编辑后）
+未识别 HTML、引用定义、frontmatter 等内容采用保留源码块，提供源码编辑入口。`.mdx` 保留整篇源码，不执行 JSX，不提供完整 JSX 可视化编辑。图片保留 alt 说明与路径，暂不提供无法用标准 Markdown 持久化的拖动缩放。
 
-**全局导航**
+工具条还提供链接、图片、表格、折叠块、公式和图表插入，以及 **HTML、PDF、DOCX、PPTX、TXT、SVG、PNG** 导出。SVG 用于导出文档中的图表；PDF 使用系统打印流程。导出不等于具备对应 Office 文件的导入编辑能力。
+
+## 代码与文件工具
+
+- CodeMirror 6：多光标、列选、代码折叠、缩进引导线、空白字符、迷你地图、自动换行、自动闭合括号、书签和颜色预览。
+- 多语言高亮：JavaScript / TypeScript、Python、Rust、Go、Java、C/C++、HTML/CSS、Vue、Svelte、SQL、JSON、YAML、TOML、Shell 等，也识别 Dockerfile、Makefile 等特殊文件名。
+- JSON / JSONC / JSON5：格式化、压缩、键排序；支持部分 Python 字典字面量输入。
+- SQL 格式化与方言选择；通用 Prettier 格式化按文件类型加载。
+- 多工作区文件树、模糊文件导航、当前文件符号跳转、跨文件搜索与替换。
+- 文件与目录拖入、重命名、新建、删除、系统定位、最近文档、重新打开关闭的标签。
+- 双栏文件差异比较、同文件分屏编辑、专注模式。
+- 自动保存可选关闭、失焦保存或停止编辑后保存；外部文件变化时，未修改标签自动重载，存在修改时提示处理。
+- 明暗主题、中英文界面、编辑器设置及快捷键开关；统一工具条、对话框和状态栏。
+
+## 支持查看的文件
+
+| 类型 | 行为 |
+| --- | --- |
+| Markdown | 源码、分栏预览、阅读编辑、只读 |
+| HTML / HTM | 源码与独立沙箱 iframe 预览，保留文件自身排版 |
+| XMind | 本地 SVG 画布，主题编辑、层级调整、拖拽、布局、样式、备注、标签、联系、边界、概要、工作表及撤销/保存 |
+| 图片 | 内嵌查看 PNG、JPEG、GIF、SVG、WebP 等 |
+| PDF | 内嵌查看，具体交互受平台 WebView 支持影响 |
+| 音频 / 视频 | 使用平台媒体能力播放，格式兼容性取决于系统编解码器 |
+| Office、压缩包、数据库、可执行文件等二进制 | 十六进制查看，最多显示前 256 KB；不是 Word / Excel / PowerPoint 可视化编辑器 |
+
+XMind 使用专用文档模型并尽量保留原归档中的未知字段和附件，兼容性核对仍在推进；不能将已覆盖样例等同于所有 XMind 版本和模板均兼容。
+
+## 常用快捷键
+
+macOS 使用 Cmd，Windows 使用 Ctrl。快捷键会随当前编辑区有所区别，可在设置中查看和调整。
 
 | 快捷键 | 功能 |
 | --- | --- |
-| `Cmd/Ctrl+Shift+T` | 重新打开最近关闭的标签（可连按） |
-| `Cmd/Ctrl+P` | Goto Anything — 跨工作区模糊搜索文件名 |
-| `Cmd/Ctrl+Shift+P` | 命令面板 — 模糊搜任意命令并执行 |
-| `Cmd/Ctrl+R` | Goto Symbol — 当前文件函数 / 标题大纲 |
-| `Cmd/Ctrl+Shift+F` | Find in Files — 全工作区文本搜索 |
-| `Cmd/Ctrl+Alt+G` | Goto Line — 跳到行号 |
-| `Cmd/Ctrl+,` | 打开设置 |
-| `Cmd/Ctrl+B` | 开关侧栏 |
-| `Cmd/Ctrl+K` | 专注模式（隐藏所有 chrome） |
-| `Cmd/Ctrl+\` | 分屏编辑（同一文件双视图） |
+| `Cmd/Ctrl+N`、`O`、`S` | 新建、打开、保存 |
+| `Cmd/Ctrl+Shift+S` | 另存为 |
+| `Cmd/Ctrl+W`、`Cmd/Ctrl+Shift+T` | 关闭标签、重新打开最近关闭标签 |
+| `Cmd/Ctrl+Z`、`Cmd/Ctrl+Shift+Z` | 撤销、重做 |
+| `Cmd/Ctrl+P` | 跨工作区模糊查找文件 |
+| `Cmd/Ctrl+Shift+P` | 命令面板 |
+| `Cmd/Ctrl+R` | 当前文档符号 / 标题跳转 |
+| `Cmd/Ctrl+F` | 当前编辑区查找 |
+| `Cmd/Ctrl+Shift+F` | 跨文件搜索与替换 |
+| `Cmd/Ctrl+Alt+G` | 源码编辑器跳行 |
+| `Cmd/Ctrl+B` | 源码模式切换侧栏；阅读编辑正文中用于加粗 |
+| `Cmd/Ctrl+K` | 专注模式 |
+| `Cmd/Ctrl+\` | 同文件分屏编辑 |
+| `Cmd/Ctrl+,` | 设置 |
+| `F2`、`F8`、`Shift+F8` | 源码书签操作；XMind 使用自己的主题编辑快捷键 |
 
-**文件管理**
+## 安装依赖与启动
 
-- 文件树侧栏：懒加载、`~` 路径展开、**展开状态持久化**
-- 右键菜单：新建文件 / 文件夹、重命名、删除、Reveal in Finder、**Select for Compare**
-- OS 级拖拽：拖文件直接打开、**拖目录加为工作区**
-- **外部变更检测**：3 秒检测一次，无脏改的 tab 自动重载，有脏改的弹横幅让你选
+使用 Node.js 22 或 24 系列、npm、Rust stable。Cargo 声明的最低 Rust 版本为 1.77.2，但实际构建还受锁定依赖的工具链要求影响。macOS 需要 Xcode Command Line Tools；Windows 需要 Microsoft C++ Build Tools 和 WebView2。Linux 可用于开发，需要 WebKitGTK 等系统依赖，当前主要交付目标仍为 macOS / Windows。
 
-**打开就能看**
-
-- 图片（PNG / JPG / GIF / SVG / WebP / ico）→ 内嵌 `<img>`
-- PDF → 原生 WebView 浏览器
-- 音视频（MP3 / WAV / FLAC / MP4 / WebM / MOV）→ HTML5 `<audio>` / `<video>`
-- Word / Excel / PowerPoint / 压缩包 / 数据库文件 / 可执行文件 → **hex dump**（256KB 上限，至少看个魔术字节）
-- Markdown → 实时分栏预览（编辑↔预览滚动联动），导出 HTML / PDF
-
-**对比 / 差异**
-
-- 文件树右键 "Select for Compare" → 在另一个文件上右键 "Compare with …" → 双栏 diff（jsdiff Myers 算法）
-- 修改 / 新增 / 删除分别用红 / 绿 / 灰底标注
-
-**写作辅助**
-
-- 图片粘贴自动落盘到 `<工作区>/assets/` + 光标处插入 Markdown 链接
-- markdown-it 14 + 各种插件（anchor、task-lists、PlantUML 在线渲染）
-- Shiki 代码块高亮（与 VSCode 同款 TextMate 语法）
-
-**设置面板（Cmd+,）**
-
-- **通用**：主题（亮 / 暗）、语言（中文 / English）、字号、自动保存模式
-- **编辑器**：自动换行 / 缩进引导线 / 显示空白 / Minimap
-- **快捷键**：每条都可独立启用 / 禁用，菜单条目仍可点击
-  - 解决"我系统快捷键就是 Cmd+P，跟你这个冲突"的痛点
-- **恢复默认** 一键还原
-
-## 架构（30 秒版）
-
-```
-┌──────────────────────────────────────────────────────────┐
-│  WebView (~10MB, 系统自带)                               │
-│   ├── React 18 + Zustand              单一 store          │
-│   ├── CodeMirror 6                    编辑器内核 + 扩展   │
-│   ├── markdown-it + Shiki             Markdown 预览       │
-│   └── lib/ — 模糊匹配 / diff / 符号 / 文件监听 / ...     │
-│                       ↕ invoke()                         │
-└──────────────────────│───────────────────────────────────┘
-                       │ JSON IPC（唯一通道）
-┌──────────────────────▼───────────────────────────────────┐
-│  Rust 主进程                                             │
-│   ├── 文件 IO（read/write/list/walk/grep/mtime）         │
-│   ├── 原生菜单（i18n + macOS AppKit 清理注入项）         │
-│   ├── 路径解析、剪贴板图片落盘                           │
-│   └── tauri-plugin-log（panic hook + 滚动日志）          │
-└──────────────────────────────────────────────────────────┘
+```sh
+npm ci
 ```
 
-**关键设计选择**：
-
-- **所有 IO 在 Rust 端，所有渲染在 TS 端**。前端不开 fs 插件，没有"前端直接读写文件系统"的口子
-- **单 Zustand store**：跨组件共享状态都在一处，约 30 个字段，按"标签 / 工作区 / 视图 / 编辑器选项 / 快捷键 / 浮层"分组
-- **Compartment-based hot swap**：主题、语言、自动换行、缩进线、空白、minimap 6 个开关运行时无缝切，不重建编辑器
-- **每个 tab 一份 CodeMirror state JSON 缓存**（`Map<tabId, JSON>`，模块级），切 tab 撤销栈不丢
-- **本地优先**：localStorage v3 持久化所有用户选择（tabs / 工作区 / 主题 / 全部设置）
-- **零云依赖**：除了 PlantUML 块需要联网渲染，其它一切离线可用
-
-详细架构文档（进程模型、模块分层、数据流、状态字段、性能边界）见 `CLAUDE.md`。
-
-## 项目结构
-
-```
-deditor/
-├── src/                  # React 前端
-│   ├── App.tsx           # 顶层布局 + 全局键盘 + drop
-│   ├── components/       # 16 个 UI 组件（Editor / Preview / Tabs / 各类浮层）
-│   ├── lib/              # 18 个纯逻辑模块（fileio / fuzzy / diff / symbols / ...）
-│   ├── store/editor.ts   # Zustand 单一 store
-│   └── styles.css        # Tailwind + CSS 变量主题
-├── src-tauri/            # Rust 后端
-│   ├── src/lib.rs        # 所有 #[tauri::command]
-│   ├── tauri.conf.json   # 窗口 / 打包配置
-│   ├── Info.plist        # macOS 抑制 AppKit 自动注入
-│   └── icons/            # 应用图标
-├── scripts/              # 跨平台启动 / 打包 / 清理脚本
-├── package.json
-├── vite.config.ts
-└── README.md / CLAUDE.md
-```
-
-## 快速开始
-
-### macOS / Linux
+macOS：
 
 ```sh
 ./scripts/start.sh
-# 或
-npm run start:mac
+# 保留 Vite 缓存
+./scripts/start.sh --no-reset
 ```
 
-### Windows
+Windows：
 
 ```powershell
 .\scripts\start.ps1
-# 或
-npm run start:win
+# 保留 Vite 缓存
+.\scripts\start.ps1 -NoReset
 ```
 
-脚本会自动检查 Node / Rust，必要时跑 `npm install`，然后启动 `tauri dev`。
+启动脚本检查工具链、补装缺失依赖并启动 Tauri 开发环境。默认只清理 Vite 缓存，不重置文档状态；不要将 `--reset-state` / `-ResetState` 当作日常启动选项。
 
-> 首次启动 Rust 编译需要 5-10 分钟（拉 ~400 个 crate），后续增量重编 3-10 秒。
+只启动前端可用 `npm run dev`。普通浏览器不提供 Tauri 的文件和系统接口，不能据此前端页面代替完整桌面应用。
 
 ## 打包
 
-### macOS
+macOS：
 
 ```sh
-./scripts/build-mac.sh             # 当前架构
-./scripts/build-mac.sh --universal # arm64 + x64 通用包
+./scripts/build-mac.sh
+./scripts/build-mac.sh --universal
 ```
 
-产物：`scripts/DEditor_<ver>_<arch>.dmg`
+DMG 复制到 `scripts/`，原始构建位于 `src-tauri/target/release/bundle/`。
 
-### Windows
+Windows：
 
 ```powershell
 .\scripts\build-win.ps1
 ```
 
-产物：
-- `src-tauri\target\release\bundle\msi\DEditor_<ver>_x64_en-US.msi`
-- `src-tauri\target\release\bundle\nsis\DEditor_<ver>_x64-setup.exe`
+MSI / NSIS 安装包位于 `src-tauri/target/release/bundle/msi/` 和 `nsis/`。使用对应平台的构建环境；发布所需的代码签名、公证和证书需单独配置。本地构建成功不代表安装、升级或平台交互已经验收。
 
-> macOS 包必须在 macOS 上构建，Windows 包必须在 Windows 上构建（Tauri 不支持交叉编译）。
-
-### 代码签名（推荐）
-
-- macOS：`tauri.conf.json` 的 `bundle.macOS.signingIdentity` + `xcrun notarytool` 公证
-- Windows：`bundle.windows.certificateThumbprint` 配 Authenticode 证书
-
-未签名的本地构建仅供测试用。
-
-## 环境要求
-
-- **Node.js** ≥ 18（推荐 20+）
-- **Rust** ≥ 1.77（[rustup](https://rustup.rs/)；国内推荐 [rsproxy](https://rsproxy.cn/) 镜像）
-- **macOS**：Xcode Command Line Tools (`xcode-select --install`)
-- **Windows**：[Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) + [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)（Win10/11 内置）
-- **Linux**：`webkit2gtk-4.1` + `libssl-dev` + `libayatana-appindicator3-dev`
-
-## 日志
-
-DEditor 启动后自动写日志，便于排查闪退、未捕获异常、文件 IO 失败等。
-
-| 平台 | 路径 |
-| --- | --- |
-| macOS | `~/Library/Logs/com.deditor.app/deditor.log` |
-| Windows | `%LOCALAPPDATA%\com.deditor.app\logs\deditor.log` |
-| Linux | `~/.local/share/com.deditor.app/logs/deditor.log` |
-
-10MB 滚动 / KeepAll。Rust panic 会带文件 + 行列号落盘。报 bug 时建议附上最新一份日志。
+隔离的 Markdown 验证应用使用独立名称和 identifier，不覆盖正式应用：
 
 ```sh
-# 实时跟踪（macOS）
-tail -f ~/Library/Logs/com.deditor.app/deditor.log
-
-# 看最近的 error / panic
-grep -E "ERROR|PANIC" ~/Library/Logs/com.deditor.app/deditor.log | tail -20
+npx tauri build --config tests/markdown-native-review.conf.json --bundles app
 ```
 
-## 贡献 / 二次开发
+## 测试与验证
 
-详细的架构文档、模块划分、关键数据流、扩展点说明见 `CLAUDE.md`。
-该文件也是 Claude Code 在本仓工作时自动加载的协作上下文。
+```sh
+npm run build
+npm run test:all
+cargo test --release --manifest-path src-tauri/Cargo.toml -- --test-threads=1
+npm run perf:all
+```
 
----
+`test:all` 汇总 Markdown 文档层、阅读编辑集成、通用组件、XMind、导出、语言高亮及文件图标测试。各项也可单独执行：
 
-License: MIT（如需更改，更新 `Cargo.toml` / `package.json` 的 `license` 字段）
+| 命令 | 范围 |
+| --- | --- |
+| `npm run test:markdown-visual` | 原文保真、源位置映射、共用历史、语法边界 |
+| `npm run test:markdown-visual:integration` | 阅读组件、保存/另存、失败恢复、表格和只读交互 |
+| `npm run test:regression` | 编辑器、HTML、工具条、文件操作及 XMind 组件回归 |
+| `npm run test:xmind` | XMind 模型、布局、归档写回与字段保留 |
+| `npm run test:export` | 各种导出格式、资源与错误路径 |
+| `npm run test:syntax` | 语言识别与高亮 |
+| `npm run test:file-icons` | 图标映射、授权文件和构建资源 |
+| `npm run perf:all` | store、组件、长时操作、文档、XMind 和 Rust 基准 |
+
+浏览器隔离验证入口为 `tests/markdown-visual-review.html`。测试只使用自建样例，不读取用户已有文档或正式应用历史。`tests/artifacts/`、截图和安装包被 Git 忽略；需要迁移时单独保存。
+
+自动化测试不能代替真实输入法、原生保存对话框、重启恢复及双平台交互。Markdown 的真实 IME、部分原生交互和复杂语法兼容性仍有待验收项，见 [Markdown 实施记录](docs/markdown-visual-editing-verification-2026-09-11.md)及[本次提交验证记录](docs/markdown-release-verification-2026-09-11.md)。XMind 状态见[独立验收矩阵](docs/xmind-acceptance-matrix-2026-09-11.md)。
+
+## 架构与持久化
+
+| 层次 | 主要位置与职责 |
+| --- | --- |
+| 应用外壳 | `src/App.tsx`、`src/components/`：布局、模式、标签、工具条和浮层 |
+| 状态 | `src/store/editor.ts`：文档内容、共享设置及标签状态 |
+| 源码编辑 | CodeMirror 6，语言与主题按需加载，保留标签编辑会话 |
+| 阅读编辑 | `src/components/MarkdownVisualEditor.tsx` 与 `src/lib/markdownVisual/` |
+| Markdown 文档与历史 | `markdownVisual/document.ts`、`markdownSession.ts`、`markdownHistory.ts` |
+| 文件与持久化 | `src/lib/fileio.ts`、`persistence.ts`、`fileWatch.ts`；通过 Rust IPC 执行文件操作 |
+| XMind | `src/lib/xmind/` 及专用画布，独立模型与历史 |
+| 原生后端 | `src-tauri/src/lib.rs`：文件 IO、搜索、路径处理、原生菜单、日志等 |
+
+标签草稿、工作区和设置写入应用数据目录的 `state.json`，旧 localStorage 数据可迁移。编辑器实例、完整撤销栈和临时浮层不写入该文件。
+
+| 平台 | 状态文件 |
+| --- | --- |
+| macOS | `~/Library/Application Support/com.deditor.app/state.json` |
+| Windows | `%APPDATA%\com.deditor.app\state.json` |
+| Linux | `~/.local/share/com.deditor.app/state.json` |
+
+核心编辑与本地文件处理不要求联网。PlantUML、文档中的远程图片或其他外部资源可能访问网络。
+
+## 日志、维护与协作
+
+macOS 日志位于 `~/Library/Logs/com.deditor.app/deditor.log`，Windows 位于 `%LOCALAPPDATA%\com.deditor.app\logs\deditor.log`；实际目录由平台日志插件决定。Rust panic、前端异常和文件操作错误会记录到滚动日志。提供问题日志前请检查是否包含文档路径或内容。
+
+构建清理使用 `scripts/clean.sh` / `scripts/clean.ps1`，先用 `--dry-run` / 相应脚本帮助查看范围。`--all` 会额外删除依赖与 npm 锁文件，应谨慎使用。
+
+协作规则与项目上下文见 [AGENTS.md](AGENTS.md)，Markdown 设计见[架构上下文](docs/markdown-visual-editing-context-2026-09-11.md)。新增能力应保护其他文件类型，补齐中英文文案，使用自建样例完成不同维度测试，并记录未验证范围。
+
+仓库目前没有独立的项目 `LICENSE` 文件，不应将其视为已明确采用 MIT 授权；第三方资源的授权说明按其目录中的文件保留。

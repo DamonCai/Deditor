@@ -3,6 +3,22 @@ import { useEditorStore } from "../store/editor";
 export type Lang = "zh" | "en";
 
 const ZH: Record<string, string> = {
+  "md.addRow": "添加行",
+  "md.addColumn": "添加列",
+  "md.deleteRow": "删除行",
+  "md.deleteColumn": "删除列",
+  "md.alignLeft": "左对齐",
+  "md.alignCenter": "居中",
+  "md.alignRight": "右对齐",
+  "md.viewVisual": "阅读编辑",
+  "md.viewReadonly": "只读",
+  "md.visualEditor": "Markdown 可视化编辑器",
+  "md.visualLoading": "正在加载文章编辑器…",
+  "md.visualError": "可视化编辑器加载失败，可返回源码继续编辑。",
+  "md.editSourceBlock": "编辑此块源码",
+  "md.hideSource": "收起源码",
+  "md.uploadImage": "上传图片",
+
   "xmind.canvas": "思维导图画布",
   "xmind.topic": "分支主题",
   "xmind.central": "中心主题",
@@ -538,6 +554,22 @@ const ZH: Record<string, string> = {
 };
 
 const EN: Record<string, string> = {
+  "md.addRow": "Add row",
+  "md.addColumn": "Add column",
+  "md.deleteRow": "Delete row",
+  "md.deleteColumn": "Delete column",
+  "md.alignLeft": "Align left",
+  "md.alignCenter": "Align center",
+  "md.alignRight": "Align right",
+  "md.viewVisual": "Visual",
+  "md.viewReadonly": "Read only",
+  "md.visualEditor": "Markdown visual editor",
+  "md.visualLoading": "Loading document editor…",
+  "md.visualError": "The visual editor could not load. You can continue in source mode.",
+  "md.editSourceBlock": "Edit block source",
+  "md.hideSource": "Hide source",
+  "md.uploadImage": "Upload image",
+
   "xmind.canvas": "Mind map canvas",
   "xmind.topic": "Topic",
   "xmind.central": "Central topic",

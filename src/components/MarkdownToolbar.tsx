@@ -1,3 +1,6 @@
+import { getVisualEditor, subscribeVisualEditor } from "../lib/markdownVisualBridge";
+import { markdownHistory } from "../lib/markdownHistory";
+import { markdownSession } from "../lib/markdownSession";
 import { lazy, Suspense, useEffect, useState, useSyncExternalStore } from "react";
 import {
   FiDownload,
@@ -17,7 +20,7 @@ import {
   FiTerminal,
   FiChevronDown,
 } from "react-icons/fi";
-import { undo, redo, undoDepth, redoDepth } from "@codemirror/commands";
+import { undo, redo } from "@codemirror/commands";
 import {
   captureEditorTarget,
   getActiveEditorState,
@@ -44,11 +47,14 @@ export default function MarkdownToolbar() {
     subscribeActiveEditor,
     getActiveEditorState,
   );
+  const visual = useSyncExternalStore(subscribeVisualEditor, getVisualEditor);
+  const content = useEditorStore(s => s.tabs.find(t => t.id === s.activeId)?.content ?? "");
   const activeId = useEditorStore((s) => s.activeId);
-  const reading = useEditorStore((s) => s.previewMaximized && s.showPreview);
+  const reading = useEditorStore((s) => s.markdownMode === "read");
+  const session = activeId ? markdownSession(activeId, content) : null;
   const editorFontSize = useEditorStore((s) => s.tabs.find((tab) => tab.id === s.activeId)?.zoomFontSize ?? s.editorFontSize);
   const setEditorZoomFontSize = useEditorStore((s) => s.setEditorZoomFontSize);
-  const disabled = reading || !state;
+  const disabled = reading || (!visual && !state);
   const [dialog, setDialog] = useState<{
     kind: InsertKind;
     target: NonNullable<ReturnType<typeof captureEditorTarget>>;
@@ -62,7 +68,7 @@ export default function MarkdownToolbar() {
   const run = (action: () => void) => {
     if (disabled) return;
     action();
-    getActiveView()?.focus();
+    if (visual) visual.focus(); else getActiveView()?.focus();
   };
   const openInsert = (kind: InsertKind) => {
     if (disabled) return;
@@ -71,18 +77,17 @@ export default function MarkdownToolbar() {
   };
   const history = (command: typeof undo) =>
     run(() => {
-      const view = getActiveView();
-      if (view) command(view);
+      markdownHistory(command === redo);
     });
   const selection = state?.selection.main;
-  const selected =
-    selection && state ? state.sliceDoc(selection.from, selection.to) : "";
-  const heading = state
+  const selected = visual?.selected ?? (
+    selection && state ? state.sliceDoc(selection.from, selection.to) : "");
+  const heading = visual?.heading ?? (state
     ? (state.doc
         .lineAt(state.selection.main.head)
         .text.match(/^ {0,3}(#{1,6})\s/)?.[1].length ?? 0)
-    : 0;
-  const marked = (marker: string) =>
+    : 0);
+  const marked = (marker: string) => visual ? visual.marked(marker) :
     !!(
       selection &&
       state &&
@@ -167,14 +172,14 @@ export default function MarkdownToolbar() {
           <div className="md-tool-group md-tool-group--leading">
             <Tool
               title={t("md.undo")}
-              disabled={disabled || !state || undoDepth(state) === 0}
+              disabled={reading || !session?.canUndo}
               onClick={() => history(undo)}
             >
               <FiRotateCcw />
             </Tool>
             <Tool
               title={t("md.redo")}
-              disabled={disabled || !state || redoDepth(state) === 0}
+              disabled={reading || !session?.canRedo}
               onClick={() => history(redo)}
             >
               <FiRotateCw />
@@ -291,7 +296,7 @@ export default function MarkdownToolbar() {
             }}><FiDownload style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} />{t("export.button")}</Button>
           </div>
           <div className="md-toolbar-views">
-            <PreviewModeSwitch />
+            <PreviewModeSwitch markdown />
           </div>
         </div>
       </div>

@@ -36,7 +36,10 @@
     "perf:document": "tsx scripts/perf-document.ts",
     "test:xmind": "tsx scripts/test-xmind.ts",
     "perf:xmind": "tsx scripts/perf-xmind.ts",
-    "test:export": "node scripts/test-export.mjs"
+    "test:export": "node scripts/test-export.mjs",
+    "test:markdown-visual": "tsx scripts/test-markdown-visual.ts",
+    "test:markdown-visual:integration": "node scripts/test-markdown-visual-integration.mjs",
+    "test:all": "npm run test:markdown-visual && npm run test:markdown-visual:integration && npm run test:regression && npm run test:xmind && npm run test:export && npm run test:syntax && npm run test:file-icons"
   },
   "dependencies": {
     "@codemirror/commands": "^6.7.1",
@@ -61,6 +64,8 @@
     "@codemirror/state": "^6.5.0",
     "@codemirror/theme-one-dark": "^6.1.2",
     "@codemirror/view": "^6.43.1",
+    "@milkdown/crepe": "7.22.1",
+    "@milkdown/kit": "7.22.1",
     "@replit/codemirror-indentation-markers": "^6.5.3",
     "@replit/codemirror-lang-svelte": "^6.0.0",
     "@replit/codemirror-minimap": "^0.5.2",
@@ -75,6 +80,7 @@
     "codemirror": "^6.0.1",
     "diff": "^9.0.0",
     "docx": "^9.7.1",
+    "dompurify": "3.3.3",
     "fflate": "^0.8.2",
     "json5": "^2.2.3",
     "katex": "^0.16.45",
@@ -88,8 +94,13 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-icons": "^5.6.0",
+    "remark-frontmatter": "5.0.0",
+    "remark-gfm": "4.0.1",
+    "remark-math": "6.0.0",
+    "remark-parse": "11.0.0",
     "shiki": "^1.24.4",
     "sql-formatter": "^15.8.0",
+    "unified": "11.0.5",
     "zustand": "^5.0.2"
   },
   "devDependencies": {

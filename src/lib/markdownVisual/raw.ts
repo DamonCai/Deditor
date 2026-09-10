@@ -1,0 +1,23 @@
+import { tableListTree } from "./tableLists";
+import { inlineHtmlMarks } from "./inline";
+import { $nodeSchema, $remark } from "@milkdown/kit/utils";
+import remarkFrontmatter from "remark-frontmatter";
+import { protectedTree, type SourceNode } from "./document";
+export const frontmatter = $remark("deditorFrontmatter", () => remarkFrontmatter, ["yaml", "toml"]);
+export function rawRemark(mdx: boolean) {
+  return $remark("deditorPreserve", () => () => (tree: unknown, file: { value: unknown }) => {
+    tableListTree(tree as SourceNode, String(file.value));
+    inlineHtmlMarks(tree as SourceNode);
+    protectedTree(tree as SourceNode, String(file.value), mdx);
+  });
+}
+export const rawSchema = $nodeSchema("deditor_raw", () => ({
+  group: "block", content: "text*", code: true, defining: true, isolating: true, marks: "",
+  parseDOM: [{ tag: "pre[data-deditor-raw]", preserveWhitespace: "full" }],
+  toDOM: () => ["pre", { "data-deditor-raw": "true" }, 0],
+  parseMarkdown: {
+    match: n => n.type === "deditorRaw",
+    runner: (state, node, type) => { state.openNode(type); if (node.value) state.addText(String(node.value)); state.closeNode(); },
+  },
+  toMarkdown: { match: n => n.type.name === "deditor_raw", runner: (state, node) => { state.addNode("html", undefined, node.textContent); } },
+}));

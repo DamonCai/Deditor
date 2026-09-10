@@ -1,3 +1,4 @@
+import { getVisualEditor } from "../lib/markdownVisualBridge";
 import { useModalFocus } from "../lib/useModalFocus";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -160,9 +161,11 @@ export default function FindInFiles({ open, onClose }: Props) {
     let attempts = 0;
     const jump = () => {
       if (useEditorStore.getState().activeId !== target.id) return;
+      const visual = getVisualEditor();
+      if (visual?.tabId === target.id && visual.navigate) { visual.navigate(line, col); return; }
       const view = getActiveView();
       if (!view || getActiveViewTabId() !== target.id) {
-        if (++attempts < 10) requestAnimationFrame(jump);
+        if (++attempts < 120) requestAnimationFrame(jump);
         return;
       }
       try {

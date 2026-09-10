@@ -1,3 +1,4 @@
+import { getVisualEditor } from "../lib/markdownVisualBridge";
 import { useModalFocus } from "../lib/useModalFocus";
 import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useActiveTab } from "../store/editor";
@@ -78,6 +79,8 @@ export default function GotoSymbol({ open, onClose }: Props) {
   const choose = (idx: number) => {
     const r = results[idx];
     if (!r) return;
+    const visual = getVisualEditor();
+    if (visual?.navigate) { visual.navigate(r.sym.line); onClose(); return; }
     const view = getActiveView();
     if (view) {
       const total = view.state.doc.lines;
