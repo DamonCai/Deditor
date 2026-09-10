@@ -96,6 +96,7 @@ await build({
     contents: `
 export * from './src/lib/fileio';
 export {loadPersisted, schedulePersist} from './src/lib/persistence';
+export {default as LangIcon} from './src/components/LangIcon';
 export {default as FileTree} from './src/components/FileTree';
 export {default as TabBar} from './src/components/TabBar';
 export {useFileWatch} from './src/lib/fileWatch';
@@ -501,6 +502,18 @@ test(3, "preview highlights aliases and catalog fallback without interpreting so
       assert.equal(host.querySelector('code').textContent,source);
     }
   }
+});
+
+test(1, "file icons distinguish language variants, local theme assets and explicit dimensions", async () => {
+  reset();
+  await render(React.createElement('div',null,...['test.xml','view.tsx','view.jsx','Cargo.toml','package.json','map.xmind','unknown.custom-extension'].map(path=>React.createElement(app.LangIcon,{key:path,filePath:path,size:14}))));
+  const icons=[...document.querySelectorAll('.file-type-icon')];
+  assert.deepEqual(icons.map(icon=>icon.dataset.fileIcon),['xml','react_ts','react','toml','nodejs','deditor-xmind','file']);
+  assert.ok(icons.every(icon=>icon.style.width==='14px'&&icon.style.height==='14px'));
+  assert.ok([...document.querySelectorAll('.file-type-icon img')].every(image=>image.getAttribute('src').startsWith('/')&&image.alt===''&&image.draggable===false));
+  assert.equal(document.querySelectorAll('.file-type-icon__light').length,1);
+  assert.equal(document.querySelectorAll('.file-type-icon__dark').length,1);
+  assert.ok(icons.every(icon=>icon.getAttribute('aria-hidden')==='true'),'file names retain the accessible label');
 });
 
 function FontZoomEditors({split = false}) {
@@ -2339,6 +2352,43 @@ test(2,'XMind inherited, pill and unknown shapes keep their actual inspector sel
     assert.equal(select.value,`org.xmind.topicShape.${shape}`);
   }
   assert.equal(button('Undo').disabled,true,'reading an unknown shape never changes the archive');
+});
+test(3,'XMind native advanced shapes render and inspector changes preserve unrelated archive fields',async()=>{
+  const shapes=JSON.parse(fs.readFileSync('tests/fixtures/xmind-native-advanced-shapes.json','utf8'));
+  const sheets=[{id:'advanced-sheet',title:'Shapes',rootTopic:{id:'advanced-root',title:'Root',children:{attached:shapes.map(({shape,index})=>({
+    id:`advanced-${index}`,title:'中文 Shape',style:{properties:{'shape-class':shape,'vendor-shape-data':'keep'}}
+  }))}}}];
+  await mountXmind(true,zipSync({'content.json':strToU8(JSON.stringify(sheets))}));
+  for(const {shape,index} of shapes) {
+    await selectR3(`advanced-${index}`);
+    const paths=[...document.querySelectorAll(`[data-topic="advanced-${index}"] > path`)];
+    assert.ok(paths.some(el=>el.getAttribute('d')?.endsWith(' Z')),`${shape} has its own closed path`);
+    const select=[...document.querySelectorAll('.xm-field select')].find(el=>el.parentElement.textContent.includes('Shape'));
+    assert.equal(select.value,shape);
+  }
+  const before=store.getState().tabs[0].content;
+  const select=[...document.querySelectorAll('.xm-field select')].find(el=>el.parentElement.textContent.includes('Shape'));
+  await act(async()=>{select.value=shapes[0].shape;select.dispatchEvent(new window.Event('change',{bubbles:true}));});
+  const topics=xmindSheets()[0].rootTopic.children.attached;
+  assert.equal(topics.at(-1).style.properties['shape-class'],shapes[0].shape);
+  assert.equal(topics.at(-1).style.properties['vendor-shape-data'],'keep');
+  assert.deepEqual(topics.slice(0,-1),sheets[0].rootTopic.children.attached.slice(0,-1));
+  await click('Undo');assert.equal(store.getState().tabs[0].content,before);
+});
+test(3,'XMind mixed custom widths batch-edit, reset and undo as single actions',async()=>{
+  const sheets=[{id:'width-sheet',title:'Widths',rootTopic:{id:'width-root',title:'Root',children:{attached:[
+    {id:'width-a',title:'First',customWidth:180},{id:'width-b',title:'Second',customWidth:240}
+  ]}}}];
+  await mountXmind(true,zipSync({'content.json':strToU8(JSON.stringify(sheets))}));
+  await selectR3('width-a');await selectR3('width-b',true);
+  const input=[...document.querySelectorAll('.xm-field input')].find(el=>el.parentElement.textContent.includes('Topic width'));
+  assert.equal(input.value,'');assert.equal(input.placeholder,'Mixed');
+  const before=store.getState().tabs[0].content;
+  await act(async()=>{setInput(input,'320');input.dispatchEvent(new window.FocusEvent('focusout',{bubbles:true}));});
+  assert.deepEqual(xmindSheets()[0].rootTopic.children.attached.map(t=>t.customWidth),[320,320]);
+  await click('Undo');assert.equal(store.getState().tabs[0].content,before);
+  await click('Fit content');assert.deepEqual(xmindSheets()[0].rootTopic.children.attached.map(t=>t.customWidth),[undefined,undefined]);
+  await click('Undo');assert.equal(store.getState().tabs[0].content,before);
 });
 test(3,'XMind composing Enter and Escape leave topic and relationship drafts open',async()=>{
   await mountXmind(true,interactionArchive());await selectR3('r3a');await keyR3(' ');

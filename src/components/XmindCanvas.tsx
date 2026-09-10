@@ -1,5 +1,6 @@
 import { draftBox } from "../lib/xmind/draft";
 import { shapeName, shapePolygon, strokeDash, ellipticRectanglePath } from "../lib/xmind/shapes";
+import { advancedShape } from "../lib/xmind/shapePaths";
 import { topicDropTarget, type DropTarget } from "../lib/xmind/drop";
 import XmindRelationship from "./XmindRelationship";
 import XmindIndicator from "./XmindIndicator";
@@ -76,6 +77,12 @@ function NodeShape({ node: n }: { node: SceneNode }) {
     strokeWidth: Math.max(0, Number.isFinite(parseFloat(n.properties["border-line-width"] ?? "")) ? parseFloat(n.properties["border-line-width"]) : 1.5),
     strokeDasharray: strokeDash(n.properties["border-line-pattern"]),
   };
+  const advanced = advancedShape(shape, w, h);
+  if (advanced) return <>
+    {advanced.back && <path d={advanced.back} {...props} />}
+    <path d={advanced.path} {...props} strokeLinejoin="round" />
+    {advanced.detail && <path d={advanced.detail} {...props} fill="none" />}
+  </>;
   if (/ellipse|oval|^circle/.test(shape))
     return <ellipse cx={w / 2} cy={h / 2} rx={w / 2} ry={h / 2} {...props} />;
   if (shape === "ellipticrectangle") return <path d={ellipticRectanglePath(w,h)} {...props} />;
@@ -723,11 +730,11 @@ export default function XmindCanvas({
                 <g key={index} data-label={index} pointerEvents="none">
                   <rect x={label.x} y={label.y} width={label.width} height={label.height}
                     rx={5} fill="#E9E9E9" />
-                  <text x={n.width / 2} y={label.y + 14} textAnchor="middle"
+                  <text x={label.x + label.width/2} y={label.y + 14} textAnchor="middle"
                     fontSize={11} fontWeight={400} fontStyle="normal"
                     fontFamily={n.properties["fo:font-family"] ?? "NeverMind, PingFang SC, Microsoft YaHei, sans-serif"}
                     fill="#555555">
-                    {label.lines.map((line, i) => <tspan key={i} x={n.width / 2} dy={i ? 16 : 0}>{line}</tspan>)}
+                    {label.lines.map((line, i) => <tspan key={i} x={label.x + label.width/2} dy={i ? 16 : 0}>{line}</tspan>)}
                   </text>
                 </g>
               ))}

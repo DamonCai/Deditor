@@ -5,6 +5,7 @@ import XmindView from "../src/components/XmindView";
 import { useEditorStore } from "../src/store/editor";
 import { sampleArchive, sampleSheets } from "./fixtures/xmind";
 import { round6Sheets, round6StyleSheets } from "./fixtures/xmind-round6";
+import { round7ShapeSheets } from "./fixtures/xmind-round7";
 import { bytesToXmindDataUrl } from "../src/lib/xmind/edit";
 import "../src/styles.css";
 
@@ -16,7 +17,8 @@ sheets.push({ ...structuredClone(sheets[1]), id: "up-sheet", title: "向上组�
   rootTopic: { ...structuredClone(sheets[1].rootTopic), structureClass: "org.xmind.ui.org-chart.up" } });
 const probe = new URLSearchParams(location.search).get("probe");
 const generatedProbes = ["control-probe", "direction-probe", "count-probe"];
-const archive = probe === "round6-styles" ? sampleArchive(round6StyleSheets())
+const archive = probe === "round7-shapes" ? sampleArchive(round7ShapeSheets())
+  : probe === "round6-styles" ? sampleArchive(round6StyleSheets())
   : probe === "round6" ? sampleArchive(round6Sheets())
   : probe && ["layout-baseline", "structure-baseline", "native-edit"].includes(probe)
   ? new Uint8Array(await (await fetch(`/tests/artifacts/xmind-round5/${probe}.xmind`)).arrayBuffer())

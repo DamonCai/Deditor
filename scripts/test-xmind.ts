@@ -1,4 +1,7 @@
 import { draftBox } from "../src/lib/xmind/draft";
+import { ADVANCED_SHAPES, advancedShape, pointInOutline, shapeContentCenter } from "../src/lib/xmind/shapePaths";
+import nativeAdvancedShapes from "../tests/fixtures/xmind-native-advanced-shapes.json";
+import { round7ShapeSheets } from "../tests/fixtures/xmind-round7";
 import { TOPIC_SHAPES, shapePolygon, shapeSize } from "../src/lib/xmind/shapes";
 import { topicDropTarget } from "../src/lib/xmind/drop";
 import { relationshipGeometry, topicAnchor } from "../src/lib/xmind/relationship";
@@ -1122,5 +1125,55 @@ test(2, "long draft editors stay visible at 10 and 400 percent without changing 
     }
   }
   assert.deepEqual(node.topic,original);
+});
+test(1, "advanced palette fields match native saves and retain archive metadata", () => {
+  assert.deepEqual(ADVANCED_SHAPES.map(s=>'org.xmind.topicShape.'+s),nativeAdvancedShapes.map(s=>s.shape));
+  const sheets=round7ShapeSheets(),doc=openDocument(sampleArchive(sheets));
+  const updated=editDocument(doc.sheets,sheets[0].id,{type:'title',id:'advanced-0',title:'中文新标题'});
+  const reopened=openDocument(writeDocument(doc,updated));
+  assert.equal(reopened.sheets[0].rootTopic.children!.detached![0].title,'中文新标题');
+  assert.deepEqual(reopened.sheets[0].rootTopic.children!.detached!.map(t=>t.style),sheets[0].rootTopic.children!.detached!.map(t=>t.style));
+  assert.deepEqual(reopened.sheets[0].relationships,sheets[0].relationships);
+});
+test(2, "concave advanced shapes contain content and all-angle line anchors touch their outline", () => {
+  const base=buildScene(round7ShapeSheets()[0]).nodes[0];
+  for(const shape of ADVANCED_SHAPES) for(const [w,h] of [[50,24],[70,300],[450,34]]) {
+    const size=shapeSize(shape,w,h),geometry=advancedShape(shape,size.width,size.height)!;
+    assert.ok(!/NaN|Infinity/.test(geometry.path));
+    const node={...base,...size,x:0,y:0,shape};
+    const [cx,cy]=shapeContentCenter(shape);
+    for(let i=0;i<=100;i++)for(const [x,y] of [[i/100,0],[i/100,1],[0,i/100],[1,i/100]])
+      assert.ok(pointInOutline([size.width*cx-w/2+x*w,size.height*cy-h/2+y*h],geometry.outline),`${shape} clips text box`);
+    for(let i=0;i<72;i++) {
+      const angle=i*Math.PI/36,dx=Math.cos(angle),dy=Math.sin(angle),c={x:size.width/2,y:size.height/2};
+      const point=topicAnchor(node,{x:c.x+dx*10000,y:c.y+dy*10000});
+      const distance=Math.min(...geometry.outline.map(([ax,ay],j)=>{
+        const [bx,by]=geometry.outline[(j+1)%geometry.outline.length],ex=bx-ax,ey=by-ay;
+        const t=Math.max(0,Math.min(1,((point.x-ax)*ex+(point.y-ay)*ey)/(ex*ex+ey*ey)||0));
+        return Math.hypot(point.x-ax-t*ex,point.y-ay-t*ey);
+      }));
+      assert.ok(distance<1e-7,`${shape} arrow floats off outline`);
+      assert.ok(Math.abs((point.x-c.x)*dy-(point.y-c.y)*dx)<1e-7);
+    }
+  }
+});
+test(3, "native customWidth expands text boxes and resets without losing styles or attachments", () => {
+  const sheet:Sheet={id:'width-sheet',title:'Width',rootTopic:{id:'width-root',title:'中文 Title',
+    children:{attached:[{id:'width-a',title:'Text',style:{properties:{'shape-class':'org.xmind.topicShape.rect','keep':'yes'}}},
+      {id:'width-b',title:'More text',customWidth:180}]}}};
+  const doc=openDocument(sampleArchive([sheet]));
+  const next=editDocument(doc.sheets,sheet.id,{type:'width',ids:['width-a','width-b'],width:320});
+  for(const id of ['width-a','width-b'])assert.equal(buildScene(next[0]).nodes.find(n=>n.topic.id===id)!.width,320);
+  const bytes=writeDocument(doc,next), reopened=openDocument(bytes);
+  assert.equal(reopened.sheets[0].rootTopic.children!.attached![0].customWidth,320);
+  assert.deepEqual(unzipSync(bytes)['attachments/keep.bin'],unzipSync(doc.original)['attachments/keep.bin']);
+  const reset=editDocument(next,sheet.id,{type:'width',ids:['width-a'],width:null});
+  assert.equal(reset[0].rootTopic.children!.attached![0].customWidth,undefined);
+  assert.equal(reset[0].rootTopic.children!.attached![1].customWidth,320);
+  const reshape=editDocument(next,sheet.id,{type:'properties',id:'width-a',properties:{'shape-class':'org.xmind.topicShape.heart.compact'}});
+  assert.equal(reshape[0].rootTopic.children!.attached![0].customWidth,undefined);
+  assert.equal(reshape[0].rootTopic.children!.attached![0].style!.properties!.keep,'yes');
+  for(const width of [NaN,Infinity,-1,20,2001])assert.throws(()=>editDocument(next,sheet.id,{type:'width',ids:['width-a'],width}));
+  assert.equal(next[0].rootTopic.children!.attached![0].customWidth,320);
 });
 console.log(`${passed} XMind tests passed`);

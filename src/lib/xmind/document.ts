@@ -12,6 +12,7 @@ export interface Topic {
   id: string;
   title: string;
   structureClass?: string;
+  customWidth?: number;
   style?: Style;
   position?: { x: number; y: number };
   children?: {
@@ -151,6 +152,7 @@ export type Command =
   | { type: "title"; id: string; title: string }
   | { type: "properties"; id: string; properties: Properties }
   | { type: "properties-many"; ids: string[]; properties: Properties }
+  | { type: "width"; ids: string[]; width: number | null }
   | { type: "href"; id: string; href: string }
   | { type: "notes"; id: string; text: string }
   | { type: "labels"; id: string; labels: string[] }
@@ -320,7 +322,19 @@ export function editDocument(
       for (const id of command.ids) {
         const target = findTopic(root, id);
         if (!target) throw new Error("Topic not found");
+        if(command.properties['shape-class'] && command.properties['shape-class']!==target.style?.properties?.['shape-class'])
+          delete target.customWidth;
         target.style = { ...target.style, properties: { ...target.style?.properties, ...command.properties } };
+      }
+      break;
+    case "width":
+      if (command.width !== null && (!Number.isFinite(command.width) || command.width < 40 || command.width > 2000))
+        throw new Error("Invalid topic width");
+      for (const id of command.ids) {
+        const target=findTopic(root,id);
+        if(!target)throw new Error("Topic not found");
+        if(command.width===null)delete target.customWidth;
+        else target.customWidth=command.width;
       }
       break;
     case "href":
@@ -330,6 +344,8 @@ export function editDocument(
       break;
     case "properties":
       if (!topic) throw new Error("Topic not found");
+      if(command.properties['shape-class'] && command.properties['shape-class']!==topic.style?.properties?.['shape-class'])
+        delete topic.customWidth;
       topic.style = {
         ...topic.style,
         properties: { ...topic.style?.properties, ...command.properties },

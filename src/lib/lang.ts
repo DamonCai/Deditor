@@ -9,58 +9,17 @@
 import type { LanguageSupport as LanguageSupportT } from "@codemirror/language";
 import type { Tag } from "@lezer/highlight";
 import { languageCatalog } from "./languageCatalog";
-import { LuFileText, LuFileImage, LuFileAudio, LuFileVideo, LuFileCog, LuDatabase, LuType, LuNetwork } from "react-icons/lu";
-import { FaRegFilePdf, FaRegFileWord, FaRegFileExcel, FaRegFilePowerpoint, FaRegFileArchive } from "react-icons/fa";
 // @codemirror/legacy-modes is a ~150 KB combined chunk; we used to static-
 // import 7 modes (shell/toml/ruby/swift/lua/dockerfile/powershell) which
 // dragged the whole thing into main. Vite *does* handle bare-specifier
 // dynamic imports — its module-path resolution rewrites them at build time
 // — so per-file `await import("@codemirror/legacy-modes/mode/X")` ships as
 // its own lazy chunk and only loads when the corresponding file type opens.
-import type { IconType } from "react-icons";
-import {
-  SiPython,
-  SiJavascript,
-  SiTypescript,
-  SiReact,
-  SiRust,
-  SiGo,
-  SiOpenjdk,
-  SiKotlin,
-  SiScala,
-  SiC,
-  SiCplusplus,
-  SiSharp,
-  SiHtml5,
-  SiCss,
-  SiSass,
-  SiVuedotjs,
-  SiSvelte,
-  SiJson,
-  SiYaml,
-  SiToml,
-  SiMarkdown,
-  SiPhp,
-  SiRuby,
-  SiSwift,
-  SiLua,
-  SiPerl,
-  SiGnubash,
-  SiDocker,
-  SiSqlite,
-} from "react-icons/si";
-
-export interface LangIcon {
-  short: string;          // letter-badge fallback
-  color: string;          // brand color
-  Logo?: IconType;        // brand SVG (preferred when set)
-}
 
 export interface LangDef {
   label: string;
   shiki: string;
   cm: () => Promise<LanguageSupportT>;
-  icon: LangIcon;
 }
 
 // Cache the @codemirror/language module's exports so each cm() thunk only
@@ -172,215 +131,213 @@ const cmMarkdown = async () => {
   return markdown({ base: markdownLanguage, codeLanguages: codeLangs });
 };
 
-const I = (short: string, color: string, Logo?: IconType): LangIcon => ({ short, color, Logo });
-
 const ext: Record<string, LangDef> = {
   // Markdown
-  md:       { label: "Markdown", shiki: "markdown", cm: cmMarkdown, icon: I("MD",  "#083fa1", SiMarkdown) },
-  markdown: { label: "Markdown", shiki: "markdown", cm: cmMarkdown, icon: I("MD",  "#083fa1", SiMarkdown) },
-  mdx:      { label: "MDX",      shiki: "mdx",      cm: cmMarkdown, icon: I("MDX", "#1a8cff", SiMarkdown) },
+  md:       { label: "Markdown", shiki: "markdown", cm: cmMarkdown },
+  markdown: { label: "Markdown", shiki: "markdown", cm: cmMarkdown },
+  mdx:      { label: "MDX",      shiki: "mdx",      cm: cmMarkdown },
 
   // JS / TS
-  js:  { label: "JavaScript", shiki: "javascript", cm: lazyJS(),            icon: I("JS",  "#f1e05a", SiJavascript) },
-  mjs: { label: "JavaScript", shiki: "javascript", cm: lazyJS(),            icon: I("JS",  "#f1e05a", SiJavascript) },
-  cjs: { label: "JavaScript", shiki: "javascript", cm: lazyJS(),            icon: I("JS",  "#f1e05a", SiJavascript) },
-  jsx: { label: "JSX",        shiki: "jsx",        cm: lazyJS(true),        icon: I("JSX", "#61dafb", SiReact) },
-  ts:  { label: "TypeScript", shiki: "typescript", cm: lazyJS(false, true), icon: I("TS",  "#3178c6", SiTypescript) },
-  tsx: { label: "TSX",        shiki: "tsx",        cm: lazyJS(true,  true), icon: I("TSX", "#61dafb", SiReact) },
+  js:  { label: "JavaScript", shiki: "javascript", cm: lazyJS() },
+  mjs: { label: "JavaScript", shiki: "javascript", cm: lazyJS() },
+  cjs: { label: "JavaScript", shiki: "javascript", cm: lazyJS() },
+  jsx: { label: "JSX",        shiki: "jsx",        cm: lazyJS(true) },
+  ts:  { label: "TypeScript", shiki: "typescript", cm: lazyJS(false, true) },
+  tsx: { label: "TSX",        shiki: "tsx",        cm: lazyJS(true,  true) },
 
   // Python
-  py:  { label: "Python", shiki: "python", cm: async () => (await import("@codemirror/lang-python")).python(), icon: I("PY", "#3776AB", SiPython) },
-  pyi: { label: "Python", shiki: "python", cm: async () => (await import("@codemirror/lang-python")).python(), icon: I("PY", "#3776AB", SiPython) },
+  py:  { label: "Python", shiki: "python", cm: async () => (await import("@codemirror/lang-python")).python() },
+  pyi: { label: "Python", shiki: "python", cm: async () => (await import("@codemirror/lang-python")).python() },
 
   // Rust / Go
-  rs: { label: "Rust", shiki: "rust", cm: async () => (await import("@codemirror/lang-rust")).rust(), icon: I("RS", "#dea584", SiRust) },
-  go: { label: "Go",   shiki: "go",   cm: async () => (await import("@codemirror/lang-go")).go(),     icon: I("GO", "#00ADD8", SiGo) },
+  rs: { label: "Rust", shiki: "rust", cm: async () => (await import("@codemirror/lang-rust")).rust() },
+  go: { label: "Go",   shiki: "go",   cm: async () => (await import("@codemirror/lang-go")).go() },
 
   // JVM
-  java: { label: "Java",   shiki: "java",   cm: async () => (await import("@codemirror/lang-java")).java(), icon: I("JV", "#ED8B00", SiOpenjdk) },
-  kt:   { label: "Kotlin", shiki: "kotlin", cm: cmCatalog("Kotlin"), icon: I("KT", "#A97BFF", SiKotlin) },
-  kts:  { label: "Kotlin", shiki: "kotlin", cm: cmCatalog("Kotlin"), icon: I("KT", "#A97BFF", SiKotlin) },
-  scala:{ label: "Scala",  shiki: "scala",  cm: cmCatalog("Scala"), icon: I("SC", "#c22d40", SiScala) },
+  java: { label: "Java",   shiki: "java",   cm: async () => (await import("@codemirror/lang-java")).java() },
+  kt:   { label: "Kotlin", shiki: "kotlin", cm: cmCatalog("Kotlin") },
+  kts:  { label: "Kotlin", shiki: "kotlin", cm: cmCatalog("Kotlin") },
+  scala:{ label: "Scala",  shiki: "scala",  cm: cmCatalog("Scala") },
 
   // C family
-  c:   { label: "C",   shiki: "c",       cm: async () => (await import("@codemirror/lang-cpp")).cpp(), icon: I("C",   "#A8B9CC", SiC) },
-  h:   { label: "C",   shiki: "c",       cm: async () => (await import("@codemirror/lang-cpp")).cpp(), icon: I("H",   "#A8B9CC", SiC) },
-  cpp: { label: "C++", shiki: "cpp",     cm: async () => (await import("@codemirror/lang-cpp")).cpp(), icon: I("C++", "#00599C", SiCplusplus) },
-  cxx: { label: "C++", shiki: "cpp",     cm: async () => (await import("@codemirror/lang-cpp")).cpp(), icon: I("C++", "#00599C", SiCplusplus) },
-  cc:  { label: "C++", shiki: "cpp",     cm: async () => (await import("@codemirror/lang-cpp")).cpp(), icon: I("C++", "#00599C", SiCplusplus) },
-  hpp: { label: "C++", shiki: "cpp",     cm: async () => (await import("@codemirror/lang-cpp")).cpp(), icon: I("HPP", "#00599C", SiCplusplus) },
-  cs:  { label: "C#",  shiki: "csharp",  cm: cmCatalog("C#"), icon: I("C#",  "#239120", SiSharp) },
+  c:   { label: "C",   shiki: "c",       cm: async () => (await import("@codemirror/lang-cpp")).cpp() },
+  h:   { label: "C",   shiki: "c",       cm: async () => (await import("@codemirror/lang-cpp")).cpp() },
+  cpp: { label: "C++", shiki: "cpp",     cm: async () => (await import("@codemirror/lang-cpp")).cpp() },
+  cxx: { label: "C++", shiki: "cpp",     cm: async () => (await import("@codemirror/lang-cpp")).cpp() },
+  cc:  { label: "C++", shiki: "cpp",     cm: async () => (await import("@codemirror/lang-cpp")).cpp() },
+  hpp: { label: "C++", shiki: "cpp",     cm: async () => (await import("@codemirror/lang-cpp")).cpp() },
+  cs:  { label: "C#",  shiki: "csharp",  cm: cmCatalog("C#") },
 
   // Web
-  html:   { label: "HTML",   shiki: "html",   cm: async () => (await import("@codemirror/lang-html")).html(), icon: I("HTM",  "#e34c26", SiHtml5) },
-  htm:    { label: "HTML",   shiki: "html",   cm: async () => (await import("@codemirror/lang-html")).html(), icon: I("HTM",  "#e34c26", SiHtml5) },
-  css:    { label: "CSS",    shiki: "css",    cm: async () => (await import("@codemirror/lang-css")).css(),   icon: I("CSS",  "#1572B6", SiCss) },
-  scss:   { label: "SCSS",   shiki: "scss",   cm: cmCatalog("SCSS"), icon: I("SCS",  "#cf649a", SiSass) },
-  sass:   { label: "Sass",   shiki: "sass",   cm: cmCatalog("Sass"), icon: I("SAS",  "#cf649a", SiSass) },
-  less:   { label: "Less",   shiki: "less",   cm: cmCatalog("LESS"), icon: I("LES",  "#1d365d", SiCss) },
-  vue:    { label: "Vue",    shiki: "vue",    cm: cmCatalog("Vue"), icon: I("VUE",  "#41b883", SiVuedotjs) },
-  svelte: { label: "Svelte", shiki: "svelte", cm: async () => (await import("@replit/codemirror-lang-svelte")).svelte(), icon: I("SVL",  "#ff3e00", SiSvelte) },
+  html:   { label: "HTML",   shiki: "html",   cm: async () => (await import("@codemirror/lang-html")).html() },
+  htm:    { label: "HTML",   shiki: "html",   cm: async () => (await import("@codemirror/lang-html")).html() },
+  css:    { label: "CSS",    shiki: "css",    cm: async () => (await import("@codemirror/lang-css")).css() },
+  scss:   { label: "SCSS",   shiki: "scss",   cm: cmCatalog("SCSS") },
+  sass:   { label: "Sass",   shiki: "sass",   cm: cmCatalog("Sass") },
+  less:   { label: "Less",   shiki: "less",   cm: cmCatalog("LESS") },
+  vue:    { label: "Vue",    shiki: "vue",    cm: cmCatalog("Vue") },
+  svelte: { label: "Svelte", shiki: "svelte", cm: async () => (await import("@replit/codemirror-lang-svelte")).svelte() },
 
   // Data / Config
-  json:  { label: "JSON",  shiki: "json",  cm: async () => (await import("@codemirror/lang-json")).json(), icon: I("{}", "#cbcb41", SiJson) },
-  jsonc: { label: "JSONC", shiki: "jsonc", cm: cmJson5, icon: I("{}", "#cbcb41", SiJson) },
-  yaml:  { label: "YAML",  shiki: "yaml",  cm: async () => (await import("@codemirror/lang-yaml")).yaml(), icon: I("YML", "#cb171e", SiYaml) },
-  yml:   { label: "YAML",  shiki: "yaml",  cm: async () => (await import("@codemirror/lang-yaml")).yaml(), icon: I("YML", "#cb171e", SiYaml) },
-  toml:  { label: "TOML",  shiki: "toml",  cm: cmToml,                                  icon: I("TOM", "#9c4221", SiToml) },
-  xml:   { label: "XML",   shiki: "xml",   cm: cmXml, icon: I("XML", "#0060ac") },
-  ini:   { label: "INI",   shiki: "ini",   cm: cmCatalog("Properties files"), icon: I("INI", "#6b6b6b") },
-  env:   { label: "Env",   shiki: "shellscript", cm: cmShell,                          icon: I("ENV", "#509941") },
+  json:  { label: "JSON",  shiki: "json",  cm: async () => (await import("@codemirror/lang-json")).json() },
+  jsonc: { label: "JSONC", shiki: "jsonc", cm: cmJson5 },
+  yaml:  { label: "YAML",  shiki: "yaml",  cm: async () => (await import("@codemirror/lang-yaml")).yaml() },
+  yml:   { label: "YAML",  shiki: "yaml",  cm: async () => (await import("@codemirror/lang-yaml")).yaml() },
+  toml:  { label: "TOML",  shiki: "toml",  cm: cmToml },
+  xml:   { label: "XML",   shiki: "xml",   cm: cmXml },
+  ini:   { label: "INI",   shiki: "ini",   cm: cmCatalog("Properties files") },
+  env:   { label: "Env",   shiki: "shellscript", cm: cmShell },
 
   // SQL / PHP / Ruby
-  sql: { label: "SQL", shiki: "sql", cm: async () => (await import("@codemirror/lang-sql")).sql(), icon: I("SQL", "#003B57", SiSqlite) },
-  php: { label: "PHP", shiki: "php", cm: async () => (await import("@codemirror/lang-php")).php(), icon: I("PHP", "#777BB4", SiPhp) },
-  rb:  { label: "Ruby", shiki: "ruby", cm: cmRuby,                              icon: I("RB",  "#CC342D", SiRuby) },
+  sql: { label: "SQL", shiki: "sql", cm: async () => (await import("@codemirror/lang-sql")).sql() },
+  php: { label: "PHP", shiki: "php", cm: async () => (await import("@codemirror/lang-php")).php() },
+  rb:  { label: "Ruby", shiki: "ruby", cm: cmRuby },
 
   // Swift / Lua / Perl
-  swift: { label: "Swift", shiki: "swift", cm: cmSwift, icon: I("SW",  "#FA7343", SiSwift) },
-  lua:   { label: "Lua",   shiki: "lua",   cm: cmLua,     icon: I("LUA", "#000080", SiLua) },
-  pl:    { label: "Perl",  shiki: "perl",  cm: cmCatalog("Perl"), icon: I("PL",  "#39457E", SiPerl) },
+  swift: { label: "Swift", shiki: "swift", cm: cmSwift },
+  lua:   { label: "Lua",   shiki: "lua",   cm: cmLua },
+  pl:    { label: "Perl",  shiki: "perl",  cm: cmCatalog("Perl") },
 
   // Shell
-  sh:    { label: "Shell",      shiki: "bash",       cm: cmShell,         icon: I("SH",  "#4EAA25", SiGnubash) },
-  bash:  { label: "Bash",       shiki: "bash",       cm: cmShell,         icon: I("SH",  "#4EAA25", SiGnubash) },
-  zsh:   { label: "Zsh",        shiki: "bash",       cm: cmShell,         icon: I("ZSH", "#4EAA25", SiGnubash) },
-  fish:  { label: "Fish",       shiki: "fish",       cm: cmShell,         icon: I("FSH", "#4aae47", SiGnubash) },
-  ps1:   { label: "PowerShell", shiki: "powershell", cm: cmPowerShell, icon: I("PS",  "#012456") },
+  sh:    { label: "Shell",      shiki: "bash",       cm: cmShell },
+  bash:  { label: "Bash",       shiki: "bash",       cm: cmShell },
+  zsh:   { label: "Zsh",        shiki: "bash",       cm: cmShell },
+  fish:  { label: "Fish",       shiki: "fish",       cm: cmShell },
+  ps1:   { label: "PowerShell", shiki: "powershell", cm: cmPowerShell },
 
   // Misc
-  txt:   { label: "Text",  shiki: "text", cm: cmPlain, icon: I("TXT", "#888888") },
-  log:   { label: "Log",   shiki: "log",  cm: () => import("./textLanguages").then((m) => m.logLanguage()), icon: I("LOG", "#888888") },
-  csv:   { label: "CSV",   shiki: "csv",  cm: () => import("./textLanguages").then((m) => m.delimitedText(",")), icon: I("CSV", "#237346") },
-  diff:  { label: "Diff",  shiki: "diff", cm: cmCatalog("diff"), icon: I("DIF", "#0a8c0a") },
-  patch: { label: "Patch", shiki: "diff", cm: cmCatalog("diff"), icon: I("PAT", "#0a8c0a") },
+  txt:   { label: "Text",  shiki: "text", cm: cmPlain },
+  log:   { label: "Log",   shiki: "log",  cm: () => import("./textLanguages").then((m) => m.logLanguage()) },
+  csv:   { label: "CSV",   shiki: "csv",  cm: () => import("./textLanguages").then((m) => m.delimitedText(",")) },
+  diff:  { label: "Diff",  shiki: "diff", cm: cmCatalog("diff") },
+  patch: { label: "Patch", shiki: "diff", cm: cmCatalog("diff") },
 
   // Images (cm/shiki are no-ops; rendered inline in Editor.tsx)
-  png:  { label: "Image", shiki: "text", cm: cmShell, icon: I("IMG", "#a78bfa", LuFileImage) },
-  jpg:  { label: "Image", shiki: "text", cm: cmShell, icon: I("IMG", "#a78bfa", LuFileImage) },
-  jpeg: { label: "Image", shiki: "text", cm: cmShell, icon: I("IMG", "#a78bfa", LuFileImage) },
-  gif:  { label: "Image", shiki: "text", cm: cmShell, icon: I("GIF", "#a78bfa", LuFileImage) },
-  webp: { label: "Image", shiki: "text", cm: cmShell, icon: I("IMG", "#a78bfa", LuFileImage) },
-  bmp:  { label: "Image", shiki: "text", cm: cmShell, icon: I("BMP", "#a78bfa", LuFileImage) },
-  ico:  { label: "Icon",  shiki: "text", cm: cmShell, icon: I("ICO", "#a78bfa", LuFileImage) },
-  tiff: { label: "Image", shiki: "text", cm: cmShell, icon: I("TIF", "#a78bfa", LuFileImage) },
-  tif:  { label: "Image", shiki: "text", cm: cmShell, icon: I("TIF", "#a78bfa", LuFileImage) },
-  svg:  { label: "SVG",   shiki: "xml",  cm: cmXml, icon: I("SVG", "#ffb013", LuFileImage) },
+  png:  { label: "Image", shiki: "text", cm: cmShell },
+  jpg:  { label: "Image", shiki: "text", cm: cmShell },
+  jpeg: { label: "Image", shiki: "text", cm: cmShell },
+  gif:  { label: "Image", shiki: "text", cm: cmShell },
+  webp: { label: "Image", shiki: "text", cm: cmShell },
+  bmp:  { label: "Image", shiki: "text", cm: cmShell },
+  ico:  { label: "Icon",  shiki: "text", cm: cmShell },
+  tiff: { label: "Image", shiki: "text", cm: cmShell },
+  tif:  { label: "Image", shiki: "text", cm: cmShell },
+  svg:  { label: "SVG",   shiki: "xml",  cm: cmXml },
 
   // PDF (rendered inline in Editor.tsx)
-  pdf:  { label: "PDF", shiki: "text", cm: cmShell, icon: I("PDF", "#dc2626", FaRegFilePdf) },
+  pdf:  { label: "PDF", shiki: "text", cm: cmShell },
 
   // Audio (rendered inline in Editor.tsx)
-  mp3:  { label: "Audio", shiki: "text", cm: cmShell, icon: I("MP3",  "#0ea5e9", LuFileAudio) },
-  wav:  { label: "Audio", shiki: "text", cm: cmShell, icon: I("WAV",  "#0ea5e9", LuFileAudio) },
-  ogg:  { label: "Audio", shiki: "text", cm: cmShell, icon: I("OGG",  "#0ea5e9", LuFileAudio) },
-  flac: { label: "Audio", shiki: "text", cm: cmShell, icon: I("FLAC", "#0ea5e9", LuFileAudio) },
-  m4a:  { label: "Audio", shiki: "text", cm: cmShell, icon: I("M4A",  "#0ea5e9", LuFileAudio) },
-  aac:  { label: "Audio", shiki: "text", cm: cmShell, icon: I("AAC",  "#0ea5e9", LuFileAudio) },
-  opus: { label: "Audio", shiki: "text", cm: cmShell, icon: I("OPUS", "#0ea5e9", LuFileAudio) },
+  mp3:  { label: "Audio", shiki: "text", cm: cmShell },
+  wav:  { label: "Audio", shiki: "text", cm: cmShell },
+  ogg:  { label: "Audio", shiki: "text", cm: cmShell },
+  flac: { label: "Audio", shiki: "text", cm: cmShell },
+  m4a:  { label: "Audio", shiki: "text", cm: cmShell },
+  aac:  { label: "Audio", shiki: "text", cm: cmShell },
+  opus: { label: "Audio", shiki: "text", cm: cmShell },
 
   // Video (rendered inline in Editor.tsx)
-  mp4:  { label: "Video", shiki: "text", cm: cmShell, icon: I("MP4",  "#7c3aed", LuFileVideo) },
-  webm: { label: "Video", shiki: "text", cm: cmShell, icon: I("WEBM", "#7c3aed", LuFileVideo) },
-  mov:  { label: "Video", shiki: "text", cm: cmShell, icon: I("MOV",  "#7c3aed", LuFileVideo) },
-  m4v:  { label: "Video", shiki: "text", cm: cmShell, icon: I("M4V",  "#7c3aed", LuFileVideo) },
-  ogv:  { label: "Video", shiki: "text", cm: cmShell, icon: I("OGV",  "#7c3aed", LuFileVideo) },
+  mp4:  { label: "Video", shiki: "text", cm: cmShell },
+  webm: { label: "Video", shiki: "text", cm: cmShell },
+  mov:  { label: "Video", shiki: "text", cm: cmShell },
+  m4v:  { label: "Video", shiki: "text", cm: cmShell },
+  ogv:  { label: "Video", shiki: "text", cm: cmShell },
 
   // Office documents — Word (rendered as hex dump in Editor.tsx)
-  doc:  { label: "Word",  shiki: "text", cm: cmShell, icon: I("DOC",  "#2B579A", FaRegFileWord) },
-  docx: { label: "Word",  shiki: "text", cm: cmShell, icon: I("DOCX", "#2B579A", FaRegFileWord) },
-  docm: { label: "Word",  shiki: "text", cm: cmShell, icon: I("DOCM", "#2B579A", FaRegFileWord) },
-  dot:  { label: "Word",  shiki: "text", cm: cmShell, icon: I("DOT",  "#2B579A", FaRegFileWord) },
-  dotx: { label: "Word",  shiki: "text", cm: cmShell, icon: I("DOTX", "#2B579A", FaRegFileWord) },
-  dotm: { label: "Word",  shiki: "text", cm: cmShell, icon: I("DOTM", "#2B579A", FaRegFileWord) },
-  odt:  { label: "OpenDocument Text", shiki: "text", cm: cmShell, icon: I("ODT", "#008080", FaRegFileWord) },
-  rtf:  { label: "RTF",   shiki: "text", cm: cmShell, icon: I("RTF",  "#2B579A", FaRegFileWord) },
-  pages:{ label: "Pages", shiki: "text", cm: cmShell, icon: I("PGS",  "#FF9500", FaRegFileWord) },
+  doc:  { label: "Word",  shiki: "text", cm: cmShell },
+  docx: { label: "Word",  shiki: "text", cm: cmShell },
+  docm: { label: "Word",  shiki: "text", cm: cmShell },
+  dot:  { label: "Word",  shiki: "text", cm: cmShell },
+  dotx: { label: "Word",  shiki: "text", cm: cmShell },
+  dotm: { label: "Word",  shiki: "text", cm: cmShell },
+  odt:  { label: "OpenDocument Text", shiki: "text", cm: cmShell },
+  rtf:  { label: "RTF",   shiki: "text", cm: cmShell },
+  pages:{ label: "Pages", shiki: "text", cm: cmShell },
 
   // Office documents — Excel
-  xls:  { label: "Excel", shiki: "text", cm: cmShell, icon: I("XLS",  "#217346", FaRegFileExcel) },
-  xlsx: { label: "Excel", shiki: "text", cm: cmShell, icon: I("XLSX", "#217346", FaRegFileExcel) },
-  xlsm: { label: "Excel", shiki: "text", cm: cmShell, icon: I("XLSM", "#217346", FaRegFileExcel) },
-  xlsb: { label: "Excel", shiki: "text", cm: cmShell, icon: I("XLSB", "#217346", FaRegFileExcel) },
-  ods:  { label: "OpenDocument Sheet", shiki: "text", cm: cmShell, icon: I("ODS", "#008080", FaRegFileExcel) },
-  numbers: { label: "Numbers", shiki: "text", cm: cmShell, icon: I("NUM", "#34C759", FaRegFileExcel) },
+  xls:  { label: "Excel", shiki: "text", cm: cmShell },
+  xlsx: { label: "Excel", shiki: "text", cm: cmShell },
+  xlsm: { label: "Excel", shiki: "text", cm: cmShell },
+  xlsb: { label: "Excel", shiki: "text", cm: cmShell },
+  ods:  { label: "OpenDocument Sheet", shiki: "text", cm: cmShell },
+  numbers: { label: "Numbers", shiki: "text", cm: cmShell },
 
   // Office documents — PowerPoint
-  ppt:  { label: "PowerPoint", shiki: "text", cm: cmShell, icon: I("PPT",  "#B7472A", FaRegFilePowerpoint) },
-  pptx: { label: "PowerPoint", shiki: "text", cm: cmShell, icon: I("PPTX", "#B7472A", FaRegFilePowerpoint) },
-  pptm: { label: "PowerPoint", shiki: "text", cm: cmShell, icon: I("PPTM", "#B7472A", FaRegFilePowerpoint) },
-  odp:  { label: "OpenDocument Presentation", shiki: "text", cm: cmShell, icon: I("ODP", "#008080", FaRegFilePowerpoint) },
-  key:  { label: "Keynote", shiki: "text", cm: cmShell, icon: I("KEY", "#000000", FaRegFilePowerpoint) },
+  ppt:  { label: "PowerPoint", shiki: "text", cm: cmShell },
+  pptx: { label: "PowerPoint", shiki: "text", cm: cmShell },
+  pptm: { label: "PowerPoint", shiki: "text", cm: cmShell },
+  odp:  { label: "OpenDocument Presentation", shiki: "text", cm: cmShell },
+  key:  { label: "Keynote", shiki: "text", cm: cmShell },
 
   // Archives
-  zip:  { label: "Archive", shiki: "text", cm: cmShell, icon: I("ZIP",  "#8b5cf6", FaRegFileArchive) },
-  tar:  { label: "Archive", shiki: "text", cm: cmShell, icon: I("TAR",  "#8b5cf6", FaRegFileArchive) },
-  gz:   { label: "Archive", shiki: "text", cm: cmShell, icon: I("GZ",   "#8b5cf6", FaRegFileArchive) },
-  tgz:  { label: "Archive", shiki: "text", cm: cmShell, icon: I("TGZ",  "#8b5cf6", FaRegFileArchive) },
-  bz2:  { label: "Archive", shiki: "text", cm: cmShell, icon: I("BZ2",  "#8b5cf6", FaRegFileArchive) },
-  xz:   { label: "Archive", shiki: "text", cm: cmShell, icon: I("XZ",   "#8b5cf6", FaRegFileArchive) },
-  "7z": { label: "Archive", shiki: "text", cm: cmShell, icon: I("7Z",   "#8b5cf6", FaRegFileArchive) },
-  rar:  { label: "Archive", shiki: "text", cm: cmShell, icon: I("RAR",  "#8b5cf6", FaRegFileArchive) },
-  jar:  { label: "Archive", shiki: "text", cm: cmShell, icon: I("JAR",  "#ED8B00", FaRegFileArchive) },
-  war:  { label: "Archive", shiki: "text", cm: cmShell, icon: I("WAR",  "#ED8B00", FaRegFileArchive) },
+  zip:  { label: "Archive", shiki: "text", cm: cmShell },
+  tar:  { label: "Archive", shiki: "text", cm: cmShell },
+  gz:   { label: "Archive", shiki: "text", cm: cmShell },
+  tgz:  { label: "Archive", shiki: "text", cm: cmShell },
+  bz2:  { label: "Archive", shiki: "text", cm: cmShell },
+  xz:   { label: "Archive", shiki: "text", cm: cmShell },
+  "7z": { label: "Archive", shiki: "text", cm: cmShell },
+  rar:  { label: "Archive", shiki: "text", cm: cmShell },
+  jar:  { label: "Archive", shiki: "text", cm: cmShell },
+  war:  { label: "Archive", shiki: "text", cm: cmShell },
 
   // Databases
-  db:      { label: "Database", shiki: "text", cm: cmShell, icon: I("DB",  "#003B57", LuDatabase) },
-  sqlite:  { label: "SQLite",   shiki: "text", cm: cmShell, icon: I("SQL", "#003B57", LuDatabase) },
-  sqlite3: { label: "SQLite",   shiki: "text", cm: cmShell, icon: I("SQL", "#003B57", LuDatabase) },
-  mdb:     { label: "Access",   shiki: "text", cm: cmShell, icon: I("MDB", "#A4373A", LuDatabase) },
+  db:      { label: "Database", shiki: "text", cm: cmShell },
+  sqlite:  { label: "SQLite",   shiki: "text", cm: cmShell },
+  sqlite3: { label: "SQLite",   shiki: "text", cm: cmShell },
+  mdb:     { label: "Access",   shiki: "text", cm: cmShell },
 
   // Executables / native binaries
-  exe:   { label: "Executable", shiki: "text", cm: cmShell, icon: I("EXE", "#6b7280", LuFileCog) },
-  dll:   { label: "Library",    shiki: "text", cm: cmShell, icon: I("DLL", "#6b7280", LuFileCog) },
-  so:    { label: "Library",    shiki: "text", cm: cmShell, icon: I("SO",  "#6b7280", LuFileCog) },
-  dylib: { label: "Library",    shiki: "text", cm: cmShell, icon: I("DYL", "#6b7280", LuFileCog) },
-  app:   { label: "Application",shiki: "text", cm: cmShell, icon: I("APP", "#6b7280", LuFileCog) },
-  deb:   { label: "Package",    shiki: "text", cm: cmShell, icon: I("DEB", "#a80030", LuFileCog) },
-  rpm:   { label: "Package",    shiki: "text", cm: cmShell, icon: I("RPM", "#cc0000", LuFileCog) },
-  dmg:   { label: "Disk Image", shiki: "text", cm: cmShell, icon: I("DMG", "#6b7280", LuFileCog) },
-  msi:   { label: "Installer",  shiki: "text", cm: cmShell, icon: I("MSI", "#6b7280", LuFileCog) },
-  apk:   { label: "Android",    shiki: "text", cm: cmShell, icon: I("APK", "#3DDC84", LuFileCog) },
-  ipa:   { label: "iOS",        shiki: "text", cm: cmShell, icon: I("IPA", "#A2AAAD", LuFileCog) },
-  bin:   { label: "Binary",     shiki: "text", cm: cmShell, icon: I("BIN", "#6b7280", LuFileCog) },
-  dat:   { label: "Data",       shiki: "text", cm: cmShell, icon: I("DAT", "#6b7280", LuFileCog) },
-  iso:   { label: "Disk Image", shiki: "text", cm: cmShell, icon: I("ISO", "#6b7280", LuFileCog) },
+  exe:   { label: "Executable", shiki: "text", cm: cmShell },
+  dll:   { label: "Library",    shiki: "text", cm: cmShell },
+  so:    { label: "Library",    shiki: "text", cm: cmShell },
+  dylib: { label: "Library",    shiki: "text", cm: cmShell },
+  app:   { label: "Application",shiki: "text", cm: cmShell },
+  deb:   { label: "Package",    shiki: "text", cm: cmShell },
+  rpm:   { label: "Package",    shiki: "text", cm: cmShell },
+  dmg:   { label: "Disk Image", shiki: "text", cm: cmShell },
+  msi:   { label: "Installer",  shiki: "text", cm: cmShell },
+  apk:   { label: "Android",    shiki: "text", cm: cmShell },
+  ipa:   { label: "iOS",        shiki: "text", cm: cmShell },
+  bin:   { label: "Binary",     shiki: "text", cm: cmShell },
+  dat:   { label: "Data",       shiki: "text", cm: cmShell },
+  iso:   { label: "Disk Image", shiki: "text", cm: cmShell },
 
   // Mind map (XMind workbook) — read-only viewer
-  xmind: { label: "XMind", shiki: "text", cm: cmShell, icon: I("MM",  "#dc6b1d", LuNetwork) },
+  xmind: { label: "XMind", shiki: "text", cm: cmShell },
 
   // Fonts
-  ttf:   { label: "Font",     shiki: "text", cm: cmShell, icon: I("TTF",  "#0ea5e9", LuType) },
-  otf:   { label: "Font",     shiki: "text", cm: cmShell, icon: I("OTF",  "#0ea5e9", LuType) },
-  woff:  { label: "Font",     shiki: "text", cm: cmShell, icon: I("WOF",  "#0ea5e9", LuType) },
-  woff2: { label: "Font",     shiki: "text", cm: cmShell, icon: I("WF2",  "#0ea5e9", LuType) },
-  eot:   { label: "Font",     shiki: "text", cm: cmShell, icon: I("EOT",  "#0ea5e9", LuType) },
+  ttf:   { label: "Font",     shiki: "text", cm: cmShell },
+  otf:   { label: "Font",     shiki: "text", cm: cmShell },
+  woff:  { label: "Font",     shiki: "text", cm: cmShell },
+  woff2: { label: "Font",     shiki: "text", cm: cmShell },
+  eot:   { label: "Font",     shiki: "text", cm: cmShell },
 
   // Video containers Chromium can't play natively — render as hex so we at
   // least skip the read_text_file fallback (which would WARN every poll).
-  mkv:   { label: "Video", shiki: "text", cm: cmShell, icon: I("MKV",  "#7c3aed", LuFileVideo) },
-  avi:   { label: "Video", shiki: "text", cm: cmShell, icon: I("AVI",  "#7c3aed", LuFileVideo) },
-  wmv:   { label: "Video", shiki: "text", cm: cmShell, icon: I("WMV",  "#7c3aed", LuFileVideo) },
-  flv:   { label: "Video", shiki: "text", cm: cmShell, icon: I("FLV",  "#7c3aed", LuFileVideo) },
-  mpg:   { label: "Video", shiki: "text", cm: cmShell, icon: I("MPG",  "#7c3aed", LuFileVideo) },
-  mpeg:  { label: "Video", shiki: "text", cm: cmShell, icon: I("MPG",  "#7c3aed", LuFileVideo) },
+  mkv:   { label: "Video", shiki: "text", cm: cmShell },
+  avi:   { label: "Video", shiki: "text", cm: cmShell },
+  wmv:   { label: "Video", shiki: "text", cm: cmShell },
+  flv:   { label: "Video", shiki: "text", cm: cmShell },
+  mpg:   { label: "Video", shiki: "text", cm: cmShell },
+  mpeg:  { label: "Video", shiki: "text", cm: cmShell },
 
-  m2ts:  { label: "Video", shiki: "text", cm: cmShell, icon: I("M2T",  "#7c3aed", LuFileVideo) },
-  vob:   { label: "Video", shiki: "text", cm: cmShell, icon: I("VOB",  "#7c3aed", LuFileVideo) },
-  rm:    { label: "Video", shiki: "text", cm: cmShell, icon: I("RM",   "#7c3aed", LuFileVideo) },
-  rmvb:  { label: "Video", shiki: "text", cm: cmShell, icon: I("RMV",  "#7c3aed", LuFileVideo) },
-  asf:   { label: "Video", shiki: "text", cm: cmShell, icon: I("ASF",  "#7c3aed", LuFileVideo) },
-  "3gp": { label: "Video", shiki: "text", cm: cmShell, icon: I("3GP",  "#7c3aed", LuFileVideo) },
+  m2ts:  { label: "Video", shiki: "text", cm: cmShell },
+  vob:   { label: "Video", shiki: "text", cm: cmShell },
+  rm:    { label: "Video", shiki: "text", cm: cmShell },
+  rmvb:  { label: "Video", shiki: "text", cm: cmShell },
+  asf:   { label: "Video", shiki: "text", cm: cmShell },
+  "3gp": { label: "Video", shiki: "text", cm: cmShell },
 
   // Audio formats browsers don't play — same treatment.
-  aiff:  { label: "Audio", shiki: "text", cm: cmShell, icon: I("AIF",  "#0ea5e9", LuFileAudio) },
-  aif:   { label: "Audio", shiki: "text", cm: cmShell, icon: I("AIF",  "#0ea5e9", LuFileAudio) },
-  mka:   { label: "Audio", shiki: "text", cm: cmShell, icon: I("MKA",  "#0ea5e9", LuFileAudio) },
-  ape:   { label: "Audio", shiki: "text", cm: cmShell, icon: I("APE",  "#0ea5e9", LuFileAudio) },
-  wma:   { label: "Audio", shiki: "text", cm: cmShell, icon: I("WMA",  "#0ea5e9", LuFileAudio) },
+  aiff:  { label: "Audio", shiki: "text", cm: cmShell },
+  aif:   { label: "Audio", shiki: "text", cm: cmShell },
+  mka:   { label: "Audio", shiki: "text", cm: cmShell },
+  ape:   { label: "Audio", shiki: "text", cm: cmShell },
+  wma:   { label: "Audio", shiki: "text", cm: cmShell },
 };
 
-// Fill gaps from every installed catalog language, preserving explicit icons
+// Fill gaps from every installed catalog language, preserving explicit language choices
 // and the dedicated image/binary viewers above.
 const catalogFilenames = languageCatalog.filter((language) => language.filename);
 const catalogCompoundSuffixes = languageCatalog.filter((language) => language.extensions.some((suffix) => suffix.includes(".")));
@@ -388,7 +345,6 @@ const catalogDefinitions = new Map(languageCatalog.map((language) => [language.n
   label: language.name,
   shiki: language.shiki,
   cm: cmCatalog(language.name),
-  icon: I(language.name.slice(0, 3).toUpperCase(), "#687bc4"),
 }]));
 for (const language of languageCatalog) {
   for (const suffix of language.extensions) ext[suffix] ??= catalogDefinitions.get(language.name)!;
@@ -399,23 +355,22 @@ for (const suffix of ["xsl", "xslt", "xsd", "xhtml", "xaml", "wsdl", "pom", "tld
 for (const [suffix, source] of Object.entries({ json5: "jsonc", jsonl: "json", ndjson: "json", cts: "ts", mts: "ts", psd1: "ps1", psm1: "ps1" })) {
   ext[suffix] = { ...ext[source], ...(suffix === "json5" ? { label: "JSON5", shiki: "json5" } : {}) };
 }
-ext.mk = { label: "Makefile", shiki: "makefile", cm: cmMakefile, icon: I("MK", "#427819") };
-ext.tsv = { label: "TSV", shiki: "tsv", cm: () => import("./textLanguages").then((m) => m.delimitedText("\t")), icon: I("TSV", "#237346") };
+ext.mk = { label: "Makefile", shiki: "makefile", cm: cmMakefile };
+ext.tsv = { label: "TSV", shiki: "tsv", cm: () => import("./textLanguages").then((m) => m.delimitedText("\t")) };
 
 const FILENAME_MAP: Record<string, LangDef> = {
-  Dockerfile:      { label: "Dockerfile", shiki: "docker", cm: cmDocker, icon: I("DKR", "#0db7ed", SiDocker) },
-  Makefile:        { label: "Makefile",   shiki: "makefile", cm: cmMakefile,         icon: I("MK",  "#427819") },
-  ".gitignore":    { label: "Git Ignore", shiki: "text", cm: cmIgnore,         icon: I("GIT", "#f05133") },
-  ".dockerignore": { label: "Docker Ignore", shiki: "text", cm: cmIgnore,         icon: I("DKR", "#0db7ed", SiDocker) },
-  ".editorconfig": { label: "EditorConfig", shiki: "ini", cm: cmCatalog("Properties files"),         icon: I("CFG", "#888888") },
-  ".env":          { label: "Env",        shiki: "shellscript", cm: cmShell,      icon: I("ENV", "#509941") },
+  Dockerfile:      { label: "Dockerfile", shiki: "docker", cm: cmDocker },
+  Makefile:        { label: "Makefile",   shiki: "makefile", cm: cmMakefile },
+  ".gitignore":    { label: "Git Ignore", shiki: "text", cm: cmIgnore },
+  ".dockerignore": { label: "Docker Ignore", shiki: "text", cm: cmIgnore },
+  ".editorconfig": { label: "EditorConfig", shiki: "ini", cm: cmCatalog("Properties files") },
+  ".env":          { label: "Env",        shiki: "shellscript", cm: cmShell },
 };
 
 const FALLBACK: LangDef = {
   label: "Text",
   shiki: "text",
   cm: cmPlain,
-  icon: I("·", "#9aa0a6", LuFileText),
 };
 
 export const IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico", "tiff", "tif"];
@@ -494,7 +449,7 @@ export function detectLang(filePath: string | null): LangDef {
   const dot = base.lastIndexOf(".");
   if (dot < 0) return FALLBACK;
   const e = base.slice(dot + 1).toLowerCase();
-  return ext[e] ?? { ...FALLBACK, icon: I(e.slice(0, 3).toUpperCase() || "·", FALLBACK.icon.color) };
+  return ext[e] ?? FALLBACK;
 }
 
 // Each predicate uses the shared `extOf` helper (one parse, no array alloc)

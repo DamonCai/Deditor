@@ -1,4 +1,5 @@
-import { shapeSize, shapeName, TOPIC_SHAPES } from "./shapes";
+import { shapeSize, shapeName, ALL_TOPIC_SHAPES } from "./shapes";
+import { shapeContentCenter, advancedShapeScale } from "./shapePaths";
 import { relationshipGeometry } from "./relationship";
 import { topicIndicators, type TopicIndicator } from "./indicators";
 import {
@@ -305,15 +306,19 @@ export function buildScene(
   ): Fragment {
     const style = styleFor(sheet, topic, depth, branch, kind, connection),
       p = style.properties;
-    if (![...TOPIC_SHAPES.map(shapeName), "oval"].includes(shapeName(style.shape)))
+    if (![...ALL_TOPIC_SHAPES.map(shapeName), "oval"].includes(shapeName(style.shape)))
       warnings.add(style.shape);
-    const widthHint = number(
+    const customWidth = typeof topic.customWidth === "number" && Number.isFinite(topic.customWidth) && topic.customWidth > 0
+      ? Math.max(40,Math.min(10000,topic.customWidth)) : undefined;
+    const horizontalPadding = kind === "floatingTopic" ? 26 : depth === 0 ? 64 : depth === 1 ? 40 : 12;
+    const scale = advancedShapeScale(shapeName(style.shape)) ?? 1;
+    const widthHint = customWidth === undefined ? number(
       p["fo:max-width"] ?? p["fo:width"],
       depth === 0 ? 260 : 210,
-    );
+    ) : Math.max(style.fontSize,customWidth/scale-horizontalPadding);
     const lines = wrap(
       topic.title,
-      Math.max(60, widthHint),
+      Math.max(style.fontSize, widthHint),
       style.fontSize,
       p,
       measure,
@@ -355,15 +360,18 @@ export function buildScene(
       (labels.length ? 4 + labelsHeight : 0) +
       (indicatorRows ? 4 + indicatorRows * 20 : 0);
     const paddedWidth = Math.max(depth === 0 ? 100 : 50,
-      contentWidth + (kind === "floatingTopic" ? 26 : depth === 0 ? 64 : depth === 1 ? 40 : 12));
+      contentWidth + horizontalPadding);
     const paddedHeight = contentHeight + (depth === 0 ? 36 : depth === 1 && !kind ? 22 : 18);
-    const { width, height } = shapeSize(style.shape, paddedWidth, paddedHeight);
-    const content = { x: (width - contentWidth) / 2, y: (height - contentHeight) / 2,
+    const naturalSize = shapeSize(style.shape, paddedWidth, paddedHeight);
+    const width=customWidth===undefined ? naturalSize.width : Math.max(customWidth,naturalSize.width);
+    const height=naturalSize.height;
+    const [centerX,centerY]=shapeContentCenter(style.shape);
+    const content = { x: width*centerX - contentWidth/2, y: height*centerY - contentHeight/2,
       width: contentWidth, height: contentHeight };
     const labelY = content.y + pictureHeight + titleHeight + 6;
     let nextLabelY = labelY;
     for (const label of labels) {
-      label.x = (width - label.width) / 2;
+      label.x = width*centerX - label.width/2;
       label.y = nextLabelY;
       nextLabelY += label.height + 4;
     }
@@ -373,7 +381,7 @@ export function buildScene(
     const titleAnchor = align === "left" || align === "start" ? "start"
       : align === "right" || align === "end" ? "end" : "middle";
     const titleX = titleAnchor === "start" ? content.x
-      : titleAnchor === "end" ? content.x + content.width - inlineWidth : (width - inlineWidth) / 2;
+      : titleAnchor === "end" ? content.x + content.width - inlineWidth : width*centerX-inlineWidth/2;
     const titleRight = titleX + (titleAnchor === "start" ? titleWidth : titleAnchor === "middle" ? titleWidth / 2 : 0);
     let inlineIndex = 0, rowIndex = 0;
     const indicatorPositions = indicators.map(icon => {
@@ -383,7 +391,7 @@ export function buildScene(
       };
       const index = rowIndex++, row = Math.floor(index / indicatorColumns);
       const columns = Math.min(indicatorColumns, rowIcons.length - row * indicatorColumns);
-      return { x: (width - (columns * 20 - 4)) / 2 + (index % indicatorColumns) * 20,
+      return { x: width*centerX - (columns * 20 - 4)/2 + (index % indicatorColumns) * 20,
         y: indicatorY + row * 20 };
     });
     const node: SceneNode = {

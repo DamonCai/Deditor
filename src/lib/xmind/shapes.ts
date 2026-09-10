@@ -1,7 +1,10 @@
+import { ADVANCED_SHAPES, advancedShapeScale } from './shapePaths';
+
 export const TOPIC_SHAPES = [
   'roundedRect', 'rect', 'ellipse', 'diamond', 'underline', 'ellipserect.compact',
   'circle.compact', 'doubleunderline', 'parallelogram', 'hexagon', 'roundedhexagon', 'ellipticrectangle',
 ] as const;
+export const ALL_TOPIC_SHAPES = [...TOPIC_SHAPES, ...ADVANCED_SHAPES] as const;
 
 export function shapeName(shape: string): string {
   const name = shape.replace(/^org\.xmind\.topicShape\./, '').toLowerCase();
@@ -11,6 +14,8 @@ export function shapeName(shape: string): string {
 /** Shape-specific room around the already padded content rectangle. */
 export function shapeSize(shape: string, width: number, height: number) {
   const name = shapeName(shape);
+  const advancedScale = advancedShapeScale(name);
+  if (advancedScale) return { width: width * advancedScale, height: height * advancedScale };
   if (name.startsWith('circle')) {
     const diameter = Math.hypot(width, height);
     return { width: diameter, height: diameter };

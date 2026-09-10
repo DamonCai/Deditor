@@ -1,4 +1,5 @@
 import { shapeName, shapePolygon } from "./shapes";
+import { advancedShape } from "./shapePaths";
 import type { Relationship, Sheet } from "./document";
 import type { Box, SceneNode } from "./scene";
 
@@ -16,7 +17,7 @@ export function topicAnchor(node: SceneNode, toward: Point): Point {
   if (!dx && !dy) return { x: node.x + node.width, y: c.y };
   const rx = node.width / 2, ry = node.height / 2;
   const shape = shapeName(node.shape);
-  const polygon = shapePolygon(shape,node.width,node.height);
+  const polygon = advancedShape(shape,node.width,node.height)?.outline ?? shapePolygon(shape,node.width,node.height);
   let ratio: number;
   if (polygon) {
     ratio = Infinity;
