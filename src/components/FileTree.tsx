@@ -1,5 +1,5 @@
 import { showError } from "../lib/feedback";
-import { memo, useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useId, useState } from "react";
 import { useShallow } from "zustand/shallow";
 import { useEditorStore, useActiveTabFilePath } from "../store/editor";
 import {
@@ -22,7 +22,7 @@ import { promptInput } from "./PromptDialog";
 import { confirmDelete } from "./ConfirmDialog";
 import { logError } from "../lib/logger";
 import { useT, tStatic } from "../lib/i18n";
-import { FiFolder, FiFolderPlus } from "react-icons/fi";
+import { FiChevronRight, FiFolder, FiFolderPlus, FiMoreHorizontal } from "react-icons/fi";
 import { Button } from "./ui/Button";
 
 const FOLDER_COLOR = "#dcb67a"; // soft amber, matches VSCode default folder icon
@@ -70,7 +70,8 @@ function FileTreeImpl() {
   const openMenu = useCallback((e: React.MouseEvent, items: MenuItem[]) => {
     e.preventDefault();
     e.stopPropagation();
-    setMenu({ x: e.clientX, y: e.clientY, items });
+    const rect = e.currentTarget.getBoundingClientRect();
+    setMenu({ x: e.clientX || rect.left, y: e.clientY || rect.bottom, items });
   }, []);
 
   // Workspace / folder / file context-menu builders are useCallback'd so the
@@ -139,7 +140,7 @@ function FileTreeImpl() {
 
   return (
     <div
-      className="flex flex-col h-full text-sm select-none"
+      className="filetree flex flex-col h-full text-sm select-none"
       style={{ background: "var(--bg-soft)" }}
     >
       <div
@@ -177,7 +178,7 @@ function FileTreeImpl() {
         </div>
       )}
       <div
-        className="flex-1 py-1"
+        className="filetree-workspaces flex-1"
         style={{ overflowY: "auto", overflowX: "hidden" }}
       >
         {workspaces.length === 0 ? (
@@ -193,6 +194,7 @@ function FileTreeImpl() {
               key={w}
               path={w}
               activePath={filePath}
+              showParent={workspaces.some((other) => other !== w && shortName(other) === shortName(w))}
               onWorkspaceContextMenu={onWorkspaceContextMenu}
               onFolderContextMenu={onFolderContextMenu}
               onFileContextMenu={onFileContextMenu}
@@ -289,12 +291,14 @@ function shortName(p: string): string {
 const WorkspaceSection = memo(function WorkspaceSection({
   path,
   activePath,
+  showParent,
   onWorkspaceContextMenu,
   onFolderContextMenu,
   onFileContextMenu,
 }: {
   path: string;
   activePath: string | null;
+  showParent: boolean;
   onWorkspaceContextMenu: (e: React.MouseEvent, w: string) => void;
   onFolderContextMenu: (e: React.MouseEvent, dir: string) => void;
   onFileContextMenu: (e: React.MouseEvent, file: string) => void;
@@ -304,35 +308,49 @@ const WorkspaceSection = memo(function WorkspaceSection({
   // still see their workspaces expanded on first launch.
   const open = useEditorStore((s) => s.expandedDirs[path] !== false);
   const setDirExpanded = useEditorStore((s) => s.setDirExpanded);
+  const contentId = useId();
+  const t = useT();
+  const parent = path.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]+$/, "");
   return (
-    <div style={{ marginBottom: 4 }}>
-      <div
-        onClick={() => setDirExpanded(path, !open)}
-        onContextMenu={(e) => onWorkspaceContextMenu(e, path)}
-        title={path}
-        className="flex items-center gap-1 cursor-pointer"
-        style={{
-          padding: "4px 8px",
-          fontSize: 11,
-          fontWeight: 700,
-          letterSpacing: 0.3,
-          color: "var(--text-soft)",
-          background: "var(--bg-mute)",
-        }}
-      >
-        <span style={{ width: 10, fontSize: 9 }}>{open ? "▼" : "▶"}</span>
-        <span className="truncate flex-1">{shortName(path)}</span>
+    <section className="workspace-section" aria-label={path}>
+      <div className="workspace-header" onContextMenu={(e) => onWorkspaceContextMenu(e, path)}>
+        <button
+          type="button"
+          onClick={() => setDirExpanded(path, !open)}
+          aria-expanded={open}
+          aria-controls={contentId}
+          title={path}
+          className="workspace-toggle"
+        >
+          <Caret open={open} />
+          <FiFolder size={15} className="workspace-icon" aria-hidden="true" />
+          <span className="workspace-label">
+            <span className="workspace-name">{shortName(path)}</span>
+            {showParent && <span className="workspace-parent">{parent}</span>}
+          </span>
+        </button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="workspace-menu"
+          title={t("filetree.folderActions", { name: shortName(path) })}
+          onClick={(e) => onWorkspaceContextMenu(e, path)}
+        >
+          <FiMoreHorizontal size={14} aria-hidden="true" />
+        </Button>
       </div>
-      {open && (
-        <Folder
-          path={path}
-          depth={0}
-          activePath={activePath}
-          onFolderContextMenu={onFolderContextMenu}
-          onFileContextMenu={onFileContextMenu}
-        />
-      )}
-    </div>
+      <div id={contentId}>
+        {open && (
+          <Folder
+            path={path}
+            depth={0}
+            activePath={activePath}
+            onFolderContextMenu={onFolderContextMenu}
+            onFileContextMenu={onFileContextMenu}
+          />
+        )}
+      </div>
+    </section>
   );
 });
 
@@ -485,6 +503,7 @@ const DirNode = memo(function DirNode({
       <Row
         depth={depth}
         active={false}
+        expanded={open}
         onClick={() => setDirExpanded(entry.path, !open)}
         onContextMenu={(e) => onFolderContextMenu(e, entry.path)}
         title={entry.path}
@@ -557,6 +576,7 @@ function Row({
   depth,
   active,
   marked,
+  expanded,
   onClick,
   onContextMenu,
   children,
@@ -565,65 +585,32 @@ function Row({
   depth: number;
   active: boolean;
   marked?: boolean;
+  expanded?: boolean;
   onClick: () => void;
   onContextMenu?: (e: React.MouseEvent) => void;
   children: React.ReactNode;
   title?: string;
 }) {
-  // The "marked for compare" highlight uses a dedicated background so it
-  // remains visible even when another tab is the active file. Mark > active
-  // visually so the user keeps track of what they staged for comparison.
-  // Selected uses --selection-bg (JetBrains "row highlight" color); hover
-  // uses the gentler --hover-bg overlay so they're visually distinct — you
-  // can tell at a glance which row is selected vs. just under the cursor.
-  const baseBg = marked
-    ? "var(--compare-mark-bg)"
-    : active
-    ? "var(--selection-bg)"
-    : "";
   return (
-    <div
+    <button
+      type="button"
       onClick={onClick}
       onContextMenu={onContextMenu}
       title={title}
-      className="flex items-center gap-1 cursor-pointer truncate"
-      style={{
-        paddingLeft: depth * 14 + 8,
-        paddingRight: 8,
-        height: 22,
-        fontSize: 13,
-        background: baseBg || undefined,
-        color: "var(--text)",
-        boxShadow: marked ? "inset 2px 0 0 var(--accent)" : undefined,
-      }}
-      onMouseEnter={(e) => {
-        if (!marked && !active) e.currentTarget.style.background = "var(--hover-bg)";
-      }}
-      onMouseLeave={(e) => {
-        if (!marked && !active) e.currentTarget.style.background = "";
-      }}
+      className="filetree-row"
+      data-active={active || undefined}
+      data-marked={marked || undefined}
+      aria-current={active ? "page" : undefined}
+      aria-expanded={expanded}
+      style={{ paddingLeft: depth * 16 + 10 }}
     >
       {children}
-    </div>
+    </button>
   );
 }
 
 function Caret({ open }: { open: boolean }) {
-  return (
-    <span
-      style={{
-        width: 12,
-        display: "inline-block",
-        textAlign: "center",
-        fontSize: 10,
-        color: "var(--text-soft)",
-        transform: open ? "rotate(90deg)" : "rotate(0deg)",
-        transition: "transform 0.1s",
-      }}
-    >
-      ▶
-    </span>
-  );
+  return <FiChevronRight size={12} className="filetree-caret" data-open={open} aria-hidden="true" />;
 }
 
 function Spinner() {

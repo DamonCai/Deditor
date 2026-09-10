@@ -7,6 +7,8 @@ import { pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { JSDOM } from "jsdom";
 import React, { act } from "react";
+import { EditorView } from "@codemirror/view";
+import MarkdownIt from "markdown-it";
 import { EditorState, StateEffect } from "@codemirror/state";
 import { history, undo, redo, undoDepth } from "@codemirror/commands";
 import { foldEffect, foldedRanges } from "@codemirror/language";
@@ -91,6 +93,8 @@ await build({
   stdin: {
     contents: `
 export * from './src/lib/fileio';
+export {loadPersisted} from './src/lib/persistence';
+export {default as FileTree} from './src/components/FileTree';
 export {default as XmindView} from './src/components/XmindView';
 export {sampleArchive} from './tests/fixtures/xmind';
 export {openDocument as openXmindDocument} from './src/lib/xmind/document';
@@ -230,6 +234,168 @@ function setInput(input, value) {
 }
 const tests = [];
 const test = (round, name, fn) => tests.push({ round, name, fn });
+
+async function withToolbarEditor(doc, fn, selection = { anchor: 0, head: doc.length }) {
+  const parent = document.createElement("div");
+  document.body.appendChild(parent);
+  const view = new EditorView({ parent, state: EditorState.create({ doc, selection, extensions: [history(), EditorView.updateListener.of(u => {
+    if (app.getActiveView() === u.view && (u.docChanged || u.selectionSet)) app.setActiveView(u.view, "a");
+  })] }) });
+  app.setActiveView(view, "a");
+  try { await fn(view); } finally {
+    await act(async () => app.setActiveView(null));
+    view.destroy(); parent.remove();
+  }
+}
+
+test(1, "Markdown inline tools toggle markup and undo as separate commands", async () => {
+  reset();
+  for (const marker of ["**", "*", "~~", "`", "$"]) {
+    await withToolbarEditor("sample", async view => {
+      app.wrapSelection(marker);
+      assert.equal(view.state.doc.toString(), marker + "sample" + marker);
+      app.wrapSelection(marker);
+      assert.equal(view.state.doc.toString(), "sample");
+      undo(view);
+      assert.equal(view.state.doc.toString(), marker + "sample" + marker);
+      undo(view);
+      assert.equal(view.state.doc.toString(), "sample");
+    });
+  }
+  for (const text of ["a`b", "`edge", "edge`", "```"]) {
+    await withToolbarEditor(text, async view => {
+      app.wrapSelection("`");
+      const token = new MarkdownIt().parseInline(view.state.doc.toString(), {})[0].children.find(t=>t.type === "code_inline");
+      assert.equal(token.content, text);
+      app.wrapSelection("`");
+      assert.equal(view.state.doc.toString(), text);
+    });
+  }
+  await withToolbarEditor("sample", async view => {
+    app.wrapSelection("**"); app.wrapSelection("*");
+    assert.equal(view.state.doc.toString(), "***sample***");
+    app.wrapSelection("*");
+    assert.equal(view.state.doc.toString(), "**sample**");
+  });
+});
+
+test(2, "Markdown headings replace levels and list conversion respects selection boundaries", async () => {
+  reset();
+  await withToolbarEditor("# Title", async view => {
+    app.prefixLines("###### "); assert.equal(view.state.doc.toString(), "###### Title");
+    app.prefixLines(""); assert.equal(view.state.doc.toString(), "Title");
+  });
+  await withToolbarEditor("a\nb\nc", async view => {
+    app.prefixLines("- "); assert.equal(view.state.doc.toString(), "- a\n- b\nc");
+    app.prefixLines("1. "); assert.equal(view.state.doc.toString(), "1. a\n2. b\nc");
+    app.prefixLines("- [ ] "); assert.equal(view.state.doc.toString(), "- [ ] a\n- [ ] b\nc");
+    app.prefixLines("- [ ] "); assert.equal(view.state.doc.toString(), "a\nb\nc");
+  }, { anchor: 0, head: 4 });
+  await withToolbarEditor("  note", async view => {
+    app.prefixLines("> "); assert.equal(view.state.doc.toString(), "  > note");
+    app.prefixLines("> "); assert.equal(view.state.doc.toString(), "  note");
+  });
+});
+
+test(3, "Markdown block and link insertion produce valid syntax without losing surrounding text", async () => {
+  reset();
+  const parser = new MarkdownIt();
+  await withToolbarEditor("beforeafter", async view => {
+    app.insertBlock("---", 3, 0);
+    const tokens = parser.parse(view.state.doc.toString(), {});
+    assert.equal(tokens.filter(t=>t.type === "hr").length, 1);
+    assert.match(view.state.doc.toString(), /^before\n\n---\n\nafter$/);
+  }, {anchor:6});
+  await withToolbarEditor("literal\n```\ncode", async view => {
+    app.insertCodeBlock("markdown");
+    const fence = parser.parse(view.state.doc.toString(), {}).find(t=>t.type === "fence");
+    assert.equal(fence.content, "literal\n```\ncode\n");
+    assert.equal(fence.info, "markdown");
+  });
+  await withToolbarEditor("", async view => {
+    app.insertLink("https://example.com/a (b)");
+    assert.equal(view.state.doc.toString(), "[link](<https://example.com/a (b)>)");
+    assert.match(parser.render(view.state.doc.toString()), /<a href=/);
+  });
+  await withToolbarEditor("label", async view => {
+    const target = app.captureEditorTarget();
+    view.dispatch({changes:{from:0,insert:"changed "}});
+    assert.equal(target.apply(()=>app.insertLink("https://example.com")), false);
+    assert.equal(view.state.doc.toString(), "changed label");
+  });
+});
+
+test(4, "Markdown toolbar dialogs validate tables and reading mode disables editing", async () => {
+  reset();
+  await withToolbarEditor("", async view => {
+    await render(React.createElement(app.MarkdownToolbar));
+    await click("Insert");
+    await click("Table");
+    const inputs = document.querySelectorAll('.md-insert-dialog input');
+    await act(async () => { setInput(inputs[0], "3"); setInput(inputs[1], "2"); });
+    await act(async () => document.querySelector('.md-insert-dialog form').dispatchEvent(new window.Event("submit", {bubbles:true,cancelable:true})));
+    assert.equal(document.querySelector('[role="dialog"]'), null);
+    const html = new MarkdownIt().render(view.state.doc.toString());
+    assert.equal((html.match(/<th>/g) || []).length, 3);
+    assert.equal((html.match(/<td>/g) || []).length, 6);
+    await act(async () => store.setState({showPreview:true,previewMaximized:true}));
+    assert.ok([...document.querySelectorAll('.md-menu-trigger')].every(b=>b.disabled));
+    assert.ok([...document.querySelectorAll('.deditor-segment')].every(b=>!b.disabled));
+  });
+});
+
+test(3, "Markdown color picker applies once and font controls respect bounds", async () => {
+  reset();
+  await withToolbarEditor("sample", async view => {
+    await act(async () => view.dispatch({selection:{anchor:0,head:6}}));
+    await render(React.createElement(app.MarkdownToolbar));
+    await click("Format");
+    await act(async () => setInput(document.querySelector('.md-menu-colors input'), "#008080"));
+    assert.equal(view.state.doc.toString(), "sample", "choosing a color does not change the document");
+    await act(async () => document.querySelector('.md-menu-colors button').click());
+    assert.equal(view.state.doc.toString(), '<span style="color:#008080">sample</span>');
+    await click("More");
+    await act(async () => store.setState({editorFontSize:10}));
+    assert.equal(document.querySelector('.md-font-controls button').disabled, true);
+    await act(async () => store.setState({editorFontSize:28}));
+    assert.equal([...document.querySelectorAll('.md-font-controls button')].at(-1).disabled, true);
+  });
+});
+
+test(1, "hover outline defaults unpinned and restores only an explicit pin", async () => {
+  reset();
+  const snapshot = { v: 3, tabs: [], workspaces: [], activeIndex: 0, theme: "light", showPreview: true, showSidebar: true, sidebarPx: 240, previewPct: 50, tocVisible: true };
+  globalThis.__invoke = async (cmd) => cmd === "read_app_state" ? JSON.stringify(snapshot) : undefined;
+  await app.loadPersisted();
+  assert.equal(store.getState().tocVisible, false, "legacy visible state is not a pin");
+  snapshot.tocPinned = true;
+  await app.loadPersisted();
+  assert.equal(store.getState().tocVisible, true, "explicit pin survives restart");
+  snapshot.tocPinned = false;
+  await app.loadPersisted();
+  assert.equal(store.getState().tocVisible, false, "unpin survives restart");
+});
+
+test(2, "same-name workspace groups collapse independently and preserve file selection", async () => {
+  reset([tab("a", "# Note", "/work/docs/readme.md")]);
+  store.setState({ workspaces: ["/work/docs", "/personal/docs"], expandedDirs: {} });
+  const calls = [];
+  globalThis.__invoke = async (cmd, args) => {
+    calls.push({cmd, ...args});
+    if (cmd === "list_dir") return [{ name: "readme.md", path: args.path + "/readme.md", is_dir: false }];
+    return undefined;
+  };
+  await render(React.createElement(app.FileTree));
+  assert.deepEqual([...document.querySelectorAll(".workspace-parent")].map(e=>e.textContent), ["/work", "/personal"]);
+  const roots = [...document.querySelectorAll(".workspace-toggle")];
+  await act(async () => roots[0].click());
+  assert.equal(roots[0].getAttribute("aria-expanded"), "false");
+  assert.equal(roots[1].getAttribute("aria-expanded"), "true");
+  assert.equal(store.getState().activeId, "a");
+  await act(async () => { roots[0].click(); await flush(); });
+  assert.equal(document.querySelector('.filetree-row[aria-current="page"]').title, "/work/docs/readme.md");
+  assert.ok(calls.every(c=>c.cmd === "list_dir"), "disclosure performs only directory reads");
+});
 
 test(1, "HTML reading renders current unsaved content and preserves document styles", async () => {
   const content = '<html lang="zh"><head><style>h1 { color: red }</style></head><body><h1>阅读</h1><img src="assets/photo.png"></body></html>';

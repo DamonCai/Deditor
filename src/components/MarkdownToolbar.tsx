@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   FiBold,
   FiItalic,
@@ -11,322 +11,430 @@ import {
   FiPlus,
   FiImage,
   FiCheckSquare,
-  FiDroplet,
-  FiEdit3,
+  FiRotateCcw,
+  FiRotateCw,
+  FiChevronDown,
 } from "react-icons/fi";
+import { undo, redo, undoDepth, redoDepth } from "@codemirror/commands";
 import {
+  captureEditorTarget,
+  getActiveEditorState,
   getActiveView,
-  insertCodeBlock,
-  insertLink,
-  insertText,
+  insertBlock,
   prefixLines,
+  subscribeActiveEditor,
   wrapSelection,
 } from "../lib/editorBridge";
 import { useEditorStore } from "../store/editor";
 import { useT } from "../lib/i18n";
-import { promptInput } from "./PromptDialog";
 import { Button } from "./ui/Button";
 import PreviewModeSwitch from "./PreviewModeSwitch";
+import MarkdownInsertDialog, { type InsertKind } from "./MarkdownInsertDialog";
 
+type Menu = "format" | "insert" | "more";
 export default function MarkdownToolbar() {
   const t = useT();
-  const moreRef = useRef<HTMLDetailsElement>(null);
-  useEffect(() => {
-    const dismiss = (event: MouseEvent) => {
-      if (moreRef.current && !moreRef.current.contains(event.target as Node)) moreRef.current.open = false;
-    };
-    const escape = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && moreRef.current?.open) {
-        moreRef.current.open = false;
-        moreRef.current.querySelector("summary")?.focus();
-      }
-    };
-    document.addEventListener("click", dismiss);
-    document.addEventListener("keydown", escape);
-    return () => { document.removeEventListener("click", dismiss); document.removeEventListener("keydown", escape); };
-  }, []);
+  const state = useSyncExternalStore(
+    subscribeActiveEditor,
+    getActiveEditorState,
+  );
+  const activeId = useEditorStore((s) => s.activeId);
+  const reading = useEditorStore((s) => s.previewMaximized && s.showPreview);
   const editorFontSize = useEditorStore((s) => s.editorFontSize);
   const setEditorFontSize = useEditorStore((s) => s.setEditorFontSize);
-
-  const onLink = async () => {
-    const url = await promptInput({
-      title: t("md.linkPromptTitle"),
-      label: "URL",
-      placeholder: "https://example.com",
-    });
-    if (url) insertLink(url);
+  const disabled = reading || !state;
+  const [menu, setMenu] = useState<Menu | null>(null);
+  const [dialog, setDialog] = useState<{
+    kind: InsertKind;
+    target: NonNullable<ReturnType<typeof captureEditorTarget>>;
+  } | null>(null);
+  const [color, setColor] = useState("#e53e3e");
+  const [highlight, setHighlight] = useState("#fff59d");
+  const rootRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const openerRef = useRef<HTMLButtonElement | null>(null);
+  const closeMenu = (restore = false) => {
+    setMenu(null);
+    if (restore) openerRef.current?.focus();
   };
-
-  const onImage = async () => {
-    // Two-step prompt — keep it simple rather than building a multi-field
-    // dialog. The first input becomes the alt text; the second is the URL.
-    const alt = await promptInput({
-      title: t("md.imagePromptTitle"),
-      label: t("md.imageAltLabel"),
-      initial: t("md.imageDefaultAlt"),
-      placeholder: t("md.imageDefaultAlt"),
-    });
-    if (alt == null) return;
-    const url = await promptInput({
-      title: t("md.imagePromptTitle"),
-      label: t("md.imageUrlLabel"),
-      placeholder: "https://example.com/pic.png",
-    });
-    if (!url) return;
-    insertText(`![${alt}](${url})`);
-  };
-
-  const wrapColor = (cssProp: "color" | "background", hex: string) => {
-    // Wrap the current selection (or empty caret) with an inline span. The
-    // markdown-it config has `html: true` so this round-trips through the
-    // preview as styled text.
-    wrapSelection(`<span style="${cssProp}:${hex}">`, `</span>`);
+  useEffect(() => {
+    setMenu(null);
+    setDialog(null);
+  }, [activeId, reading]);
+  useEffect(() => {
+    if (!menu) return;
+    const onOutside = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setMenu(null);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setMenu(null);
+        openerRef.current?.focus();
+      }
+    };
+    document.addEventListener("mousedown", onOutside);
+    document.addEventListener("keydown", onKey);
+    menuRef.current
+      ?.querySelector<HTMLElement>("button:not(:disabled), select, input")
+      ?.focus();
+    return () => {
+      document.removeEventListener("mousedown", onOutside);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menu]);
+  const run = (action: () => void) => {
+    if (disabled) return;
+    closeMenu();
+    action();
     getActiveView()?.focus();
   };
-
-  const extraTools = <>
-      <Divider />
-      {/* Color & highlight — the <input type="color"> sits on top of each
-          button. WebKit's native color picker only opens reliably when the
-          actual click lands on the input, so we make it transparent rather
-          than zero-sized. */}
-      <ColorButton
-        title={t("md.color")}
-        defaultValue="#e53e3e"
-        icon={<FiEdit3 size={13} color="#e53e3e" />}
-        onPick={(hex) => wrapColor("color", hex)}
-      />
-      <ColorButton
-        title={t("md.highlight")}
-        defaultValue="#fff59d"
-        icon={<FiDroplet size={13} color="#d69e2e" />}
-        onPick={(hex) => wrapColor("background", hex)}
-      />
-      <Divider />
-      {/* Headings */}
-      <ToolbarButton
-        title={t("md.h1")}
-        onClick={() => prefixLines("# ")}
-        label="H1"
-      />
-      <ToolbarButton
-        title={t("md.h2")}
-        onClick={() => prefixLines("## ")}
-        label="H2"
-      />
-      <ToolbarButton
-        title={t("md.h3")}
-        onClick={() => prefixLines("### ")}
-        label="H3"
-      />
-      <Divider />
-      {/* Lists & blocks */}
-      <ToolbarButton title={t("md.ulist")} onClick={() => prefixLines("- ")}>
-        <FiList size={13} />
-      </ToolbarButton>
-      <ToolbarButton
-        title={t("md.olist")}
-        onClick={() => prefixLines("1. ")}
-        label="1."
-      />
-      <ToolbarButton
-        title={t("md.tasklist")}
-        onClick={() => prefixLines("- [ ] ")}
+  const openInsert = (kind: InsertKind) => {
+    const target = captureEditorTarget();
+    if (target) {
+      closeMenu();
+      setDialog({ kind, target });
+    }
+  };
+  const history = (command: typeof undo) =>
+    run(() => {
+      const view = getActiveView();
+      if (view) command(view);
+    });
+  const selection = state?.selection.main;
+  const selected =
+    selection && state ? state.sliceDoc(selection.from, selection.to) : "";
+  const heading = state
+    ? (state.doc
+        .lineAt(state.selection.main.head)
+        .text.match(/^ {0,3}(#{1,6})\s/)?.[1].length ?? 0)
+    : 0;
+  const marked = (marker: string) =>
+    !!(
+      selection &&
+      state &&
+      ((selected.startsWith(marker) &&
+        selected.endsWith(marker) &&
+        selected.length > marker.length * 2) ||
+        (state.sliceDoc(
+          Math.max(0, selection.from - marker.length),
+          selection.from,
+        ) === marker &&
+          state.sliceDoc(selection.to, selection.to + marker.length) ===
+            marker))
+    );
+  const emphasis = (
+    <>
+      <Tool
+        title={t("md.bold")}
+        disabled={disabled}
+        pressed={marked("**")}
+        onClick={() => run(() => wrapSelection("**"))}
       >
-        <FiCheckSquare size={13} />
-      </ToolbarButton>
-      <ToolbarButton title={t("md.quote")} onClick={() => prefixLines("> ")}>
-        <FiMessageSquare size={13} />
-      </ToolbarButton>
-      <ToolbarButton title={t("md.hr")} onClick={() => insertText("\n---\n\n")}>
-        <FiMinus size={13} />
-      </ToolbarButton>
-      <Divider />
-      {/* Code & table */}
-      <ToolbarButton
-        title={t("md.codeblock")}
-        onClick={() => insertCodeBlock("")}
-        label="{ }"
-      />
-      <ToolbarButton
-        title={t("md.table")}
-        onClick={() => insertText(t("md.tableTpl"))}
+        <FiBold />
+      </Tool>
+      <Tool
+        title={t("md.italic")}
+        disabled={disabled}
+        pressed={marked("*") && (!marked("**") || marked("***"))}
+        onClick={() => run(() => wrapSelection("*"))}
       >
-        <FiTable size={13} />
-      </ToolbarButton>
-      <Divider />
-      {/* Link & image */}
-      <ToolbarButton title={t("md.link")} onClick={onLink}>
-        <FiLink size={13} />
-      </ToolbarButton>
-      <ToolbarButton title={t("md.image")} onClick={onImage}>
-        <FiImage size={13} />
-      </ToolbarButton>
-
-      {/* Editor font size */}
-      <span style={{ fontSize: 11, color: "var(--text-soft)" }}>
-        {t("md.fontSize")}
-      </span>
-      <ToolbarButton
-        title={t("md.smaller")}
-        onClick={() => setEditorFontSize(editorFontSize - 1)}
-      >
-        <FiMinus size={13} />
-      </ToolbarButton>
-      <span
-        style={{
-          fontSize: 11,
-          minWidth: 22,
-          textAlign: "center",
-          color: "var(--text)",
-        }}
-      >
-        {editorFontSize}
-      </span>
-      <ToolbarButton
-        title={t("md.bigger")}
-        onClick={() => setEditorFontSize(editorFontSize + 1)}
-      >
-        <FiPlus size={13} />
-      </ToolbarButton>
-      <Divider />
-  </>;
-
-  return (
-    <div
-      className="md-toolbar-shell select-none"
-      style={{
-        flexShrink: 0,
-        position: "relative",
-        containerType: "inline-size",
-      }}
-    >
-      <div className="md-toolbar-row">
-      {/* Inline emphasis */}
-      <ToolbarButton title={t("md.bold")} onClick={() => wrapSelection("**")}>
-        <FiBold size={13} />
-      </ToolbarButton>
-      <ToolbarButton title={t("md.italic")} onClick={() => wrapSelection("*")}>
-        <FiItalic size={13} />
-      </ToolbarButton>
-      <ToolbarButton
+        <FiItalic />
+      </Tool>
+      <Tool
         title={t("md.strikethrough")}
-        onClick={() => wrapSelection("~~")}
-        label="S̶"
-      />
-      <ToolbarButton title={t("md.inlineCode")} onClick={() => wrapSelection("`")}>
-        <FiCode size={13} />
-      </ToolbarButton>
-      <div className="md-toolbar-expanded">{extraTools}</div>
-      <details ref={moreRef} className="md-toolbar-more">
-        <summary>{t("md.more")}</summary>
-        <div className="md-toolbar-popover" onClick={(event) => { if ((event.target as HTMLElement).closest("button") && moreRef.current) moreRef.current.open = false; }}>{extraTools}</div>
-      </details>
-      <div style={{ flex: 1 }} />
-      {/* View mode: edit-only / split / preview-only. Rendered as a segmented
-          control so the active mode is clearly visible. Drives
-          showPreview + previewMaximized in the store. */}
-      <PreviewModeSwitch />
+        disabled={disabled}
+        pressed={marked("~~")}
+        onClick={() => run(() => wrapSelection("~~"))}
+      >
+        <span className="md-strike">S</span>
+      </Tool>
+      <Tool
+        title={t("md.inlineCode")}
+        disabled={disabled}
+        pressed={marked("`")}
+        onClick={() => run(() => wrapSelection("`"))}
+      >
+        <FiCode />
+      </Tool>
+    </>
+  );
+  const headingSelect = (
+    <select
+      className="deditor-input deditor-input--compact md-heading-select"
+      aria-label={t("md.heading")}
+      disabled={disabled}
+      value={heading}
+      onChange={(e) =>
+        run(() =>
+          prefixLines(
+            "#".repeat(Number(e.target.value)) +
+              (Number(e.target.value) ? " " : ""),
+          ),
+        )
+      }
+    >
+      <option value={0}>{t("md.paragraph")}</option>
+      {[1, 2, 3, 4, 5, 6].map((n) => (
+        <option key={n} value={n}>
+          H{n}
+        </option>
+      ))}
+    </select>
+  );
+  const item = (key: string, action: () => void, icon?: React.ReactNode) => (
+    <button
+      type="button"
+      className="md-menu-item"
+      aria-label={t(key)}
+      onClick={() => run(action)}
+    >
+      {icon}
+      <span>{t(key)}</span>
+    </button>
+  );
+  return (
+    <>
+      <div
+        ref={rootRef}
+        className="md-toolbar-shell select-none"
+        style={{ position: "relative", containerType: "inline-size" }}
+      >
+        <div className="md-toolbar-row">
+          <div className="md-toolbar-history">
+            <Tool
+              title={t("md.undo")}
+              disabled={disabled || !state || undoDepth(state) === 0}
+              onClick={() => history(undo)}
+            >
+              <FiRotateCcw />
+            </Tool>
+            <Tool
+              title={t("md.redo")}
+              disabled={disabled || !state || redoDepth(state) === 0}
+              onClick={() => history(redo)}
+            >
+              <FiRotateCw />
+            </Tool>
+            <Divider />
+          </div>
+          <div className="md-toolbar-heading">{headingSelect}</div>
+          <div className="md-toolbar-inline">
+            {emphasis}
+            <Divider />
+          </div>
+          {(["format", "insert", "more"] as const).map((name) => (
+            <Button
+              key={name}
+              variant="ghost"
+              size="sm"
+              disabled={disabled}
+              className="md-menu-trigger"
+              aria-expanded={menu === name}
+              aria-controls={`md-menu-${name}`}
+              onClick={(e) => {
+                openerRef.current = e.currentTarget;
+                setMenu(menu === name ? null : name);
+              }}
+            >
+              {t(`md.${name}`)}
+              <FiChevronDown size={12} />
+            </Button>
+          ))}
+          <div className="md-toolbar-spacer" />
+          <PreviewModeSwitch />
+        </div>
+        {menu && !disabled && (
+          <div
+            ref={menuRef}
+            id={`md-menu-${menu}`}
+            className={`md-toolbar-popover md-toolbar-popover--${menu}`}
+            role="group"
+            aria-label={t(`md.${menu}`)}
+            onBlur={(e) => {
+              if (
+                e.relatedTarget &&
+                !rootRef.current?.contains(e.relatedTarget)
+              )
+                setMenu(null);
+            }}
+          >
+            {menu === "format" && (
+              <>
+                <div className="md-menu-section">
+                  {headingSelect}
+                  {emphasis}
+                </div>
+                {item("md.ulist", () => prefixLines("- "), <FiList />)}
+                {item("md.olist", () => prefixLines("1. "), <span>1.</span>)}
+                {item(
+                  "md.tasklist",
+                  () => prefixLines("- [ ] "),
+                  <FiCheckSquare />,
+                )}
+                {item("md.quote", () => prefixLines("> "), <FiMessageSquare />)}
+                <div className="md-menu-colors">
+                  <label>
+                    {t("md.color")}
+                    <input
+                      type="color"
+                      aria-label={t("md.color")}
+                      value={color}
+                      onInput={(e) => setColor(e.currentTarget.value)}
+                      onChange={(e) => setColor(e.target.value)}
+                    />
+                  </label>
+                  <Button
+                    size="sm"
+                    onClick={() =>
+                      run(() =>
+                        wrapSelection(
+                          `<span style="color:${color}">`,
+                          "</span>",
+                        ),
+                      )
+                    }
+                  >
+                    {t("md.apply")}
+                  </Button>
+                  <label>
+                    {t("md.highlight")}
+                    <input
+                      type="color"
+                      aria-label={t("md.highlight")}
+                      value={highlight}
+                      onInput={(e) => setHighlight(e.currentTarget.value)}
+                      onChange={(e) => setHighlight(e.target.value)}
+                    />
+                  </label>
+                  <Button
+                    size="sm"
+                    onClick={() =>
+                      run(() =>
+                        wrapSelection(
+                          `<span style="background:${highlight}">`,
+                          "</span>",
+                        ),
+                      )
+                    }
+                  >
+                    {t("md.apply")}
+                  </Button>
+                </div>
+              </>
+            )}
+            {menu === "insert" && (
+              <>
+                {item("md.link", () => openInsert("link"), <FiLink />)}
+                {item("md.image", () => openInsert("image"), <FiImage />)}
+                {item("md.table", () => openInsert("table"), <FiTable />)}
+                {item(
+                  "md.codeblock",
+                  () => openInsert("codeblock"),
+                  <FiCode />,
+                )}
+                {item("md.hr", () => insertBlock("---", 3, 0), <FiMinus />)}
+                <div className="md-menu-separator" />
+                {item(
+                  "md.inlineMath",
+                  () => wrapSelection("$"),
+                  <span>ƒ</span>,
+                )}
+                {item(
+                  "md.blockMath",
+                  () => {
+                    const value = selected || "E = mc^2";
+                    insertBlock(`$$\n${value}\n$$`, 3, value.length);
+                  },
+                  <span>∑</span>,
+                )}
+                {item(
+                  "md.mermaid",
+                  () => {
+                    const diagram =
+                      "```mermaid\nflowchart LR\n  A[Start] --> B[End]\n```";
+                    insertBlock(diagram, diagram.indexOf("Start"), 5);
+                  },
+                  <span>◇</span>,
+                )}
+              </>
+            )}
+            {menu === "more" && (
+              <>
+                <div className="md-menu-section">
+                  <Button
+                    size="sm"
+                    disabled={!state || undoDepth(state) === 0}
+                    onClick={() => history(undo)}
+                  >
+                    {t("md.undo")}
+                  </Button>
+                  <Button
+                    size="sm"
+                    disabled={!state || redoDepth(state) === 0}
+                    onClick={() => history(redo)}
+                  >
+                    {t("md.redo")}
+                  </Button>
+                </div>
+                <div className="md-menu-section md-font-controls">
+                  <span>{t("md.editorFontSize")}</span>
+                  <Tool
+                    title={t("md.smaller")}
+                    disabled={editorFontSize <= 10}
+                    onClick={() => setEditorFontSize(editorFontSize - 1)}
+                  >
+                    <FiMinus />
+                  </Tool>
+                  <output>{editorFontSize}</output>
+                  <Tool
+                    title={t("md.bigger")}
+                    disabled={editorFontSize >= 28}
+                    onClick={() => setEditorFontSize(editorFontSize + 1)}
+                  >
+                    <FiPlus />
+                  </Tool>
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
-    </div>
+      {dialog && (
+        <MarkdownInsertDialog {...dialog} onClose={() => setDialog(null)} />
+      )}
+    </>
   );
 }
-
-function ToolbarButton({
-  children,
+function Tool({
   title,
   onClick,
-  label,
+  disabled,
   pressed,
+  children,
 }: {
-  children?: React.ReactNode;
   title: string;
   onClick: () => void;
-  label?: string;
+  disabled?: boolean;
   pressed?: boolean;
+  children: React.ReactNode;
 }) {
   return (
     <Button
       variant="ghost"
-      size={label ? "sm" : "icon"}
+      size="icon"
       title={title}
-      onClick={onClick}
+      aria-label={title}
+      disabled={disabled}
       pressed={pressed}
-      style={
-        label
-          ? { height: 24, fontWeight: 600, color: "var(--text)" }
-          : { color: "var(--text)" }
-      }
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={onClick}
+      className="md-tool"
     >
-      {label ?? children}
+      {children}
     </Button>
   );
 }
-
-function ColorButton({
-  title,
-  defaultValue,
-  icon,
-  onPick,
-}: {
-  title: string;
-  defaultValue: string;
-  icon: React.ReactNode;
-  onPick: (hex: string) => void;
-}) {
-  return (
-    <label
-      title={title}
-      style={{
-        height: 24,
-        padding: "0 5px",
-        position: "relative",
-        display: "inline-flex",
-        alignItems: "center",
-        borderRadius: 4,
-        background: "transparent",
-        cursor: "pointer",
-        color: "var(--text)",
-      }}
-      onMouseEnter={(e) =>
-        (e.currentTarget.style.background = "var(--hover-bg)")
-      }
-      onMouseLeave={(e) =>
-        (e.currentTarget.style.background = "transparent")
-      }
-    >
-      <input
-        type="color"
-        defaultValue={defaultValue}
-        onInput={(e) => onPick((e.target as HTMLInputElement).value)}
-        style={{
-          position: "absolute",
-          inset: 0,
-          width: "100%",
-          height: "100%",
-          opacity: 0,
-          cursor: "pointer",
-          // Zero border / padding so the click target matches the visible button.
-          border: "none",
-          padding: 0,
-          margin: 0,
-          background: "transparent",
-        }}
-      />
-      {icon}
-    </label>
-  );
-}
-
 function Divider() {
-  return (
-    <div
-      style={{
-        width: 1,
-        height: 14,
-        background: "var(--border)",
-        margin: "0 4px",
-      }}
-    />
-  );
+  return <span className="md-toolbar-divider" aria-hidden="true" />;
 }

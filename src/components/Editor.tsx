@@ -64,7 +64,7 @@ const exportHtml = () => import("../lib/export").then((m) => m.exportHtml());
 const exportPdf = () => import("../lib/export").then((m) => m.exportPdf());
 import { codeBlockCompletion } from "../lib/codeBlockComplete";
 import { logError, logInfo } from "../lib/logger";
-import { setActiveView, getActiveView } from "../lib/editorBridge";
+import { setActiveView, getActiveView, notifyActiveEditor } from "../lib/editorBridge";
 import { tStatic, useT } from "../lib/i18n";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
 
@@ -357,6 +357,7 @@ export default function Editor({
             if (getActiveView() === u.view) setActiveView(u.view, tabId, next);
             onChangeRef.current(next);
           }
+          if (u.selectionSet && !u.docChanged && getActiveView() === u.view) notifyActiveEditor();
           if (u.selectionSet || u.docChanged) {
             positionRef.current.cursor = u.state.selection.main.head;
             schedulePositionFlush();

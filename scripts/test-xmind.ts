@@ -522,6 +522,37 @@ test(1, "fishbone has alternating diagonal ribs with horizontal twigs on each ri
       `overlap: ${a.topic.id}, ${b.topic.id}`);
   }
 });
+test(1, "opposite fishbone ribs attach at staggered spine positions", () => {
+  for (const direction of ["leftHeaded", "rightHeaded"]) {
+    const sheet = fishSheet(`org.xmind.ui.fishbone.${direction}`, 6);
+    const scene = buildScene(sheet);
+    const roots = sheet.rootTopic.children!.attached!;
+    const bases = roots.map(t => scene.edges.find(e => e.to === t.id)!.points![0]);
+    const sign = direction === "leftHeaded" ? 1 : -1;
+    for (let i = 1; i < bases.length; i++) {
+      assert.ok(sign * (bases[i].x - bases[i - 1].x) > 0,
+        "successive upper/lower ribs must have separate, ordered junctions");
+      assert.equal(bases[i].y, bases[0].y);
+    }
+    const trunk = scene.edges.find(e => e.trunk)!.trunk!;
+    for (const base of bases) {
+      assert.ok(base.x >= Math.min(trunk[0].x, trunk[1].x));
+      assert.ok(base.x <= Math.max(trunk[0].x, trunk[1].x));
+    }
+  }
+});
+test(3, "staggered fishbone keeps lower twigs attached when an opposite rib folds", () => {
+  const sheet = fishSheet();
+  for (const folded of [new Set<string>(), new Set(["cause-0"]), new Set(["cause-1"])]) {
+    const scene = buildScene(sheet, folded);
+    const ribs = [0, 1].map(i => scene.edges.find(e => e.to === `cause-${i}`)!.points!);
+    assert.ok(ribs[1][0].x > ribs[0][0].x);
+    for (const e of scene.edges.filter(e => e.from === "cause-1")) {
+      const anchor = e.points![0], base = ribs[1][0];
+      assert.ok(Math.abs(anchor.x - base.x - Math.abs(anchor.y) / Math.sqrt(3)) < 1e-8);
+    }
+  }
+});
 test(2, "fishbone handles empty, single, odd, mirrored and deeply nested causes", () => {
   for (const count of [0, 1, 3, 8]) {
     const left = fishSheet(undefined, count), right = fishSheet("org.xmind.ui.fishbone.rightHeaded", count);

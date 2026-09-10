@@ -40,7 +40,8 @@ interface PersistedV3 {
   editorFontSize?: number;
   previewMaximized?: boolean;
   /** Right-side TOC visibility in markdown reading mode. Default true. */
-  tocVisible?: boolean;
+  tocVisible?: boolean; // Legacy expanded state; hover outlines start unpinned.
+  tocPinned?: boolean;
   language?: Lang;
   /** Per-shortcut enable map. Optional so older snapshots keep loading. */
   shortcuts?: Record<string, boolean>;
@@ -271,7 +272,7 @@ export async function loadPersisted(): Promise<UiExtras | null> {
     showPreview: data.showPreview,
     showSidebar: data.showSidebar,
     previewMaximized: data.previewMaximized ?? false,
-    tocVisible: data.tocVisible ?? true,
+    tocVisible: data.tocPinned ?? false,
   });
 
   if (data.shortcuts && typeof data.shortcuts === "object") {
@@ -372,7 +373,7 @@ function doSave(extras: UiExtras): void {
     previewPct: extras.previewPct,
     editorFontSize: s.editorFontSize,
     previewMaximized: s.previewMaximized,
-    tocVisible: s.tocVisible,
+    tocPinned: s.tocVisible,
     language: s.language,
     shortcuts: s.shortcuts,
     expandedDirs: s.expandedDirs,

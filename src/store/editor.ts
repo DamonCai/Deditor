@@ -369,7 +369,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   showPreview: true,
   showSidebar: true,
   previewMaximized: false,
-  tocVisible: true,
+  tocVisible: false,
   editorFontSize: 14,
   compareMarkPath: null,
   activeSelectionLength: 0,

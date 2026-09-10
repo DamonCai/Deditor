@@ -389,6 +389,9 @@ export function buildScene(
         let pairRight = cursor;
         for (let j = i; j < Math.min(i + 2, children.length); j++) {
           const child = children[j], sign = j % 2 === 0 ? -1 : 1;
+          // Opposite ribs join distinct points on the spine, rather than a
+          // shared V-shaped junction. Translate the whole lower rib together.
+          const base = cursor + (sign > 0 ? 36 : 0);
           const branchIndex = depth === 0 ? j : branch;
           const bare = { ...child, children: { ...child.children, attached: [] } };
           const part = layout(bare, depth + 1, branchIndex, "right", topic.id);
@@ -403,12 +406,12 @@ export function buildScene(
             return { anchorY, before: sign < 0 ? above : below, after: sign < 0 ? below : above };
           });
           const reach = Math.max(90, slots.reduce((sum, slot) => sum + slot.before + slot.after + 24, 0) + 48);
-          const tip = { x: cursor + reach / Math.sqrt(3), y: sign * reach };
+          const tip = { x: base + reach / Math.sqrt(3), y: sign * reach };
           shift(part, tip.x, tip.y + sign * cause.height / 2);
           let distance = reach;
           leaves.forEach((leaf, k) => {
             distance -= 24 + slots[k].before;
-            const anchor = { x: cursor + distance / Math.sqrt(3), y: sign * distance };
+            const anchor = { x: base + distance / Math.sqrt(3), y: sign * distance };
             const leafRoot = leaf.nodes[0];
             shift(leaf, anchor.x + 24 - leaf.bounds.x,
               anchor.y - slots[k].anchorY);
@@ -420,7 +423,7 @@ export function buildScene(
           });
           part.bounds = boundsOf(part.nodes);
           pairRight = Math.max(pairRight, part.bounds.x + part.bounds.width);
-          ribs.push({ part, base: cursor, tip });
+          ribs.push({ part, base, tip });
         }
         cursor = pairRight + 64;
       }
