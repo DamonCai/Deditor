@@ -627,4 +627,67 @@ test(2, "many and unknown markers wrap inside shaped topics without phantom text
   }
 });
 
+const styledBranches = (direction: "left" | "right"): Sheet => ({
+  id: "styled", title: "Styled branches", theme: {
+    map: { properties: { "multi-line-colors": "#2563EB #DB2777" } },
+    centralTopic: { properties: { "line-class": "org.xmind.branchConnection.curve" } },
+    mainTopic: { properties: { "line-class": "org.xmind.branchConnection.roundedElbow" } },
+    subTopic: { properties: { "shape-class": "org.xmind.topicShape.underline" } },
+    calloutTopic: { properties: { "svg:fill": "#FFE4E6", "shape-class": "roundedRect" } },
+  }, rootTopic: { id: "root", title: "Root", structureClass: `org.xmind.ui.logic.${direction}`, children: { attached: [
+    { id: "main", title: "Architecture", style: { properties: { "line-color": "#DB2777" } }, children: {
+      attached: [{id:"a",title:"Frontend",children:{attached:[{id:"leaf",title:"SVG"}]}},{id:"b",title:"Native"},{id:"c",title:"Documentation"}],
+      callout: [{id:"bubble",title:"批注",position:{x:0,y:-160}}],
+    } },
+  ] } },
+});
+test(1, "rounded branches inherit color, share a spine and join underline endpoints on either side", () => {
+  for (const direction of ["left", "right"] as const) {
+    const scene = buildScene(styledBranches(direction));
+    const node = (id: string) => scene.nodes.find(n => n.topic.id === id)!;
+    for (const id of ["a", "b", "leaf"]) {
+      assert.equal(node(id).lineColor, "#DB2777");
+      assert.equal(node(id).stroke, "#DB2777");
+      assert.equal(node(id).properties["line-class"], "org.xmind.branchConnection.roundedElbow");
+    }
+    const paths = ["a", "b"].map(id => edgePath(scene.edges.find(e=>e.to===id)!,node("main"),node(id)));
+    const stems = paths.map(p => p.match(/^M[^ ]+ H([^ ]+)/)![1]);
+    assert.equal(stems[0],stems[1]);
+    assert.ok(paths[0].includes(" Q"));
+    assert.ok(!paths[1].includes(" Q"), "middle child joins the shared trunk without an extra bend");
+    paths.forEach((p,i)=>{
+      assert.ok(!p.includes(" C"));
+      assert.ok(p.endsWith(`H${direction === "left" ? node(i ? "b" : "a").x + node(i ? "b" : "a").width : node(i ? "b" : "a").x}`));
+      const endY = node(i ? "b" : "a").y + node(i ? "b" : "a").height;
+      assert.ok(p.includes(`,${endY}`) || p.includes(`V${endY}`));
+    });
+    assert.ok(edgePath(scene.edges.find(e=>e.to==="main")!,node("root"),node("main")).includes(" Q"));
+  }
+});
+test(2, "callout positions control filled tails above, below and beside their parent", () => {
+  for (const position of [{x:0,y:-160},{x:0,y:160},{x:-300,y:0},{x:300,y:0}]) {
+    const sheet = styledBranches("left");
+    sheet.rootTopic.children!.attached![0].children!.callout![0].position = position;
+    const scene = buildScene(sheet), parent = scene.nodes.find(n=>n.topic.id==="main")!, bubble=scene.nodes.find(n=>n.topic.id==="bubble")!;
+    assert.ok(Math.abs(bubble.x+bubble.width/2-parent.x-parent.width/2-position.x)<1e-8);
+    assert.ok(Math.abs(bubble.y+bubble.height/2-parent.y-parent.height/2-position.y)<1e-8);
+    assert.equal(bubble.stroke,"none");
+    const edge=scene.edges.find(e=>e.to==="bubble")!;
+    assert.equal(edge.callout,true);
+    const path=edgePath(edge,parent,bubble);
+    assert.ok(path.endsWith(" Z"));assert.ok(!/NaN|Infinity| H| V/.test(path));
+  }
+});
+test(3, "callout and rounded branches survive edit, save, reopen and folding without source mutation", () => {
+  const sheets=[styledBranches("right")], bytes=zipSync({"content.json":strToU8(JSON.stringify(sheets))});
+  const doc=openDocument(bytes);
+  const edited=editDocument(doc.sheets,"styled",{type:"title",id:"bubble",title:"保存后的批注"});
+  const reopened=openDocument(writeDocument(doc,edited));
+  assert.deepEqual(findTopic(reopened.sheets[0].rootTopic,"bubble")!.position,{x:0,y:-160});
+  const scene=buildScene(reopened.sheets[0],new Set(["a"]));
+  assert.ok(scene.edges.find(e=>e.to==="bubble")!.callout);
+  assert.equal(scene.nodes.find(n=>n.topic.id==="b")!.lineColor,"#DB2777");
+  assert.deepEqual(writeDocument(doc,doc.sheets),bytes);
+});
+
 console.log(`${passed} XMind tests passed`);

@@ -39,6 +39,8 @@ export interface Edge {
   to: string;
   direction: Direction;
   brace: boolean;
+  callout?: boolean;
+  roundedCorner?: boolean;
   points?: { x: number; y: number }[];
   trunk?: { x: number; y: number }[];
 }
@@ -107,6 +109,7 @@ export function styleFor(
   depth: number,
   branch: number,
   kind?: "floatingTopic" | "calloutTopic" | "summaryTopic",
+  connection?: Properties,
 ) {
   const theme = sheet.theme ?? {};
   const colors =
@@ -122,6 +125,7 @@ export function styleFor(
   const branchColor = colors[branch % colors.length] ?? palette[0];
   const p: Properties = {
     "fo:font-weight": depth < 2 ? "600" : "400",
+    ...connection,
     ...defined(
       theme[
         kind ??
@@ -153,7 +157,7 @@ export function styleFor(
             ? "#f4f8fc"
             : "#ffffff"),
     color: p["fo:color"] ?? (depth === 0 ? "#ffffff" : "#283b4c"),
-    stroke: p["border-line-color"] ?? (depth === 0 ? "#354d69" : branchColor),
+    stroke: p["border-line-color"] ?? (kind === "calloutTopic" ? "none" : depth === 0 ? "#354d69" : p["line-color"] ?? branchColor),
     lineColor: p["line-color"] ?? branchColor,
     shape: p["shape-class"] ?? (depth < 2 ? "roundedRect" : "underline"),
   };
@@ -235,8 +239,9 @@ export function buildScene(
     parent?: string,
     detached = false,
     kind?: "floatingTopic" | "calloutTopic" | "summaryTopic",
+    connection?: Properties,
   ): Fragment {
-    const style = styleFor(sheet, topic, depth, branch, kind),
+    const style = styleFor(sheet, topic, depth, branch, kind, connection),
       p = style.properties;
     const widthHint = number(
       p["fo:max-width"] ?? p["fo:width"],
@@ -324,10 +329,11 @@ export function buildScene(
         ...f.edges,
       );
     };
-    const arrange = (topics: Topic[], d: Direction, offset = 0) => {
+    const arrange = (topics: Topic[], d: Direction) => {
       const vertical = d === "down" || d === "up";
-      const parts = topics.map((t, i) =>
-        layout(t, depth + 1, depth === 0 ? offset + i : branch, d, topic.id),
+      const parts = topics.map((t) =>
+        layout(t, depth + 1, depth === 0 ? children.indexOf(t) : branch, d, topic.id,
+          false, undefined, depth > 0 ? connectionStyle(node) : undefined),
       );
       const gap = vertical ? 36 : depth === 0 ? 35 : 18;
       const length =
@@ -363,6 +369,17 @@ export function buildScene(
         }
         add(part, d);
       }
+      if (!vertical && parts.length) {
+        const anchors = parts.map(part => {
+          const n = part.nodes[0];
+          return { id: n.topic.id, y: n.y + n.height * (n.shape.toLowerCase().includes("underline") ? 1 : 0.5) };
+        });
+        const top = Math.min(...anchors.map(a => a.y)), bottom = Math.max(...anchors.map(a => a.y));
+        for (const edge of fragment.edges.filter(e => e.from === topic.id)) {
+          const anchor = anchors.find(a => a.id === edge.to);
+          if (anchor) edge.roundedCorner = anchor.y === top || anchor.y === bottom;
+        }
+      }
     };
     if (direction === "side") {
       const extensions = topic.extensions as
@@ -379,7 +396,7 @@ export function buildScene(
         ? Math.max(0, Math.min(children.length, Math.floor(parsed)))
         : Math.ceil(children.length / 2);
       arrange(children.slice(0, split), "right");
-      arrange(children.slice(split).reverse(), "left", split);
+      arrange(children.slice(split).reverse(), "left");
     } else if (direction === "fishbone") {
       // Each cause is a diagonal rib. Its children join successive points on
       // that rib horizontally, ordered from the tip towards the spine.
@@ -398,7 +415,7 @@ export function buildScene(
           const cause = part.nodes[0];
           cause.topic = child;
           const leaves = (folded.has(child.id) ? [] : child.children?.attached ?? [])
-            .map(t => layout(t, depth + 2, branchIndex, "right", child.id));
+            .map(t => layout(t, depth + 2, branchIndex, "right", child.id, false, undefined, connectionStyle(cause)));
           const slots = leaves.map(f => {
             const n = f.nodes[0];
             const anchorY = n.y + n.height * (n.shape.toLowerCase().includes("underline") ? 1 : 0.5);
@@ -484,10 +501,11 @@ export function buildScene(
       );
       shift(
         f,
-        width / 2 + 30 - f.bounds.x,
-        -height / 2 - 38 - f.bounds.y - f.bounds.height - i * 80,
+        t.position?.x ?? 0,
+        t.position?.y ?? -height / 2 - 80 - f.nodes[0].height / 2 - i * 80,
       );
-      add(f, "up");
+      fragment.nodes.push(...f.nodes);
+      fragment.edges.push({ from: topic.id, to: t.id, direction: "up", brace: false, callout: true }, ...f.edges);
     }
     fragment.bounds = boundsOf([...fragment.nodes, ...fragment.edges.flatMap(e =>
       [...(e.points ?? []), ...(e.trunk ?? [])].map(p => ({ ...p, width: 0, height: 0 }))) ]);
@@ -607,7 +625,35 @@ export function buildScene(
       "#ffffff",
   };
 }
+/** Only branch styling flows down the tree; topic fills/fonts stay tier-specific. */
+function connectionStyle(node: SceneNode): Properties {
+  return { "line-color": node.lineColor,
+    ...(node.properties["line-class"] ? { "line-class": node.properties["line-class"] } : {}) };
+}
+
+/** A filled callout tail joins the facing edges, including side/below callouts. */
+export function calloutTailPath(parent: Box, bubble: Box): string {
+  if (parent.x < bubble.x + bubble.width && bubble.x < parent.x + parent.width &&
+      parent.y < bubble.y + bubble.height && bubble.y < parent.y + parent.height) return "";
+  const boundary = (box: Box, other: Box) => {
+    const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+    const dx = other.x + other.width / 2 - cx, dy = other.y + other.height / 2 - cy;
+    const vertical = Math.abs(dy) / box.height >= Math.abs(dx) / box.width;
+    const scale = vertical ? box.height / 2 / Math.abs(dy) : box.width / 2 / Math.abs(dx);
+    return { x: cx + dx * scale, y: cy + dy * scale, vertical };
+  };
+  const base = boundary(bubble, parent), tip = boundary(parent, bubble);
+  const half = Math.min(8, (base.vertical ? bubble.width : bubble.height) / 4);
+  if (base.vertical) {
+    const x = Math.max(bubble.x + half, Math.min(bubble.x + bubble.width - half, base.x));
+    return `M${x - half},${base.y} L${tip.x},${tip.y} L${x + half},${base.y} Z`;
+  }
+  const y = Math.max(bubble.y + half, Math.min(bubble.y + bubble.height - half, base.y));
+  return `M${base.x},${y - half} L${tip.x},${tip.y} L${base.x},${y + half} Z`;
+}
+
 export function edgePath(edge: Edge, from: SceneNode, to: SceneNode): string {
+  if (edge.callout) return calloutTailPath(from, to);
   if (edge.points) return [edge.trunk ?? [], edge.points].map(points =>
     points.map((p, i) => `${i ? "L" : "M"}${p.x},${p.y}`).join(" ")).join(" ").trim();
   const cx = (n: Box) => n.x + n.width / 2,
@@ -624,12 +670,23 @@ export function edgePath(edge: Edge, from: SceneNode, to: SceneNode): string {
   }
   const vertical = d === "up" || d === "down";
   const x1 = vertical ? cx(from) : d === "left" ? from.x : from.x + from.width;
-  const y1 = vertical ? (d === "up" ? from.y : from.y + from.height) : cy(from);
+  const y1 = vertical ? (d === "up" ? from.y : from.y + from.height) : from.shape.toLowerCase().includes("underline") ? from.y + from.height : cy(from);
   const x2 = vertical ? cx(to) : d === "left" ? to.x + to.width : to.x;
-  const y2 = vertical ? (d === "up" ? to.y + to.height : to.y) : cy(to);
+  const y2 = vertical ? (d === "up" ? to.y + to.height : to.y) : to.shape.toLowerCase().includes("underline") ? to.y + to.height : cy(to);
   const lineClass =
-    to.properties["line-class"] ?? from.properties["line-class"] ?? "";
+    (from.properties["line-class"] ?? to.properties["line-class"] ?? "").toLowerCase();
   if (lineClass.includes("straight")) return `M${x1},${y1} L${x2},${y2}`;
+  if (!vertical && lineClass.includes("roundedelbow")) {
+    // Every sibling uses the same spine beside its parent. The overlapping
+    // stem segments form one trunk; only the turn into each child is rounded.
+    const sign = d === "left" ? -1 : 1;
+    const spine = x1 + sign * 24;
+    const r = Math.min(12, Math.abs(y2 - y1), Math.abs(x2 - spine));
+    const turn = Math.sign(y2 - y1);
+    if (!turn) return `M${x1},${y1} H${x2}`;
+    if (edge.roundedCorner === false) return `M${x1},${y1} H${spine} V${y2} H${x2}`;
+    return `M${x1},${y1} H${spine} V${y2 - turn * r} Q${spine},${y2} ${spine + sign * r},${y2} H${x2}`;
+  }
   if (
     lineClass.includes("elbow") ||
     vertical ||

@@ -26,7 +26,6 @@ import { registerDocumentFlush } from "../lib/documentFlush";
 import { logError } from "../lib/logger";
 import { useT } from "../lib/i18n";
 import { Button } from "./ui/Button";
-import { FiX } from "react-icons/fi";
 import "./xmind.css";
 
 interface Props {
@@ -479,13 +478,6 @@ export default function XmindView({ dataUrl, tabId }: Props) {
           <aside className="xm-inspector" aria-label={t("xmind.inspector")}>
             <div className="xm-panel-title">
               {t("xmind.inspector")}
-              <Button
-                size="sm"
-                onClick={() => setInspector(false)}
-                aria-label={t("common.close")}
-              >
-                <FiX />
-              </Button>
             </div>
             {topic ? (
               <>

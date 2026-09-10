@@ -1,6 +1,7 @@
 import MarkdownIt from "markdown-it";
 import anchor from "markdown-it-anchor";
 import taskLists from "markdown-it-task-lists";
+import { markdownTableLists } from "./markdownTableLists";
 import { ensureLanguage, getHighlighter } from "./highlight";
 import { detectLang } from "./lang";
 import { tStatic } from "./i18n";
@@ -98,6 +99,7 @@ const md = new MarkdownIt({
 });
 
 md.use(anchor, { permalink: false });
+md.use(markdownTableLists);
 md.use(taskLists, { enabled: false });
 // KaTeX is registered lazily by renderMarkdown() when the source actually
 // contains math — see loadKatex().

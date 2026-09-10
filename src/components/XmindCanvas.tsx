@@ -544,6 +544,18 @@ export default function XmindCanvas({
           pointer.current = null;
           setDragOffset(null);
           if (!p?.dragged || !p.id || p.id === sheet.rootTopic.id) return;
+          const callout = scene.edges.find((edge) => edge.callout && edge.to === p.id);
+          if (callout) {
+            const node = byId.get(p.id)!, parent = byId.get(callout.from)!;
+            // Callouts stay attached to their owner; their coordinates are
+            // relative to its centre, unlike free topics in canvas space.
+            onCommand({
+              type: "position", id: p.id,
+              x: node.x + node.width / 2 - parent.x - parent.width / 2 + (e.clientX - p.x) / camera.zoom,
+              y: node.y + node.height / 2 - parent.y - parent.height / 2 + (e.clientY - p.y) / camera.zoom,
+            });
+            return;
+          }
           const target = document
             .elementFromPoint(e.clientX, e.clientY)
             ?.closest("[data-topic]")
@@ -665,11 +677,14 @@ export default function XmindCanvas({
           return from && to ? (
             <path
               key={i}
-              d={edgePath(e, from, to)}
-              fill="none"
-              stroke={to.lineColor}
+              d={edgePath(e, from, e.callout && dragOffset?.id === e.to
+                ? { ...to, x: to.x + dragOffset.x, y: to.y + dragOffset.y }
+                : to)}
+              data-callout-tail={e.callout || undefined}
+              fill={e.callout ? to.fill : "none"}
+              stroke={e.callout ? "none" : to.lineColor}
               strokeWidth={parseFloat(
-                to.properties["line-width"] ?? (to.depth === 1 ? "2.5" : "1.5"),
+                (e.points ? to : from).properties["line-width"] ?? (to.depth === 1 ? "2.5" : "1.5"),
               )}
             />
           ) : null;

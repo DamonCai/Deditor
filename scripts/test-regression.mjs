@@ -543,6 +543,23 @@ test(1, "unchanged save does not write or change mtime", async () => {
   assert.equal(await app.saveFile(), true);
   assert.equal(writes.length, 0);
 });
+test(1, "XMind callouts render a filled tail and remain editable through standard save", async () => {
+  await mountXmind();
+  const tail=document.querySelector('[data-callout-tail="true"]');
+  assert.ok(tail);assert.equal(tail.getAttribute('stroke'),'none');
+  assert.notEqual(tail.getAttribute('fill'),'none');
+  assert.ok(tail.getAttribute('d').endsWith(' Z'));
+  const bubble=document.querySelector('[data-topic="callout"]');
+  assert.ok(bubble);
+  await act(async()=>bubble.dispatchEvent(new window.MouseEvent('dblclick',{bubbles:true})));
+  await act(async()=>setInput(document.querySelector('textarea[aria-label="Edit topic text"]'),'批注修改后保存'));
+  await act(async()=>app.saveFile());
+  const saved=app.openXmindDocument(new Uint8Array(Buffer.from(writes.at(-1).data,'base64')));
+  const collect=t=>[t,...Object.values(t.children??{}).filter(Array.isArray).flatMap(cs=>cs.flatMap(collect))];
+  assert.equal(collect(saved.sheets[0].rootTopic).find(t=>t.id==='callout').title,'批注修改后保存');
+  assert.ok(document.querySelector('[data-callout-tail="true"]'));
+});
+
 test(1, "XMind save remains binary, including save-as", async () => {
   reset([
     tab(
@@ -1071,6 +1088,71 @@ async function mountXmind(editing = true, bytes = app.sampleArchive()) {
   function Host() {const content=store(s=>s.tabs.find(t=>t.id==='xm')?.content);return content?React.createElement(app.XmindView,{dataUrl:content,filePath:'/test/sample.xmind',tabId:'xm'}):null;}
   await render(React.createElement(Host));
 }
+async function dragCallout(dx, dy, { cancel = false, over = null } = {}) {
+  const svg = document.querySelector('.xm-svg');
+  const bubble = document.querySelector('[data-topic="callout"]');
+  const tail = () => document.querySelector('[data-callout-tail="true"]').getAttribute('d');
+  const beforeTail = tail();
+  svg.setPointerCapture = () => {};
+  const originalHit = document.elementFromPoint;
+  document.elementFromPoint = () => over;
+  try {
+    await act(async () => bubble.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles:true, button:0, clientX:100, clientY:100 })));
+    await act(async () => svg.dispatchEvent(new window.MouseEvent('pointermove', { bubbles:true, clientX:100+dx, clientY:100+dy })));
+    assert.notEqual(tail(), beforeTail, 'tail follows the bubble while dragging');
+    await act(async () => svg.dispatchEvent(new window.MouseEvent(cancel ? 'pointercancel' : 'pointerup', { bubbles:true, clientX:100+dx, clientY:100+dy })));
+  } finally { document.elementFromPoint = originalHit; }
+}
+function calloutOwner(sheets) {
+  const visit = topic => topic.children?.callout?.some(t => t.id === 'callout') ? topic
+    : Object.values(topic.children ?? {}).flat().map(visit).find(Boolean);
+  return visit(sheets[0].rootTopic);
+}
+test(1, 'XMind callout drag preserves ownership and styling, including live tail and standard save', async () => {
+  await mountXmind();
+  const owner = calloutOwner(xmindSheets());
+  const before = structuredClone(owner.children.callout[0]);
+  const originalBuffer = store.getState().tabs[0].content;
+  const fill = document.querySelector('[data-callout-tail="true"]').getAttribute('fill');
+  await dragCallout(0, 30);
+  const movedOwner = calloutOwner(xmindSheets());
+  assert.equal(movedOwner.id, owner.id);
+  const moved = movedOwner.children.callout[0];
+  assert.ok(Number.isFinite(moved.position.y));
+  const {position, ...unchanged} = moved;
+  assert.deepEqual(unchanged, before);
+  assert.equal(document.querySelector('[data-callout-tail="true"]').getAttribute('fill'), fill);
+  assert.equal(document.querySelector('[data-topic="callout"]').getAttribute('data-detached'), null);
+  await click('Undo'); assert.equal(store.getState().tabs[0].content, originalBuffer);
+  await click('Redo'); assert.deepEqual(calloutOwner(xmindSheets()).children.callout[0], moved);
+  await act(async () => app.saveFile());
+  const saved = new Uint8Array(Buffer.from(writes.at(-1).data, 'base64'));
+  await mountXmind(true, saved);
+  assert.deepEqual(calloutOwner(xmindSheets()).children.callout[0], moved);
+  assert.equal(document.querySelector('[data-callout-tail="true"]').getAttribute('fill'), fill);
+});
+test(2, 'XMind callout drag over a different topic never reparents; cancelling leaves the document intact', async () => {
+  await mountXmind();
+  const owner = calloutOwner(xmindSheets()).id;
+  const before = store.getState().tabs[0].content;
+  await dragCallout(40, -30, {cancel:true});
+  assert.equal(store.getState().tabs[0].content, before);
+  await dragCallout(90, -40, {over:document.querySelector('[data-topic="read"]')});
+  assert.equal(calloutOwner(xmindSheets()).id, owner);
+  assert.ok(document.querySelector('[data-callout-tail="true"]').getAttribute('d').endsWith(' Z'));
+});
+test(3, 'XMind outline and format toggles remain independent after removing the duplicate close control', async () => {
+  await mountXmind();
+  const before = store.getState().tabs[0].content;
+  assert.equal(document.querySelector('.xm-panel-title button'), null);
+  await click('Outline'); await click('Format');
+  assert.ok(document.querySelector('.xm-outline'));
+  assert.equal(document.querySelector('.xm-inspector'), null);
+  await click('Format'); await click('Outline');
+  assert.ok(document.querySelector('.xm-inspector'));
+  assert.equal(document.querySelector('.xm-outline'), null);
+  assert.equal(store.getState().tabs[0].content, before);
+});
 test(3, 'XMind symbols and layout hints never paint internal names with legacy mode preferences', async()=>{
   const sheet={id:'icons-sheet',title:'Icons',rootTopic:{id:'icons-root',title:'交付计划',
     structureClass:'org.xmind.ui.unknown-internal-layout',labels:['客户标签'],

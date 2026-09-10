@@ -5,7 +5,6 @@ import { SHORTCUTS, type ShortcutMeta } from "../lib/shortcuts";
 import { useT } from "../lib/i18n";
 import { Button } from "./ui/Button";
 import { SegmentedControl } from "./ui/SegmentedControl";
-import { FiX } from "react-icons/fi";
 
 interface Props {
   open: boolean;
@@ -111,15 +110,6 @@ export default function SettingsDialog({ open, onClose }: Props) {
           }}
         >
           <span>{t("settings.title")}</span>
-          <Button
-            ref={closeBtnRef}
-            variant="ghost"
-            size="icon"
-            onClick={onClose}
-            aria-label={t("common.close")}
-          >
-            <FiX size={14} />
-          </Button>
         </div>
 
         <div style={{ padding: "12px 16px", flex: 1, overflowY: "auto" }}>
@@ -309,7 +299,7 @@ export default function SettingsDialog({ open, onClose }: Props) {
           <Button variant="secondary" onClick={resetShortcuts}>
             {t("settings.reset")}
           </Button>
-          <Button variant="primary" onClick={onClose}>
+          <Button ref={closeBtnRef} variant="primary" onClick={onClose}>
             {t("settings.done")}
           </Button>
         </div>
