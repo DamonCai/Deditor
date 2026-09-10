@@ -158,4 +158,8 @@ $RECYCLE.BIN/
 *.orig
 .history/
 
+/package-lock.json
+/DEditor*.dmg
+/test
+
 # Commit package-lock.json and src-tauri/Cargo.lock for reproducible installs.
