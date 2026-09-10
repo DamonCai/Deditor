@@ -13,6 +13,13 @@ DEditor 项目的协作上下文。Codex 在这个目录工作时自动加载本
 
 ---
 
+## Markdown 可视化编辑架构（2026-09-11，待实施）
+
+- 后续接手此功能先读 [Markdown 可视化编辑接续上下文](docs/markdown-visual-editing-context-2026-09-11.md)。用户要求接近 Typora、以最终体验为优先，不以代码量作为选型约束，同时保护 HTML、XMind 等既有能力。
+- 本次讨论最终倾向：**Milkdown／ProseMirror 定制可视化编辑 + CodeMirror 源码和代码块 + 独立 Markdown 保真文档层 + 每标签编辑会话层**。优先复用成熟组件，必要时深入 ProseMirror 定制；不要把此前讨论过的纯 CodeMirror 实时预览或从零搭建 ProseMirror 当作最终结论。
+- 原文保真、跨模式撤销、真实中文输入法与长文档性能是必须先验证的风险，不能声称引入依赖后自动具备。HTML/XMind 的模式、快捷键、样式、保存和会话生命周期必须隔离并回归。
+- **当前仅完成评估与上下文记录，尚未接入新内核、安装相关依赖或完成原型验证。** 用户此次要求是保存方案以便后续执行，不代表本轮启动实现，也不改变上方 XMind 的未完成状态和接续约定。时间估算仅作参考，不能当作交付承诺。
+
 ## 项目概览
 
 **DEditor** 是跨平台桌面 Markdown / 多语言代码编辑器。
@@ -454,7 +461,7 @@ Settings 切语言 / 切某条快捷键开关
 - KaTeX 数学公式
 - 大纲（TOC）侧栏（Goto Symbol 完成后再考虑常驻面板）
 - 文件树搜索框
-- WYSIWYG 模式
+- WYSIWYG 模式：已完成架构讨论、待实施，详见 [Markdown 可视化编辑接续上下文](docs/markdown-visual-editing-context-2026-09-11.md)；不计为已实现功能。
 
 ## 启动 / 打包 / 清理
 
