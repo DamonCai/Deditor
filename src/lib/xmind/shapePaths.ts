@@ -92,9 +92,9 @@ export function shapeContentCenter(shape: string): Point {
   return [.5,.5];
 }
 export function advancedShapeScale(name: string): number | undefined {
+  if(contentScales.has(name))return contentScales.get(name)!;
   const geometry=advancedShape(name,1,1);
   if(!geometry)return undefined;
-  if(contentScales.has(name))return contentScales.get(name)!;
   const [cx,cy]=shapeContentCenter(name);
   // The nearest boundary in the L-infinity metric gives the largest centred
   // square entirely inside even a concave outline. Segment minima occur at an

@@ -26,6 +26,7 @@ import {
 } from "../lib/xmind/document";
 import {
   buildScene,
+  nodeVisualBounds,
   edgePath,
   braceConnector,
   type SceneNode,
@@ -624,7 +625,7 @@ export default function XmindCanvas({
               transform={`translate(${n.x + (offset?.x ?? 0)},${n.y + (offset?.y ?? 0)})`}
               style={{ cursor: readonly ? "pointer" : "grab" }}
             >
-              <rect data-topic-hitbox width={n.width} height={n.height} fill="transparent" stroke="none" />
+              <rect data-topic-hitbox width={nodeVisualBounds(n).width} height={nodeVisualBounds(n).height} fill="transparent" stroke="none" />
               {(chosen || match) && (
                 <rect
                   x={-5}

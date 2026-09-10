@@ -483,7 +483,7 @@ test(
 );
 // Native rendering regressions: containment is tested against the real shape,
 // not merely against its surrounding rectangle.
-test(1, "diamond and ellipse contain title, labels and metadata", () => {
+test(1, "diamond and ellipse contain title and metadata with labels below the outline", () => {
   for (const shape of ["diamond", "ellipse", "roundedRect", "pill"]) {
     const sheet: Sheet = { id: "shape-sheet", title: "Shapes", rootTopic: {
       id: "shape-root", title: "菱形 / Decision\n第二行 gyp",
@@ -1175,5 +1175,24 @@ test(3, "native customWidth expands text boxes and resets without losing styles 
   assert.equal(reshape[0].rootTopic.children!.attached![0].style!.properties!.keep,'yes');
   for(const width of [NaN,Infinity,-1,20,2001])assert.throws(()=>editDocument(next,sheet.id,{type:'width',ids:['width-a'],width}));
   assert.equal(next[0].rootTopic.children!.attached![0].customWidth,320);
+});
+test(4, "advanced rich topics place markers beside titles and labels below the outline",()=>{
+  const sheet=round7ShapeSheets()[1],scene=buildScene(sheet);
+  for(const node of scene.nodes.filter(n=>n.detached)) {
+    const outline=advancedShape(node.shape,node.width,node.height)!.outline;
+    const c=node.content;
+    for(const [x,y] of [[c.x,c.y],[c.x+c.width,c.y],[c.x,c.y+c.height],[c.x+c.width,c.y+c.height]])
+      assert.ok(pointInOutline([x,y],outline),`${node.shape} clips rich content`);
+    for(const label of node.labels) {
+      assert.ok(label.y>=node.height+6);
+      assert.ok(node.y+label.y+label.height<=scene.bounds.y+scene.bounds.height);
+    }
+    assert.equal(node.labels[0].x,0);
+    assert.equal(node.labels[0].y,node.labels[1].y);
+    const markerPositions=node.indicators.flatMap((icon,i)=>icon.kind==='priority'||icon.kind==='task'?[node.indicatorPositions[i]]:[]);
+    for(const icon of markerPositions)assert.ok(icon.x+16<=node.titleX);
+    for(const icon of node.indicatorPositions)assert.ok(icon.x>=c.x && icon.x+16<=c.x+c.width+1e-7);
+    assert.equal(node.topic.title,sheet.rootTopic.children!.detached!.find(t=>t.id===node.topic.id)!.title);
+  }
 });
 console.log(`${passed} XMind tests passed`);

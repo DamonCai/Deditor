@@ -255,6 +255,12 @@ export function boundsOf(nodes: Box[]): Box {
   }
   return { x, y, width: right - x, height: bottom - y };
 }
+/** Shape dimensions stay separate from labels so connectors touch the outline. */
+export function nodeVisualBounds(node: SceneNode): Box {
+  return boundsOf([node, ...node.labels.map(label => ({
+    x: node.x + label.x, y: node.y + label.y, width: label.width, height: label.height,
+  }))]);
+}
 interface Fragment {
   groups: SceneGroup[];
   nodes: SceneNode[];
@@ -341,24 +347,17 @@ export function buildScene(
         height: lines.length * 16 + 4 };
     });
     const labelLines = labels.flatMap((label) => label.lines);
-    const labelsHeight = labels.reduce((total, label) => total + label.height + 4, 0);
     const indicators = topicIndicators(topic);
     const inlineIcons = indicators.filter(i => i.kind === "notes" || i.kind === "link");
-    const rowIcons = indicators.filter(i => i.kind !== "notes" && i.kind !== "link");
+    const leadingIcons = indicators.filter(i => i.kind !== "notes" && i.kind !== "link");
     const inlineWidth = inlineIcons.length ? inlineIcons.length * 20 + 4 : 0;
     const titleWidth = Math.max(24, ...lines.map(s => measure(s, style.fontSize, p)));
-    const indicatorColumns = Math.max(1, Math.min(rowIcons.length,
-      Math.floor((Math.max(60, widthHint) + 4) / 20)));
-    const indicatorRows = Math.ceil(rowIcons.length / indicatorColumns);
-    const contentWidth = Math.max(24, imageWidth,
-      titleWidth + inlineWidth,
-      ...labels.map((label) => label.width),
-      rowIcons.length ? indicatorColumns * 20 - 4 : 0);
-    const titleHeight = lines.length * style.fontSize * 1.4;
+    const leadingWidth = leadingIcons.length ? leadingIcons.length * 20 + 4 : 0;
+    const indicatorColumns = leadingIcons.length;
+    const contentWidth = Math.max(24, imageWidth, titleWidth + leadingWidth + inlineWidth);
+    const titleHeight = Math.max(lines.length * style.fontSize * 1.4, indicators.length ? 16 : 0);
     const pictureHeight = imageHeight ? imageHeight + 8 : 0;
-    const contentHeight = pictureHeight + titleHeight +
-      (labels.length ? 4 + labelsHeight : 0) +
-      (indicatorRows ? 4 + indicatorRows * 20 : 0);
+    const contentHeight = pictureHeight + titleHeight;
     const paddedWidth = Math.max(depth === 0 ? 100 : 50,
       contentWidth + horizontalPadding);
     const paddedHeight = contentHeight + (depth === 0 ? 36 : depth === 1 && !kind ? 22 : 18);
@@ -368,32 +367,37 @@ export function buildScene(
     const [centerX,centerY]=shapeContentCenter(style.shape);
     const content = { x: width*centerX - contentWidth/2, y: height*centerY - contentHeight/2,
       width: contentWidth, height: contentHeight };
-    const labelY = content.y + pictureHeight + titleHeight + 6;
-    let nextLabelY = labelY;
+    // Native tags sit below the outline, left aligned and packed into rows.
+    // Their bounds participate in layout/Fit without inflating the topic shape.
+    const labelY = height + 6;
+    let nextLabelX = 0, nextLabelY = labelY, rowHeight = 0;
     for (const label of labels) {
-      label.x = width*centerX - label.width/2;
+      if (nextLabelX && nextLabelX + label.width > width) {
+        nextLabelX = 0;
+        nextLabelY += rowHeight + 4;
+        rowHeight = 0;
+      }
+      label.x = nextLabelX;
       label.y = nextLabelY;
-      nextLabelY += label.height + 4;
+      nextLabelX += label.width + 4;
+      rowHeight = Math.max(rowHeight, label.height);
     }
-    const indicatorY = content.y + pictureHeight + titleHeight +
-      (labels.length ? 4 + labelsHeight : 0) + 4;
+    const indicatorY = content.y + pictureHeight + (titleHeight - 16) / 2;
     const align = p["fo:text-align"];
     const titleAnchor = align === "left" || align === "start" ? "start"
       : align === "right" || align === "end" ? "end" : "middle";
-    const titleX = titleAnchor === "start" ? content.x
-      : titleAnchor === "end" ? content.x + content.width - inlineWidth : width*centerX-inlineWidth/2;
-    const titleRight = titleX + (titleAnchor === "start" ? titleWidth : titleAnchor === "middle" ? titleWidth / 2 : 0);
-    let inlineIndex = 0, rowIndex = 0;
-    const indicatorPositions = indicators.map(icon => {
-      if (icon.kind === "notes" || icon.kind === "link") return {
-        x: titleRight + 6 + inlineIndex++ * 20,
-        y: content.y + pictureHeight + (titleHeight - 16) / 2,
-      };
-      const index = rowIndex++, row = Math.floor(index / indicatorColumns);
-      const columns = Math.min(indicatorColumns, rowIcons.length - row * indicatorColumns);
-      return { x: width*centerX - (columns * 20 - 4)/2 + (index % indicatorColumns) * 20,
-        y: indicatorY + row * 20 };
-    });
+    const titleX = titleAnchor === "start" ? content.x + leadingWidth
+      : titleAnchor === "end" ? content.x + content.width - inlineWidth
+      : width*centerX + (leadingWidth-inlineWidth)/2;
+    const titleLeft = titleX - (titleAnchor === "end" ? titleWidth : titleAnchor === "middle" ? titleWidth/2 : 0);
+    const titleRight = titleLeft + titleWidth;
+    let inlineIndex = 0, leadingIndex = 0;
+    const indicatorPositions = indicators.map(icon => ({
+      x: icon.kind === "notes" || icon.kind === "link"
+        ? titleRight + 6 + inlineIndex++ * 20
+        : titleLeft - leadingWidth + leadingIndex++ * 20,
+      y: indicatorY,
+    }));
     const node: SceneNode = {
       topic,
       parent,
@@ -409,7 +413,7 @@ export function buildScene(
       width,
       height,
     };
-    const fragment: Fragment = { nodes: [node], edges: [], groups: [], bounds: node };
+    const fragment: Fragment = { nodes: [node], edges: [], groups: [], bounds: nodeVisualBounds(node) };
     const children = folded.has(topic.id)
       ? []
       : (topic.children?.attached ?? []);
@@ -587,7 +591,7 @@ export function buildScene(
             distance -= slots[k].after;
           });
           attachGroups(part, cause);
-          part.bounds = boundsOf([...part.nodes, ...part.groups]);
+          part.bounds = boundsOf([...part.nodes.map(nodeVisualBounds), ...part.groups]);
           laneEnds[j % 2] = part.bounds.x + part.bounds.width;
           ribs.push({ part, base, tip });
           cursor = base + 36;
@@ -621,8 +625,8 @@ export function buildScene(
         const milestone = part.nodes[0];
         shift(part, -milestone.x - milestone.width / 2, cursor - milestone.y);
         let clearance = 0;
-        for (const next of [...part.nodes, ...part.groups.map(groupBounds)]) {
-          for (const prior of [...fragment.nodes, ...fragment.groups.map(groupBounds)]) {
+        for (const next of [...part.nodes.map(nodeVisualBounds), ...part.groups.map(groupBounds)]) {
+          for (const prior of [...fragment.nodes.map(nodeVisualBounds), ...fragment.groups.map(groupBounds)]) {
             if (next.x < prior.x + prior.width && prior.x < next.x + next.width)
               clearance = Math.max(clearance, prior.y + prior.height + 24 - next.y);
           }
@@ -668,14 +672,14 @@ export function buildScene(
               points: [{ x, y: above ? milestone.y : milestone.y + milestone.height }, { x, y: anchorY }, { x: target.x, y: anchorY }] }, ...detail.edges);
           });
           attachGroups(part, milestone);
-          part.bounds = boundsOf([...part.nodes, ...part.groups.map(groupBounds)]);
+          part.bounds = boundsOf([...part.nodes.map(nodeVisualBounds), ...part.groups.map(groupBounds)]);
         }
         // Opposite sides may share horizontal space. Only boxes occupying
         // the same vertical band need clearance; a long upper detail must not
         // push the next lower milestone away from the axis rhythm.
         let clearance = 0;
-        const occupied = [...fragment.nodes, ...fragment.groups.map(groupBounds)];
-        for (const next of [...part.nodes, ...part.groups.map(groupBounds)]) {
+        const occupied = [...fragment.nodes.map(nodeVisualBounds), ...fragment.groups.map(groupBounds)];
+        for (const next of [...part.nodes.map(nodeVisualBounds), ...part.groups.map(groupBounds)]) {
           for (const prior of occupied) {
             if (next.y < prior.y + prior.height && prior.y < next.y + next.height)
               clearance = Math.max(clearance, prior.x + prior.width + 24 - next.x);
@@ -762,7 +766,7 @@ export function buildScene(
       fragment.edges.push({ from: topic.id, to: t.id, direction: "up", brace: false, callout: true }, ...f.edges);
     }
     attachGroups(fragment, node);
-    fragment.bounds = boundsOf([...fragment.nodes, ...fragment.groups.map(groupBounds), ...fragment.edges.flatMap(e =>
+    fragment.bounds = boundsOf([...fragment.nodes.map(nodeVisualBounds), ...fragment.groups.map(groupBounds), ...fragment.edges.flatMap(e =>
       [...(e.points ?? []), ...(e.trunk ?? [])].map(p => ({ ...p, width: 0, height: 0 }))) ]);
     return fragment;
   }
@@ -787,7 +791,7 @@ export function buildScene(
         .forEach(collect);
       const nodes = fragment.nodes.filter((v) => ids.has(v.topic.id));
       if (!nodes.length) return;
-      const b = boundsOf(nodes);
+      const b = boundsOf(nodes.map(nodeVisualBounds));
       return {
         x: b.x - 14,
         y: b.y - 14,
@@ -881,7 +885,7 @@ export function buildScene(
     relationBoxes.push({ x: g.label.x - textWidth / 2, y: g.label.y - g.fontSize,
       width: textWidth, height: g.fontSize * 2 });
   }
-  const b = boundsOf([...initial.nodes, ...groups.map(groupBounds), ...relationBoxes]);
+  const b = boundsOf([...initial.nodes.map(nodeVisualBounds), ...groups.map(groupBounds), ...relationBoxes]);
   return {
     ...initial,
     groups,
