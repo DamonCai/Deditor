@@ -19,6 +19,7 @@ HTMLElement.prototype.scrollTo=function({top=0}){this.scrollTop=top;};
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
 // React DOM must detect the installed DOM before choosing its input event implementation.
 const {createRoot}=await import('react-dom/client');
+const {flushSync}=await import('react-dom');
 const runtimeErrors=[];window.addEventListener('error',event=>runtimeErrors.push(event.error));
 const output=path.resolve('node_modules/.cache/deditor-markdown-integration.mjs');
 fs.mkdirSync(path.dirname(output),{recursive:true});
@@ -250,5 +251,44 @@ await test('presentation: readonly code clicks do not open editing or alter sour
  await act(async()=>{document.querySelector('.md-code-preview').dispatchEvent(new dom.window.MouseEvent('mousedown',{button:0,bubbles:true,cancelable:true}));});
  assert.equal(document.querySelector('.md-code-editor').hidden,true);assert.equal(content(),original);
  await render(false);
+});
+await test('scroll stability: source mode retains block height and unchanged preview DOM',async()=>{
+ const block=document.querySelector('.md-code-block'),preview=block.querySelector('.md-code-preview');
+ const before=preview.firstElementChild,original=content();
+ const measure=block.getBoundingClientRect;
+ block.getBoundingClientRect=()=>({height:512,left:0,top:0,right:600,bottom:512,width:600});
+ await act(async()=>{preview.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));});
+ assert.equal(block.querySelector('.md-code-editor').style.minHeight,'512px');
+ await act(async()=>{block.querySelector('.cm-content').dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));await pause(80);});
+ assert.equal(preview.firstElementChild,before,'focus-only toggles reuse rendered DOM');assert.equal(content(),original);
+ block.getBoundingClientRect=measure;
+});
+await test('scroll stability: typing changes source immediately and defers preview replacement until exit',async()=>{
+ const block=document.querySelector('.md-code-block'),preview=block.querySelector('.md-code-preview');
+ const before=preview.firstElementChild;
+ await act(async()=>preview.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true})));
+ const {EditorView}=await import('@codemirror/view');const cm=EditorView.findFromDOM(block.querySelector('.cm-editor'));
+ await act(async()=>{cm.dispatch({changes:{from:cm.state.doc.length,insert:' // pending'}});await pause(80);});
+ assert.match(content(),/pending/);assert.equal(preview.firstElementChild,before);assert.doesNotMatch(before.textContent,/pending/);
+ await act(async()=>{cm.contentDOM.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));await pause(100);});
+ assert.match(preview.textContent,/pending/);
+});
+await test('scroll stability: rapid source changes cannot publish a stale preview after undo',async()=>{
+ const original=content();
+ await act(async()=>{app.getVisualEditor().navigate(1,1);});
+ const before=document.querySelector('.md-code-preview').textContent;
+ await act(async()=>{
+   flushSync(()=>store.getState().setContent(original.replace('pending','stale preview'),'a','source'));
+   flushSync(()=>store.getState().setContent(original,'a','source'));
+   await pause(120);
+ });
+ assert.equal(document.querySelector('.md-code-preview').textContent,before);assert.equal(content(),original);
+});
+await test('scroll stability: preserved HTML blocks reserve their preview height during editing',async()=>{
+ await act(async()=>{store.getState().setContent('# Raw\n\n<custom>tall raw block</custom>\n\nEnd\n','a','command');await pause(80);});
+ const block=document.querySelector('.md-raw-block');block.getBoundingClientRect=()=>({height:480,left:0,top:0,right:600,bottom:480,width:600});
+ await act(async()=>block.querySelector('.md-raw-preview').click());assert.equal(block.style.minHeight,'480px');
+ await act(async()=>block.querySelector('.cm-content').dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true})));
+ assert.equal(block.style.minHeight,'');
 });
 await act(async()=>root.unmount());assert.deepEqual(runtimeErrors,[]);dom.window.close();console.log(`${passed} integration tests passed`);

@@ -20,6 +20,7 @@ export function codeView(tabId: string, theme: "light" | "dark") {
   return (initial: ProseNode, view: ProseView, getPos: () => number | undefined): NodeView => {
     let node = initial, updating = false, generation = 0, languageGeneration = 0, destroyed = false, expanded = false;
     let controllers: AbortController[] = [];
+    let renderedSource: string | null = null, pendingSource: string | null = null;
     const dom = document.createElement("section"); dom.className = "md-code-block"; dom.contentEditable = "false";
     const bar = document.createElement("div"); bar.className = "md-code-bar";
     const language = document.createElement("input"); language.className = "deditor-input deditor-input--compact";
@@ -69,28 +70,49 @@ export function codeView(tabId: string, theme: "light" | "dark") {
       else cm.dispatch({ effects: languageCompartment.reconfigure([]) });
     };
     function render() {
-      const token = ++generation;
-      controllers.forEach(controller => controller.abort()); controllers = [];
       const lang = String(node.attrs.language ?? "").toLowerCase();
       const diagram = ["mermaid", "plantuml", "puml", "uml", "latex"].includes(lang);
       dom.dataset.kind = lang === "latex" ? "math" : diagram ? "diagram" : "code";
+      // Keep the surrounding article still when a tall diagram becomes a short source block.
+      if (expanded && editor.hidden) editor.style.minHeight = `${dom.getBoundingClientRect().height}px`;
       editor.hidden = !expanded; preview.hidden = expanded;
       toggle.hidden = !diagram || !view.editable;
       toggle.textContent = tStatic(expanded ? "md.hideSource" : "md.editSourceBlock");
       language.readOnly = !view.editable;
-      const fence = "`".repeat(Math.max(3, ...Array.from(node.textContent.matchAll(/`+/g), m => m[0].length + 1)));
-      const source = lang === "latex" ? `$$\n${node.textContent}\n$$` : `${fence}${lang}\n${node.textContent}\n${fence}`;
-      void renderMarkdown(source, { theme }).then(html => {
+      const code = node.textContent;
+      const fence = "`".repeat(Math.max(3, ...Array.from(code.matchAll(/`+/g), m => m[0].length + 1)));
+      const source = lang === "latex" ? `$$\n${code}\n$$` : `${fence}${lang}\n${code}\n${fence}`;
+      // Editing and focus changes do not invalidate the rendered projection. In particular,
+      // never replace a live SVG with its loading placeholder on each source keystroke.
+      if (pendingSource !== null && pendingSource !== source) {
+        generation++; pendingSource = null;
+        controllers.forEach(controller => controller.abort()); controllers = [];
+      }
+      if (expanded || source === renderedSource || source === pendingSource) return;
+      const token = ++generation;
+      pendingSource = source;
+      controllers.forEach(controller => controller.abort()); controllers = [];
+      const staging = document.createElement("div");
+      void renderMarkdown(source, { theme }).then(async html => {
         if (destroyed || token !== generation) return;
-        preview.innerHTML = DOMPurify.sanitize(html);
-        // Diagram source is inert data. Restore it after HTML sanitization,
-        // which intentionally removes attributes containing arrow-like markup.
-        const mermaid = preview.querySelector<HTMLElement>(".mermaid-diagram");
-        if (mermaid) mermaid.dataset.mermaidSource = node.textContent;
-        const plantuml = preview.querySelector<HTMLElement>(".plantuml-diagram");
-        if (plantuml) plantuml.dataset.plantumlSource = node.textContent;
-        controllers = [hydrateMermaid(preview, theme), hydratePlantuml(preview)];
-      }).catch(err => { logError("Markdown code preview failed", err); if (!destroyed && token === generation) preview.textContent = String(err); });
+        staging.innerHTML = DOMPurify.sanitize(html);
+        const mermaid = staging.querySelector<HTMLElement>(".mermaid-diagram");
+        if (mermaid) mermaid.dataset.mermaidSource = code;
+        const plantuml = staging.querySelector<HTMLElement>(".plantuml-diagram");
+        if (plantuml) plantuml.dataset.plantumlSource = code;
+        if (renderedSource === null && !preview.hasChildNodes()) {
+          preview.append(...Array.from(staging.cloneNode(true).childNodes));
+        }
+        const hydrated = [hydrateMermaid(staging, theme), hydratePlantuml(staging)];
+        controllers = hydrated;
+        await Promise.all(hydrated.map(controller => controller.done));
+        if (destroyed || token !== generation) return;
+        preview.replaceChildren(...Array.from(staging.childNodes));
+        renderedSource = source; pendingSource = null;
+      }).catch(err => {
+        logError("Markdown code preview failed", err);
+        if (!destroyed && token === generation) { pendingSource = null; preview.textContent = String(err); }
+      });
     }
     preview.onmousedown = event => {
       if (!view.editable || event.button !== 0) return;

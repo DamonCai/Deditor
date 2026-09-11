@@ -38,7 +38,7 @@ export function rawView(filePath: string | null, tabId: string) {
       }).catch(error => { logError("Markdown preserved block render failed", error); if (!destroyed && version === generation) preview.textContent = node.textContent; });
     };
     const close = (focus = true) => {
-      cm?.destroy(); cm = null; editor.replaceChildren(); button.textContent = tStatic("md.editSourceBlock"); render();
+      cm?.destroy(); cm = null; editor.replaceChildren(); dom.style.minHeight = ""; button.textContent = tStatic("md.editSourceBlock"); render();
       const pos = getPos();
       if (focus && pos !== undefined) { view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, pos))); view.focus(); }
       return true;
@@ -46,6 +46,7 @@ export function rawView(filePath: string | null, tabId: string) {
     const open = (anchor = 0, head = anchor) => {
       if (!view.editable) return;
       if (cm) return;
+      dom.style.minHeight = `${dom.getBoundingClientRect().height}px`;
       generation++; preview.hidden = true;
       button.textContent = tStatic("common.confirm");
       cm = new EditorView({ parent: editor, state: EditorState.create({ doc: node.textContent, selection: { anchor, head }, extensions: [
