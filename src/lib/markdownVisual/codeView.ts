@@ -32,9 +32,9 @@ export function codeView(tabId: string, theme: "light" | "dark") {
     dom.append(bar, editor, preview);
     const languageCompartment = new Compartment(), editableCompartment = new Compartment();
     const cm = new EditorView({ parent: editor, state: EditorState.create({ doc: node.textContent, extensions: [basicSetup, EditorView.lineWrapping,
-      theme === "dark" ? islandDark : islandLight, languageCompartment.of([]), editableCompartment.of(EditorView.editable.of(view.editable)),
+      theme === "dark" ? islandDark : islandLight, languageCompartment.of([]), editableCompartment.of([EditorView.editable.of(view.editable), EditorState.readOnly.of(!view.editable)]),
       Prec.highest(keymap.of([
-        { key: "Mod-z", run: () => markdownHistory(false, tabId) }, { key: "Mod-Shift-z", run: () => markdownHistory(true, tabId) },
+        { key: "Mod-z", run: () => !view.editable || markdownHistory(false, tabId) }, { key: "Mod-Shift-z", run: () => !view.editable || markdownHistory(true, tabId) },
         { key: "Escape", run: () => { expanded = false; render(); view.focus(); return true; } },
         { key: "ArrowDown", run: () => {
           if (!view.editable) return false;
@@ -48,7 +48,7 @@ export function codeView(tabId: string, theme: "light" | "dark") {
       EditorView.updateListener.of(update => {
         if (updating) return;
         const pos = getPos(); if (pos === undefined) return;
-        if (update.docChanged) {
+        if (update.docChanged || update.view.hasFocus && (update.selectionSet || update.focusChanged)) {
           const tr = view.state.tr; let offset = pos + 1;
           update.changes.iterChanges((fromA, toA, fromB, toB, text) => {
             tr.replaceWith(offset + fromA, offset + toA, text.length ? view.state.schema.text(text.toString()) : []); offset += (toB - fromB) - (toA - fromA);
@@ -96,7 +96,7 @@ export function codeView(tabId: string, theme: "light" | "dark") {
     };
     const modeChanged = () => {
       updating = true;
-      cm.dispatch({ effects: editableCompartment.reconfigure(EditorView.editable.of(view.editable)) });
+      cm.dispatch({ effects: editableCompartment.reconfigure([EditorView.editable.of(view.editable), EditorState.readOnly.of(!view.editable)]) });
       updating = false;
       if (!view.editable) expanded = false;
       render();
@@ -104,13 +104,20 @@ export function codeView(tabId: string, theme: "light" | "dark") {
     view.dom.addEventListener("deditor-editable-change", modeChanged);
     loadLanguage(); render();
     return { dom, stopEvent: () => true, ignoreMutation: () => true,
+      setSelection(anchor, head) {
+        if (!view.editable) return;
+        if (editor.hidden) { expanded = true; render(); }
+        updating = true;
+        cm.dispatch({ selection: { anchor: Math.min(anchor, cm.state.doc.length), head: Math.min(head, cm.state.doc.length) } });
+        updating = false; cm.focus();
+      },
       update(next) {
         if (next.type !== node.type) return false;
         const languageChanged = next.attrs.language !== node.attrs.language;
         const textChanged = next.textContent !== node.textContent;
         node = next; updating = true;
         if (cm.state.doc.toString() !== node.textContent) cm.dispatch({ changes: { from: 0, to: cm.state.doc.length, insert: node.textContent } });
-        cm.dispatch({ effects: editableCompartment.reconfigure(EditorView.editable.of(view.editable)) }); updating = false;
+        cm.dispatch({ effects: editableCompartment.reconfigure([EditorView.editable.of(view.editable), EditorState.readOnly.of(!view.editable)]) }); updating = false;
         language.value = node.attrs.language ?? "";
         if (languageChanged) loadLanguage();
         if (textChanged || languageChanged || language.readOnly === view.editable) render();

@@ -1,5 +1,6 @@
 import { tableListTree } from "./tableLists";
 import { inlineHtmlMarks } from "./inline";
+import { referenceLinks } from "./references";
 import { $nodeSchema, $remark } from "@milkdown/kit/utils";
 import remarkFrontmatter from "remark-frontmatter";
 import { protectedTree, type SourceNode } from "./document";
@@ -8,6 +9,7 @@ export function rawRemark(mdx: boolean) {
   return $remark("deditorPreserve", () => () => (tree: unknown, file: { value: unknown }) => {
     tableListTree(tree as SourceNode, String(file.value));
     inlineHtmlMarks(tree as SourceNode);
+    referenceLinks(tree as SourceNode);
     protectedTree(tree as SourceNode, String(file.value), mdx);
   });
 }

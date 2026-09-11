@@ -5,7 +5,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import React, { act } from 'react';
-import { createRoot } from 'react-dom/client';
 const dom = new JSDOM('<!doctype html><body><div id="root"></div></body>', { url:'http://localhost', pretendToBeVisual:true });
 for (const key of ['window','Window','document','Node','NodeFilter','HTMLElement','HTMLInputElement','HTMLButtonElement','HTMLDivElement','Element','Text','SVGElement','MutationObserver','DOMParser','DOMRect','Event','CustomEvent','localStorage']) Object.defineProperty(globalThis,key,{value:dom.window[key],configurable:true});
 Object.defineProperty(globalThis,'navigator',{value:dom.window.navigator,configurable:true});
@@ -18,6 +17,8 @@ window.Range.prototype.getBoundingClientRect=()=>({left:0,right:0,top:0,bottom:0
 HTMLElement.prototype.scrollIntoView=function(){};
 HTMLElement.prototype.scrollTo=function({top=0}){this.scrollTop=top;};
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
+// React DOM must detect the installed DOM before choosing its input event implementation.
+const {createRoot}=await import('react-dom/client');
 const runtimeErrors=[];window.addEventListener('error',event=>runtimeErrors.push(event.error));
 const output=path.resolve('node_modules/.cache/deditor-markdown-integration.mjs');
 fs.mkdirSync(path.dirname(output),{recursive:true});
@@ -133,5 +134,63 @@ await test('round 5: HTML retained editor keeps its own undo while Markdown sour
  assert.equal(store.getState().tabs.find(t=>t.id==='b').content,html);assert.equal(content(),markdown);
  await act(async()=>{store.setState({activeId:'a',markdownMode:'visual'});await pause(120);});
  assert.equal(app.getActiveView(),null);assert.equal(content(),markdown);assert.equal(app.getVisualEditor().tabId,'a');
+});
+await test('reported editing bug: a closed or open search never steals the caret on document changes',async()=>{
+ await act(async()=>{root.render(null);store.setState({activeId:'a',markdownMode:'visual'});store.getState().setContent('# Top\n\nbody\n\nBottom target\n','a','command');});await render();
+ await act(async()=>{app.getVisualEditor().find();});
+ const input=document.querySelector('[role="search"] input');
+ await act(async()=>{
+   Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value').set.call(input,'Bottom');
+   input.dispatchEvent(new dom.window.Event('input',{bubbles:true}));
+ });
+ assert.equal(input.value,'Bottom');assert.equal(app.getVisualEditor().selected,'Bottom');
+ const editTop=async(label)=>{
+   await act(async()=>app.getVisualEditor().navigate(1,4));
+   await act(async()=>{const heading=document.querySelector('.ProseMirror h1');heading.firstChild.textContent=label;heading.dispatchEvent(new Event('input',{bubbles:true}));await pause(40);});
+   assert.ok(store.getState().tabPositions.a.cursor < label.length+5,'caret stays in heading');
+   assert.equal(app.getVisualEditor().selected,'');assert.ok(content().includes('Bottom target'));
+ };
+ await editTop('Top while searching');
+ await act(async()=>document.querySelector('[role="search"] button:last-child').click());
+ await editTop('Top after closing search');
+});
+await test('reported editing bug: lower reference list text is directly editable',async()=>{
+ const original='# Top\n\n+ plain\n+ [label][r] <kbd>key</kbd><br>next\n+ lower\n\n[r]: https://example.com\n';
+ await act(async()=>store.getState().setContent(original,'a','command'));
+ assert.equal(document.querySelectorAll('.ProseMirror li').length,3);
+ assert.equal(document.querySelector('.ProseMirror li .md-raw-block'),null);
+ await act(async()=>{const p=[...document.querySelectorAll('.ProseMirror li p')].find(p=>p.textContent==='lower');p.firstChild.textContent='lower edited';p.dispatchEvent(new Event('input',{bubbles:true}));await pause(40);});
+ assert.equal(content(),original.replace('lower','lower edited'));
+});
+await test('reported editing bug: clicking a preserved block edits in place and retains inner selection',async()=>{
+ await act(async()=>store.getState().setContent('# Top\n\n<custom>raw text</custom>\n\nBottom\n','a','command'));
+ await act(async()=>{await pause(40);document.querySelector('.md-raw-preview').click();await pause(40);});
+ const {EditorView}=await import('@codemirror/view');
+ const cm=EditorView.findFromDOM(document.querySelector('.md-raw-source .cm-editor'));assert.ok(cm);
+ assert.equal(document.querySelector('.md-raw-preview').hidden,true);
+ await act(async()=>{cm.focus();cm.dispatch({selection:{anchor:8,head:11}});});
+ assert.equal(app.getVisualEditor().selected,'raw');
+ await act(async()=>cm.dispatch({changes:{from:8,to:11,insert:'changed'},selection:{anchor:15}}));
+ assert.match(content(),/<custom>changed text<\/custom>/);assert.ok(content().endsWith('Bottom\n'));
+ await act(async()=>{cm.contentDOM.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));await pause(40);});
+ assert.equal(document.querySelector('.md-raw-source .cm-editor'),null,'Escape closes block source');
+ await act(async()=>document.querySelector('.md-raw-preview').click());
+ await render(true);assert.equal(document.querySelector('.md-raw-source .cm-editor'),null);
+ assert.equal(document.querySelector('.md-raw-preview').hidden,false);await render(false);
+});
+await test('reported editing bug: code caret stays in its block and readonly history cannot mutate text',async()=>{
+ const original='# Top\n\n```js\nconst value = 1;\n```\n\nBottom\n';
+ await act(async()=>store.getState().setContent(original,'a','command'));
+ const {EditorView}=await import('@codemirror/view');
+ const cm=EditorView.findFromDOM(document.querySelector('.md-code-block .cm-editor'));
+ await act(async()=>{cm.focus();cm.dispatch({selection:{anchor:6,head:11}});});assert.equal(app.getVisualEditor().selected,'value');
+ await act(async()=>cm.dispatch({changes:{from:6,to:11,insert:'count'},selection:{anchor:11}}));
+ const expected=content();assert.equal(expected,original.replace('value','count'));
+ await render(true);
+ await act(async()=>{
+   cm.contentDOM.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true,cancelable:true}));
+   cm.contentDOM.dispatchEvent(new dom.window.InputEvent('beforeinput',{inputType:'historyUndo',bubbles:true,cancelable:true}));
+ });assert.equal(content(),expected);
+ await render(false);await act(async()=>app.markdownHistory());assert.equal(content(),original);
 });
 await act(async()=>root.unmount());assert.deepEqual(runtimeErrors,[]);dom.window.close();console.log(`${passed} integration tests passed`);

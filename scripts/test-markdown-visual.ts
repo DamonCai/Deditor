@@ -9,19 +9,20 @@ Object.assign(globalThis, { addEventListener: dom.window.addEventListener.bind(d
 const { CrepeBuilder } = await import("@milkdown/crepe/builder");
 const { codeMirror } = await import("@milkdown/crepe/feature/code-mirror");
 const { imageBlock } = await import("@milkdown/crepe/feature/image-block");
+const { faithfulLink } = await import("../src/lib/markdownVisual/references");
 const { faithfulImage } = await import("../src/lib/markdownVisual/image");
 const { latex } = await import("@milkdown/crepe/feature/latex");
 const { parserCtx, serializerCtx } = await import("@milkdown/kit/core");
 const { remarkInlineLinkPlugin, remarkPreserveEmptyLinePlugin } = await import("@milkdown/kit/preset/commonmark");
 const { extendedTableCells } = await import("../src/lib/markdownVisual/tableLists");
-const { inlineSchemas, configureInlineSerialization } = await import("../src/lib/markdownVisual/inline");
+const { inlineSchemas, faithfulInlineHtml, configureInlineSerialization } = await import("../src/lib/markdownVisual/inline");
 const { rawSchema, rawRemark, frontmatter } = await import("../src/lib/markdownVisual/raw");
 const { MarkdownDocument } = await import("../src/lib/markdownVisual/document");
 const { EditorState } = await import("@milkdown/kit/prose/state");
 const { history } = await import("@milkdown/kit/plugin/history");
 const { trailing } = await import("@milkdown/kit/plugin/trailing");
 const crepe = new CrepeBuilder({ root: document.querySelector("#editor") }).addFeature(codeMirror).addFeature(latex).addFeature(imageBlock);
-crepe.editor.use(faithfulImage).use(extendedTableCells.flat()).use(inlineSchemas.flat()).config(configureInlineSerialization).use(frontmatter).use(rawRemark(false)).use(rawSchema);
+crepe.editor.use(faithfulLink).use(faithfulInlineHtml).use(faithfulImage).use(extendedTableCells.flat()).use(inlineSchemas.flat()).config(configureInlineSerialization).use(frontmatter).use(rawRemark(false)).use(rawSchema);
 await crepe.editor.remove(remarkInlineLinkPlugin.plugin); await crepe.editor.remove(remarkPreserveEmptyLinePlugin.plugin);
 await crepe.editor.remove(history); await crepe.editor.remove(trailing); await crepe.create();
 let passed = 0;
@@ -90,6 +91,36 @@ crepe.editor.action(ctx => {
      const model = make(source); assert.equal(model.doc.firstChild!.type.name, "table");
      const serialized = serialize(model.doc); const reloaded = parse(serialized); assert.equal(reloaded.firstChild!.type.name, "table");
      assert.equal(reloaded.textContent, model.doc.textContent);
+   }
+ });
+ test("reported editing bug: references and inline HTML never lock the surrounding list", () => {
+   const source = '+ normal\n+ [label][ref] with <kbd>Ctrl</kbd> and <span style="color: red">color</span><br>next\n+ bottom\n\n[ref]: https://example.com \'title\'\n';
+   const model = make(source); assert.equal(model.doc.firstChild!.type.name, "bullet_list");
+   let raw = 0; model.doc.firstChild!.descendants(node => { if (node.type.name === "deditor_raw") raw++; }); assert.equal(raw, 0);
+   assert.equal(editText(model, "bottom", "lower edited"), source.replace("bottom", "lower edited"));
+   assert.equal(editText(model, "label", "changed"), source.replace("bottom", "lower edited").replace("label", "changed"));
+   assert.equal(make(model.source).doc.firstChild!.type.name, "bullet_list");
+ });
+ test("reported editing bug: reference images do not lock adjacent list text", () => {
+   const source = '+ ![icon][image] adjacent\n+ bottom\n\n[image]: assets/picture.svg\n';
+   const model = make(source); assert.equal(model.doc.firstChild!.type.name, "bullet_list");
+   assert.equal(editText(model, "bottom", "edited"), source.replace("bottom", "edited"));
+ });
+ test("reported editing bug: collapsed and shortcut reference labels remain links after editing", () => {
+   for (const reference of ["[name]", "[name][]", "[name][name]"]) {
+     const model = make(reference + "\n\n[name]: https://example.com\n");
+     assert.equal(model.doc.firstChild!.type.name, "paragraph");
+     editText(model, "name", "renamed");
+     const node = make(model.source).doc.firstChild!.firstChild!;
+     assert.equal(node.text, "renamed"); assert.equal(node.marks[0].attrs.href, "https://example.com");
+     assert.ok(model.source.endsWith("[name]: https://example.com\n"));
+   }
+ });
+ test("reported editing bug: HTML styles and keyboard labels preserve source while editing", () => {
+   for (const source of ['press <kbd>Ctrl</kbd> then type\n', '<span style="color: rgb(200, 10, 20)">colored</span> text<br>tail\n']) {
+     const model = make(source); assert.equal(model.doc.firstChild!.type.name, "paragraph");
+     const text = source.includes("Ctrl") ? "Ctrl" : "tail";
+     assert.equal(editText(model, text, "edited"), source.replace(text, "edited"));
    }
  });
  test("round 3: text edits with 2000 paragraphs preserve the full document", () => { const source = Array.from({ length: 2000 }, (_, i) => `Paragraph ${i} 中文`).join("\n\n"); const start = performance.now(); const model = make(source); const load = performance.now() - start; const edit = performance.now(); assert.equal(editText(model, "Paragraph 1777", "修改 1777"), source.replace("Paragraph 1777", "修改 1777")); console.log(`PERF 2000 blocks load=${load.toFixed(1)}ms edit=${(performance.now() - edit).toFixed(1)}ms`); });

@@ -1,8 +1,9 @@
+import { faithfulLink } from "../lib/markdownVisual/references";
 import { faithfulImage, accessibleImageView } from "../lib/markdownVisual/image";
 import { installMarkdownAccessibility, tableIcon } from "../lib/markdownVisual/accessibility";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { extendedTableCells } from "../lib/markdownVisual/tableLists";
-import { inlineSchemas, configureInlineSerialization } from "../lib/markdownVisual/inline";
+import { inlineSchemas, faithfulInlineHtml, configureInlineSerialization } from "../lib/markdownVisual/inline";
 import { codeView } from "../lib/markdownVisual/codeView";
 import { remarkInlineLinkPlugin, remarkPreserveEmptyLinePlugin } from "@milkdown/kit/preset/commonmark";
 import { useEffect, useRef, useState } from "react";
@@ -53,6 +54,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
   const [ready, setReady] = useState(false), [searchOpen, setSearchOpen] = useState(false), [query, setQuery] = useState("");
   const [tocOpen, setTocOpen] = useState(false), [headings, setHeadings] = useState<{ pos: number; level: number; text: string }[]>([]);
   const [matchCount, setMatchCount] = useState(0), [matchIndex, setMatchIndex] = useState(0);
+  const lastSearch = useRef({ query: "", open: false });
   const matches = useRef<{ from: number; to: number }[]>([]);
   const select = (from: number, to = from) => {
     const view = runtime.current?.view; if (!view) return;
@@ -88,7 +90,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
         inlineUploadButton: t("md.uploadImage"), blockUploadButton: t("md.uploadImage"), blockConfirmButton: t("common.confirm"),
         inlineUploadPlaceholderText: t("md.imageUrlLabel"), blockUploadPlaceholderText: t("md.imageUrlLabel"), blockCaptionPlaceholderText: t("md.imageAltLabel") })
       .addFeature(latex);
-    crepe.editor.use(faithfulImage).use(extendedTableCells.flat()).use(inlineSchemas.flat()).config(configureInlineSerialization).use(frontmatter).use(rawRemark(mdx)).use(rawSchema);
+    crepe.editor.use(faithfulLink).use(faithfulInlineHtml).use(faithfulImage).use(extendedTableCells.flat()).use(inlineSchemas.flat()).config(configureInlineSerialization).use(frontmatter).use(rawRemark(mdx)).use(rawSchema);
     crepe.editor.config(ctx => ctx.update(editorViewOptionsCtx, prev => ({ ...prev, attributes: { "aria-label": t("md.visualEditor"), spellcheck: "false" },
       handleKeyDown: (view, event) => {
         if (event.key !== "Tab" || !view.editable || !isInTable(view.state)) return false;
@@ -168,8 +170,9 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
         };
         const beforeInput = (event: Event) => {
           const type = (event as InputEvent).inputType;
-          if (!readonlyRef.current && (type === "historyUndo" || type === "historyRedo")) {
-            event.preventDefault(); event.stopPropagation(); markdownHistory(type === "historyRedo", tabId);
+          if (type === "historyUndo" || type === "historyRedo") {
+            event.preventDefault(); event.stopPropagation();
+            if (!readonlyRef.current) markdownHistory(type === "historyRedo", tabId);
           }
         };
         let compositionTimer: ReturnType<typeof setTimeout> | undefined;
@@ -222,9 +225,16 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
       for (let index = text.indexOf(search); index >= 0; index = text.indexOf(search, index + search.length)) found.push({ from: pos + 1 + index, to: pos + 1 + index + search.length });
       return false;
     });
-    matches.current = found; setMatchCount(found.length); setMatchIndex(0);
-    if (found[0]) select(found[0].from, found[0].to);
-  }, [query, source, ready]);
+    // Recompute results after edits, but only user search actions may move the caret.
+    // A retained query must never reselect/overwrite a distant match while typing.
+    const requested = searchOpen && (!lastSearch.current.open || lastSearch.current.query !== query);
+    lastSearch.current = { query, open: searchOpen };
+    matches.current = found; setMatchCount(found.length);
+    if (requested) {
+      setMatchIndex(0);
+      if (found[0]) select(found[0].from, found[0].to);
+    } else setMatchIndex(index => Math.min(index, Math.max(0, found.length - 1)));
+  }, [query, source, ready, searchOpen]);
   const navigate = (delta: number) => {
     if (!matches.current.length) return;
     const index = (matchIndex + delta + matches.current.length) % matches.current.length;
@@ -236,8 +246,9 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
       const mod = event.metaKey || event.ctrlKey;
       if (mod && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "f") { event.preventDefault(); event.stopPropagation(); setSearchOpen(true); }
       const target = event.target as HTMLElement;
-      if (!readonly && mod && (event.key.toLowerCase() === "z" || event.key.toLowerCase() === "y") && target.closest(".ProseMirror")) {
-        event.preventDefault(); event.stopPropagation(); markdownHistory(event.shiftKey || event.key.toLowerCase() === "y", tabId);
+      if (mod && (event.key.toLowerCase() === "z" || event.key.toLowerCase() === "y") && target.closest(".ProseMirror")) {
+        event.preventDefault(); event.stopPropagation();
+        if (!readonly) markdownHistory(event.shiftKey || event.key.toLowerCase() === "y", tabId);
       }
     }}>
     <div className="md-visual-controls">

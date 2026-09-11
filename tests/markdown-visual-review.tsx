@@ -1,3 +1,4 @@
+import { interactionMarkdown } from "./fixtures/markdown-interaction";
 // Only self-created documents. No application startup, persistence, or real files.
 import React from "react";
 import { createRoot } from "react-dom/client";
@@ -17,7 +18,7 @@ import "../src/styles.css";
 Object.defineProperty(window, "__TAURI_INTERNALS__", { value: { convertFileSrc: (path: string) => new URL(path, location.origin).href }, configurable: true });
 const sample = '# 阅读时自然编辑\n\n这是**加粗**和 *斜体*，支持中文连续输入。\n\n## 任务清单\n\n+ [ ] 编写正文\n+ [x] 保留原文\n\n## 表格\n\n| 项目 | 状态 |\n| :--- | ---: |\n| 编辑器 | 就绪 |\n| 历史 | 待验证 |\n\n## 代码与公式\n\n```typescript\nconst message = "你好";\n```\n\n$$\nx^2 + y^2 = z^2\n$$\n\n```mermaid\ngraph LR\n  A[阅读] --> B[编辑]\n```\n\n## 扩展语法\n\n<span style="color:#e53e3e">彩色文字</span>\n\n[引用链接][ref]\n\n[ref]: https://example.com "保留定义"\n\n最后一段保留三空格。   \n';
 const dark = new URLSearchParams(location.search).has("dark");
-const docs = [ { id: "md-review", filePath: "/generated/visual-review.md", content: sample, savedContent: sample },
+const docs = [ { id: "md-review", filePath: "/generated/visual-review.md", content: new URLSearchParams(location.search).has("interaction") ? interactionMarkdown : sample, savedContent: new URLSearchParams(location.search).has("interaction") ? interactionMarkdown : sample },
  { id: "md-other", filePath: "/generated/second.md", content: "# 第二个标签\n\n独立历史。\n", savedContent: "# 第二个标签\n\n独立历史。\n" },
  { id: "html-review", filePath: "/generated/isolated.html", content: "<h1>HTML 保持独立</h1><p>原有预览</p>", savedContent: "<h1>HTML 保持独立</h1><p>原有预览</p>" },
  { id: "xmind-review", filePath: "/generated/isolated.xmind", content: bytesToXmindDataUrl(sampleArchive(sampleSheets())), savedContent: bytesToXmindDataUrl(sampleArchive(sampleSheets())) },

@@ -104,6 +104,7 @@ export class MarkdownDocument {
     const to = oldEnd > first ? range(this.ast[oldEnd - 1])[1] : from;
     const eol = this.source.includes("\r\n") ? "\r\n" : "\n";
     const changed = after.slice(first, newEnd);
+    const definitions = this.ast.filter(node => node.type === "definition").map(node => this.source.slice(...range(node))).join("\n");
     const serializeBlock = (block: ProseNode) => block.type.name === "deditor_raw" ? block.textContent : this.serialize(next.type.create(null, block)).replace(/\n$/, "").replace(/\r?\n/g, eol);
     let parts = changed.map(serializeBlock);
     if (oldEnd - first === 1 && changed.length === 1 && changed[0].type.name !== "deditor_raw") {
@@ -112,7 +113,8 @@ export class MarkdownDocument {
       if (patched !== null) {
         // A literal '*' or a newline must not turn into unintended Markdown
         // when saved. Only retain token spelling if it reparses equivalently.
-        const reparsed = this.parse(patched);
+        const parsed = this.parse(patched + (definitions ? "\n\n" + definitions : ""));
+        const reparsed = definitions && parsed.firstChild ? parsed.type.create(null, parsed.firstChild) : parsed;
         const expected = this.serialize(next.type.create(null, changed[0]));
         if (this.serialize(reparsed) === expected) parts = [patched];
       }
@@ -130,7 +132,7 @@ export class MarkdownDocument {
     });
     let cursor = from + leading.length;
     const spans = parts.map((part, index) => {
-      const parsed = sourceTree(part).children ?? [];
+      const parsed = (sourceTree(part + (definitions ? "\n\n" + definitions : "")).children ?? []).filter(node => range(node)[0] < part.length);
       const ast = changed[index].type.name !== "deditor_raw" && parsed.length === 1
         ? shifted(parsed[0], cursor)
         : { type: "deditorRaw", position: { start: { offset: cursor }, end: { offset: cursor + part.length } } };
