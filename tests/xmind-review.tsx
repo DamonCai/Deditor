@@ -23,7 +23,8 @@ sheets.push({ ...structuredClone(sheets[1]), id: "up-sheet", title: "向上组�
   rootTopic: { ...structuredClone(sheets[1].rootTopic), structureClass: "org.xmind.ui.org-chart.up" } });
 const probe = new URLSearchParams(location.search).get("probe");
 const generatedProbes = ["control-probe", "direction-probe", "count-probe"];
-const archive = probe === "timeline-variants" ? sampleArchive(timelineVariantSheets())
+const archive = probe === "timeline-counts" ? sampleArchive(timelineVariantSheets(true))
+  : probe === "timeline-variants" ? sampleArchive(timelineVariantSheets())
   : probe === "arrow-catalog" ? sampleArchive(arrowCatalogSheets())
   : probe === "smart-colors" ? sampleArchive(smartColorSheets())
   : probe === "round10-master" ? sampleArchive(round10MasterSheets())

@@ -2379,7 +2379,7 @@ test(3, 'XMind group range handles preview, cancel and commit one history entry'
 });
 
 test(3, 'XMind vertical and reverse timeline range drags extend toward the displayed siblings', async () => {
-  for (const [structure,vertical] of [['org.xmind.ui.timeline.through.vertical',true],['org.xmind.ui.timeline.through.vertical.btt',true],['org.xmind.ui.timeline.horizontal.rtl',false]]) {
+  for (const [structure,vertical] of [['org.xmind.ui.timeline.through.vertical',true],['org.xmind.ui.timeline.through.vertical.btt',true],['org.xmind.ui.timeline.through.symmetric.vertical',true],['org.xmind.ui.timeline.through.symmetric.vertical.btt',true],['org.xmind.ui.timeline.horizontal.rtl',false]]) {
     const sheets=[{id:'range-sheet',title:'Range',rootTopic:{id:'range-root',title:'Root',structureClass:structure,
       children:{attached:[0,1,2].map(i=>({id:`range-${i}`,title:`Topic ${i}`}))},boundaries:[{id:'range-group',range:'(0,0)',title:'Range'}]}}];
     await mountXmind(true,zipSync({'content.json':strToU8(JSON.stringify(sheets))}));

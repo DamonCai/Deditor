@@ -475,7 +475,7 @@ export function buildScene(
     let direction = topic.structureClass
       ? directionOf(topic.structureClass)
       : inherited;
-    if (depth > 0 && !detached && direction === "side")
+    if (depth > 0 && !detached && direction === "side" && topic.structureClass!=="org.xmind.ui.map.unbalanced.symmetric")
       direction = inherited === "left" ? "left" : "right";
     node.direction = direction;
     const sc = topic.structureClass ?? "";

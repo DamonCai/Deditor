@@ -1137,8 +1137,40 @@ test(2, "upward through timelines preserve detail reading order, groups, fold st
   assert.equal(saved.sheets[0].rootTopic.children!.attached![0].branch,'folded');
   assert.deepEqual(saved.sheets[0].rootTopic.boundaries,sheet.rootTopic.boundaries);
 });
+test(2, "symmetric vertical milestones balance 1–5 details while preserving reading order and source structure", () => {
+  for(const sheet of timelineVariantSheets(true).slice(1)) {
+    const children=sheet.rootTopic.children!.attached!,upward=sheet.rootTopic.structureClass!.endsWith('.btt');
+    children[0].structureClass='org.xmind.ui.org-chart.down';
+    const before=JSON.stringify(sheet);
+    const scene=buildScene(sheet),root=scene.nodes[0];
+    assert.equal(scene.warnings.length,0);assert.equal(root.direction,upward?'up':'down');
+    children.forEach((child,i)=>{
+      const stage=scene.nodes.find(n=>n.topic.id===child.id)!;
+      const details=child.children!.attached!.map(t=>scene.nodes.find(n=>n.topic.id===t.id)!);
+      const count=[1,2,2,2,3][i]; // Native five-stage quantity probe.
+      assert.equal(stage.direction,'side');
+      assert.equal(stage.topic.structureClass,child.structureClass,'render-only override must not escape into source topics');
+      assert.ok(Math.abs(stage.x+stage.width/2)<.001);
+      details.forEach((n,j)=>assert.ok(j<count?n.x>stage.x+stage.width:n.x+n.width<stage.x));
+      for(let j=1;j<count;j++)assert.ok(details[j].y>details[j-1].y);
+      for(let j=count+1;j<details.length;j++)assert.ok(details[j].y<details[j-1].y);
+      for(const side of [details.slice(0,count),details.slice(count)])if(side.length) {
+        const center=side.reduce((sum,n)=>sum+n.y+n.height/2,0)/side.length;
+        assert.ok(Math.abs(center-stage.y-stage.height/2)<.001,'each side remains centered on the milestone');
+      }
+    });
+    assert.equal(JSON.stringify(sheet),before);
+    const folded=buildScene(sheet,new Set(children.map(c=>c.id)));assert.equal(folded.nodes.length,6);
+    const doc=openDocument(sampleArchive([sheet]));
+    const edited=editDocument(doc.sheets,sheet.id,{type:'title',id:children[2].id,title:'Saved symmetric stage'});
+    const reopened=openDocument(writeDocument(doc,edited));
+    assert.equal(reopened.sheets[0].rootTopic.children!.attached![2].title,'Saved symmetric stage');
+    assert.equal(reopened.sheets[0].rootTopic.children!.attached![0].structureClass,'org.xmind.ui.org-chart.down');
+    assert.equal(reopened.sheets[0].rootTopic.structureClass,sheet.rootTopic.structureClass);
+  }
+});
 test(2, "timeline variants keep long, mixed and grouped subtrees separate at every fold state", () => {
-  for (const sheet of round6Sheets()) {
+  for (const sheet of [...round6Sheets(),...timelineVariantSheets()]) {
     const children=sheet.rootTopic.children!.attached!;
     children[0].children!.attached![0].title="中文 Long title ".repeat(24);
     children[1].structureClass="org.xmind.ui.org-chart.down";
