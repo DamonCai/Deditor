@@ -59,6 +59,32 @@ let passed=0;
 async function test(name,fn){await fn();passed++;console.log('PASS '+name);}
 await render();
 await test('round 1: initial render and readonly transitions are exact no-ops',async()=>{assert.equal(content(),source);await render(true);assert.equal(document.querySelector('.ProseMirror').getAttribute('contenteditable'),'false');await render(false);assert.equal(content(),source);});
+await test('heading hints: only the caret heading is decorated across H1–H6, without changing source or history',async()=>{
+ const headings=Array.from({length:6},(_,i)=>'#'.repeat(i+1)+' 标题 '+(i+1)+'\n\n正文 '+(i+1)+'\n').join('\n');
+ await act(async()=>store.getState().setContent(headings,'a','command'));
+ for(let level=1;level<=6;level++){
+  await act(async()=>app.getVisualEditor().navigate((level-1)*4+1,level+2));
+  const active=document.querySelectorAll('.md-heading-active');
+  assert.equal(active.length,1);assert.equal(active[0].tagName,'H'+level);
+  await act(async()=>app.getVisualEditor().navigate((level-1)*4+3,2));
+  assert.equal(document.querySelectorAll('.md-heading-active').length,0);
+ }
+ assert.equal(content(),headings);
+ await act(async()=>app.markdownHistory());assert.equal(content(),source);
+ await act(async()=>app.markdownHistory(true));assert.equal(content(),headings);
+ await act(async()=>app.markdownHistory());assert.equal(content(),source);
+});
+await test('heading hints: empty and nested headings track the caret through readonly and remount',async()=>{
+ const headings='## \n\n> ### 引用标题\n\n正文\n';
+ await act(async()=>store.getState().setContent(headings,'a','command'));
+ await act(async()=>app.getVisualEditor().navigate(1,4));assert.equal(document.querySelector('.md-heading-active')?.tagName,'H2');
+ await act(async()=>app.getVisualEditor().navigate(3,8));assert.equal(document.querySelector('.md-heading-active')?.tagName,'H3');
+ await render(true);assert.equal(document.querySelector('.md-visual-shell').dataset.readonly,'true');
+ await render(false);
+ await act(async()=>root.render(null));await render();
+ await act(async()=>app.getVisualEditor().navigate(5,2));assert.equal(document.querySelectorAll('.md-heading-active').length,0);
+ assert.equal(content(),headings);await act(async()=>app.markdownHistory());assert.equal(content(),source);
+});
 await test('round 1: DOM text edit synchronously feeds shared source and save',async()=>{
  await act(async()=>{const paragraph=document.querySelector('.ProseMirror > p');paragraph.firstChild.textContent='Edited paragraph';paragraph.dispatchEvent(new Event('input',{bubbles:true}));await pause(40);});
  assert.equal(content(),source.replace('Original','Edited'));

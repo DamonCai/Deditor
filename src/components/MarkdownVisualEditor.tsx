@@ -1,6 +1,6 @@
 import { installCompositionViewport } from "../lib/markdownVisual/compositionViewport";
 import { faithfulLink } from "../lib/markdownVisual/references";
-import { absoluteHeadingInputRule } from "../lib/markdownVisual/heading";
+import { absoluteHeadingInputRule, activeHeadingHint } from "../lib/markdownVisual/heading";
 import { faithfulImage, accessibleImageView } from "../lib/markdownVisual/image";
 import { installMarkdownAccessibility, tableIcon } from "../lib/markdownVisual/accessibility";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -92,7 +92,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
         inlineUploadButton: t("md.uploadImage"), blockUploadButton: t("md.uploadImage"), blockConfirmButton: t("common.confirm"),
         inlineUploadPlaceholderText: t("md.imageUrlLabel"), blockUploadPlaceholderText: t("md.imageUrlLabel"), blockCaptionPlaceholderText: t("md.imageAltLabel") })
       .addFeature(latex);
-    crepe.editor.use(absoluteHeadingInputRule).use(faithfulLink).use(faithfulInlineHtml).use(faithfulImage).use(extendedTableCells.flat()).use(inlineSchemas.flat()).config(configureInlineSerialization).use(frontmatter).use(rawRemark(mdx)).use(rawSchema);
+    crepe.editor.use(absoluteHeadingInputRule).use(activeHeadingHint).use(faithfulLink).use(faithfulInlineHtml).use(faithfulImage).use(extendedTableCells.flat()).use(inlineSchemas.flat()).config(configureInlineSerialization).use(frontmatter).use(rawRemark(mdx)).use(rawSchema);
     crepe.editor.config(ctx => ctx.update(editorViewOptionsCtx, prev => ({ ...prev, attributes: { class: "md-document", "aria-label": t("md.visualEditor"), spellcheck: "false" },
       handleKeyDown: (view, event) => {
         if (event.key !== "Tab" || !view.editable || !isInTable(view.state)) return false;

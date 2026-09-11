@@ -77,9 +77,10 @@
 .md-visual-shell[data-readonly="false"] .md-document :is(h1,h2,h3,h4,h5,h6)::before {
   position: absolute; right: calc(100% + 6px); top: 0.3em; width: 22px;
   font: 10px/1.5 "SF Mono", Menlo, Consolas, monospace; letter-spacing: 0;
-  color: var(--preview-muted); opacity: 0.65; text-align: right;
+  color: var(--preview-muted); opacity: 0; text-align: right;
   pointer-events: none; user-select: none;
 }
+.md-visual-shell[data-readonly="false"] .md-document.ProseMirror-focused .md-heading-active::before { opacity: 0.65; }
 .md-visual-shell[data-readonly="false"] .md-document h1::before { content: "H1" / ""; }
 .md-visual-shell[data-readonly="false"] .md-document h2::before { content: "H2" / ""; }
 .md-visual-shell[data-readonly="false"] .md-document h3::before { content: "H3" / ""; }
