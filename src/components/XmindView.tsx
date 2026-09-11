@@ -1,4 +1,5 @@
 import XmindGroupRange from "./XmindGroupRange";
+import { BOUNDARY_SHAPES, SUMMARY_SHAPES } from "../lib/xmind/groupShapes";
 import XmindRelationshipInspector from "./XmindRelationshipInspector";
 import { ALL_TOPIC_SHAPES } from "../lib/xmind/shapes";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -604,10 +605,18 @@ export default function XmindView({ dataUrl, tabId }: Props) {
                 </select>
               </label>
               {!groupInfo.summary && <label className="xm-field">{t("xmind.shape")}
-                <select disabled={!editing} value={selectedGroupStyle["shape-class"] ?? "org.xmind.boundaryShape.roundedRect"}
+                <select aria-label={t("xmind.shape")} disabled={!editing} value={selectedGroupStyle["shape-class"] ?? "org.xmind.boundaryShape.roundedRect"}
                   onChange={e => updateGroupStyle({"shape-class":e.target.value})}>
-                  {selectedGroupStyle["shape-class"] && !["org.xmind.boundaryShape.rect","org.xmind.boundaryShape.roundedRect"].includes(selectedGroupStyle["shape-class"]) && <option value={selectedGroupStyle["shape-class"]}>{t("xmind.originalShape")}</option>}
-                  {["roundedRect","rect"].map(value => <option key={value} value={`org.xmind.boundaryShape.${value}`}>{t(`xmind.shape.${value}`)}</option>)}
+                  {selectedGroupStyle["shape-class"] && !BOUNDARY_SHAPES.some(value=>selectedGroupStyle['shape-class']===`org.xmind.boundaryShape.${value}`) && <option value={selectedGroupStyle["shape-class"]}>{t("xmind.originalShape")}</option>}
+                  {BOUNDARY_SHAPES.map(value => <option key={value} value={`org.xmind.boundaryShape.${value}`}>{t(value==='rect'||value==='roundedRect'?`xmind.shape.${value}`:`xmind.boundaryShape.${value}`)}</option>)}
+                </select>
+              </label>}
+              {groupInfo.summary && <label className="xm-field">{t("xmind.shape")}
+                <select aria-label={t("xmind.shape")} disabled={!editing} value={selectedGroupStyle["shape-class"] ?? "org.xmind.summaryShape.curly"}
+                  onChange={e => updateGroupStyle({"shape-class":e.target.value})}>
+                  {selectedGroupStyle["shape-class"] && !SUMMARY_SHAPES.some(value => selectedGroupStyle["shape-class"] === `org.xmind.summaryShape.${value}`) &&
+                    <option value={selectedGroupStyle["shape-class"]}>{t("xmind.originalShape")}</option>}
+                  {SUMMARY_SHAPES.map(value => <option key={value} value={`org.xmind.summaryShape.${value}`}>{t(`xmind.summaryShape.${value}`)}</option>)}
                 </select>
               </label>}
               <Button size="sm" disabled={!editing} onClick={()=>{execute({type:"group-delete",id:groupInfo.group.id,parent:groupInfo.parent});setSelectedGroup(null);}}>{t("common.delete")}</Button>

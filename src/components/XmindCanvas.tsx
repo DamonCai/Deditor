@@ -1,4 +1,5 @@
 import XmindGroupHandles from "./XmindGroupHandles";
+import { boundaryGeometry, summaryPath } from "../lib/xmind/groupShapes";
 import { groupRangeAxis } from "../lib/xmind/groupRange";
 import { punctuationPath } from "../lib/xmind/punctuationShapes";
 import { draftBox } from "../lib/xmind/draft";
@@ -810,6 +811,7 @@ export default function XmindCanvas({
           const opacity = parseFloat(g.properties["svg:fill-opacity"] ?? "0.2");
           const strokeWidth = Number.isFinite(lineWidth) ? Math.max(0, lineWidth) : 2;
           const dash = strokeDash(g.properties["line-pattern"] ?? (g.summary ? "solid" : "dash"));
+          const boundary=g.summary?null:boundaryGeometry(g.properties['shape-class'],g.width,g.height,g.memberBoxes);
           return (
           <g key={g.id} data-group={g.id} role="button" tabIndex={0} aria-label={g.title || t(g.summary ? "xmind.summary" : "xmind.boundary")}
             aria-pressed={selectedGroup === g.id}
@@ -830,12 +832,19 @@ export default function XmindCanvas({
                         ? `translate(${g.x},${g.y}) matrix(0,-1,1,0,0,0)`
                         : `translate(${g.x + g.width},${g.y})`
                 }
-                d={`M0,0 C18,0 18,0 18,${(g.side === "up" || g.side === "down" ? g.width : g.height) / 2 - 10} Q18,${(g.side === "up" || g.side === "down" ? g.width : g.height) / 2} 30,${(g.side === "up" || g.side === "down" ? g.width : g.height) / 2} Q18,${(g.side === "up" || g.side === "down" ? g.width : g.height) / 2} 18,${(g.side === "up" || g.side === "down" ? g.width : g.height) / 2 + 10} C18,${g.side === "up" || g.side === "down" ? g.width : g.height} 18,${g.side === "up" || g.side === "down" ? g.width : g.height} 0,${g.side === "up" || g.side === "down" ? g.width : g.height}`}
+                d={summaryPath(g.properties["shape-class"], g.side === "up" || g.side === "down" ? g.width : g.height)}
                 fill="none"
                 stroke={g.properties["line-color"] ?? "#94a3b8"}
                 strokeWidth={strokeWidth}
                 strokeDasharray={dash}
               />
+            ) : boundary ? (
+              <g transform={`translate(${g.x},${g.y})`} data-boundary-shape={g.properties['shape-class']}>
+                <path d={boundary.fillPath} fill={g.properties['fill-pattern']==='none'?'none':g.properties['svg:fill'] ?? '#e9f1fa'}
+                  fillOpacity={Number.isFinite(opacity)?Math.max(0,Math.min(1,opacity)):0.2} pointerEvents="none" />
+                <path d={boundary.borderPath} fill="none" stroke={g.properties['line-color'] ?? '#a2b3c9'} strokeWidth={strokeWidth} strokeDasharray={dash} pointerEvents="none" />
+                <path d={boundary.borderPath} fill="none" stroke="transparent" strokeWidth={14/camera.zoom} pointerEvents="stroke" />
+              </g>
             ) : (
               <rect
                 x={g.x}
@@ -900,7 +909,9 @@ export default function XmindCanvas({
           ) : null;
         })}
         {scene.nodes.filter(n => n.topic.id !== editing).map(renderNode)}
-        {(sheet.relationships ?? []).map((relation) => {
+        {[...(sheet.relationships ?? [])].sort((a, b) =>
+          Number(a.id === selectedRelationship) - Number(b.id === selectedRelationship)
+        ).map((relation) => {
           const from = displayById.get(relation.end1Id), to = displayById.get(relation.end2Id);
           if (!from || !to) return null;
           return <XmindRelationship key={relation.id} relation={relation} sheet={sheet} from={from} to={to} nodes={Array.from(displayById.values())}

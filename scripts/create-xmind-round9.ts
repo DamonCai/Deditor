@@ -1,15 +1,15 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { zipSync, strToU8 } from "fflate";
-import { round9ColorSheets, round9RelationshipSheets } from "../tests/fixtures/xmind-round9";
+import { round9ColorSheets, round9GroupSheets, round9RelationshipSheets } from "../tests/fixtures/xmind-round9";
 
 const directory = "tests/artifacts/xmind-round9";
 const name = process.argv[2] ?? "native-relationships";
 const mode = process.argv[3] ?? "relationships";
-if (!["relationships", "colors"].includes(mode)) throw new Error("Unknown fixture mode");
+if (!["relationships", "colors", "groups"].includes(mode)) throw new Error("Unknown fixture mode");
 if (!/^[a-z0-9-]+$/.test(name)) throw new Error("Use a simple fixture name");
 mkdirSync(directory, { recursive: true });
 const files = {
-  "content.json": strToU8(JSON.stringify(mode === "colors" ? round9ColorSheets() : round9RelationshipSheets())),
+  "content.json": strToU8(JSON.stringify(mode === "colors" ? round9ColorSheets() : mode === "groups" ? round9GroupSheets() : round9RelationshipSheets())),
   "metadata.json": strToU8(
     JSON.stringify({
       creator: { name: "DEditor synthetic review", version: "9" },

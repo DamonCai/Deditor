@@ -69,6 +69,15 @@ export function round9RelationshipSheets(): Sheet[] {
   });
 }
 
+export function round9GroupSheets(): Sheet[] {
+  return [{id:'two-sided-range',title:'双侧分组拖动',rootTopic:{
+    id:'range-root',title:'双侧分组对照',structureClass:'org.xmind.ui.map.unbalanced',
+    children:{attached:Array.from({length:6},(_,i)=>({id:`range-member-${i}`,title:`主题 ${i+1}`}))},
+    boundaries:[{id:'left-range',range:'(3,4)',title:'左侧分组'},
+      {id:'right-range',range:'(0,1)',title:'右侧分组'}],
+  }}];
+}
+
 export function round9ColorSheets(): Sheet[] {
   return ["#FFFFFF", "#112244"].map((background, sheetIndex) => ({
     id: `colors-${sheetIndex}`,

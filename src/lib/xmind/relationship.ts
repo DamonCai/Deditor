@@ -4,8 +4,24 @@ import type { Relationship, Sheet } from "./document";
 import type { Box, SceneNode } from "./scene";
 
 export interface Point { x: number; y: number }
+export type RelationshipControl = Point | { amount: number; angle: number };
 const center = (box: Box): Point => ({ x: box.x + box.width / 2, y: box.y + box.height / 2 });
 const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
+const cartesian = (value: unknown): value is Point => !!value && typeof value === 'object'
+  && finite((value as Point).x) && finite((value as Point).y);
+const polar = (value: unknown): value is { amount: number; angle: number } => !!value && typeof value === 'object'
+  && finite((value as {amount:number}).amount) && finite((value as {angle:number}).angle);
+
+/** Preserve polar controls when dragging: their origin is the outline endpoint. */
+export function movedRelationshipControl(original: unknown, point: Point, topic: Box, start: Point, end: Point): RelationshipControl {
+  const dx=end.x-start.x,dy=end.y-start.y,length=Math.hypot(dx,dy);
+  if(polar(original) && !cartesian(original) && length>1e-8) {
+    const px=point.x-start.x,py=point.y-start.y;
+    return {amount:Math.hypot(px,py)/length,angle:Math.atan2(py,px)-Math.atan2(dy,dx)};
+  }
+  const c=center(topic);
+  return {x:point.x-c.x,y:point.y-c.y};
+}
 const numeric = (value: string | undefined, fallback: number) => {
   const n = parseFloat(value ?? "");
   return Number.isFinite(n) ? n : fallback;
@@ -82,6 +98,7 @@ export function relationshipGeometry(sheet: Sheet, relation: Relationship, a: Sc
   const properties=relationshipStyle(sheet,relation);
   const shape = (properties["shape-class"] ?? "curve").toLowerCase();
   const controls = relation.controlPoints as Record<string, { x?: number; y?: number; amount?: number; angle?: number }> | undefined;
+  const endpoints = relation.lineEndPoints as Record<string, unknown> | undefined;
   // Current XMind's Cartesian control vectors are relative to each topic's
   // centre, confirmed with the generated native control-point probe.
   const distance = Math.hypot(cb.x - ca.x, cb.y - ca.y);
@@ -104,10 +121,25 @@ export function relationshipGeometry(sheet: Sheet, relation: Relationship, a: Sc
       : { x: origin.x + defaultVector(index).x, y: origin.y + defaultVector(index).y };
   };
   let c1 = control(0, ca), c2 = control(1, cb);
-  const automatic=!Object.values(controls??{}).some(p=>finite(p.x)&&finite(p.y));
+  const automatic=![controls?.[0],controls?.[1]].some(p=>cartesian(p)||polar(p));
   const nativeShape=shape.startsWith('org.xmind.relationshipshape.');
-  const start = topicAnchor(a, straight || (automatic&&nativeShape) ? cb : c1);
-  const end = topicAnchor(b, straight || (automatic&&nativeShape) ? ca : c2);
+  const anchor = (index:number,node:SceneNode,other:Point,control:Point) => {
+    const reference=endpoints?.[index],origin=center(node);
+    if(cartesian(reference))return topicAnchor(node,{x:origin.x+reference.x,y:origin.y+reference.y});
+    return topicAnchor(node,straight || polar(controls?.[index]) || (automatic&&nativeShape) ? other : control);
+  };
+  const start = anchor(0,a,cb,c1),end=anchor(1,b,ca,c2);
+  // Native polar amount is a fraction of the edge-to-edge vector; angle is
+  // radians. Rotating the control does not rotate the attachment on the topic.
+  const polarControl = (value:unknown,origin:Point,target:Point,fallback:Point) => {
+    if(!polar(value)||cartesian(value))return fallback;
+    const x=(target.x-origin.x)*value.amount,y=(target.y-origin.y)*value.amount;
+    return {x:origin.x+x*Math.cos(value.angle)-y*Math.sin(value.angle),
+      y:origin.y+x*Math.sin(value.angle)+y*Math.cos(value.angle)};
+  };
+  const storedControl=(index:number) => controls?.[index] ?? (!automatic&&nativeShape?{amount:.33,angle:Math.PI/6}:undefined);
+  c1=polarControl(storedControl(0),start,end,c1);
+  c2=polarControl(storedControl(1),end,start,c2);
   if(automatic&&nativeShape) {
     const ex=end.x-start.x,ey=end.y-start.y;
     if(nativeCurve) {
@@ -154,6 +186,6 @@ export function relationshipGeometry(sheet: Sheet, relation: Relationship, a: Sc
     fontSize: Math.max(9, numeric(properties["fo:font-size"], 12)),
     beginArrow: properties["arrow-begin-class"] ?? "none",
     endArrow: properties["arrow-end-class"] ?? "org.xmind.arrowShape.herringbone",
-    unsupportedPolar: Object.values(controls ?? {}).some((p) => !finite(p.x) && finite(p.amount)),
+    unsupportedPolar: [controls?.[0],controls?.[1]].some(p=>p && typeof p==='object' && ('amount' in p || 'angle' in p) && !polar(p) && !cartesian(p)),
   };
 }

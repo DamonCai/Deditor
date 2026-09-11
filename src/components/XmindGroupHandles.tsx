@@ -51,13 +51,13 @@ export default function XmindGroupHandles({
     };
   }, []);
   if (!range) return null;
-  const reversed = groupRangeReversed(owner, nodes, axis);
+  const reversed = groupRangeReversed(owner, nodes, axis, range);
   const bounds = preview
     ? (groupRangeBounds(owner, preview.start, preview.end, nodes) ?? box)
     : box;
   const at = (which: "start" | "end", x: number, y: number) => {
     const point = toWorld(x, y),
-      index = nearestGroupMember(owner, nodes, axis, point[axis]);
+      index = nearestGroupMember(owner, nodes, axis, point[axis], point[axis === "x" ? "y" : "x"]);
     if (index === null) return range;
     return which === "start"
       ? { start: Math.min(index, range.end), end: range.end }

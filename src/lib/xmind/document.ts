@@ -181,7 +181,7 @@ export type Command =
     }
   | { type: "position"; id: string; x: number; y: number }
   | { type: "relationship"; from: string; to: string; title: string }
-  | { type: "relationship-update"; id: string; title?: string; properties?: Properties; controlPoints?: Record<string, { x: number; y: number }> }
+  | { type: "relationship-update"; id: string; title?: string; properties?: Properties; controlPoints?: Record<string, { x: number; y: number } | { amount: number; angle: number }> }
   | { type: "relationship-reconnect"; id: string; end: 0 | 1; topicId: string }
   | { type: "relationship-delete"; id: string }
   | { type: "group-update"; parent: string; id: string; title?: string; properties?: Properties; range?: { start: number; end: number } }
@@ -306,7 +306,8 @@ export function editDocument(
       if (command.properties) relation.style={...relation.style,properties:{...relation.style?.properties,...command.properties}};
       if (command.controlPoints) {
         for (const point of Object.values(command.controlPoints))
-          if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) throw new Error("Invalid control point");
+          if ('x' in point ? !Number.isFinite(point.x) || !Number.isFinite(point.y)
+            : !Number.isFinite(point.amount) || !Number.isFinite(point.angle)) throw new Error("Invalid control point");
         relation.controlPoints = { ...(relation.controlPoints as object ?? {}), ...command.controlPoints };
       }
       break;

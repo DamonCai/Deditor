@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Command, Relationship, Sheet } from "../lib/xmind/document";
 import type { Box, Measure, SceneNode } from "../lib/xmind/scene";
 import { draftBox } from "../lib/xmind/draft";
-import { relationshipDropTarget, relationshipGeometry, type Point } from "../lib/xmind/relationship";
+import { movedRelationshipControl, relationshipDropTarget, relationshipGeometry, type Point, type RelationshipControl } from "../lib/xmind/relationship";
 import { useT } from "../lib/i18n";
 
 function Arrow({ id, kind, color, begin = false }: { id: string; kind: string; color: string; begin?: boolean }) {
@@ -35,7 +35,7 @@ interface Props {
 export default function XmindRelationship(props: Props) {
   const { relation, sheet, from, to, selected, readonly, onCommand } = props;
   const t = useT();
-  const [preview, setPreview] = useState<Record<string, Point> | null>(null);
+  const [preview, setPreview] = useState<Record<string, RelationshipControl> | null>(null);
   const [editing, setEditing] = useState(false), [draft, setDraft] = useState("");
   const dragging = useRef<{ index: number; moved: boolean } | null>(null);
   const endpointDrag = useRef<{end:0|1; moved:boolean}|null>(null);
@@ -90,12 +90,14 @@ export default function XmindRelationship(props: Props) {
     {selected && <path d={path} fill="none" stroke="#80CFFF" strokeWidth={width + 6} opacity={0.55} pointerEvents="none" />}
     <path d={path} data-relationship-path fill="none" stroke={color} strokeWidth={width}
       strokeDasharray={geometry.dash} markerStart={markerStart} markerEnd={markerEnd} />
-    <path d={path} fill="none" stroke="transparent" strokeWidth={14} style={{ cursor: "pointer" }} />
+    <path d={path} fill="none" stroke="transparent" strokeWidth={14 / props.zoom} style={{ cursor: "pointer" }} />
     {selected && !readonly && !geometry.straight && [c1, c2].map((point, index) => {
       const anchor = index ? end : start, topic = index ? to : from;
+      const movedControl = (point:Point) => movedRelationshipControl(
+        (relation.controlPoints as Record<string,unknown> | undefined)?.[index],point,topic,anchor,index?start:end);
       return <g key={index}>
         <path d={`M${anchor.x},${anchor.y} L${point.x},${point.y}`} stroke="#55B7E8" strokeWidth={1} pointerEvents="none" />
-        <circle cx={point.x} cy={point.y} r={6} fill="#fff" stroke="#299AD8" strokeWidth={2}
+        <circle cx={point.x} cy={point.y} r={6 / props.zoom} fill="#fff" stroke="#299AD8" strokeWidth={2 / props.zoom}
           data-control={index} aria-label={t("xmind.controlPoint", { index: index + 1 })}
           style={{ cursor: "move" }}
           onDoubleClick={(e) => e.stopPropagation()}
@@ -108,18 +110,18 @@ export default function XmindRelationship(props: Props) {
             if (!dragging.current) return;
             dragging.current.moved = true;
             const p = props.toWorld(e.clientX, e.clientY);
-            setPreview({ [index]: { x: p.x - topic.x - topic.width / 2, y: p.y - topic.y - topic.height / 2 } });
+            setPreview({ [index]: movedControl(p) });
           }}
           onPointerUp={(e) => {
             if (!dragging.current) return;
             if (dragging.current.moved) {
               const p = props.toWorld(e.clientX, e.clientY);
               onCommand({ type: "relationship-update", id: relation.id,
-                controlPoints: { [index]: { x: p.x - topic.x - topic.width / 2, y: p.y - topic.y - topic.height / 2 } } });
+                controlPoints: { [index]: movedControl(p) } });
             }
             cancelDrag();
           }}
-          onPointerCancel={cancelDrag} />
+          onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag} />
       </g>;
     })}
     {endpointPreview && <rect x={endpointPreview.target.x-3} y={endpointPreview.target.y-3}
@@ -127,8 +129,8 @@ export default function XmindRelationship(props: Props) {
       rx={6} fill="none" stroke="#299AD8" strokeWidth={2} pointerEvents="none" />}
     {selected && !readonly && ([start,end] as const).map((point,index)=> {
       const endpoint=index as 0|1,other=index===0?to.topic.id:from.topic.id;
-      return <circle key={`endpoint-${index}`} cx={point.x} cy={point.y} r={6}
-        fill="#299AD8" stroke="#fff" strokeWidth={2} data-endpoint={index}
+      return <circle key={`endpoint-${index}`} cx={point.x} cy={point.y} r={6 / props.zoom}
+        fill="#299AD8" stroke="#fff" strokeWidth={2 / props.zoom} data-endpoint={index}
         aria-label={t('xmind.endpoint',{index:index+1})} style={{cursor:'crosshair'}}
         onDoubleClick={e=>e.stopPropagation()}
         onPointerDown={e=>{

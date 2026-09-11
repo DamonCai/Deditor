@@ -1,4 +1,7 @@
 import { groupRangeAxis, groupRangeBounds, groupRangeReversed, nearestGroupMember } from '../src/lib/xmind/groupRange';
+import { BOUNDARY_SHAPES, SUMMARY_SHAPES, boundaryGeometry, boundaryOverflow, summaryPath } from '../src/lib/xmind/groupShapes';
+import { round10GroupSheets, round10PolarSheets } from '../tests/fixtures/xmind-round10';
+import nativeGroupShapes from '../tests/fixtures/xmind-native-group-shapes.json';
 import { round9RelationshipSheets } from '../tests/fixtures/xmind-round9';
 import { ARROW_SHAPES, arrowDrawing } from '../src/lib/xmind/arrows';
 import nativeArrows from '../tests/fixtures/xmind-native-arrows.json';
@@ -11,7 +14,7 @@ import nativeAdvancedShapes from "../tests/fixtures/xmind-native-advanced-shapes
 import { round7ShapeSheets } from "../tests/fixtures/xmind-round7";
 import { TOPIC_SHAPES, shapePolygon, shapeSize } from "../src/lib/xmind/shapes";
 import { topicDropTarget } from "../src/lib/xmind/drop";
-import { relationshipDropTarget, relationshipGeometry, topicAnchor } from "../src/lib/xmind/relationship";
+import { movedRelationshipControl, relationshipDropTarget, relationshipGeometry, topicAnchor } from "../src/lib/xmind/relationship";
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { unzipSync, strFromU8, zipSync, strToU8 } from "fflate";
@@ -1388,6 +1391,101 @@ test(2, "range handles follow vertical and reverse timelines instead of connecto
   sheet.rootTopic.structureClass='org.xmind.ui.org-chart.down';
   const scene=buildScene(sheet);
   assert.equal(groupRangeAxis(scene.nodes[0],scene.nodes),'x');
+});
+
+test(2, "range drops inside a left topic do not select the opposite right branch", () => {
+  const sheet: Sheet = {id:'two-sided-range',title:'Range',rootTopic:{id:'r',title:'Root',
+    structureClass:'org.xmind.ui.map.unbalanced',
+    children:{attached:Array.from({length:6},(_,i)=>({id:`member-${i}`,title:`Topic ${i}`}))},
+    boundaries:[{id:'left-range',range:'(3,4)'}]}};
+  const scene=buildScene(sheet),target=scene.nodes.find(n=>n.topic.id==='member-5')!;
+  const y=target.y+target.height-4,x=target.x+target.width/2;
+  assert.equal(nearestGroupMember(sheet.rootTopic,scene.nodes,'y',y,x),5);
+  const reflected=scene.nodes.map(n=>({...n,x:-n.x-n.width}));
+  assert.equal(nearestGroupMember(sheet.rootTopic,reflected,'y',y,-x),5);
+  for (const range of [{start:0,end:1},{start:0,end:0}])
+    assert.equal(groupRangeReversed(sheet.rootTopic,scene.nodes,'y',range),false);
+  for (const range of [{start:3,end:4},{start:3,end:3}])
+    assert.equal(groupRangeReversed(sheet.rootTopic,scene.nodes,'y',range),true);
+});
+
+test(2, "all packaged summary shape fields render distinct finite paths and retain inherited styles", () => {
+  const fields=nativeGroupShapes.fields.filter(f=>f.shapeClass.includes('.summaryShape.'));
+  assert.deepEqual(new Set(fields.map(f=>f.shapeClass.split('.').pop())),new Set(SUMMARY_SHAPES));
+  for(const length of [0,8,100,1500]) {
+    const paths=SUMMARY_SHAPES.map(name=>summaryPath(`org.xmind.summaryShape.${name}`,length));
+    assert.equal(new Set(paths).size,5);
+    assert.ok(paths.every(path=>!/(NaN|Infinity)/.test(path)));
+  }
+  const sheets=sampleSheets(),sheet=sheets[0];
+  for(const name of SUMMARY_SHAPES) {
+    sheet.theme={...sheet.theme,summary:{properties:{'shape-class':`org.xmind.summaryShape.${name}`}}};
+    const before=structuredClone(sheet),scene=buildScene(sheet);
+    assert.equal(scene.groups.find(g=>g.id==='summary')!.properties['shape-class'],`org.xmind.summaryShape.${name}`);
+    assert.equal(scene.warnings.includes(`org.xmind.summaryShape.${name}`),false);
+    assert.deepEqual(sheet,before);
+  }
+});
+
+test(2, "native boundary shapes enclose members and keep open borders separate from fills", () => {
+  const fields=nativeGroupShapes.fields.filter(f=>f.shapeClass.includes('.boundaryShape.'));
+  assert.deepEqual(new Set(fields.map(f=>f.shapeClass.split('.').pop())),new Set(BOUNDARY_SHAPES));
+  const [sheet]=round10GroupSheets(),scene=buildScene(sheet);
+  assert.equal(scene.groups.length,9);
+  const paths=new Set<string>();
+  for(const group of scene.groups) {
+    const shape=group.properties['shape-class'],geometry=boundaryGeometry(shape,group.width,group.height,group.memberBoxes);
+    assert.equal(scene.warnings.includes(shape),false);
+    const overflow=boundaryOverflow(shape);
+    assert.ok(scene.bounds.x<=group.x-overflow && scene.bounds.x+scene.bounds.width>=group.x+group.width+overflow);
+    if(geometry) {
+      assert.ok(!/(NaN|Infinity)/.test(geometry.fillPath+geometry.borderPath));
+      assert.ok(geometry.fillPath.endsWith('Z'));
+      if(shape.endsWith('focus')||shape.endsWith('cross'))assert.notEqual(geometry.fillPath,geometry.borderPath);
+      paths.add(geometry.borderPath);
+    }
+  }
+  assert.equal(paths.size,7);
+  const poly=boundaryGeometry('polygon',200,200,[{x:14,y:14,width:60,height:30},{x:80,y:120,width:106,height:66}])!;
+  assert.notEqual(poly.borderPath,'M0,0 H200 V200 H0 Z','polygon follows the different member widths');
+});
+
+test(2, "polar controls rotate fractions of the endpoint vector without moving outline anchors", () => {
+  const sheet=sampleSheets()[0],template=buildScene(sheet).nodes[0];
+  const a={...template,x:0,y:0,width:100,height:60,shape:'rect'},b={...a,x:300};
+  const relation={id:'polar',end1Id:'a',end2Id:'b',controlPoints:{'0':{amount:.5,angle:Math.PI/2},'1':{amount:.25,angle:0}},
+    style:{properties:{'shape-class':'org.xmind.relationshipShape.curved'}}};
+  const g=relationshipGeometry(sheet,relation,a,b);
+  assert.deepEqual(g.start,{x:100,y:30});assert.deepEqual(g.end,{x:300,y:30});
+  assert.ok(Math.abs(g.c1.x-100)<1e-8);assert.equal(g.c1.y,130);
+  assert.deepEqual(g.c2,{x:250,y:30});assert.equal(g.unsupportedPolar,false);
+  const fixed=relationshipGeometry(sheet,{...relation,lineEndPoints:{'0':{x:0,y:-80},'1':{x:0,y:80}}},a,b);
+  assert.deepEqual(fixed.start,{x:50,y:0});assert.deepEqual(fixed.end,{x:350,y:60});
+  const vertical=relationshipGeometry(sheet,relation,a,{...b,x:0,y:300});
+  assert.ok(Math.abs(vertical.c1.x+70)<1e-8);assert.ok(Math.abs(vertical.c1.y-60)<1e-8);
+  const zero=relationshipGeometry(sheet,{...relation,controlPoints:{'0':{amount:0,angle:-5},'1':{amount:0,angle:0}}},a,b);
+  assert.deepEqual(zero.c1,zero.start);assert.deepEqual(zero.c2,zero.end);
+  const coincident=relationshipGeometry(sheet,relation,a,a);assert.ok(!/NaN|Infinity/.test(coincident.path));
+});
+
+test(3, "polar drag, reconnect and archive preserve fixed endpoints, opposite controls and resources", () => {
+  const sheets=round10PolarSheets(),sheet=sheets[0],doc=openDocument(sampleArchive(sheets)),scene=buildScene(sheet);
+  assert.equal(scene.warnings.includes('relationship-polar-controls'),false);
+  const relation=sheet.relationships![3],a=scene.nodes.find(n=>n.topic.id===relation.end1Id)!,b=scene.nodes.find(n=>n.topic.id===relation.end2Id)!;
+  const before=structuredClone(relation),g=relationshipGeometry(sheet,relation,a,b),target={x:g.start.x+220,y:g.start.y-130};
+  const moved=movedRelationshipControl((relation.controlPoints as any)[0],target,a,g.start,g.end);
+  assert.ok('amount' in moved);
+  const updated=editDocument(sheets,sheet.id,{type:'relationship-update',id:relation.id,controlPoints:{'0':moved}});
+  const after=updated[0].relationships![3],geometry=relationshipGeometry(sheet,after,a,b);
+  assert.ok(Math.hypot(geometry.c1.x-target.x,geometry.c1.y-target.y)<1e-8);
+  assert.deepEqual(geometry.start,g.start);assert.deepEqual(geometry.end,g.end);
+  const connected=editDocument(updated,sheet.id,{type:'relationship-reconnect',id:relation.id,end:1,topicId:'polar-2-1'});
+  const reopened=openDocument(writeDocument(doc,connected)),saved=reopened.sheets[0].relationships![3];
+  assert.deepEqual(saved.lineEndPoints,before.lineEndPoints);
+  assert.deepEqual((saved.controlPoints as any)[1],(before.controlPoints as any)[1]);
+  assert.equal(saved.end2Id,'polar-2-1');assert.deepEqual(relation,before);
+  assert.deepEqual(reopened.files['attachments/keep.bin'],doc.files['attachments/keep.bin']);
+  assert.throws(()=>editDocument(sheets,sheet.id,{type:'relationship-update',id:relation.id,controlPoints:{'0':{amount:NaN,angle:0}}}),/Invalid control/);
 });
 
 console.log(`${passed} XMind tests passed`);

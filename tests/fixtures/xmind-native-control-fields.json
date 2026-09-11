@@ -1,0 +1,17 @@
+{
+  "source": "Xmind.app/Contents/Resources/app.asar:renderer/1857.js",
+  "sha256": "4518bf24d5c02562e4d75162ecf4a0840db756f40fafc66a497f59b11fba58e0",
+  "evidence": "Static renderer/import-export inspection; native UI and archive interchange remain pending.",
+  "fields": {
+    "controlPoints.0/1.x/y": "Vectors relative to source/target topic centres",
+    "controlPoints.0/1.amount": "Fraction of outline endpoint-to-endpoint vector",
+    "controlPoints.0/1.angle": "Radians rotating that vector about the matching outline endpoint",
+    "lineEndPoints.0/1.x/y": "Centre-relative reference directions for fixed source/target outline attachments",
+    "flexibleControlPoints": "Array of control vectors relative to source topic centre; separate from two ordinary controls"
+  },
+  "checks": [
+    "Native importer maps lineEndPoints to sourceRefPoint / targetRefPoint and exporter maps back",
+    "Polar controls use outline origins; they do not re-aim the outline attachment",
+    "When only one ordinary control exists, native missing control defaults to amount 0.33 and angle pi/6"
+  ]
+}

@@ -1,4 +1,5 @@
 import { isPunctuationShape } from "./punctuationShapes";
+import { BOUNDARY_SHAPES, SUMMARY_SHAPES, boundaryOverflow } from "./groupShapes";
 import { shapeSize, shapeName, ALL_TOPIC_SHAPES } from "./shapes";
 import { shapeContentCenter, advancedShapeScale, flowContentScale, referenceSymbol } from "./shapePaths";
 import { relationshipGeometry } from "./relationship";
@@ -56,6 +57,7 @@ export interface Edge {
   trunk?: { x: number; y: number }[];
 }
 export interface SceneGroup extends Box {
+  memberBoxes?: Box[];
   id: string;
   parent: string;
   title: string;
@@ -311,10 +313,13 @@ export function buildScene(
       titleWidth: titleLines.length ? Math.max(40,...titleLines.map(line=>measure(line,titleFontSize,properties)+12)) : 0,
       titleHeight: titleLines.length ? titleLines.length*titleLineHeight+8 : 0};
   }
-  const groupBounds = (g: SceneGroup): Box => ({
-    x:g.x-Math.max(0,g.titleWidth-g.width)/2,y:g.y-g.titleHeight,
-    width:Math.max(g.width,g.titleWidth),height:g.height+g.titleHeight,
-  });
+  const groupBounds = (g: SceneGroup): Box => {
+    const extra=g.summary?0:boundaryOverflow(g.properties['shape-class']);
+    return boundsOf([
+      {x:g.x-extra,y:g.y-extra,width:g.width+extra*2,height:g.height+extra*2},
+      {x:g.x+(g.width-g.titleWidth)/2,y:g.y-g.titleHeight,width:g.titleWidth,height:g.titleHeight},
+    ]);
+  };
   function layout(
     topic: Topic,
     depth: number,
@@ -472,9 +477,9 @@ export function buildScene(
       });
       const before: number[] = parts.map((_,i)=>Math.max(0,...groupRanges.filter(g=>g.start===i).map(g=> {
         const width = Math.max(...parts.slice(g.start,g.end+1).map(p=>p.bounds.width)) + 28;
-        return vertical ? 18 : 18 + groupTitle(g.title,width,g.properties).titleHeight;
+        return 18 + boundaryOverflow(g.properties['shape-class']) + (vertical ? 0 : groupTitle(g.title,width,g.properties).titleHeight);
       })));
-      const after: number[] = parts.map((_,i)=>groupRanges.some(g=>g.end===i) ? 18 : 0);
+      const after: number[] = parts.map((_,i)=>Math.max(0,...groupRanges.filter(g=>g.end===i).map(g=>18+boundaryOverflow(g.properties['shape-class']))));
       const length = before.reduce((a,b)=>a+b,0) + after.reduce((a,b)=>a+b,0) +
         parts.reduce(
           (sum, f) => sum + (vertical ? f.bounds.width : f.bounds.height),
@@ -813,6 +818,7 @@ export function buildScene(
         y: b.y - 14,
         width: b.width + 28,
         height: b.height + 28,
+        memberBoxes: nodes.map(nodeVisualBounds).map(box=>({...box,x:box.x-b.x+14,y:box.y-b.y+14})),
       };
     };
     for (const g of n.topic.boundaries ?? []) {
@@ -884,7 +890,7 @@ export function buildScene(
   for (const group of groups) {
     const shape = group.properties["shape-class"];
     const name = shape?.split(".").pop()?.toLowerCase();
-    if (name && !(group.summary ? ["round"] : ["rect", "roundedrect"]).includes(name))
+    if (name && !(group.summary ? [...SUMMARY_SHAPES] as string[] : BOUNDARY_SHAPES.map(shape=>shape.toLowerCase())).includes(name))
       warnings.add(shape!);
   }
   const relationBoxes: Box[] = [];

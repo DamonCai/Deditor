@@ -36,6 +36,7 @@ export function nearestGroupMember(
   nodes: readonly SceneNode[],
   axis: "x" | "y",
   coordinate: number,
+  perpendicular?: number,
 ): number | null {
   const indices = new Map(
     (owner.children?.attached ?? []).map((t, i) => [t.id, i]),
@@ -45,8 +46,14 @@ export function nearestGroupMember(
   for (const node of nodes) {
     const index = indices.get(node.topic.id);
     if (index === undefined) continue;
-    const value = node[axis] + (axis === "x" ? node.width : node.height) / 2,
-      d = Math.abs(value - coordinate);
+    const value = node[axis] + (axis === "x" ? node.width : node.height) / 2;
+    const other = axis === "x" ? "y" : "x";
+    const extent = axis === "x" ? node.height : node.width;
+    // Opposite branches can share the same height. Include the distance to
+    // the topic's perpendicular span so dropping on the left stays on the left.
+    const crossDistance = perpendicular === undefined ? 0 :
+      Math.max(node[other] - perpendicular, perpendicular - node[other] - extent, 0);
+    const d = Math.hypot(value - coordinate, crossDistance);
     if (d < distance) {
       distance = d;
       nearest = index;
@@ -60,15 +67,25 @@ export function groupRangeReversed(
   owner: Topic,
   nodes: readonly SceneNode[],
   axis: "x" | "y",
+  range?: { start: number; end: number },
 ): boolean {
   const byId = new Map(nodes.map((node) => [node.topic.id, node]));
   const visible = (owner.children?.attached ?? [])
     .map((topic) => byId.get(topic.id))
     .filter((node): node is SceneNode => !!node);
-  if (visible.length < 2) return false;
+  const members = range ? (owner.children?.attached ?? [])
+    .slice(range.start, range.end + 1)
+    .map(topic => byId.get(topic.id))
+    .filter((node): node is SceneNode => !!node) : visible;
+  // Each side of a mind map has its own order. A one-topic range uses the
+  // neighboring topics on its branch side until it contains a second member.
+  const ordered = members.length === 1
+    ? visible.filter(node => node.direction === members[0].direction)
+    : members;
+  if (ordered.length < 2) return false;
   const center = (node: SceneNode) =>
     node[axis] + (axis === "x" ? node.width : node.height) / 2;
-  return center(visible[0]) > center(visible[visible.length - 1]);
+  return center(ordered[0]) > center(ordered[ordered.length - 1]);
 }
 
 export function groupRangeAxis(

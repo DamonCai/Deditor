@@ -2295,6 +2295,43 @@ test(3, 'XMind changing a group range keeps topics and unrelated data, saves and
   await click('Undo');assert.equal(store.getState().tabs[0].content,original);
 });
 
+test(3, 'XMind boundary shapes preserve fields, save and undo without changing members', async () => {
+  await mountXmind();
+  const original=store.getState().tabs[0].content,ownerBefore=xmindSheets()[0].rootTopic.children.attached[0];
+  for(const shape of ['polygon','roundedPolygon','scallops','waves','tension','focus','cross']) {
+    await act(async()=>document.querySelector('[data-group="boundary"]').dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true,button:0})));
+    const select=document.querySelector('select[aria-label="Shape"]');assert.equal(select.options.length,9);
+    await act(async()=>{select.value=`org.xmind.boundaryShape.${shape}`;select.dispatchEvent(new window.Event('change',{bubbles:true}));});
+    assert.ok(document.querySelector(`[data-boundary-shape="org.xmind.boundaryShape.${shape}"]`));
+    const owner=xmindSheets()[0].rootTopic.children.attached[0];
+    assert.equal(owner.boundaries[0].style.properties['svg:fill'],ownerBefore.boundaries[0].style.properties['svg:fill']);
+    assert.deepEqual(owner.children,ownerBefore.children);
+    await act(async()=>app.saveFile());
+    const saved=app.openXmindDocument(new Uint8Array(Buffer.from(writes.at(-1).data,'base64'))).sheets[0];
+    assert.equal(saved.rootTopic.children.attached[0].boundaries[0].style.properties['shape-class'],`org.xmind.boundaryShape.${shape}`);
+    await click('Undo');assert.equal(store.getState().tabs[0].content,original);
+  }
+});
+
+test(3, 'XMind summary shape changes save without changing members and undo once', async () => {
+  await mountXmind();
+  const original=store.getState().tabs[0].content,originalSheets=xmindSheets(),paths=new Set();
+  for(const shape of ['angle','square','round','curly','straight']) {
+    await act(async()=>document.querySelector('[data-group="summary"]').dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true,button:0})));
+    const select=document.querySelector('select[aria-label="Shape"]');assert.equal(select.options.length,5);
+    await act(async()=>{select.value=`org.xmind.summaryShape.${shape}`;select.dispatchEvent(new window.Event('change',{bubbles:true}));});
+    paths.add(document.querySelector('[data-group="summary"] path').getAttribute('d'));
+    const owner=xmindSheets()[0].rootTopic.children.attached.find(t=>t.id==='safe');
+    assert.equal(owner.summaries[0].style.properties['shape-class'],`org.xmind.summaryShape.${shape}`);
+    assert.deepEqual(owner.children,originalSheets[0].rootTopic.children.attached.find(t=>t.id==='safe').children);
+    await act(async()=>app.saveFile());
+    const saved=app.openXmindDocument(new Uint8Array(Buffer.from(writes.at(-1).data,'base64'))).sheets[0];
+    assert.equal(saved.rootTopic.children.attached.find(t=>t.id==='safe').summaries[0].style.properties['shape-class'],`org.xmind.summaryShape.${shape}`);
+    await click('Undo');assert.equal(store.getState().tabs[0].content,original);
+  }
+  assert.equal(paths.size,5);
+});
+
 test(3, 'XMind group range handles preview, cancel and commit one history entry', async () => {
   await mountXmind();
   const before=store.getState().tabs[0].content;
@@ -2336,7 +2373,27 @@ test(3, 'XMind vertical and reverse timeline range drags extend toward the displ
   }
 });
 
-test(2, 'XMind relationship Escape cancels title and control-point drags', async () => {
+test(3, 'XMind left boundary drag selects the left topic, saves and undoes once', async () => {
+  const sheets=[{id:'range-sheet',title:'Range',rootTopic:{id:'range-root',title:'Root',
+    structureClass:'org.xmind.ui.map.unbalanced',
+    children:{attached:Array.from({length:6},(_,i)=>({id:`range-${i}`,title:`Topic ${i}`}))},
+    boundaries:[{id:'range-group',range:'(3,4)',title:'Range'}]}}];
+  await mountXmind(true,zipSync({'content.json':strToU8(JSON.stringify(sheets))}));
+  const before=store.getState().tabs[0].content;
+  await act(async()=>document.querySelector('[data-group="range-group"]').dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true,button:0})));
+  const end=document.querySelector('[data-range-handle="end"]');end.setPointerCapture=()=>{};
+  const svg=document.querySelector('.xm-svg'),target=document.querySelector('[data-topic="range-5"]'),box=target.querySelector('[data-topic-hitbox]');
+  const [x,y]=target.getAttribute('transform').match(/[-\d.]+/g).map(Number),[vx,vy,vw,vh]=svg.getAttribute('viewBox').split(' ').map(Number);
+  const zoom=parseFloat(document.querySelector('.xm-zoom span').textContent)/100;
+  const clientX=(x+Number(box.getAttribute('width'))/2-vx-vw/2)*zoom,clientY=(y+Number(box.getAttribute('height'))-4-vy-vh/2)*zoom;
+  for(const type of ['pointerdown','pointermove','pointerup'])await act(async()=>end.dispatchEvent(new window.MouseEvent(type,{bubbles:true,button:0,clientX,clientY})));
+  assert.equal(xmindSheets()[0].rootTopic.boundaries[0].range,'(3,5)');
+  await act(async()=>app.saveFile());
+  assert.equal(app.openXmindDocument(new Uint8Array(Buffer.from(writes.at(-1).data,'base64'))).sheets[0].rootTopic.boundaries[0].range,'(3,5)');
+  await click('Undo');assert.equal(store.getState().tabs[0].content,before);
+});
+
+test(2, 'XMind relationship Escape and lost capture cancel control-point drags', async () => {
   await mountXmind();
   const before=store.getState().tabs[0].content;
   const relation=document.querySelector('[data-relationship="rel"]');
@@ -2355,7 +2412,37 @@ test(2, 'XMind relationship Escape cancels title and control-point drags', async
   await act(async()=>window.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
   await act(async()=>handle.dispatchEvent(new window.MouseEvent('pointerup',{bubbles:true,clientX:200,clientY:50})));
   assert.equal(store.getState().tabs[0].content,before);assert.equal(path(),original);
+  await act(async()=>handle.dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true,button:0})));
+  await act(async()=>handle.dispatchEvent(new window.MouseEvent('pointermove',{bubbles:true,clientX:200,clientY:50})));
+  assert.notEqual(path(),original);
+  await act(async()=>handle.dispatchEvent(new window.Event('lostpointercapture',{bubbles:true})));
+  await act(async()=>handle.dispatchEvent(new window.MouseEvent('pointerup',{bubbles:true,clientX:200,clientY:50})));
+  assert.equal(store.getState().tabs[0].content,before);assert.equal(path(),original);
 });
+test(3, 'XMind polar drag preserves attachment and opposite control through save and one undo', async () => {
+  const sheets=app.openXmindDocument(app.sampleArchive()).sheets;
+  const relation=sheets[0].relationships[0];
+  relation.controlPoints={'0':{amount:.4,angle:Math.PI/3},'1':{amount:.25,angle:0}};
+  relation.lineEndPoints={'0':{x:0,y:-100},'1':{x:0,y:100}};
+  await mountXmind(true,zipSync({'content.json':strToU8(JSON.stringify(sheets))}));
+  const before=store.getState().tabs[0].content;
+  await act(async()=>document.querySelector('[data-relationship="rel"]').dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true,button:0})));
+  const endpoints=()=>[...document.querySelectorAll('[data-endpoint]')].map(e=>[e.getAttribute('cx'),e.getAttribute('cy')]);
+  const originalEndpoints=endpoints(),handle=document.querySelector('[data-control="0"]');handle.setPointerCapture=()=>{};
+  await act(async()=>handle.dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true,button:0})));
+  await act(async()=>handle.dispatchEvent(new window.MouseEvent('pointermove',{bubbles:true,clientX:160,clientY:70})));
+  assert.equal(store.getState().tabs[0].content,before);assert.deepEqual(endpoints(),originalEndpoints);
+  await act(async()=>handle.dispatchEvent(new window.MouseEvent('pointerup',{bubbles:true,clientX:160,clientY:70})));
+  const updated=xmindSheets()[0].relationships[0];
+  assert.equal(typeof updated.controlPoints[0].amount,'number');assert.equal(updated.controlPoints[0].x,undefined);
+  assert.deepEqual(updated.controlPoints[1],relation.controlPoints[1]);assert.deepEqual(updated.lineEndPoints,relation.lineEndPoints);
+  assert.deepEqual(endpoints(),originalEndpoints);
+  await act(async()=>app.saveFile());
+  const reopened=app.openXmindDocument(new Uint8Array(Buffer.from(writes.at(-1).data,'base64'))).sheets[0].relationships[0];
+  assert.deepEqual(reopened,updated);
+  await click('Undo');assert.equal(store.getState().tabs[0].content,before);
+});
+
 test(3, 'XMind control-point drag is a single edit and notes icon selects the owner and opens its field', async () => {
   await mountXmind();
   const original=store.getState().tabs[0].content;

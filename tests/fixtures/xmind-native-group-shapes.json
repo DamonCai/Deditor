@@ -1,0 +1,63 @@
+{
+  "source": "Xmind.app/Contents/Resources/app.asar:renderer/2610.js",
+  "sourceSha256": "1d88d1fc57b1587aaae8a7c65080707b9536ecce0c2aa57a6983308492e39660",
+  "fields": [
+    {
+      "shapeClass": "org.xmind.boundaryShape.rect",
+      "icon": "shape-rectangle"
+    },
+    {
+      "shapeClass": "org.xmind.boundaryShape.roundedRect",
+      "icon": "shape-rounded-rect"
+    },
+    {
+      "shapeClass": "org.xmind.boundaryShape.polygon",
+      "icon": "shape-polygon"
+    },
+    {
+      "shapeClass": "org.xmind.boundaryShape.scallops",
+      "icon": "shape-scallops"
+    },
+    {
+      "shapeClass": "org.xmind.boundaryShape.waves",
+      "icon": "shape-waves"
+    },
+    {
+      "shapeClass": "org.xmind.boundaryShape.tension",
+      "icon": "shape-tension"
+    },
+    {
+      "shapeClass": "org.xmind.boundaryShape.roundedPolygon",
+      "icon": "shape-rounded-polygon"
+    },
+    {
+      "shapeClass": "org.xmind.boundaryShape.focus",
+      "icon": "shape-focus"
+    },
+    {
+      "shapeClass": "org.xmind.boundaryShape.cross",
+      "icon": "shape-cross"
+    },
+    {
+      "shapeClass": "org.xmind.summaryShape.angle",
+      "icon": "summary-straight"
+    },
+    {
+      "shapeClass": "org.xmind.summaryShape.square",
+      "icon": "summary-elbow"
+    },
+    {
+      "shapeClass": "org.xmind.summaryShape.round",
+      "icon": "summary-curve"
+    },
+    {
+      "shapeClass": "org.xmind.summaryShape.curly",
+      "icon": "summary-bright"
+    },
+    {
+      "shapeClass": "org.xmind.summaryShape.straight",
+      "icon": "summary-right-angle"
+    }
+  ],
+  "evidence": "Packaged palette mapping, not a native save/reopen test"
+}
