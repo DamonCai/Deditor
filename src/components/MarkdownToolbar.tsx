@@ -1,3 +1,5 @@
+import type { ExportSnapshot } from "../lib/markdownExport/document";
+import MarkdownWritingSettings from "./MarkdownWritingSettings";
 import { getVisualEditor, subscribeVisualEditor } from "../lib/markdownVisualBridge";
 import { markdownHistory } from "../lib/markdownHistory";
 import { markdownSession } from "../lib/markdownSession";
@@ -59,7 +61,7 @@ export default function MarkdownToolbar() {
     kind: InsertKind;
     target: NonNullable<ReturnType<typeof captureEditorTarget>>;
   } | null>(null);
-  const [exportSnapshot, setExportSnapshot] = useState<{ content: string; filePath: string | null; theme: "light" | "dark" } | null>(null);
+  const [exportSnapshot, setExportSnapshot] = useState<ExportSnapshot | null>(null);
   const [color, setColor] = useState("#e53e3e");
   const [highlight, setHighlight] = useState("#fff59d");
   useEffect(() => {
@@ -292,9 +294,10 @@ export default function MarkdownToolbar() {
             <Button variant="ghost" size="sm" title={t("export.title")} onClick={() => {
               const current = useEditorStore.getState();
               const tab = current.tabs.find(tab => tab.id === current.activeId);
-              if (tab) setExportSnapshot({ content: tab.content, filePath: tab.filePath, theme: current.theme });
+              if (tab) setExportSnapshot({ content: tab.content, filePath: tab.filePath, theme: current.theme, documentTheme: current.markdownSettings.documentTheme, exportTemplate: current.markdownSettings.exportTemplate });
             }}><FiDownload style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} />{t("export.button")}</Button>
           </div>
+          <MarkdownWritingSettings />
           <div className="md-toolbar-views">
             <PreviewModeSwitch markdown />
           </div>

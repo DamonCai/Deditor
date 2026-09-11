@@ -134,6 +134,16 @@ try {
     assert.match(html, /<details open="">/);
     assert.doesNotMatch(html, /<script|javascript:|onclick=/);
   });
+  await test("HTML/PDF capture the selected document theme and export template", async () => {
+    const snapshot = { content: "# Report\n\nBody", filePath: "report.md", documentTheme: "serif", exportTemplate: "report" };
+    await e.exportMarkdown(snapshot, "html");
+    assert.match(writes.at(-1).content, /data-md-theme="serif" data-export-template="report"/);
+    await e.exportMarkdown(snapshot, "pdf");
+    assert.equal(document.getElementById("deditor-print-area").dataset.mdTheme, "serif");
+    assert.equal(document.getElementById("deditor-print-area").dataset.exportTemplate, "report");
+    const html = await e.standalonePage("<p>safe</p>", "Title", "light", { documentTheme: '\"bad', exportTemplate: "unknown" });
+    assert.match(html, /data-md-theme="default" data-export-template="default"/);
+  });
   await test("PDF retains its snapshot after print invocation", async () => {
     await e.exportMarkdown({ content: "# Printed", filePath: "a.md" }, "pdf");
     assert.equal(writes.at(-1).name, "print_window");
@@ -293,7 +303,7 @@ try {
       finish();await pending;
       const html=writes.at(-1).content;
       assert.equal(renderedTheme,'dark');assert.equal(diagramTheme,'dark');
-      assert.match(html,/<html class="dark"/);assert.match(html,/<main class="preview">/);
+      assert.match(html,/<html class="dark"/);assert.match(html,/<main class="preview"[^>]*>/);
       assert.match(html,/--preview-link: #8ab4ff/);assert.match(html,/color:#e53e3e/);
       assert.match(html,/<svg/);assert.match(html,/fill="#ff0000"/);
       assert.doesNotMatch(html,/正在加载 Mermaid|class="mermaid-loading"/);

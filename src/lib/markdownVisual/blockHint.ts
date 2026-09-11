@@ -7,9 +7,11 @@ export function getBlockHint(state: EditorState) {
   const { selection } = state, { $head } = selection;
   const selectedNode = selection instanceof NodeSelection ? selection.node : null;
   if (!selectedNode && (!(selection instanceof TextSelection) || !selection.empty)) return null;
-  const node = selectedNode ?? $head.parent;
+  let depth = $head.depth;
+  while (depth > 0 && !$head.node(depth).isBlock) depth--;
+  const node = selectedNode ?? $head.node(depth);
   if (!node.isBlock || (!selectedNode && !$head.depth)) return null;
-  const from = selectedNode ? selection.from : $head.before();
+  const from = selectedNode ? selection.from : $head.before(depth);
   let label = "¶";
   switch (node.type.name) {
     case "heading": label = `H${node.attrs.level}`; break;

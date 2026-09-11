@@ -1,3 +1,7 @@
+import { sharedHeadingIds } from "../lib/markdownVisual/headingIds";
+import { installTypewriter } from "../lib/markdownVisual/typewriter";
+import { pasteTableClipboard } from "../lib/markdownVisual/tablePaste";
+import { inlineSourceSchema, installInlineSource, inlineProjection } from "../lib/markdownVisual/inlineSource";
 import { installCompositionViewport } from "../lib/markdownVisual/compositionViewport";
 import { installMarkdownComposition } from "../lib/markdownComposition";
 import { faithfulLink } from "../lib/markdownVisual/references";
@@ -9,7 +13,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { extendedTableCells } from "../lib/markdownVisual/tableLists";
 import { inlineSchemas, faithfulInlineHtml, configureInlineSerialization } from "../lib/markdownVisual/inline";
 import { codeView } from "../lib/markdownVisual/codeView";
-import { remarkInlineLinkPlugin, remarkPreserveEmptyLinePlugin, wrapInHeadingInputRule } from "@milkdown/kit/preset/commonmark";
+import { remarkInlineLinkPlugin, remarkPreserveEmptyLinePlugin, syncHeadingIdPlugin, wrapInHeadingInputRule } from "@milkdown/kit/preset/commonmark";
 import { useEffect, useRef, useState } from "react";
 import { CrepeBuilder } from "@milkdown/crepe/builder";
 import { codeMirror } from "@milkdown/crepe/feature/code-mirror";
@@ -45,11 +49,12 @@ import { Button } from "./ui/Button";
 import "@milkdown/crepe/theme/common/style.css";
 import "./markdown-visual.css";
 
-interface Runtime { session: MarkdownSession; crepe: CrepeBuilder; view: EditorView; document: MarkdownDocument; sync: (source: string) => void; flush: () => void }
+interface Runtime { session: MarkdownSession; crepe: CrepeBuilder; view: EditorView; document: MarkdownDocument; sync: (source: string) => void; flush: () => void; closeInline: () => void }
 export default function MarkdownVisualEditor({ tabId, readonly = false, theme }: { tabId: string; readonly?: boolean; theme: "light" | "dark" }) {
   const t = useT();
   const source = useTabContent(tabId), filePath = useTabFilePath(tabId);
   const language = useEditorStore(s => s.language);
+  const writing = useEditorStore(s => s.markdownSettings);
   const fontSize = useEditorStore(s => s.tabs.find(tab => tab.id === tabId)?.zoomFontSize ?? s.editorFontSize);
   const root = useRef<HTMLDivElement>(null), scroller = useRef<HTMLDivElement>(null), searchInput = useRef<HTMLInputElement>(null);
   const runtime = useRef<Runtime | null>(null), readonlyRef = useRef(readonly), sourceRef = useRef(source);
@@ -65,7 +70,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
     view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, from, to)).scrollIntoView());
   };
   useEffect(() => {
-    let cancelled = false, cleanupFlush = () => {}, cleanupInput = () => {}, cleanupAccessibility = () => {}, cleanupCompositionViewport = () => {};
+    let cancelled = false, cleanupFlush = () => {}, cleanupInput = () => {}, cleanupAccessibility = () => {}, cleanupCompositionViewport = () => {}, cleanupInlineSource = () => {}, cleanupTypewriter = () => {};
     setReady(false); setError("");
     const host = document.createElement("div"); root.current!.append(host);
     const session = markdownSession(tabId, sourceRef.current); session.breakGroup();
@@ -77,7 +82,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
       const name = `image-${crypto.randomUUID()}.${ext}`;
       const bytes = new Uint8Array(await file.arrayBuffer()); let binary = "";
       for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
-      try { await saveImage(base, name, btoa(binary)); return `assets/${name}`; }
+      try { const folder = useEditorStore.getState().markdownSettings.imageDirectory; await saveImage(base, name, btoa(binary), folder); return `${folder}/${name}`; }
       catch (err) { logError("Markdown image upload failed", err); void showError(String(err)); throw err; }
     };
     const initialSource = sourceRef.current;
@@ -94,7 +99,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
         inlineUploadButton: t("md.uploadImage"), blockUploadButton: t("md.uploadImage"), blockConfirmButton: t("common.confirm"),
         inlineUploadPlaceholderText: t("md.imageUrlLabel"), blockUploadPlaceholderText: t("md.imageUrlLabel"), blockCaptionPlaceholderText: t("md.imageAltLabel") })
       .addFeature(latex);
-    crepe.editor.use(absoluteHeadingInputRule).use(activeBlockHint).use(faithfulLink).use(faithfulInlineHtml).use(faithfulImage).use(extendedTableCells.flat()).use(inlineSchemas.flat()).config(configureInlineSerialization).use(frontmatter).use(rawRemark(mdx)).use(rawSchema);
+    crepe.editor.use(inlineSourceSchema).use(absoluteHeadingInputRule).use(activeBlockHint).use(sharedHeadingIds).use(faithfulLink).use(faithfulInlineHtml).use(faithfulImage).use(extendedTableCells.flat()).use(inlineSchemas.flat()).config(configureInlineSerialization).use(frontmatter).use(rawRemark(mdx)).use(rawSchema);
     crepe.editor.config(ctx => ctx.update(editorViewOptionsCtx, prev => ({ ...prev, attributes: { class: "md-document", "aria-label": t("md.visualEditor"), spellcheck: "false" },
       handleKeyDown: (view, event) => {
         if (event.key !== "Tab" || !view.editable || !isInTable(view.state)) return false;
@@ -103,6 +108,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
         if (!event.shiftKey && addRowAfter(view.state, view.dispatch)) goToNextCell(1)(view.state, view.dispatch);
         return true;
       },
+      handlePaste: pasteTableClipboard,
       handleClick: (view, _pos, event) => {
         const link = (event.target as HTMLElement).closest("a");
         if (!link) return false;
@@ -111,7 +117,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
         if (!readonlyRef.current) return true;
         if (href.startsWith("#")) {
           const id = decodeURIComponent(href.slice(1));
-          Array.from(view.dom.querySelectorAll<HTMLElement>("[id]")).find(el => el.id === id)?.scrollIntoView({ block: "start" });
+          Array.from(view.dom.querySelectorAll<HTMLElement>("[id]")).find(el => el.id === id || el.id === href.slice(1))?.scrollIntoView({ block: "start" });
         } else if (/^(https?:|mailto:)/i.test(href)) void openUrl(href).catch(err => logError("Markdown link open failed", err));
         else if (isLocalRef(href)) void openFileByPath(resolveAgainst(filePath ? dirname(filePath) : "", stripFileScheme(href))).catch(err => logError("Markdown local link open failed", err));
         return true;
@@ -120,6 +126,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
     const initialize = async () => {
       await crepe.editor.remove(history); await crepe.editor.remove(trailing);
       await crepe.editor.remove(wrapInHeadingInputRule);
+      await crepe.editor.remove(syncHeadingIdPlugin);
       await crepe.editor.remove(remarkInlineLinkPlugin.plugin);
       await crepe.editor.remove(remarkPreserveEmptyLinePlugin.plugin);
       await crepe.create();
@@ -128,9 +135,17 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
       crepe.editor.action(ctx => {
         const view = ctx.get(editorViewCtx), parse = ctx.get(parserCtx), serialize = ctx.get(serializerCtx);
         const document = new MarkdownDocument(initialSource, parse, serialize, mdx, view.state.doc);
+        let inlineEditing: ReturnType<typeof installInlineSource> | undefined;
         const publish = () => {
           if (cancelled) return;
           const bridge = visualCommands(view, tabId, parse, () => session.breakGroup());
+          const fresh = () => { inlineEditing?.close(); return visualCommands(view, tabId, parse, () => session.breakGroup()); };
+          bridge.wrap = (...args) => fresh().wrap(...args);
+          bridge.prefix = (...args) => fresh().prefix(...args);
+          bridge.insert = (...args) => fresh().insert(...args);
+          bridge.color = (...args) => fresh().color(...args);
+          bridge.link = (...args) => fresh().link(...args);
+          bridge.capture = () => fresh().capture();
           bridge.find = () => setSearchOpen(true);
           bridge.navigate = (line, column = 1) => {
             const lines = document.source.split("\n");
@@ -156,21 +171,31 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
         };
         const compositionViewport = installCompositionViewport(view.dom, scroller.current!);
         cleanupCompositionViewport = compositionViewport.destroy;
+        const typewriter = installTypewriter(view, scroller.current!);
+        cleanupTypewriter = typewriter.destroy;
         const originalImageView = view.props.nodeViews?.["image-block"];
-        view.setProps({ nodeViews: { ...view.props.nodeViews, ...(originalImageView ? { "image-block": accessibleImageView(originalImageView) } : {}), deditor_raw: rawView(filePath, tabId), code_block: codeView(tabId, theme) },
+        view.setProps({ nodeViews: { ...view.props.nodeViews, ...(originalImageView ? { "image-block": accessibleImageView(originalImageView, language) } : {}), deditor_raw: rawView(filePath, tabId), code_block: codeView(tabId, theme) },
           handleScrollToSelection: () => compositionViewport.handleScroll(),
           dispatchTransaction: tr => {
             if (cancelled) return;
             const result = view.state.applyTransaction(tr);
             view.updateState(result.state);
-            if (result.transactions.some(transaction => transaction.docChanged)) { flush(); outline(); }
+            const projected = tr.getMeta(inlineProjection);
+            if (inlineEditing?.apply(tr)) {
+              if (!projected) flush();
+            } else if (result.transactions.some(transaction => transaction.docChanged)) flush();
+            if (tr.docChanged) outline();
             session.visualSelection = { anchor: view.state.selection.anchor, head: view.state.selection.head };
-            publish();
+            publish(); inlineEditing?.update();
+            if (!projected && (tr.docChanged || tr.selectionSet)) typewriter.update();
           },
         });
+        inlineEditing = installInlineSource(view, document, () => session.breakGroup());
+        cleanupInlineSource = inlineEditing.destroy;
         const sync = (content: string) => {
           if (document.source === content) return;
           if (view.composing || composition.composing) return;
+          inlineEditing?.reset();
           const next = document.reset(content), selection = view.state.selection;
           const tr = view.state.tr.replaceWith(0, view.state.doc.content.size, next.content);
           tr.setSelection(Selection.near(tr.doc.resolve(Math.min(selection.head, tr.doc.content.size))));
@@ -193,7 +218,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
         });
         view.dom.addEventListener("beforeinput", beforeInput, true);
         cleanupInput = () => { composition.destroy(); view.dom.removeEventListener("beforeinput", beforeInput, true); };
-        runtime.current = { session, crepe, view, document, sync, flush };
+        runtime.current = { session, crepe, view, document, sync, flush, closeInline: () => inlineEditing?.close() };
         sync(sourceRef.current);
         const position = Math.min(view.state.doc.content.size, session.sourceCursor === null ? session.visualSelection.head : document.positionAtSource(session.sourceCursor));
         view.dispatch(view.state.tr.setSelection(Selection.near(view.state.doc.resolve(position))));
@@ -205,9 +230,12 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
     };
     void initialize().catch(err => { logError("Markdown visual editor initialization failed", err); if (!cancelled) setError(String(err)); });
     return () => {
-      runtime.current?.flush();
+      // A path/language/theme remount may follow an external source replacement in the same batch.
+      // Never let the outgoing view overwrite the newer store content during cleanup.
+      const outgoing = runtime.current;
+      if (outgoing && useEditorStore.getState().tabs.find(tab => tab.id === tabId)?.content === outgoing.document.source) outgoing.flush();
       session.breakGroup(); session.visualScroll = scroller.current?.scrollTop ?? session.visualScroll;
-      cancelled = true; cleanupFlush(); cleanupInput(); cleanupAccessibility(); cleanupCompositionViewport(); runtime.current = null;
+      cancelled = true; cleanupFlush(); cleanupInput(); cleanupAccessibility(); cleanupCompositionViewport(); cleanupInlineSource(); cleanupTypewriter(); runtime.current = null;
       if (getVisualEditor()?.tabId === tabId) setVisualEditor(null);
       void crepe.destroy().catch(err => logError("Markdown visual editor cleanup failed", err)); host.remove();
     };
@@ -215,6 +243,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
   useEffect(() => { runtime.current?.sync(source); }, [source]);
   useEffect(() => {
     const rt = runtime.current; if (!rt) return;
+    if (readonly) rt.closeInline();
     rt.crepe.setReadonly(readonly);
     rt.view.dom.dispatchEvent(new Event("deditor-editable-change"));
     markdownSession(tabId, sourceRef.current).breakGroup();
@@ -245,7 +274,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
     const index = (matchIndex + delta + matches.current.length) % matches.current.length;
     setMatchIndex(index); const match = matches.current[index]; select(match.from, match.to);
   };
-  return <section className="md-visual-shell" data-readonly={readonly} style={{ "--md-visual-font-size": `${fontSize}px`, "--md-document-zoom": `${fontSize - 14}px` } as React.CSSProperties}
+  return <section className="md-visual-shell" data-md-theme={writing.documentTheme} data-md-focus={writing.focusParagraph} data-readonly={readonly} style={{ "--md-visual-font-size": `${fontSize}px`, "--md-document-zoom": `${fontSize - 14}px` } as React.CSSProperties}
     onKeyDownCapture={event => {
       if (event.nativeEvent.isComposing) return;
       const mod = event.metaKey || event.ctrlKey;

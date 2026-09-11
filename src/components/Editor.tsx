@@ -869,19 +869,20 @@ async function handleImagePaste(blob: File, mime: string, view: EditorView) {
   const isMd = isMarkdown(filePath);
   const subtype = mime.split("/")[1]?.toLowerCase() ?? "png";
   const ext = subtype === "jpeg" ? "jpg" : subtype;
+  const folder = isMd ? useEditorStore.getState().markdownSettings.imageDirectory : "assets";
   const name = `paste-${Date.now()}.${ext}`;
   const buf = await blob.arrayBuffer();
   const base64 = arrayBufferToBase64(buf);
   try {
-    await saveImage(baseDir, name, base64);
-    logInfo(`pasted image saved: assets/${name} (${buf.byteLength} bytes)`);
+    await saveImage(baseDir, name, base64, folder);
+    logInfo(`pasted image saved: ${folder}/${name} (${buf.byteLength} bytes)`);
   } catch (err) {
-    logError(`paste image save failed: assets/${name}`, err);
+    logError(`paste image save failed: ${folder}/${name}`, err);
     void showError(tStatic("editor.saveImageFailed", { err: String(err) }));
     return;
   }
-  const rel = `assets/${name}`;
-  const insert = isMd ? `![](${rel})` : rel;
+  const rel = `${folder}/${name}`;
+  const insert = isMd ? `![](${/[\s()]/.test(rel) ? `<${rel}>` : rel})` : rel;
   const pos = view.state.selection.main.from;
   view.dispatch({
     changes: { from: pos, insert },

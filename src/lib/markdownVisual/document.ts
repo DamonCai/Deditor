@@ -14,6 +14,8 @@ const syntax = unified().use(remarkParse).use(remarkGfm).use(remarkMath).use(rem
 export function sourceTree(source: string): SourceNode { return syntax.parse(source) as SourceNode; }
 const protectedTypes = new Set(["html", "definition", "linkReference", "imageReference", "yaml", "toml", "footnoteDefinition", "footnoteReference"]);
 export function protectedBlock(node: SourceNode): boolean {
+  if (node.type === "paragraph" && /^\[(?:toc|\[toc\])\]$/i.test(node.children?.map(n => n.value ?? "").join("") ?? "")) return true;
+  if (node.type === "blockquote" && /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/i.test(node.children?.[0]?.children?.map(n => n.value ?? "").join("") ?? "")) return true;
   return protectedTypes.has(node.type) || !!node.children?.some(protectedBlock);
 }
 export function range(node: SourceNode): [number, number] {
@@ -104,6 +106,41 @@ export class MarkdownDocument {
     // Crepe may append an empty paragraph for a terminal table/code/atom.
     while (this.ast.length < this.doc.childCount) this.ast.push({ type: "paragraph", position: { start: { offset: this.source.length }, end: { offset: this.source.length } } });
   }
+  project(next: ProseNode) { this.doc = next; }
+  editInline(from: number, length: number, raw: string, next: ProseNode) {
+    const end = from + length, delta = raw.length - length;
+    const shift = (n: SourceNode): SourceNode => ({ ...n, position: n.position ? {
+      start: { offset: (n.position.start.offset ?? 0) >= end ? (n.position.start.offset ?? 0) + delta : n.position.start.offset },
+      end: { offset: (n.position.end.offset ?? 0) >= end ? (n.position.end.offset ?? 0) + delta : n.position.end.offset },
+    } : undefined, children: n.children?.map(shift) });
+    this.source = this.source.slice(0, from) + raw + this.source.slice(end);
+    this.ast = this.ast.map(shift);
+    const parsed = sourceTree(this.source).children ?? [];
+    if (parsed.length === this.ast.length) this.ast = parsed;
+    this.doc = next;
+  }
+  inlineAt(position: number) {
+    const offset = this.sourceOffset(position);
+    const supported = new Set(["strong", "emphasis", "delete", "link", "linkReference", "inlineCode"]);
+    let token: SourceNode | undefined;
+    const walk = (n: SourceNode) => {
+      const [from, to] = range(n);
+      if (offset < from || offset > to || token) return;
+      if (supported.has(n.type)) { token = n; return; }
+      n.children?.forEach(walk);
+    };
+    this.ast.forEach(walk);
+    if (!token) return null;
+    const leaves: SourceNode[] = [];
+    const texts = (n: SourceNode) => { if (n.type === "text" || n.type === "inlineCode") leaves.push(n); else n.children?.forEach(texts); };
+    texts(token); if (!leaves.length) return null;
+    const [sourceFrom, sourceTo] = range(token), raw = this.source.slice(sourceFrom, sourceTo);
+    const start = range(leaves[0])[0] + (leaves[0].type === "inlineCode" ? this.source.slice(...range(leaves[0])).indexOf(leaves[0].value ?? "") : 0);
+    const end = range(leaves.at(-1)!)[1] - (leaves.at(-1)!.type === "inlineCode" ? this.source.slice(...range(leaves.at(-1)!)).length - this.source.slice(...range(leaves.at(-1)!)).indexOf(leaves.at(-1)!.value ?? "") - (leaves.at(-1)!.value?.length ?? 0) : 0);
+    const from = this.positionAtSource(start), to = this.positionAtSource(end);
+    if (to <= from || !this.doc.resolve(from).sameParent(this.doc.resolve(to))) return null;
+    return { from, to, sourceFrom, raw };
+  }
   reset(source: string) { this.source = source; this.doc = this.parse(source); this.index(); return this.doc; }
   apply(next: ProseNode): string {
     if (sameSourceNode(next, this.doc)) { this.doc = next; return this.source; }
@@ -161,7 +198,18 @@ export class MarkdownDocument {
     if (!ast) return [];
     const walk = (n: SourceNode) => { if (["text", "inlineCode", "code", "math"].includes(n.type)) leaves.push(n); else n.children?.forEach(walk); }; walk(ast);
     const prose: { text: string; pos: number }[] = [];
-    node.descendants((child, pos) => { if (child.isText) prose.push({ text: child.text!, pos: start + pos + 1 }); });
+    node.descendants((child, pos) => {
+      if (child.type.name === "deditor_inline_source") {
+        const from = Number(child.attrs.sourceFrom), to = from + child.textContent.length;
+        const first = leaves.findIndex(leaf => range(leaf)[0] >= from && range(leaf)[1] <= to);
+        if (first >= 0) {
+          let count = 0; while (first + count < leaves.length && range(leaves[first + count])[1] <= to) count++;
+          leaves.splice(first, count, { type: "text", value: child.textContent, position: { start: { offset: from }, end: { offset: to } } });
+        }
+        prose.push({ text: child.textContent, pos: start + pos + 2 }); return false;
+      }
+      if (child.isText) prose.push({ text: child.text!, pos: start + pos + 1 });
+    });
     if (leaves.length !== prose.length) return [];
     return leaves.flatMap((leaf, i) => {
       const [from, to] = range(leaf), text = prose[i];

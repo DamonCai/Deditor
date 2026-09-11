@@ -377,3 +377,19 @@
   max-width: 100%;
 }
 
+
+/* Document extensions share the same presentation in both Markdown modes. */
+:is(.preview, .milkdown .ProseMirror.md-document) .md-frontmatter { margin: 1em 0; padding: 0.6em 1em; border: 1px solid var(--preview-rule); border-radius: 6px; color: var(--preview-muted); }
+:is(.preview, .milkdown .ProseMirror.md-document) .md-frontmatter summary { cursor: pointer; font: 0.85em monospace; }
+:is(.preview, .milkdown .ProseMirror.md-document) .md-frontmatter pre { margin-bottom: 0; }
+:is(.preview, .milkdown .ProseMirror.md-document) .md-toc { margin: 1.2em 0; border-left: 2px solid var(--preview-rule); padding-left: 1em; }
+:is(.preview, .milkdown .ProseMirror.md-document) .md-toc ol { list-style: none; padding-left: 0; }
+:is(.preview, .milkdown .ProseMirror.md-document) .md-callout { border-left-color: var(--preview-link); }
+:is(.preview, .milkdown .ProseMirror.md-document) .md-callout-title { display: block; font-size: 0.85em; font-weight: 650; color: var(--preview-link); }
+:is(.preview, .milkdown .ProseMirror.md-document) .md-callout-warning, :is(.preview, .milkdown .ProseMirror.md-document) .md-callout-caution { border-left-color: #c58225; }
+:is(.preview, .milkdown .ProseMirror.md-document) .footnotes { font-size: 0.88em; color: var(--preview-muted); }
+:is(.preview, .milkdown .ProseMirror.md-document) .footnote-ref { font-size: 0.75em; vertical-align: super; }
+
+:is(.preview[data-md-theme="serif"], .md-visual-shell[data-md-theme="serif"] .md-document) { font-family: Georgia, "Songti SC", "Noto Serif CJK SC", serif; }
+:is(.preview[data-md-theme="compact"], .md-visual-shell[data-md-theme="compact"] .md-document) { line-height: 1.6; }
+:is(.preview[data-md-theme="compact"], .md-visual-shell[data-md-theme="compact"] .md-document) p { margin-top: 0.65em; margin-bottom: 0.65em; }

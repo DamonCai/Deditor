@@ -1,3 +1,4 @@
+import { exportAppearance, exportTemplateCss, type ExportAppearance } from "./markdownExport/templates";
 import previewCss from "../preview.css?raw";
 import { save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
@@ -37,6 +38,8 @@ const PRINT_AREA_ID = "deditor-print-area";
 
 const PRINT_CSS = `
   #${PRINT_AREA_ID} {
+    --preview-text:#343b46;--preview-heading:#202631;--preview-muted:#606b7a;--preview-link:#2864cf;--preview-code:#7350a2;--preview-code-bg:#f5f6f8;--preview-rule:#e5e8ed;
+    height:auto;overflow:visible;color-scheme:light;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     color: #1f2328;
     background: #ffffff;
@@ -85,7 +88,9 @@ export async function standalonePage(
   body: string,
   title: string,
   theme: "light" | "dark" = "light",
+  appearance: Partial<ExportAppearance> = {},
 ): Promise<string> {
+  const options = exportAppearance(appearance);
   let mathCss = "";
   if (body.includes('class="katex')) {
     const { katexExportCss } = await import("./markdownExport/mathCss");
@@ -105,7 +110,8 @@ ${previewCss}
 .preview{height:auto;overflow:visible;max-width:924px;margin:0 auto}
 @media(max-width:600px){.preview{padding:24px 20px 48px}}
 @media print{body{print-color-adjust:exact;-webkit-print-color-adjust:exact}.preview{height:auto;overflow:visible}}
-${mathCss}</style></head><body><main class="preview">${body}</main></body></html>`;
+${exportTemplateCss}
+${mathCss}</style></head><body><main class="preview" data-md-theme="${options.documentTheme}" data-export-template="${options.exportTemplate}">${body}</main></body></html>`;
 }
 
 let exporting = false;
@@ -146,7 +152,7 @@ export async function exportMarkdown(
     });
     const { root } = prepared;
     if (format === "pdf") {
-      await printDocument(root);
+      await printDocument(root, snapshot);
     } else if (format === "html") {
       await invoke("write_text_file", {
         path: target,
@@ -154,6 +160,7 @@ export async function exportMarkdown(
           root.innerHTML,
           name.replace(/\.html$/, ""),
           theme,
+          snapshot,
         ),
       });
     } else if (diagram) {
@@ -195,20 +202,26 @@ export async function exportMarkdown(
   }
 }
 
-async function printDocument(root: HTMLElement) {
+async function printDocument(root: HTMLElement, appearance: Partial<ExportAppearance> = {}) {
+  const options = exportAppearance(appearance);
   let style = document.getElementById("deditor-print-style");
   if (!style) {
     style = document.createElement("style");
     style.id = "deditor-print-style";
     document.head.appendChild(style);
   }
-  style.textContent = PRINT_CSS;
+  style.textContent = previewCss + PRINT_CSS + exportTemplateCss.replaceAll(".preview", `#${PRINT_AREA_ID}.preview`) + `
+#${PRINT_AREA_ID}[data-md-theme="serif"] { font-family: Georgia, "Songti SC", "Noto Serif CJK SC", serif; }
+#${PRINT_AREA_ID}[data-md-theme="compact"] { line-height:1.6; }
+#${PRINT_AREA_ID}[data-md-theme="compact"] p { margin:.65em 0; }`;
   let area = document.getElementById(PRINT_AREA_ID);
   if (!area) {
     area = document.createElement("div");
     area.id = PRINT_AREA_ID;
     document.body.appendChild(area);
   }
+  area.className = "preview";
+  area.dataset.mdTheme = options.documentTheme; area.dataset.exportTemplate = options.exportTemplate;
   area.innerHTML = root.innerHTML;
   await Promise.all(
     Array.from(area.querySelectorAll("img"), (img) => img.decode()),

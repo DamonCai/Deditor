@@ -1,3 +1,4 @@
+import type { ExportAppearance } from "./templates";
 import { invoke } from "@tauri-apps/api/core";
 import { renderMarkdown } from "../markdown";
 import { hydrateMermaid } from "../mermaidHydrate";
@@ -11,7 +12,7 @@ import {
 } from "../pathUtil";
 import { tStatic } from "../i18n";
 
-export interface ExportSnapshot {
+export interface ExportSnapshot extends Partial<ExportAppearance> {
   content: string;
   filePath: string | null;
   theme?: "light" | "dark";

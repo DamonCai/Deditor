@@ -1,3 +1,4 @@
+import { defaultMarkdownPreferences, type MarkdownPreferences } from "../lib/markdownPreferences";
 import { markdownSession, type MarkdownOrigin } from "../lib/markdownSession";
 import { isMarkdown } from "../lib/lang";
 import { create } from "zustand";
@@ -69,6 +70,7 @@ interface EditorState {
   /** Visibility of the right-side TOC in markdown reading (preview-maximized)
    *  mode. Has no effect outside reading mode. Persisted. */
   tocVisible: boolean;
+  markdownSettings: MarkdownPreferences;
   editorFontSize: number;
   /** Path of the file the user marked via "Select for Compare" in the file
    *  tree. Right-clicking another file then offers "Compare with Selected". */
@@ -377,6 +379,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   showSidebar: true,
   previewMaximized: false,
   tocVisible: false,
+  markdownSettings: { ...defaultMarkdownPreferences },
   editorFontSize: 14,
   compareMarkPath: null,
   activeSelectionLength: 0,

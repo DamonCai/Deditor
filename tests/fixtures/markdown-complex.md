@@ -107,6 +107,8 @@ sequenceDiagram
 
 ![自建图片定位点](/tests/fixtures/markdown-presentation.svg "本地自建图片")
 
+<img src="/tests/fixtures/markdown-review.svg" alt="自建定宽图片" width="240" title="宽度保存验收">
+
 ## HTML 与保留语法
 
 <span style="color:#e53e3e">行内彩色文字定位点</span>，<u>下划线</u>、<sup>上标</sup>、<sub>下标</sub>、<mark>高亮</mark>、<kbd>Enter</kbd>。
@@ -118,7 +120,7 @@ sequenceDiagram
 
 脚注引用示例[^note]与自动链接 <https://example.com>。
 
-[^note]: 这是自建的脚注定义，未支持的语法也应保留原文。
+[^note]: 这是自建的脚注定义，编号与预览一致，原文格式应保留。
 
 [guide]: https://example.com/guide "文档引用标题"
 
@@ -267,6 +269,25 @@ sequenceDiagram
 
 - 长文条目 18
   - 嵌套条目
+
+## 扩展语法验收
+
+> [!NOTE]
+> 提示块正文，包含 **强调** 与 `代码`。
+>
+> ```mermaid
+> graph LR
+>   A[提示块] --> B[共享图表渲染]
+> ```
+
+> [!WARNING]
+> 警告块正文，包含 [文内链接](#综合文档-h1)。
+
+第二处脚注[^second]，重复第一处脚注[^note]。
+
+[^second]: 自建第二条脚注，检查编号与回跳。
+
+[TOC]
 
 ## 文末验收
 

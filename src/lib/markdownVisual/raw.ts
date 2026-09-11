@@ -1,3 +1,4 @@
+import { sizedImages } from "./image";
 import { tableListTree } from "./tableLists";
 import { inlineHtmlMarks } from "./inline";
 import { referenceLinks } from "./references";
@@ -10,6 +11,7 @@ export function rawRemark(mdx: boolean) {
     tableListTree(tree as SourceNode, String(file.value));
     inlineHtmlMarks(tree as SourceNode);
     referenceLinks(tree as SourceNode);
+    sizedImages(tree as SourceNode);
     protectedTree(tree as SourceNode, String(file.value), mdx);
   });
 }

@@ -106,12 +106,17 @@ fn write_binary_file(path: String, data: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn save_image(dir: String, name: String, data: String) -> Result<String, String> {
+fn save_image(dir: String, name: String, data: String, folder: Option<String>) -> Result<String, String> {
     let bytes = BASE64.decode(&data).map_err(|e| {
         log::error!("save_image base64 decode failed for {}: {}", name, e);
         e.to_string()
     })?;
-    let assets_dir = expand(&dir).join("assets");
+    let folder = folder.unwrap_or_else(|| "assets".to_string()).replace('\\', "/");
+    if folder.split('/').any(|part| part.is_empty() || part == "." || part == ".." || part.chars().any(|c| c.is_control() || "<>:\"|?*".contains(c)))
+        || name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\']) {
+        return Err("Invalid relative image path".to_string());
+    }
+    let assets_dir = expand(&dir).join(folder);
     if let Err(e) = fs::create_dir_all(&assets_dir) {
         log::error!(
             "save_image create_dir_all failed: {} -- {}",
@@ -1728,6 +1733,26 @@ mod regression {
             assert_eq!(result.files_scanned, 24);
             println!("dense search: {:.2} ms", start.elapsed().as_secs_f64() * 1000.0);
         }
+        fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod markdown_image_tests {
+    use super::*;
+    #[test]
+    fn image_folder_defaults_nested_and_rejects_escape() {
+        let dir = std::env::temp_dir().join(format!("deditor_image_test_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let root = dir.to_string_lossy().to_string();
+        let encoded = BASE64.encode(b"self-created-image-fixture");
+        assert!(save_image(root.clone(), "one.png".into(), encoded.clone(), None).unwrap().ends_with("assets/one.png"));
+        save_image(root.clone(), "two.png".into(), encoded.clone(), Some("media/images".into())).unwrap();
+        assert_eq!(fs::read(dir.join("media/images/two.png")).unwrap(), b"self-created-image-fixture");
+        for folder in ["../outside", "/tmp", "C:/bad", "images//bad", "images/..", "a\\..\\b"] {
+            assert!(save_image(root.clone(), "bad.png".into(), encoded.clone(), Some(folder.into())).is_err());
+        }
+        assert!(save_image(root, "../bad.png".into(), encoded, None).is_err());
         fs::remove_dir_all(dir).unwrap();
     }
 }

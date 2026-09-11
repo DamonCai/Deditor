@@ -1,3 +1,4 @@
+import { normalizeMarkdownPreferences, type MarkdownPreferences } from "./markdownPreferences";
 import { invoke } from "@tauri-apps/api/core";
 import {
   useEditorStore,
@@ -37,6 +38,7 @@ interface PersistedV3 {
   showSidebar: boolean;
   sidebarPx: number;
   previewPct: number;
+  markdownSettings?: Partial<MarkdownPreferences>;
   editorFontSize?: number;
   /** Legacy global zoom snapshot: migrate its configured baseline only. */
   editorBaseFontSize?: number;
@@ -267,6 +269,7 @@ export async function loadPersisted(): Promise<UiExtras | null> {
   if (data.language === "zh" || data.language === "en") {
     store.setLanguage(data.language);
   }
+  useEditorStore.setState({ markdownSettings: normalizeMarkdownPreferences(data.markdownSettings) });
   const configuredFontSize = data.editorBaseFontSize ?? data.editorFontSize;
   if (typeof configuredFontSize === "number" && Number.isFinite(configuredFontSize)) {
     store.setEditorFontSize(configuredFontSize);
@@ -377,6 +380,7 @@ function doSave(extras: UiExtras): void {
     showSidebar: s.showSidebar,
     sidebarPx: extras.sidebarPx,
     previewPct: extras.previewPct,
+    markdownSettings: s.markdownSettings,
     editorFontSize: s.editorFontSize,
     previewMaximized: s.previewMaximized,
     tocPinned: s.tocVisible,

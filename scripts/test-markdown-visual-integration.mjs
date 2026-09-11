@@ -23,8 +23,10 @@ const {flushSync}=await import('react-dom');
 const runtimeErrors=[];window.addEventListener('error',event=>runtimeErrors.push(event.error));
 const output=path.resolve('node_modules/.cache/deditor-markdown-integration.mjs');
 fs.mkdirSync(path.dirname(output),{recursive:true});
-const writes=[];let failed=false;
+const writes=[];let failed=false,persistedState='';
 globalThis.mdInvoke=async(command,args)=>{
+ if(command==='read_app_state')return persistedState;
+ if(command==='write_app_state'){persistedState=args.content;return;}
  if(command==='write_text_file'){if(failed)throw new Error('generated disk failure');writes.push(args);}
  if(command==='read_text_file')return '';
 };
@@ -40,9 +42,14 @@ export {default as Visual} from './src/components/MarkdownVisualEditor';
 export {useEditorStore} from './src/store/editor';
 export {getVisualEditor} from './src/lib/markdownVisualBridge';
 export {markdownHistory} from './src/lib/markdownHistory';
-export {saveFile,saveFileAs,saveAllDirty} from './src/lib/fileio';
+export {saveFile,saveFileAs,saveAllDirty,renamePath} from './src/lib/fileio';
 export {renderMarkdown} from './src/lib/markdown';
 export {installCompositionViewport} from './src/lib/markdownVisual/compositionViewport';
+export {loadPersisted,schedulePersist} from './src/lib/persistence';
+export {default as WritingSettings} from './src/components/MarkdownWritingSettings';
+export {rebaseMarkdownImages} from './src/lib/markdownImagePaths';
+export {installTypewriter} from './src/lib/markdownVisual/typewriter';
+export {normalizeMarkdownPreferences,defaultMarkdownPreferences} from './src/lib/markdownPreferences';
 export {getBlockHint} from './src/lib/markdownVisual/blockHint';
 export {flushDocument} from './src/lib/documentFlush';
 `,resolveDir:process.cwd()},outfile:output,bundle:true,format:'esm',platform:'node',packages:'external',loader:{'.css':'empty'},plugins:[{name:'isolated-io',setup(b){
@@ -370,6 +377,168 @@ await test('scroll stability: preserved HTML blocks reserve their preview height
  assert.equal(block.style.minHeight,'');
 });
 
+await test('P2 syntax: YAML, TOC, alerts and contextual footnotes share preview rendering and preserve source',async()=>{
+ const original='---\ntitle: 自建语法样例\n---\n\n[TOC]\n\n# 第一章\n\n正文[^b] 和另一个[^a]。\n\n> [!WARNING]\n> 注意 **数据**。\n\n[^a]: 第一条定义。\n\n[^b]: 第二条定义。\n';
+ await act(async()=>{store.getState().setContent(original,'a','command');await pause(200);});
+ await render(true);await pause(80);
+ assert.ok(document.querySelector('.ProseMirror .md-frontmatter'));assert.equal(document.querySelector('.ProseMirror .md-frontmatter').tagName,'DETAILS');
+ assert.equal(document.querySelector('.ProseMirror .md-toc a').textContent,'第一章');
+ assert.equal(document.querySelector('.ProseMirror .md-callout-title').textContent,'WARNING');
+ const refs=[...document.querySelectorAll('.ProseMirror .footnote-ref')].map(e=>e.textContent);assert.deepEqual(refs,['[1]','[2]']);
+ assert.equal(document.querySelector('.ProseMirror [data-footnote-label="b"]').id,'fn1');assert.equal(document.querySelector('.ProseMirror [data-footnote-label="a"]').id,'fn2');
+ const html=await app.renderMarkdown(original,{theme:'light'});assert.match(html,/class="md-frontmatter"/);assert.match(html,/md-callout-warning/);assert.match(html,/data-footnote-label="b" id="fn1"/);
+ assert.equal(content(),original);await act(async()=>app.saveFile());assert.equal(writes.at(-1).content,original);
+ await render(true);await render(false);assert.equal(content(),original);
+});
+await test('P2 nested diagrams: preserved callouts retain inert diagram source after sanitization',async()=>{
+ const original='> [!NOTE]\n> ```mermaid\n> flowchart TD\n> A --> B\n> ```\n> <img src="invalid" onerror="window.bad=1">\n\nTail\n';
+ await act(async()=>store.getState().setContent(original,'a','command'));await render(true);await pause(120);
+ const diagram=document.querySelector('.md-raw-preview .mermaid-diagram');
+ assert.ok(diagram);assert.equal(diagram.dataset.mermaidSource,'flowchart TD\nA --> B\n');assert.equal(diagram.dataset.mermaidHydrated,'1');
+ assert.equal(document.querySelector('.md-raw-preview img')?.getAttribute('onerror'),null);assert.equal(content(),original);
+ await render(false);
+});
+await test('P2 anchors: duplicate and nested headings have the same link destinations as Preview',async()=>{
+ const original='[TOC]\n\n# Same **title**\n\n# Same **title**\n\n> ## Nested\n';
+ await act(async()=>store.getState().setContent(original,'a','command'));await render(true);await pause(100);
+ const html=await app.renderMarkdown(original,{theme:'light'}),template=document.createElement('template');template.innerHTML=html;
+ const ids=[...template.content.querySelectorAll('h1,h2')].map(e=>e.id);
+ assert.deepEqual([...document.querySelectorAll('.ProseMirror h1,.ProseMirror h2')].map(e=>e.id),ids);
+ assert.equal(ids[1],'same-title-1');assert.deepEqual([...document.querySelectorAll('.ProseMirror .md-toc a')].map(e=>e.textContent),['Same title','Same title','Nested']);
+ assert.equal(content(),original);await render(false);
+});
+await test('P1 table/list: spreadsheet paste grows a rectangle and keeps nested list keyboard editing',async()=>{
+ const original='| A | B |\n| :--- | ---: |\n| one | two |\n\nTail\n';
+ await act(async()=>store.getState().setContent(original,'a','command'));
+ await act(async()=>app.getVisualEditor().navigate(3,3));
+ const clipboard=new Event('paste',{bubbles:true,cancelable:true});Object.defineProperty(clipboard,'clipboardData',{value:{getData:type=>type==='text/plain'?'中文\t"带\n换行"\tthree\nnext\tvalue\textra\n':''}});
+ await act(async()=>document.querySelector('.ProseMirror').dispatchEvent(clipboard));
+ assert.equal(document.querySelectorAll('.ProseMirror tr').length,3);assert.equal(document.querySelectorAll('.ProseMirror tr:last-child td').length,3);
+ assert.match(content(),/中文/);assert.match(content(),/带<br>换行/);assert.ok(content().endsWith('\n\nTail\n'));
+ await act(async()=>app.markdownHistory());assert.equal(content(),original);
+ const list='- one\n- two\n\nTail\n';await act(async()=>{store.getState().setContent(list,'a','command');await pause(40);});
+ await act(async()=>app.getVisualEditor().navigate(2,4));
+ const key=(key,shiftKey=false)=>document.querySelector('.ProseMirror').dispatchEvent(new dom.window.KeyboardEvent('keydown',{key,shiftKey,bubbles:true,cancelable:true}));
+ await act(async()=>key('Tab'));assert.ok(document.querySelector('.ProseMirror li li'));
+ await act(async()=>key('Tab',true));assert.equal(document.querySelector('.ProseMirror li li'),null);
+ await act(async()=>{app.getVisualEditor().navigate(2,6);key('Enter');});
+ assert.equal(document.querySelectorAll('.ProseMirror li').length,3);
+ await act(async()=>key('Enter'));assert.equal(document.querySelectorAll('.ProseMirror li').length,2);
+});
+await test('P1 inline source: entering, editing, exiting and undo preserve surrounding Markdown',async()=>{
+ for(const [raw,word] of [['**bold**','bold'],['_em_','em'],['~~gone~~','gone'],['`code`','code'],['[label](https://example.com "title")','label'],['**bold _nested_**','bold']]){
+  const original='Before '+raw+' after.\n\nUnchanged **tail**.\n';
+  await act(async()=>store.getState().setContent(original,'a','command'));
+  await act(async()=>{app.getVisualEditor().navigate(1,original.indexOf(word)+2);await pause(30);});
+  let active=document.querySelector('[data-md-inline-source]');assert.ok(active,raw);assert.equal(active.textContent,raw);assert.equal(content(),original);
+  const updated=raw.replace(word,word+'中文');
+  await act(async()=>{active.firstChild.textContent=updated;document.getSelection().collapse(active.firstChild,updated.indexOf(word)+word.length+2);active.dispatchEvent(new Event('input',{bubbles:true}));await pause(40);});
+  assert.equal(content(),original.replace(raw,updated));
+  await act(async()=>{document.querySelector('.ProseMirror').dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));await pause(40);});
+  assert.equal(document.querySelector('[data-md-inline-source]'),null);assert.equal(content(),original.replace(raw,updated));
+  await act(async()=>app.markdownHistory());assert.equal(content(),original);
+ }
+});
+await test('P1 inline source: cross-block selection, readonly and formatting leave a coherent projection',async()=>{
+ const original='Before **word** after.\n\nEnd paragraph.\n';
+ await act(async()=>store.getState().setContent(original,'a','command'));
+ await act(async()=>{app.getVisualEditor().navigate(1,11);await pause(30);});
+ const active=document.querySelector('[data-md-inline-source]'),tail=document.querySelector('.ProseMirror > p:last-child');
+ await act(async()=>{document.getSelection().setBaseAndExtent(active.firstChild,3,tail.firstChild,3);document.dispatchEvent(new Event('selectionchange'));await pause(60);});
+ assert.equal(document.querySelector('[data-md-inline-source]'),null);assert.equal(app.getVisualEditor().selected,'ord after.\nEnd');assert.equal(content(),original);
+ await act(async()=>{app.getVisualEditor().navigate(1,11);await pause(30);});
+ await render(true);assert.equal(document.querySelector('[data-md-inline-source]'),null);assert.equal(content(),original);await render(false);
+ await act(async()=>{app.getVisualEditor().navigate(1,11);await pause(30);app.getVisualEditor().prefix('## ');await pause(40);});
+ assert.match(content(),/^## Before/);assert.ok(document.querySelector('.ProseMirror h2'));
+});
+await test('P1 inline source: incomplete delimiters stay editable and survive save/reload',async()=>{
+ const original='Before **word** after.\n';await act(async()=>store.getState().setContent(original,'a','command'));
+ await act(async()=>{app.getVisualEditor().navigate(1,11);await pause(30);});
+ const active=document.querySelector('[data-md-inline-source]');assert.ok(active);
+ await act(async()=>{active.firstChild.textContent='**word*';document.getSelection().collapse(active.firstChild,7);active.dispatchEvent(new Event('input',{bubbles:true}));await pause(40);});
+ await act(async()=>{app.saveFile();document.querySelector('.ProseMirror').dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));await pause(40);});
+ assert.equal(content(),'Before **word* after.\n');assert.equal(writes.at(-1).content,content());
+ await act(async()=>root.render(null));await render();assert.equal(content(),'Before **word* after.\n');
+});
+
+await test('P2 images: width persists through save, mode switches, undo and source reload',async()=>{
+ const original='Before\n\n![中文说明](assets/test.svg "title")\n\nTail\n';
+ await act(async()=>store.getState().setContent(original,'a','command'));
+ const input=document.querySelector('.md-image-width input');assert.ok(input);
+ await act(async()=>{input.value='320';input.dispatchEvent(new Event('blur'));await pause(40);});
+ assert.match(content(),/<img src="assets\/test.svg" alt="中文说明" width="320" title="title">/);
+ assert.ok(content().endsWith('\n\nTail\n'));const resized=content();
+ await act(async()=>app.saveFile());assert.equal(writes.at(-1).content,resized);
+ await render(true);assert.equal(document.querySelector('.md-image-width').hidden,true);
+ await act(async()=>root.render(null));await render();assert.equal(content(),resized);
+ assert.equal(document.querySelector('.md-image-width input').value,'320');
+ assert.equal(document.querySelector('.md-persisted-image img')?.style.width,'320px');
+ await act(async()=>app.markdownHistory());assert.equal(content(),original);
+ await act(async()=>app.markdownHistory(true));assert.equal(content(),resized);
+ const html=await app.renderMarkdown(resized,{theme:'light'});assert.match(html,/width="320"/);
+});
+await test('P2 paths: Save As relocates only image destinations across POSIX and Windows folders',async()=>{
+ const markdown='![a](assets/a(1).png "title")\n\n![b][pic]\n\n[pic]: <assets/b two.png> "caption"\n\n[link](assets/other.png)\n\n`![literal](assets/code.png)`\n\n<img src="assets/c.png" alt="c">\n\n![url](https://example.com/x.png)\n';
+ const result=app.rebaseMarkdownImages(markdown,'/docs/note.md','/docs/sub/note.md');
+ assert.match(result,/\.\.\/assets\/a\(1\)\.png/);assert.match(result,/<\.\.\/assets\/b%20two.png>/);assert.match(result,/src="\.\.\/assets\/c.png"/);
+ assert.ok(result.includes('[link](assets/other.png)'));assert.ok(result.includes('`![literal](assets/code.png)`'));assert.ok(result.includes('https://example.com/x.png'));
+ assert.equal(app.rebaseMarkdownImages('![x](assets/x.png)','C:\\Docs\\a.md','C:\\Docs\\sub\\b.md'),'![x](../assets/x.png)');
+ assert.equal(app.rebaseMarkdownImages('![x](assets/x.png)','C:\\Docs\\a.md','D:\\Other\\b.md'),'![x](C:/Docs/assets/x.png)');
+ assert.equal(app.rebaseMarkdownImages('![x](assets/x.png)','/docs/a.md','/new/a.md',{from:'/docs',to:'/new'}),'![x](assets/x.png)');
+ assert.equal(app.rebaseMarkdownImages('![x](assets/x.png)','/docs/a.md','/docs/a.md',{from:'/docs/assets/x.png',to:'/docs/assets/renamed.png'}),'![x](assets/renamed.png)');
+ assert.equal(app.rebaseMarkdownImages('![x](assets/old%20image.png)','/docs/a.md','/docs/a.md',{from:'/docs/assets/old image.png',to:'/docs/assets/new image.png'}),'![x](assets/new%20image.png)');
+ await act(async()=>{store.getState().setContent('![x](assets/x.png)\n','a','command');store.setState(s=>({tabs:s.tabs.map(t=>t.id==='a'?{...t,filePath:'/generated/sub/original.md'}:t)}));});
+ await render();await act(async()=>app.saveFileAs());assert.equal(writes.at(-1).content,'![x](sub/assets/x.png)\n');
+ assert.equal(content(),writes.at(-1).content);
+});
+await test('P2 move: application rename updates open Markdown image targets with undo and save',async()=>{
+ const before='![x](assets/old.png)\n';await act(async()=>{store.getState().setContent(before,'a','command');await pause(40);});
+ const path=store.getState().tabs.find(t=>t.id==='a').filePath,base=path.slice(0,path.lastIndexOf('/'));
+ await act(async()=>app.renamePath(base+'/assets/old.png',base+'/assets/new.png'));
+ assert.equal(content(),'![x](assets/new.png)\n');
+ await act(async()=>app.markdownHistory());assert.equal(content(),before);
+ await act(async()=>app.markdownHistory(true));await act(async()=>app.saveFile());assert.equal(writes.at(-1).content,content());
+});
+await test('P2 context: TOC refreshes after heading text changes without rewriting the directive',async()=>{
+ const original='[TOC]\n\n# First\n\nTail\n';await act(async()=>store.getState().setContent(original,'a','command'));await render(true);await pause(80);
+ assert.equal(document.querySelector('.md-toc a').textContent,'First');await render(false);
+ await act(async()=>{const heading=document.querySelector('.ProseMirror h1');heading.firstChild.textContent='First updated';heading.dispatchEvent(new Event('input',{bubbles:true}));await pause(100);});
+ assert.equal(document.querySelector('.md-toc a').textContent,'First updated');assert.ok(content().startsWith('[TOC]\n\n'));
+});
+await test('P1 inline source: multiline clipboard text survives projection closure and undo',async()=>{
+ const original='Before **word** after.\n\nTail\n';await act(async()=>store.getState().setContent(original,'a','command'));
+ await act(async()=>{app.getVisualEditor().navigate(1,11);await pause(30);});
+ assert.ok(document.querySelector('[data-md-inline-source]'));
+ const clipboard=new Event('paste',{bubbles:true,cancelable:true});Object.defineProperty(clipboard,'clipboardData',{value:{getData:t=>t==='text/plain'?'line one\n\nline two':''}});
+ await act(async()=>{document.querySelector('.ProseMirror').dispatchEvent(clipboard);await pause(40);});
+ assert.ok(content().includes('line one\n\nline two'));assert.ok(content().endsWith('\n\nTail\n'));assert.equal(document.querySelector('[data-md-inline-source]'),null);
+ const pasted=content();await act(async()=>app.saveFile());assert.equal(writes.at(-1).content,pasted);
+ await act(async()=>app.markdownHistory());assert.equal(content(),original);
+});
+await test('P3 typewriter: default off, explicit centering and composition exclusion',async()=>{
+ const element=document.createElement('div'),scroller=document.createElement('div');document.body.append(scroller);scroller.append(element);
+ Object.defineProperties(scroller,{clientHeight:{value:400},scrollHeight:{value:2000}});scroller.scrollTop=200;scroller.getBoundingClientRect=()=>({top:0,bottom:400});
+ const view={dom:element,editable:true,composing:false,hasFocus:()=>true,state:{selection:{head:1}},coordsAtPos:()=>({top:300,bottom:320})};
+ const controller=app.installTypewriter(view,scroller);
+ const update=patch=>store.setState(s=>({markdownSettings:{...s.markdownSettings,...patch}}));
+ update({typewriter:false});controller.update();await pause(30);assert.equal(scroller.scrollTop,200);
+ update({typewriter:true});controller.update();await pause(30);assert.equal(scroller.scrollTop,310);
+ element.dispatchEvent(new Event('compositionstart'));controller.update();await pause(30);assert.equal(scroller.scrollTop,310);
+ element.dispatchEvent(new Event('compositionend'));controller.update();await pause(30);assert.equal(scroller.scrollTop,310);
+ await pause(40);controller.update();await pause(30);assert.equal(scroller.scrollTop,420);
+ controller.destroy();update({typewriter:false});scroller.remove();
+});
+await test('P3 preferences: invalid old values restore defaults and writing styles stay Markdown-only',async()=>{
+ const htmlBefore=store.getState().tabs.find(t=>t.id==='b').content;
+ assert.deepEqual(app.normalizeMarkdownPreferences(null),app.defaultMarkdownPreferences);
+ assert.equal(app.normalizeMarkdownPreferences({imageDirectory:'../private',typewriter:'true',documentTheme:'unknown'}).imageDirectory,'assets');
+ assert.equal(app.normalizeMarkdownPreferences({imageDirectory:'media\\images'}).imageDirectory,'media/images');
+ await act(async()=>store.setState(s=>({markdownSettings:{...s.markdownSettings,documentTheme:'serif',focusParagraph:true}})));
+ assert.equal(document.querySelector('.md-visual-shell').dataset.mdTheme,'serif');assert.equal(document.querySelector('.md-visual-shell').dataset.mdFocus,'true');
+ assert.equal(store.getState().tabs.find(t=>t.id==='b').content,htmlBefore);
+ await act(async()=>store.setState({markdownSettings:{...app.defaultMarkdownPreferences}}));
+});
+
 await test('P0 composition: slow candidate replacement and cancellation in paragraph and table preserve history',async()=>{
  for(const table of [false,true]){
   const original=table?'| 单元格 |\n| --- |\n| 正文 |\n':'正文\n';
@@ -484,4 +653,19 @@ await test('IME round 5: leaving the editor and destroying the view cannot pull 
  event('compositionstart');document.getSelection().removeAllRanges();scroller.scrollTop=1250;guard.handleScroll();assert.equal(scroller.scrollTop,1250);
  guard.destroy();scroller.scrollTop=1450;editor.dispatchEvent(new Event('input',{bubbles:true}));await pause(40);assert.equal(scroller.scrollTop,1450);
 }));
+await test('P3 settings UI and persistence: explicit options survive reload, old snapshots use safe defaults',async()=>{
+ await act(async()=>root.render(React.createElement(app.WritingSettings)));
+ await act(async()=>document.querySelector('.md-writing-settings button').click());
+ const theme=document.querySelector('select[aria-label="Document theme"]');assert.ok(theme);
+ await act(async()=>{theme.value='serif';theme.dispatchEvent(new Event('change',{bubbles:true}));});
+ assert.equal(store.getState().markdownSettings.documentTheme,'serif');
+ const typewriter=[...document.querySelectorAll('.md-writing-panel label')].find(e=>e.textContent==='Typewriter mode').querySelector('input');
+ assert.equal(typewriter.checked,false);await act(async()=>typewriter.click());assert.equal(store.getState().markdownSettings.typewriter,true);
+ app.schedulePersist({sidebarPx:230,previewPct:50});await pause(750);
+ assert.equal(JSON.parse(persistedState).markdownSettings.typewriter,true);assert.equal(JSON.parse(persistedState).markdownSettings.documentTheme,'serif');
+ await act(async()=>{store.setState({markdownSettings:{...app.defaultMarkdownPreferences}});await app.loadPersisted();});
+ assert.equal(store.getState().markdownSettings.typewriter,true);assert.equal(store.getState().markdownSettings.documentTheme,'serif');
+ const legacy=JSON.parse(persistedState);delete legacy.markdownSettings;persistedState=JSON.stringify(legacy);
+ await act(async()=>app.loadPersisted());assert.deepEqual(store.getState().markdownSettings,app.defaultMarkdownPreferences);
+});
 await act(async()=>root.unmount());assert.deepEqual(runtimeErrors,[]);dom.window.close();console.log(`${passed} integration tests passed`);

@@ -1,3 +1,5 @@
+import footnote from "markdown-it-footnote";
+import { markdownExtensions } from "./markdownExtensions";
 import MarkdownIt from "markdown-it";
 import anchor from "markdown-it-anchor";
 import taskLists from "markdown-it-task-lists";
@@ -101,6 +103,13 @@ const md = new MarkdownIt({
 md.use(anchor, { permalink: false });
 md.use(markdownTableLists);
 md.use(taskLists, { enabled: false });
+md.use(footnote);
+md.use(markdownExtensions);
+const footnoteOpen = md.renderer.rules.footnote_open!;
+md.renderer.rules.footnote_open = (tokens, i, options, env, renderer) => {
+  const label = env.footnotes?.list?.[tokens[i].meta.id]?.label ?? "";
+  return footnoteOpen(tokens, i, options, env, renderer).replace("<li", `<li data-footnote-label="${escapeAttr(label)}"`);
+};
 // KaTeX is registered lazily by renderMarkdown() when the source actually
 // contains math — see loadKatex().
 
@@ -120,7 +129,7 @@ md.renderer.rules.fence = (tokens, idx, options, env, self) => {
   return originalFence(tokens, idx, options, env, self);
 };
 
-["paragraph_open", "heading_open", "blockquote_open", "list_item_open"].forEach(
+["paragraph_open", "heading_open", "blockquote_open", "list_item_open", "table_open"].forEach(
   (rule) => {
     const original = md.renderer.rules[rule];
     md.renderer.rules[rule] = (tokens, idx, options, env, self) => {
@@ -166,7 +175,8 @@ export async function renderMarkdown(
     await loadKatex();
   }
   const hl = await getHighlighter();
-  const tokens = md.parse(source, {});
+  const env: Record<string, unknown> = {};
+  const tokens = md.parse(source, env);
   // Pre-scan for plantuml — if any fence is plantuml, load the encoder once
   // before the synchronous render pass below.
   let needsPlantuml = false;
@@ -221,7 +231,7 @@ export async function renderMarkdown(
     }
   }
 
-  return md.renderer.render(tokens, md.options, { __highlighted: highlighted });
+  return md.renderer.render(tokens, md.options, { ...env, __highlighted: highlighted });
 }
 
 export async function renderCode(

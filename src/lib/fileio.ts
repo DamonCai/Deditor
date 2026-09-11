@@ -8,7 +8,7 @@ import { confirmUnsaved } from "../components/ConfirmDialog";
 import { logError, logInfo, logWarn } from "./logger";
 import { notifyRefresh } from "./treeRefresh";
 import { tStatic } from "./i18n";
-import { isImageFile, isPdfFile, isAudioFile, isVideoFile, isHexFile, isXmindFile, isBinaryRenderable } from "./lang";
+import { isMarkdown, isImageFile, isPdfFile, isAudioFile, isVideoFile, isHexFile, isXmindFile, isBinaryRenderable } from "./lang";
 import { formatBuffer } from "./format";
 
 const MD_FILTER = [
@@ -332,7 +332,9 @@ async function saveTab(id: string, saveAs = false, automatic = false): Promise<b
     // A tab may have closed or been renamed while the native dialog was open.
     if (!useEditorStore.getState().tabs.some((t) => t.id === id && t.filePath === snapshot.filePath)) return false;
     try {
-      const formatted = await maybeFormat(snapshot.content, target, binary);
+      const content = snapshot.filePath && target !== snapshot.filePath && isMarkdown(snapshot.filePath) && isMarkdown(target) && useEditorStore.getState().markdownSettings.preserveImageTargets
+        ? (await import("./markdownImagePaths")).rebaseMarkdownImages(snapshot.content, snapshot.filePath, target) : snapshot.content;
+      const formatted = await maybeFormat(content, target, binary);
       if (target !== snapshot.filePath || formatted !== snapshot.savedContent) {
         await writeTabContent(target, formatted, binary);
       }
@@ -453,8 +455,9 @@ export async function saveImage(
   baseDir: string,
   name: string,
   data: string,
+  folder = "assets",
 ): Promise<string> {
-  return invoke<string>("save_image", { dir: baseDir, name, data });
+  return invoke<string>("save_image", { dir: baseDir, name, data, folder });
 }
 
 export async function createFile(parentDir: string, name: string): Promise<string> {
@@ -497,6 +500,8 @@ export async function revealInFinder(path: string): Promise<void> {
 }
 
 export async function renamePath(from: string, to: string): Promise<void> {
+  const { rebaseMarkdownImages } = await import("./markdownImagePaths");
+  flushDocuments();
   await invoke("rename_path", { from, to });
   logInfo(`renamed: ${from} -> ${to}`);
   // Refresh both ends in case from/to were under different parents (defensive;
@@ -513,19 +518,19 @@ export async function renamePath(from: string, to: string): Promise<void> {
   let anyChanged = false;
   const remapped = tabs.map((t) => {
     if (!t.filePath) return t;
-    if (t.filePath === from) {
-      anyChanged = true;
-      return { ...t, filePath: to };
-    }
-    if (t.filePath.startsWith(from + "/") || t.filePath.startsWith(from + "\\")) {
-      anyChanged = true;
-      const rest = t.filePath.slice(from.length);
-      return { ...t, filePath: to + rest };
-    }
-    return t;
+    const filePath = t.filePath === from ? to : t.filePath.startsWith(from + "/") || t.filePath.startsWith(from + "\\") ? to + t.filePath.slice(from.length) : t.filePath;
+    if (filePath !== t.filePath) anyChanged = true;
+    return filePath === t.filePath ? t : { ...t, filePath };
   });
-  if (anyChanged) {
-    useEditorStore.setState({ tabs: remapped });
+  if (anyChanged) useEditorStore.setState({ tabs: remapped });
+  if (useEditorStore.getState().markdownSettings.preserveImageTargets && tabs.some(t => t.filePath && isMarkdown(t.filePath))) {
+    for (const tab of tabs) {
+      if (!tab.filePath || !isMarkdown(tab.filePath)) continue;
+      const path = remapped.find(t => t.id === tab.id)!.filePath!;
+      if (!isMarkdown(path)) continue;
+      const updated = rebaseMarkdownImages(tab.content, tab.filePath, path, { from, to });
+      if (updated !== tab.content) useEditorStore.getState().setContent(updated, tab.id, "command");
+    }
   }
   // Keep the compare mark in sync if it pointed at the renamed file.
   const { compareMarkPath, setCompareMarkPath } = useEditorStore.getState();
