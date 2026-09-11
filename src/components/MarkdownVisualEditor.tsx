@@ -1,11 +1,12 @@
 import { faithfulLink } from "../lib/markdownVisual/references";
+import { absoluteHeadingInputRule } from "../lib/markdownVisual/heading";
 import { faithfulImage, accessibleImageView } from "../lib/markdownVisual/image";
 import { installMarkdownAccessibility, tableIcon } from "../lib/markdownVisual/accessibility";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { extendedTableCells } from "../lib/markdownVisual/tableLists";
 import { inlineSchemas, faithfulInlineHtml, configureInlineSerialization } from "../lib/markdownVisual/inline";
 import { codeView } from "../lib/markdownVisual/codeView";
-import { remarkInlineLinkPlugin, remarkPreserveEmptyLinePlugin } from "@milkdown/kit/preset/commonmark";
+import { remarkInlineLinkPlugin, remarkPreserveEmptyLinePlugin, wrapInHeadingInputRule } from "@milkdown/kit/preset/commonmark";
 import { useEffect, useRef, useState } from "react";
 import { CrepeBuilder } from "@milkdown/crepe/builder";
 import { codeMirror } from "@milkdown/crepe/feature/code-mirror";
@@ -90,7 +91,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
         inlineUploadButton: t("md.uploadImage"), blockUploadButton: t("md.uploadImage"), blockConfirmButton: t("common.confirm"),
         inlineUploadPlaceholderText: t("md.imageUrlLabel"), blockUploadPlaceholderText: t("md.imageUrlLabel"), blockCaptionPlaceholderText: t("md.imageAltLabel") })
       .addFeature(latex);
-    crepe.editor.use(faithfulLink).use(faithfulInlineHtml).use(faithfulImage).use(extendedTableCells.flat()).use(inlineSchemas.flat()).config(configureInlineSerialization).use(frontmatter).use(rawRemark(mdx)).use(rawSchema);
+    crepe.editor.use(absoluteHeadingInputRule).use(faithfulLink).use(faithfulInlineHtml).use(faithfulImage).use(extendedTableCells.flat()).use(inlineSchemas.flat()).config(configureInlineSerialization).use(frontmatter).use(rawRemark(mdx)).use(rawSchema);
     crepe.editor.config(ctx => ctx.update(editorViewOptionsCtx, prev => ({ ...prev, attributes: { "aria-label": t("md.visualEditor"), spellcheck: "false" },
       handleKeyDown: (view, event) => {
         if (event.key !== "Tab" || !view.editable || !isInTable(view.state)) return false;
@@ -115,6 +116,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
     })));
     const initialize = async () => {
       await crepe.editor.remove(history); await crepe.editor.remove(trailing);
+      await crepe.editor.remove(wrapInHeadingInputRule);
       await crepe.editor.remove(remarkInlineLinkPlugin.plugin);
       await crepe.editor.remove(remarkPreserveEmptyLinePlugin.plugin);
       await crepe.create();

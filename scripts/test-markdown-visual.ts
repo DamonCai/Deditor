@@ -9,21 +9,23 @@ Object.assign(globalThis, { addEventListener: dom.window.addEventListener.bind(d
 const { CrepeBuilder } = await import("@milkdown/crepe/builder");
 const { codeMirror } = await import("@milkdown/crepe/feature/code-mirror");
 const { imageBlock } = await import("@milkdown/crepe/feature/image-block");
+const { absoluteHeadingInputRule } = await import("../src/lib/markdownVisual/heading");
 const { faithfulLink } = await import("../src/lib/markdownVisual/references");
 const { faithfulImage } = await import("../src/lib/markdownVisual/image");
 const { latex } = await import("@milkdown/crepe/feature/latex");
-const { parserCtx, serializerCtx } = await import("@milkdown/kit/core");
-const { remarkInlineLinkPlugin, remarkPreserveEmptyLinePlugin } = await import("@milkdown/kit/preset/commonmark");
+const { parserCtx, serializerCtx, editorViewCtx } = await import("@milkdown/kit/core");
+const { remarkInlineLinkPlugin, remarkPreserveEmptyLinePlugin, wrapInHeadingInputRule } = await import("@milkdown/kit/preset/commonmark");
 const { extendedTableCells } = await import("../src/lib/markdownVisual/tableLists");
 const { inlineSchemas, faithfulInlineHtml, configureInlineSerialization } = await import("../src/lib/markdownVisual/inline");
 const { rawSchema, rawRemark, frontmatter } = await import("../src/lib/markdownVisual/raw");
 const { MarkdownDocument } = await import("../src/lib/markdownVisual/document");
-const { EditorState } = await import("@milkdown/kit/prose/state");
+const { EditorState, TextSelection } = await import("@milkdown/kit/prose/state");
 const { history } = await import("@milkdown/kit/plugin/history");
 const { trailing } = await import("@milkdown/kit/plugin/trailing");
 const crepe = new CrepeBuilder({ root: document.querySelector("#editor") }).addFeature(codeMirror).addFeature(latex).addFeature(imageBlock);
-crepe.editor.use(faithfulLink).use(faithfulInlineHtml).use(faithfulImage).use(extendedTableCells.flat()).use(inlineSchemas.flat()).config(configureInlineSerialization).use(frontmatter).use(rawRemark(false)).use(rawSchema);
+crepe.editor.use(absoluteHeadingInputRule).use(faithfulLink).use(faithfulInlineHtml).use(faithfulImage).use(extendedTableCells.flat()).use(inlineSchemas.flat()).config(configureInlineSerialization).use(frontmatter).use(rawRemark(false)).use(rawSchema);
 await crepe.editor.remove(remarkInlineLinkPlugin.plugin); await crepe.editor.remove(remarkPreserveEmptyLinePlugin.plugin);
+await crepe.editor.remove(wrapInHeadingInputRule);
 await crepe.editor.remove(history); await crepe.editor.remove(trailing); await crepe.create();
 let passed = 0;
 const test = (name: string, fn: () => void) => { fn(); passed++; console.log(`PASS ${name}`); };
@@ -121,6 +123,40 @@ crepe.editor.action(ctx => {
      const model = make(source); assert.equal(model.doc.firstChild!.type.name, "paragraph");
      const text = source.includes("Ctrl") ? "Ctrl" : "tail";
      assert.equal(editText(model, text, "edited"), source.replace(text, "edited"));
+   }
+ });
+ const view = ctx.get(editorViewCtx);
+ const inputInto = (model: InstanceType<typeof MarkdownDocument>, position: number, text: string) => {
+   view.updateState(EditorState.create({ doc: model.doc, selection: TextSelection.create(model.doc, position), plugins: view.state.plugins }));
+   for (const character of text) {
+     const {from,to} = view.state.selection;
+     const insert = () => view.state.tr.insertText(character,from,to);
+     if (!view.someProp("handleTextInput", handler => handler(view,from,to,character,insert))) view.dispatch(insert());
+     model.apply(view.state.doc);
+   }
+ };
+ test("reported heading bug: typed hashes set an absolute level across all 42 prior/target combinations", () => {
+   for(let previous=0;previous<=6;previous++) for(let level=1;level<=6;level++) {
+     const original=(previous ? "#".repeat(previous)+" " : "")+"Title\n\nTail\n";
+     const model=make(original);inputInto(model,1,"#".repeat(level)+" ");
+     assert.equal(model.doc.firstChild!.attrs.level,level,`H${previous} + ${level} hashes`);
+     assert.equal(model.source,"#".repeat(level)+" Title\n\nTail\n");
+     inputInto(model,1,"#".repeat(level)+" ");
+     assert.equal(model.source,"#".repeat(level)+" Title\n\nTail\n","repeating a prefix never increments the level");
+   }
+ });
+ test("reported heading bug: an empty paragraph or empty heading stays H1 after one hash", () => {
+   for(const source of ["", "\n", "# ", "#### ", "###### "]) {
+     const model=make(source);inputInto(model,1,"# ");
+     assert.equal(model.doc.firstChild!.attrs.level,1);inputInto(model,1,"New title");
+     assert.match(model.source,/^\s*# New title\s*$/);
+   }
+ });
+ test("reported heading bug: seven hashes, mid-line hashes and code remain literal", () => {
+   for(const [source,position,text] of [["Title\n",1,"####### "],["Title\n",3,"# "],["```\ncode\n```\n",1,"# "]] as const) {
+     const model=make(source),type=model.doc.firstChild!.type.name;
+     inputInto(model,position,text);assert.equal(model.doc.firstChild!.type.name,type);
+     assert.equal(make(model.source).doc.firstChild!.textContent,model.doc.firstChild!.textContent);
    }
  });
  test("round 3: text edits with 2000 paragraphs preserve the full document", () => { const source = Array.from({ length: 2000 }, (_, i) => `Paragraph ${i} 中文`).join("\n\n"); const start = performance.now(); const model = make(source); const load = performance.now() - start; const edit = performance.now(); assert.equal(editText(model, "Paragraph 1777", "修改 1777"), source.replace("Paragraph 1777", "修改 1777")); console.log(`PERF 2000 blocks load=${load.toFixed(1)}ms edit=${(performance.now() - edit).toFixed(1)}ms`); });
