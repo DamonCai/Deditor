@@ -32,6 +32,7 @@ import {
   type Sheet,
 } from "../src/lib/xmind/document";
 import { buildScene, nodeVisualBounds, edgePath, STRUCTURES, topicStyle, groupStyle } from "../src/lib/xmind/scene";
+import { contentCombinationSheets } from "../tests/fixtures/xmind-content-combinations";
 import { timelineVariantSheets } from "../tests/fixtures/xmind-timeline-variants";
 import { round6Sheets } from "../tests/fixtures/xmind-round6";
 import { sampleArchive, sampleSheets } from "../tests/fixtures/xmind";
@@ -1866,4 +1867,27 @@ test(1, "synthetic native archives use a structured creator and list every paylo
   for(const name of Object.keys(files).filter(name=>name!=='manifest.json'))assert.ok(name in manifest['file-entries']);
 });
 
+test(17, "media and multiline label combinations keep parent and descendant visual bounds separate", () => {
+  for (const sheet of contentCombinationSheets()) {
+    const archive=sampleArchive([sheet]),doc=openDocument(archive);
+    const before=structuredClone(sheet);
+    for (const folded of [new Set<string>(),new Set([sheet.rootTopic.children!.attached![0].id]),new Set(sheet.rootTopic.children!.attached!.map(t=>t.id))]) {
+      const scene=buildScene(sheet,folded);
+      for (let i=0;i<scene.nodes.length;i++) for(let j=i+1;j<scene.nodes.length;j++) {
+        const a=nodeVisualBounds(scene.nodes[i]),b=nodeVisualBounds(scene.nodes[j]);
+        assert.ok(a.x+a.width<=b.x+.01 || b.x+b.width<=a.x+.01 || a.y+a.height<=b.y+.01 || b.y+b.height<=a.y+.01,
+          `${sheet.title}: visible label/image overlap ${scene.nodes[i].topic.id}/${scene.nodes[j].topic.id}`);
+      }
+    }
+    assert.deepEqual(sheet,before,'layout does not rewrite source media or labels');
+    const target=sheet.rootTopic.children!.attached![0];
+    const edited=editDocument(doc.sheets,sheet.id,{type:'title',id:target.id,title:'Edited combination'});
+    const expected=structuredClone(doc.sheets);
+    expected[0].rootTopic.children!.attached![0].title='Edited combination';
+    const saved=writeDocument(doc,edited);
+    assert.deepEqual(read(saved),expected,'editing title preserves every image, label and marker field');
+    const files=unzipSync(saved);
+    for(const key in doc.files)if(key!=='content.json')assert.deepEqual(files[key],doc.files[key],'embedded resource preserved');
+  }
+});
 console.log(`${passed} XMind tests passed`);

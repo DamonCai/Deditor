@@ -1,6 +1,7 @@
 import { decodeHTMLAttribute } from "entities";
 import { sourceTree, range, type SourceNode } from "./markdownVisual/document";
 import { dirname, isAbsolutePath, isLocalRef, resolveAgainst } from "./pathUtil";
+import { documentImageRoot, resolveMarkdownImage } from "./markdownImageSettings";
 
 function relativeImage(url: string, oldPath: string, newPath: string, moved?: { from: string; to: string }) {
   if (!isLocalRef(url) || isAbsolutePath(url) || /^file:/i.test(url)) return url;
@@ -67,5 +68,22 @@ export function rewriteMarkdownImageUrls(source: string, replace: (url: string) 
 
 export function rebaseMarkdownImages(source: string, oldPath: string, newPath: string, moved?: { from: string; to: string }) {
   if (!moved && dirname(oldPath) === dirname(newPath)) return source;
-  return rewriteMarkdownImageUrls(source, url => relativeImage(url, oldPath, newPath, moved));
+  const oldRoot = documentImageRoot(source, oldPath), newRoot = documentImageRoot(source, newPath);
+  return rewriteMarkdownImageUrls(source, url => {
+    if (oldRoot !== null && /^\/(?!\/)/.test(url)) {
+      let target = resolveMarkdownImage(url, oldPath, oldRoot)!.replace(/\\/g, "/");
+      const key = (path: string) => /^[a-z]:/i.test(oldPath) || /^(?:\\\\|\/\/)/.test(oldPath) ? path.toLowerCase() : path;
+      if (moved) {
+        const from = moved.from.replace(/\\/g, "/"), to = moved.to.replace(/\\/g, "/");
+        if (key(target) === key(from) || key(target).startsWith(key(from) + "/")) target = to + target.slice(from.length);
+      }
+      if (key(target) === key(resolveMarkdownImage(url, newPath, newRoot)!.replace(/\\/g, "/"))) return url;
+      // Keep the authored root, but preserve this image's target when a relative
+      // root changes meaning after Save As or a folder/image move.
+      const encoded = encodeURI(target).replace(/#/g, "%23").replace(/\?/g, "%3F");
+      const suffix = url.match(/[?#].*$/)?.[0] ?? "";
+      return (target.startsWith("//") ? "file:" : target.startsWith("/") ? "file://" : "file:///") + encoded + suffix;
+    }
+    return relativeImage(url, oldPath, newPath, moved);
+  });
 }

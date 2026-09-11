@@ -1,10 +1,5 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
-import {
-  dirname,
-  isLocalRef,
-  resolveAgainst,
-  stripFileScheme,
-} from "./pathUtil";
+import { resolveMarkdownImage } from "./markdownImageSettings";
 
 /** After Markdown HTML is mounted, walk every `<img data-raw-src>` and rewrite
  *  the `src` for local files to the Tauri asset:// URL. Remote images keep
@@ -13,23 +8,18 @@ import {
 export function hydrateLocalImages(
   root: HTMLElement,
   filePath: string | null,
+  imageRoot: string | null = null,
 ): void {
-  const baseDir = filePath ? dirname(filePath) : "";
-  const imgs = root.querySelectorAll<HTMLImageElement>("img[data-raw-src]");
+  const imgs = root.querySelectorAll<HTMLImageElement>("img");
   imgs.forEach((img) => {
-    const raw = img.dataset.rawSrc;
+    const raw = img.dataset.rawSrc ?? img.getAttribute("src");
     if (!raw) return;
-    if (img.dataset.localImgHydrated === "1") return;
-    img.dataset.localImgHydrated = "1";
-    if (!isLocalRef(raw)) return;
-    let target = stripFileScheme(raw);
-    target = resolveAgainst(baseDir, target);
-    // strip a hash/query that resolveAgainst left attached — convertFileSrc
-    // handles a clean path only.
-    const cleanIdx = target.search(/[#?]/);
-    const clean = cleanIdx >= 0 ? target.slice(0, cleanIdx) : target;
+    const clean = resolveMarkdownImage(raw, filePath, imageRoot);
+    if (clean === null || img.dataset.absPath === clean && img.dataset.localImgHydrated === "1") return;
     try {
       img.src = convertFileSrc(clean);
+      img.dataset.rawSrc = raw;
+      img.dataset.localImgHydrated = "1";
       img.dataset.absPath = clean;
       img.style.cursor = "zoom-in";
     } catch {

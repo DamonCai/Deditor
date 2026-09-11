@@ -252,6 +252,16 @@
   display: block;
   margin: 16px 0;
 }
+/* Inline images share the text baseline in both renderers. Standalone images
+   keep the document's block spacing. */
+:is(.preview, .milkdown .ProseMirror.md-document) img[data-md-inline="true"],
+.md-visual-shell .milkdown .md-document .milkdown-image-inline img {
+  display: inline-block;
+  vertical-align: baseline;
+  margin: 0;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) figure:has(> img:only-child) { margin: 16px 0; }
+:is(.preview, .milkdown .ProseMirror.md-document) figure > img:only-child { margin: 0; }
 :is(.preview, .milkdown .ProseMirror.md-document) kbd {
   padding: 2px 6px;
   font: 0.8em "SF Mono", Menlo, Consolas, monospace;

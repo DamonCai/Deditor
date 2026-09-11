@@ -530,7 +530,7 @@ export function buildScene(
             part,
             cursor - b.x,
             d === "down"
-              ? height / 2 + (depth === 0 ? 100 : 24) - b.y
+              ? nodeVisualBounds(node).y + nodeVisualBounds(node).height + (depth === 0 ? 100 : 24) - b.y
               : -height / 2 - (depth === 0 ? 100 : 24) - b.y - b.height,
           );
           cursor += b.width + gap;
@@ -639,12 +639,16 @@ export function buildScene(
             slots[+range[2]].after+=extent+(sign>0?title:0);
           }
           const minimumReach = folded.has(child.id) && child.children?.attached?.length ? 70 : 50;
-          const reach = Math.max(minimumReach, slots.reduce((sum, slot, k) => sum + slot.before + slot.after + (k ? 3 : 24), 0) + 48);
+          // On upper ribs, labels below the cause face its first detail.
+          const causeBounds = nodeVisualBounds(cause);
+          const labelClearance = sign < 0 ? Math.max(0, causeBounds.y + causeBounds.height - cause.y - cause.height) : 0;
+          const firstGap = 24 + labelClearance;
+          const reach = Math.max(minimumReach + labelClearance, slots.reduce((sum, slot, k) => sum + slot.before + slot.after + (k ? 3 : firstGap), 0) + 48);
           const tip = { x: base + reach / Math.sqrt(3), y: sign * reach };
           shift(part, tip.x, tip.y + sign * cause.height / 2);
           let distance = reach;
           leaves.forEach((leaf, k) => {
-            distance -= (k ? 3 : 24) + slots[k].before;
+            distance -= (k ? 3 : firstGap) + slots[k].before;
             const anchor = { x: base + distance / Math.sqrt(3), y: sign * distance };
             const leafRoot = leaf.nodes[0];
             shift(leaf, anchor.x + 24 - leaf.bounds.x,
@@ -748,7 +752,8 @@ export function buildScene(
           const details = (folded.has(child.id) ? [] : child.children?.attached ?? [])
             .map(t => layout(t, depth + 2, branchIndex, "right", child.id, false, undefined, connectionStyle(milestone)));
           const total = details.reduce((sum, f) => sum + f.bounds.height, 0) + Math.max(0, details.length - 1) * 3;
-          let y = above ? milestone.y - 28 - total : milestone.y + milestone.height + 24;
+          const milestoneBounds = nodeVisualBounds(milestone);
+          let y = above ? milestone.y - 28 - total : milestoneBounds.y + milestoneBounds.height + 24;
           const x = milestone.x + milestone.width / 2;
           details.forEach(detail => {
             const h = detail.bounds.height;
@@ -771,7 +776,7 @@ export function buildScene(
           if(boxes.length) {
             const extent=boundsOf(boxes);
             const dy=above?Math.min(0,milestone.y-24-extent.y-extent.height)
-              :Math.max(0,milestone.y+milestone.height+24-extent.y);
+              :Math.max(0,milestoneBounds.y+milestoneBounds.height+24-extent.y);
             if(dy) {
               for(const n of descendants)n.y+=dy;
               for(const g of childGroups)g.y+=dy;

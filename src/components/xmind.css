@@ -196,6 +196,8 @@
 }
 .xm-sheets .xm-help {
   margin: 0 8px;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .xm-outline {
   width: 200px;

@@ -39,6 +39,7 @@ await build({stdin:{contents:`
 export {default as EditorHost} from './src/components/EditorHost';
 export {getActiveView} from './src/lib/editorBridge';
 export {default as Visual} from './src/components/MarkdownVisualEditor';
+export {default as Preview} from './src/components/Preview';
 export {useEditorStore} from './src/store/editor';
 export {getVisualEditor} from './src/lib/markdownVisualBridge';
 export {markdownHistory} from './src/lib/markdownHistory';
@@ -48,7 +49,8 @@ export {installCompositionViewport} from './src/lib/markdownVisual/compositionVi
 export {loadPersisted,schedulePersist} from './src/lib/persistence';
 export {default as WritingSettings} from './src/components/MarkdownWritingSettings';
 export {collectMarkdownImages} from './src/lib/markdownImageCollect';
-export {documentImageDirectory} from './src/lib/markdownImageSettings';
+export {documentImageDirectory,documentImageRoot,resolveMarkdownImage} from './src/lib/markdownImageSettings';
+export {hydrateLocalImages} from './src/lib/localImgHydrate';
 export {rebaseMarkdownImages} from './src/lib/markdownImagePaths';
 export {installTypewriter} from './src/lib/markdownVisual/typewriter';
 export {normalizeMarkdownPreferences,defaultMarkdownPreferences} from './src/lib/markdownPreferences';
@@ -463,6 +465,85 @@ await test('image collection: copies once, patches Markdown/HTML/references, kee
   await act(async()=>app.markdownHistory());assert.equal(content(),original);
  } finally {globalThis.mdInvoke=oldInvoke;}
 });
+await test('image root paths: website roots, encoded filenames, explicit files, Windows and UNC',async()=>{
+ const resolve=app.resolveMarkdownImage,header=value=>'---\ntypora-root-url: '+value+'\n---\n';
+ assert.equal(app.documentImageRoot(header('../site'),'/docs/posts/a.md'),'/docs/site');
+ assert.equal(app.documentImageRoot(header('"D:\\\\site"'),'C:\\docs\\a.md'),'D:\\site');
+ for(const value of ['[bad]','*missing','https://example.com','""']) assert.equal(app.documentImageRoot(header(value),'/docs/a.md'),null);
+ assert.equal(resolve('/img/a%20%E4%B8%AD%23%3F.png?v=2#part','/docs/a.md','/site'),'/site/img/a 中#?.png');
+ assert.equal(resolve('./img/a.png','/docs/a.md','/site'),'/docs/img/a.png');
+ assert.equal(resolve('file:///absolute/a%23.png','/docs/a.md','/site'),'/absolute/a#.png');
+ assert.equal(resolve('file:///C:/images/a%20b.png','D:\\docs\\a.md','D:\\site'),'C:/images/a b.png');
+ assert.equal(resolve('C:\\images\\a.png','D:\\docs\\a.md','D:\\site'),'C:\\images\\a.png');
+ assert.equal(resolve('/img/a.png','D:\\docs\\a.md','D:\\site'),'D:\\site\\img\\a.png');
+ assert.equal(resolve('a.png','\\\\server\\share\\a.md'),'\\\\server\\share\\a.png');
+ assert.equal(resolve('file://server/share/a.png',null),'//server/share/a.png');
+ assert.equal(resolve('a.png','/a.md'),'/a.png');
+ assert.equal(resolve('a%2520.png','/draft%20/a.md'),'/draft%20/a%20.png');
+ const literalRoot=app.documentImageRoot(header('"/draft%20/#assets"'),'/docs/a.md');
+ assert.equal(literalRoot,'/draft%20/#assets');assert.equal(resolve('/a.png','/docs/a.md',literalRoot),'/draft%20/#assets/a.png');
+ for(const url of ['https://example.com/a','//cdn.example.com/a','#part','data:image/png;base64,a']) assert.equal(resolve(url,'/a.md','/site'),null);
+});
+await test('image root views: Preview, block/inline/HTML images update together without source writes',async()=>{
+ const original='---\ntypora-root-url: /site-one\n---\n\n![block](/img/block.png)\n\nText ![inline](/img/inline.png) end\n\n<figure><img src="/img/raw.png" alt="raw"></figure>\n';
+ await act(async()=>store.getState().setContent(original,'a','command'));await render(false);
+ const previewHost=document.createElement('div');document.body.append(previewHost);const previewRoot=createRoot(previewHost);
+ try {
+  await act(async()=>{previewRoot.render(React.createElement(app.Preview,{tabId:'a',active:false,theme:'light'}));await pause(200);});
+  await act(async()=>{await pause(150);});
+  const targets=scope=>[...scope.querySelectorAll('img')].map(img=>img.getAttribute('src')).filter(src=>src?.includes('/img/')).sort();
+  const expected=root=>['block','inline','raw'].map(name=>root+'/img/'+name+'.png').sort();
+  assert.deepEqual(targets(document.querySelector('.ProseMirror')),expected('/site-one'));
+  assert.deepEqual(targets(previewHost),expected('/site-one'));
+  assert.equal(previewHost.querySelector('img[alt="inline"]').dataset.mdInline,'true');
+  assert.equal(previewHost.querySelector('img[alt="block"]').dataset.mdInline,undefined);
+  assert.equal(content(),original);
+  const changed=original.replace('/site-one','/site-two');
+  await act(async()=>{store.getState().setContent(changed,'a','command');await pause(160);});
+  await act(async()=>{await pause(160);});
+  assert.deepEqual(targets(document.querySelector('.ProseMirror')),expected('/site-two'));
+  assert.deepEqual(targets(previewHost),expected('/site-two'));assert.equal(content(),changed);
+  await act(async()=>app.markdownHistory());await act(async()=>{await pause(160);});
+  assert.deepEqual(targets(document.querySelector('.ProseMirror')),expected('/site-one'));assert.equal(content(),original);
+ } finally {await act(async()=>previewRoot.unmount());previewHost.remove();}
+});
+await test('image root collection: resolves actual files, preserves suffixes, aborts stale root changes',async()=>{
+ const original='---\ntypora-root-url: /website\n---\n\n![site](/img/a%23.png?v=1)\n\nText\n';
+ await act(async()=>store.getState().setContent(original,'a','command'));
+ const oldInvoke=globalThis.mdInvoke,reads=[];let changeRoot=false,changeBody=false;
+ globalThis.mdInvoke=async(command,args)=>{
+  if(command==='read_binary_as_base64'){reads.push(args.path);return 'cGljdHVyZQ==';}
+  if(command==='save_image'){
+   if(changeRoot)store.getState().setContent(content().replace('/website','/new-site'),'a','command');
+   if(changeBody)store.getState().setContent(content().replace('Text','Updated while copying'),'a','command');
+   return '/generated/'+args.folder+'/'+args.name;
+  }
+  return oldInvoke(command,args);
+ };
+ try {
+  await act(async()=>{const result=await app.collectMarkdownImages('a');assert.equal(result.copied,1);});
+  assert.deepEqual(reads,['/website/img/a#.png']);assert.match(content(),/!\[site\]\(assets\/image-[^)]*\.png\?v=1\)/);
+  await act(async()=>app.markdownHistory());assert.equal(content(),original);
+  changeBody=true;
+  await act(async()=>app.collectMarkdownImages('a'));
+  assert.ok(content().includes('Updated while copying'));assert.ok(content().includes('](assets/'));
+  changeBody=false;await act(async()=>store.getState().setContent(original,'a','command'));
+  changeRoot=true;
+  await act(async()=>assert.rejects(app.collectMarkdownImages('a'),/image root changed/));
+  assert.equal(content(),original.replace('/website','/new-site'));
+ } finally {globalThis.mdInvoke=oldInvoke;}
+});
+await test('image root Save As: relative roots and moved images preserve the resolved destination',async()=>{
+ const original='---\ntypora-root-url: ../site\n---\n\n![site](/img/a%20b.png#part)\n\n![local](local.png)\n';
+ const next=app.rebaseMarkdownImages(original,'/docs/posts/a.md','/elsewhere/posts/a.md');
+ assert.ok(next.includes('![site](file:///docs/site/img/a%20b.png#part)'));
+ assert.ok(next.includes('![local](../../docs/posts/local.png)'));
+ assert.ok(next.startsWith('---\ntypora-root-url: ../site\n---'));
+ const absolute=original.replace('../site','/site');
+ assert.ok(app.rebaseMarkdownImages(absolute,'/docs/a.md','/other/a.md').includes('![site](/img/a%20b.png#part)'));
+ const moved=app.rebaseMarkdownImages(absolute,'/docs/a.md','/docs/a.md',{from:'/site/img/a b.png',to:'/site/img/renamed.png'});
+ assert.ok(moved.includes('![site](file:///site/img/renamed.png#part)'));
+});
 await test('P2 nested diagrams: preserved callouts retain inert diagram source after sanitization',async()=>{
  const original='> [!NOTE]\n> ```mermaid\n> flowchart TD\n> A --> B\n> ```\n> <img src="invalid" onerror="window.bad=1">\n\nTail\n';
  await act(async()=>store.getState().setContent(original,'a','command'));await render(true);await pause(120);
@@ -603,6 +684,22 @@ await test('P1 inline source: multiline clipboard text survives projection closu
  assert.ok(content().includes('line one\n\nline two'));assert.ok(content().endsWith('\n\nTail\n'));assert.equal(document.querySelector('[data-md-inline-source]'),null);
  const pasted=content();await act(async()=>app.saveFile());assert.equal(writes.at(-1).content,pasted);
  await act(async()=>app.markdownHistory());assert.equal(content(),original);
+});
+await test('P1 enclosing block parse: multiline, quote and table preserve references, siblings, reload and undo',async()=>{
+ for(const block of ['First **word** [reference][ref]\nSecond line[^note]', '> First **word** [reference][ref]\n>\n> - nested item', '| A | B |\n| --- | --- |\n| **word** [reference][ref] | other |']) {
+  const original='# Before\n\n'+block+'\n\nTail **unchanged**\n\n[ref]: https://example.com/path "title"\n\n[^note]: Definition\n';
+  await act(async()=>store.getState().setContent(original,'a','command'));
+  const before=original.slice(0,original.indexOf('word')+1),lines=before.split('\n');
+  await act(async()=>{app.getVisualEditor().navigate(lines.length,lines.at(-1).length+1);await pause(30);});
+  const active=document.querySelector('[data-md-inline-source]');assert.ok(active,block);
+  await act(async()=>{active.firstChild.textContent='**word中文**';document.getSelection().collapse(active.firstChild,8);active.dispatchEvent(new Event('input',{bubbles:true}));await pause(40);});
+  await act(async()=>{document.querySelector('.ProseMirror').dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));await pause(40);});
+  assert.equal(content(),original.replace('word','word中文'));
+  const shape=()=>[...document.querySelectorAll('.ProseMirror p,.ProseMirror h1,.ProseMirror td,.ProseMirror a[href]')].map(e=>[e.tagName,e.textContent,e.getAttribute('href')]);
+  const closed=shape();assert.ok(document.querySelector('.ProseMirror a[href="https://example.com/path"]'));
+  await act(async()=>root.render(null));await render();assert.deepEqual(shape(),closed);
+  await act(async()=>app.markdownHistory());assert.equal(content(),original);
+ }
 });
 await test('P3 typewriter: default off, explicit centering and composition exclusion',async()=>{
  const element=document.createElement('div'),scroller=document.createElement('div');document.body.append(scroller);scroller.append(element);

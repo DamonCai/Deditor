@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import XmindView from "../src/components/XmindView";
 import { useEditorStore } from "../src/store/editor";
 import { sampleArchive, sampleSheets } from "./fixtures/xmind";
+import { contentCombinationSheets } from "./fixtures/xmind-content-combinations";
 import { timelineVariantSheets } from "./fixtures/xmind-timeline-variants";
 import { arrowCatalogSheets } from "./fixtures/xmind-arrow-catalog";
 import { smartColorSheets } from "./fixtures/xmind-smart-colors";
@@ -23,7 +24,8 @@ sheets.push({ ...structuredClone(sheets[1]), id: "up-sheet", title: "向上组�
   rootTopic: { ...structuredClone(sheets[1].rootTopic), structureClass: "org.xmind.ui.org-chart.up" } });
 const probe = new URLSearchParams(location.search).get("probe");
 const generatedProbes = ["control-probe", "direction-probe", "count-probe"];
-const archive = probe === "timeline-counts" ? sampleArchive(timelineVariantSheets(true))
+const archive = probe === "content-combinations" ? sampleArchive(contentCombinationSheets())
+  : probe === "timeline-counts" ? sampleArchive(timelineVariantSheets(true))
   : probe === "timeline-variants" ? sampleArchive(timelineVariantSheets())
   : probe === "arrow-catalog" ? sampleArchive(arrowCatalogSheets())
   : probe === "smart-colors" ? sampleArchive(smartColorSheets())

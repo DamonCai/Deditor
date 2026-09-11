@@ -4,6 +4,20 @@ import type { SourceNode } from "./document";
 import { markdownLabels } from "../markdownPreferences";
 const escapeAttribute = (s: string) => s.replace(/[&<>"\n\r]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "\n": "&#10;", "\r": "&#13;" })[c]!);
 
+/** A metadata change need not change the image node or its authored URL. */
+export function rootAwareImageView(original: NodeViewConstructor): NodeViewConstructor {
+  return (node, view, getPos, decorations, innerDecorations) => {
+    const result = original(node, view, getPos, decorations, innerDecorations);
+    const refresh = () => result.update?.(node, decorations, innerDecorations);
+    view.dom.addEventListener("deditor-image-root-change", refresh);
+    return { ...result, update(next, deco, inner) {
+      const accepted = result.update?.(next, deco, inner) ?? false;
+      if (accepted) { node = next; decorations = deco; innerDecorations = inner; }
+      return accepted;
+    }, destroy() { view.dom.removeEventListener("deditor-image-root-change", refresh); result.destroy?.(); } };
+  };
+}
+
 /** Only promote simple standalone images; arbitrary authored HTML stays lossless. */
 export function sizedImages(tree: SourceNode) {
   tree.children = tree.children?.map(block => {
@@ -60,10 +74,11 @@ export function accessibleImageView(original: NodeViewConstructor, language: "zh
     const observer = new MutationObserver(update); observer.observe(dom, { childList: true, subtree: true });
     const modeChanged = () => { result.update?.(node, decorations, innerDecorations); update(); };
     view.dom.addEventListener("deditor-editable-change", modeChanged); update();
+    view.dom.addEventListener("deditor-image-root-change", modeChanged);
     return { ...result, stopEvent(event) { return label.contains(event.target as Node) || (result.stopEvent?.(event) ?? false); }, update(next, deco, inner) {
       const accepted = result.update?.(next, deco, inner) ?? false;
       if (accepted) { node = next; decorations = deco; innerDecorations = inner; update(); }
       return accepted;
-    }, destroy() { observer.disconnect(); view.dom.removeEventListener("deditor-editable-change", modeChanged); result.destroy?.(); } };
+    }, destroy() { observer.disconnect(); view.dom.removeEventListener("deditor-editable-change", modeChanged); view.dom.removeEventListener("deditor-image-root-change", modeChanged); result.destroy?.(); } };
   };
 }

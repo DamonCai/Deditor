@@ -25,7 +25,8 @@ const sample = '# 阅读时自然编辑\n\n这是**加粗**和 *斜体*，支持
 const ime = new URLSearchParams(location.search).has("ime");
 const parity = new URLSearchParams(location.search).has("parity");
 const dark = new URLSearchParams(location.search).has("dark");
-const fixture = new URLSearchParams(location.search).has("complex") ? complexMarkdown : ime ? imeMarkdown : new URLSearchParams(location.search).has("scroll") ? scrollMarkdown : new URLSearchParams(location.search).has("presentation") ? presentationMarkdown : new URLSearchParams(location.search).has("interaction") ? interactionMarkdown : sample;
+const imageRootFixture = complexMarkdown.replace('revision: 1', 'revision: 1\ntypora-root-url: /tests/fixtures').replace('# 综合文档 H1', '# 综合文档 H1\n\n![根目录块图](/markdown-review.svg)\n\n行内根目录图片 ![根目录行内图](/markdown-presentation.svg)\n\n<figure><img src="/markdown-review.svg" alt="根目录 HTML 图"></figure>');
+const fixture = new URLSearchParams(location.search).has("image-root") ? imageRootFixture : new URLSearchParams(location.search).has("complex") ? complexMarkdown : ime ? imeMarkdown : new URLSearchParams(location.search).has("scroll") ? scrollMarkdown : new URLSearchParams(location.search).has("presentation") ? presentationMarkdown : new URLSearchParams(location.search).has("interaction") ? interactionMarkdown : sample;
 const docs = [ { id: "md-review", filePath: "/generated/visual-review.md", content: fixture, savedContent: fixture },
  { id: "md-other", filePath: "/generated/second.md", content: "# 第二个标签\n\n独立历史。\n", savedContent: "# 第二个标签\n\n独立历史。\n" },
  { id: "html-review", filePath: "/generated/isolated.html", content: "<h1>HTML 保持独立</h1><p>原有预览</p>", savedContent: "<h1>HTML 保持独立</h1><p>原有预览</p>" },

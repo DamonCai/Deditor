@@ -58,5 +58,26 @@ await crepe.editor.action(async ctx => {
   rows.push({mode,paragraphs,chars:source.length,parses,fullParses,closeMedianMs:+timings[2].toFixed(2),closeMaxMs:+timings[4].toFixed(2)});
  }
  console.log(JSON.stringify(rows,null,2));
+ const complexRows=[];
+ for(const sections of [30,100]) for(const kind of ["multiline","nested","table"]) {
+  const section=(i:number)=>`## 第 ${i} 节\n\n多行正文 ${i} **正文目标**\n后续一行含中文、English 和 H~2~O。\n\n> 引用正文 **引用目标**\n>\n> - [ ] 嵌套任务\n> - 项目 ==高亮==\n\n| 项目 | 内容 |\n| --- | --- |\n| A | **表格目标** 与 :smile: |\n\n[^note-${i}]: 注释内容\n`;
+  const source=Array.from({length:sections},(_,i)=>section(i)).join('\n');
+  let fullParses=0;const parse=(s:string)=>{if(s.length>source.length/2)fullParses++;return parser(s);};
+  const model=new MarkdownDocument(source,parse,serialize);
+  view.updateState(EditorState.create({doc:model.doc,plugins:view.state.plugins}));
+  const controller=installInlineSource(view,model,()=>{});
+  view.setProps({dispatchTransaction(tr){view.updateState(view.state.apply(tr));if(!controller.apply(tr))model.apply(view.state.doc);controller.update();}});
+  const token=kind==='multiline'?'正文目标':kind==='nested'?'引用目标':'表格目标', input=[], close=[];
+  for(let trial=0;trial<3;trial++) {
+   controller.reset();view.focus();view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc,model.positionAtSource(model.source.lastIndexOf(token)+1))));
+   await Promise.resolve();await Promise.resolve();assert.ok(view.dom.querySelector('.md-inline-source'),kind);
+   const begin=performance.now();view.dispatch(view.state.tr.insertText('x'));input.push(performance.now()-begin);
+   const expected=model.source,start=performance.now();controller.close();close.push(performance.now()-start);
+   assert.equal(model.source,expected);assert.equal(serialize(parser(model.source)),serialize(view.state.doc));
+  }
+  controller.destroy();input.sort((a,b)=>a-b);close.sort((a,b)=>a-b);
+  complexRows.push({kind,sections,chars:source.length,inputMedianMs:+input[1].toFixed(2),closeMedianMs:+close[1].toFixed(2),fullParses});
+ }
+ console.log('Complex document controller timings (JSDOM):');console.log(JSON.stringify(complexRows,null,2));
 });
 await crepe.destroy();dom.window.close();

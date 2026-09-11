@@ -1,4 +1,4 @@
-import { documentImageDirectory } from "../lib/markdownImageSettings";
+import { documentImageDirectory, documentImageRoot, resolveMarkdownImage } from "../lib/markdownImageSettings";
 import { shorthandRemark, highlightRemark, shorthandMarks, emojiSchema, shorthandInputRules, configureShorthand } from "../lib/markdownVisual/shorthand";
 import { strikethroughInputRule } from "@milkdown/kit/preset/gfm";
 import { editableBlockquote, footnoteReference, footnoteDefinition, footnoteUpdates, footnoteNodeView } from "../lib/markdownVisual/structuredBlocks";
@@ -11,7 +11,7 @@ import { installMarkdownComposition } from "../lib/markdownComposition";
 import { faithfulLink } from "../lib/markdownVisual/references";
 import { absoluteHeadingInputRule } from "../lib/markdownVisual/heading";
 import { activeBlockHint } from "../lib/markdownVisual/blockHint";
-import { faithfulImage, accessibleImageView } from "../lib/markdownVisual/image";
+import { faithfulImage, accessibleImageView, rootAwareImageView } from "../lib/markdownVisual/image";
 import { installMarkdownAccessibility, tableIcon } from "../lib/markdownVisual/accessibility";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { extendedTableCells } from "../lib/markdownVisual/tableLists";
@@ -63,6 +63,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
   const root = useRef<HTMLDivElement>(null), scroller = useRef<HTMLDivElement>(null), searchInput = useRef<HTMLInputElement>(null);
   const runtime = useRef<Runtime | null>(null), readonlyRef = useRef(readonly), sourceRef = useRef(source);
   readonlyRef.current = readonly; sourceRef.current = source;
+  const imageRoot = documentImageRoot(source, filePath);
   const [error, setError] = useState("");
   const [ready, setReady] = useState(false), [searchOpen, setSearchOpen] = useState(false), [query, setQuery] = useState("");
   const [tocOpen, setTocOpen] = useState(false), [headings, setHeadings] = useState<{ pos: number; level: number; text: string }[]>([]);
@@ -99,7 +100,10 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
       }).addFeature(listItem).addFeature(cursor)
       .addFeature(linkTooltip, { inputPlaceholder: t("md.linkUrl") })
       .addFeature(imageBlock, { onUpload: upload,
-        proxyDomURL: url => isLocalRef(url) ? convertFileSrc(resolveAgainst(filePath ? dirname(filePath) : "", stripFileScheme(url))) : url,
+        proxyDomURL: url => {
+          const path = resolveMarkdownImage(url, filePath, documentImageRoot(sourceRef.current, filePath));
+          return path === null ? url : convertFileSrc(path);
+        },
         inlineUploadButton: t("md.uploadImage"), blockUploadButton: t("md.uploadImage"), blockConfirmButton: t("common.confirm"),
         inlineUploadPlaceholderText: t("md.imageUrlLabel"), blockUploadPlaceholderText: t("md.imageUrlLabel"), blockCaptionPlaceholderText: t("md.imageAltLabel") })
       .addFeature(latex);
@@ -178,7 +182,8 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
         const typewriter = installTypewriter(view, scroller.current!);
         cleanupTypewriter = typewriter.destroy;
         const originalImageView = view.props.nodeViews?.["image-block"];
-        view.setProps({ nodeViews: { ...view.props.nodeViews, ...(originalImageView ? { "image-block": accessibleImageView(originalImageView, language) } : {}), footnote_reference: footnoteNodeView, footnote_definition: footnoteNodeView, deditor_raw: rawView(filePath, tabId), code_block: codeView(tabId, theme) },
+        const originalInlineImageView = view.props.nodeViews?.image;
+        view.setProps({ nodeViews: { ...view.props.nodeViews, ...(originalImageView ? { "image-block": accessibleImageView(originalImageView, language) } : {}), ...(originalInlineImageView ? { image: rootAwareImageView(originalInlineImageView) } : {}), footnote_reference: footnoteNodeView, footnote_definition: footnoteNodeView, deditor_raw: rawView(filePath, tabId), code_block: codeView(tabId, theme) },
           handleScrollToSelection: () => compositionViewport.handleScroll(),
           dispatchTransaction: tr => {
             if (cancelled) return;
@@ -245,6 +250,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
     };
   }, [tabId, filePath, language, theme]);
   useEffect(() => { runtime.current?.sync(source); }, [source]);
+  useEffect(() => { runtime.current?.view.dom.dispatchEvent(new Event("deditor-image-root-change")); }, [imageRoot, ready]);
   useEffect(() => {
     const rt = runtime.current; if (!rt) return;
     if (readonly) rt.closeInline();

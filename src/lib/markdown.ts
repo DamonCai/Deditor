@@ -163,6 +163,7 @@ md.renderer.rules.image = (tokens, idx, options, env, self) => {
   const token = tokens[idx];
   const srcAttr = token.attrGet("src") ?? "";
   if (srcAttr) token.attrSet("data-raw-src", srcAttr);
+  if (tokens.some((other, index) => index !== idx && (other.type !== "text" || other.content.trim()))) token.attrSet("data-md-inline", "true");
   return originalImage(tokens, idx, options, env, self);
 };
 

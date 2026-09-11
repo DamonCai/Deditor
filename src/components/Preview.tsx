@@ -7,6 +7,7 @@ import { renderMarkdown, renderCode } from "../lib/markdown";
 import { hydratePlantuml } from "../lib/plantumlHydrate";
 import { hydrateMermaid } from "../lib/mermaidHydrate";
 import { hydrateLocalImages } from "../lib/localImgHydrate";
+import { documentImageRoot } from "../lib/markdownImageSettings";
 import { isMarkdown } from "../lib/lang";
 import { logError } from "../lib/logger";
 import { openFileByPath } from "../lib/fileio";
@@ -84,6 +85,7 @@ export default function Preview({
   const html = retainDom ? cachedHtml : "";
   const containerRef = useRef<HTMLDivElement>(null);
   const isMd = isMarkdown(filePath);
+  const imageRoot = isMd ? documentImageRoot(source, filePath) : null;
   // Suppress outgoing scroll events for this many ms after a programmatic scroll
   // (set when applying incoming scrollLine from editor).
   const suppressOutgoingUntil = useRef(0);
@@ -140,8 +142,8 @@ export default function Preview({
   // active markdown file's directory.
   useEffect(() => {
     if (!containerRef.current) return;
-    hydrateLocalImages(containerRef.current, filePath);
-  }, [html, filePath]);
+    hydrateLocalImages(containerRef.current, filePath, imageRoot);
+  }, [html, filePath, imageRoot]);
 
   // totalLines: rounded-up newline count of the active source. Both sides of
   // the editor↔preview sync use this to encode an "atBottom" sentinel

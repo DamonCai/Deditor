@@ -113,11 +113,14 @@ export class MarkdownDocument {
   /** Reparse only a changed top-level prose block when its source boundaries remain stable. */
   reparseInlineBlock(position: number) {
     const resolved = this.doc.resolve(position), index = resolved.index(0), node = this.doc.child(index), ast = this.ast[index];
-    if (!ast || !["paragraph", "heading"].includes(node.type.name) || ast.type !== node.type.name) return null;
+    if (!ast || !["paragraph", "heading", "blockquote", "table"].includes(node.type.name) || ast.type !== node.type.name) return null;
     const [start, end] = range(ast), raw = this.source.slice(start, end);
-    // A multiline paste can introduce new blocks/definitions and affect neighbors.
-    // Those edits continue through the complete document parser.
-    if (/[\r\n]/.test(raw)) return null;
+    // Reparse the enclosing block, including multiline prose, a quote, or a
+    // table. A paste that creates siblings or definitions must still reparse
+    // the whole document because it can change neighboring reference meaning.
+    const fragment = editingTree(raw).children ?? [];
+    const hasDefinition = (n: SourceNode): boolean => ["definition", "footnoteDefinition"].includes(n.type) || !!n.children?.some(hasDefinition);
+    if (fragment.length !== 1 || fragment[0].type !== ast.type || hasDefinition(fragment[0])) return null;
     const definitions = this.ast.filter(n => ["definition", "footnoteDefinition"].includes(n.type)).map(n => this.source.slice(...range(n))).join("\n\n");
     const parsed = this.parse(raw + (definitions ? "\n\n" + definitions : ""));
     if (!parsed.firstChild || parsed.firstChild.type !== node.type) return null;

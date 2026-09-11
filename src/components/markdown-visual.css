@@ -116,6 +116,8 @@
 .md-visual-shell .milkdown .md-document .milkdown-image-block { margin: max(16px, 1em) 0; }
 .md-visual-shell .milkdown .md-document .milkdown-image-block > .image-wrapper { margin: 0; min-width: 0; max-width: 100%; }
 .md-visual-shell .milkdown .md-document .milkdown-image-block img { min-height: 0; height: auto !important; margin: 0; }
+.md-visual-shell .milkdown .md-document .milkdown-image-inline { vertical-align: baseline; }
+.md-visual-shell .milkdown .md-document img.ProseMirror-separator { margin: 0; }
 .md-visual-shell .milkdown .md-document .content-dom > :is(ul,ol) > .milkdown-list-item-block:last-child { margin-bottom: 0; }
 
 .md-visual-shell .milkdown .md-document [data-type="math_inline"] { color: inherit; padding: 0; display: inline; vertical-align: baseline; }

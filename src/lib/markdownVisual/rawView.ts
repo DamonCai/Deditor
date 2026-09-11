@@ -11,6 +11,7 @@ import { markdown } from "@codemirror/lang-markdown";
 import DOMPurify from "dompurify";
 import { renderMarkdownFragment } from "../markdownFragments";
 import { hydrateLocalImages } from "../localImgHydrate";
+import { documentImageRoot } from "../markdownImageSettings";
 import { tStatic } from "../i18n";
 import { markdownHistory } from "../markdownHistory";
 import { logError } from "../logger";
@@ -54,7 +55,8 @@ export function rawView(filePath: string | null, tabId: string) {
             }
           });
         }
-        hydrateLocalImages(preview, filePath);
+        const currentSource = useEditorStore.getState().tabs.find(t => t.id === tabId)?.content ?? source;
+        hydrateLocalImages(preview, filePath, documentImageRoot(currentSource, filePath));
         controllers = [hydrateMermaid(preview, document.documentElement.classList.contains("dark") ? "dark" : "light"), hydratePlantuml(preview)];
       }).catch(error => { logError("Markdown preserved block render failed", error); if (!destroyed && version === generation) preview.textContent = node.textContent; });
     };
@@ -101,6 +103,8 @@ export function rawView(filePath: string | null, tabId: string) {
     });
     const modeChanged = () => { if (!view.editable) close(false); render(); };
     view.dom.addEventListener("deditor-editable-change", modeChanged);
+    const imageRootChanged = () => hydrateLocalImages(preview, filePath, documentImageRoot(useEditorStore.getState().tabs.find(t => t.id === tabId)?.content ?? "", filePath));
+    view.dom.addEventListener("deditor-image-root-change", imageRootChanged);
     // Context changes can renumber a footnote or rename a TOC heading without changing this node.
     let refreshQueued = false;
     const unsubscribe = useEditorStore.subscribe((state, previous) => {
@@ -124,7 +128,7 @@ export function rawView(filePath: string | null, tabId: string) {
           updating = true; cm.dispatch({ changes: { from: 0, to: cm.state.doc.length, insert: next.textContent } }); updating = false;
         }
         if (changed) render(); return true;
-      }, destroy() { controllers.forEach(controller => controller.abort()); unsubscribe(); view.dom.removeEventListener("deditor-editable-change", modeChanged); destroyed = true; generation++; cm?.destroy(); },
+      }, destroy() { controllers.forEach(controller => controller.abort()); unsubscribe(); view.dom.removeEventListener("deditor-editable-change", modeChanged); view.dom.removeEventListener("deditor-image-root-change", imageRootChanged); destroyed = true; generation++; cm?.destroy(); },
     };
   };
 }
