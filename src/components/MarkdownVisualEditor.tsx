@@ -1,4 +1,5 @@
 import { installCompositionViewport } from "../lib/markdownVisual/compositionViewport";
+import { installMarkdownComposition } from "../lib/markdownComposition";
 import { faithfulLink } from "../lib/markdownVisual/references";
 import { absoluteHeadingInputRule } from "../lib/markdownVisual/heading";
 import { activeBlockHint } from "../lib/markdownVisual/blockHint";
@@ -169,7 +170,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
         });
         const sync = (content: string) => {
           if (document.source === content) return;
-          if (view.composing) return;
+          if (view.composing || composition.composing) return;
           const next = document.reset(content), selection = view.state.selection;
           const tr = view.state.tr.replaceWith(0, view.state.doc.content.size, next.content);
           tr.setSelection(Selection.near(tr.doc.resolve(Math.min(selection.head, tr.doc.content.size))));
@@ -182,19 +183,16 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
             if (!readonlyRef.current) markdownHistory(type === "historyRedo", tabId);
           }
         };
-        let compositionTimer: ReturnType<typeof setTimeout> | undefined;
-        const compositionEnd = () => {
-          clearTimeout(compositionTimer);
-          compositionTimer = setTimeout(() => {
+        const composition = installMarkdownComposition(view.dom, session, {
+          settled: () => {
             if (cancelled) return;
             const live = useEditorStore.getState().tabs.find(tab => tab.id === tabId);
             if (live) sync(live.content);
-            session.breakGroup();
-          }, 30);
-        };
+            publish();
+          },
+        });
         view.dom.addEventListener("beforeinput", beforeInput, true);
-        view.dom.addEventListener("compositionend", compositionEnd);
-        cleanupInput = () => { clearTimeout(compositionTimer); view.dom.removeEventListener("beforeinput", beforeInput, true); view.dom.removeEventListener("compositionend", compositionEnd); };
+        cleanupInput = () => { composition.destroy(); view.dom.removeEventListener("beforeinput", beforeInput, true); };
         runtime.current = { session, crepe, view, document, sync, flush };
         sync(sourceRef.current);
         const position = Math.min(view.state.doc.content.size, session.sourceCursor === null ? session.visualSelection.head : document.positionAtSource(session.sourceCursor));

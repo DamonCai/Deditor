@@ -1,4 +1,5 @@
 import { markdownSession, sourceChange } from "../lib/markdownSession";
+import { installMarkdownComposition } from "../lib/markdownComposition";
 import { markdownHistory } from "../lib/markdownHistory";
 import { showError } from "../lib/feedback";
 import { documentStatsField } from "../lib/documentStats";
@@ -522,8 +523,12 @@ function TextEditor({
       });
     };
     view.scrollDOM.addEventListener("scroll", onScrollEvt, { passive: true });
+    const composition = tabId && isMarkdown(filePath)
+      ? installMarkdownComposition(view.contentDOM, markdownSession(tabId, useEditorStore.getState().tabs.find(t => t.id === tabId)?.content ?? view.state.doc.toString()), { origin: "source" })
+      : null;
 
     return () => {
+      composition?.destroy();
       removeFontZoom();
       view.contentDOM.removeEventListener("beforeinput", beforeNativeHistory, true);
       view.scrollDOM.removeEventListener("scroll", onScrollEvt);

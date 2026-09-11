@@ -14,20 +14,42 @@ export class MarkdownSession {
   private past: Entry[] = [];
   private future: Entry[] = [];
   private boundary = true;
+  private composition: { source: string; origin: MarkdownOrigin } | null = null;
   visualSelection = { anchor: 1, head: 1 };
   visualScroll = 0;
   sourceCursor: number | null = null;
   constructor(public source: string) {}
-  get canUndo() { return this.past.length > 0; }
-  get canRedo() { return this.future.length > 0; }
+  get canUndo() { return this.past.length > 0 || !!this.composition && this.composition.source !== this.source; }
+  get canRedo() { return this.future.length > 0 && (!this.composition || this.composition.source === this.source); }
   breakGroup() { this.boundary = true; }
+  beginComposition(origin: MarkdownOrigin = "visual") {
+    this.endComposition();
+    this.boundary = true;
+    this.composition = { source: this.source, origin };
+  }
+  endComposition() {
+    const composition = this.composition;
+    this.composition = null;
+    if (!composition) return;
+    if (composition.source !== this.source) {
+      this.past.push({ changes: [sourceChange(composition.source, this.source)], origin: composition.origin, time: Date.now() });
+      if (this.past.length > 500) this.past.shift();
+      this.future = [];
+    }
+    this.boundary = true;
+  }
   sync(source: string) {
     if (source === this.source) return;
     this.source = source;
+    this.composition = null;
     this.past = []; this.future = []; this.boundary = true; this.version++;
   }
   commit(source: string, origin: MarkdownOrigin, time = Date.now()) {
+    if (this.composition && origin !== this.composition.origin) this.endComposition();
     if (source === this.source) return false;
+    // Provisional candidate replacements are one edit, even with long pauses.
+    // A cancelled composition must also retain the redo branch it started from.
+    if (this.composition) { this.source = source; this.version++; return true; }
     const change = sourceChange(this.source, source);
     const last = this.past.at(-1);
     const previous = last?.changes.at(-1);
@@ -42,12 +64,14 @@ export class MarkdownSession {
     return true;
   }
   undo() {
+    this.endComposition();
     const entry = this.past.pop();
     if (!entry) return false;
     for (const c of [...entry.changes].reverse()) this.source = this.source.slice(0, c.from) + c.removed + this.source.slice(c.from + c.inserted.length);
     this.future.push(entry); this.boundary = true; this.version++; return true;
   }
   redo() {
+    this.endComposition();
     const entry = this.future.pop();
     if (!entry) return false;
     for (const c of entry.changes) this.source = this.source.slice(0, c.from) + c.inserted + this.source.slice(c.from + c.removed.length);

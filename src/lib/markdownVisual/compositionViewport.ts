@@ -11,7 +11,26 @@ export function installCompositionViewport(editor: HTMLElement, scroller: HTMLEl
     // ProseMirror transaction while the platform is replacing a candidate word.
     const range = doc.createRange();
     range.setStart(selection.focusNode, selection.focusOffset); range.collapse(true);
-    const rect = Array.from(range.getClientRects()).find(rect => rect.height > 0);
+    let rect = Array.from(range.getClientRects()).find(rect => rect.height > 0);
+    // WebKit can expose no rectangle for a collapsed range during marked text.
+    // Measure an adjacent character without changing the DOM or native selection.
+    const node = selection.focusNode, offset = selection.focusOffset;
+    if (!rect && node.nodeType === 3) {
+      if (offset < (node.textContent?.length ?? 0)) {
+        range.setEnd(node, offset + 1);
+        rect = Array.from(range.getClientRects()).find(rect => rect.height > 0);
+      } else if (offset > 0) {
+        range.setStart(node, offset - 1); range.setEnd(node, offset);
+        rect = Array.from(range.getClientRects()).filter(rect => rect.height > 0).at(-1);
+      }
+    }
+    if (!rect) {
+      const element = node.nodeType === 1 ? node as HTMLElement : node.parentElement;
+      if (element && !element.textContent && element !== editor) {
+        const empty = element.getBoundingClientRect();
+        if (empty.height > 0) rect = empty;
+      }
+    }
     if (!rect) return;
     const viewport = scroller.getBoundingClientRect();
     const top = viewport.top + scroller.clientTop, bottom = top + scroller.clientHeight;

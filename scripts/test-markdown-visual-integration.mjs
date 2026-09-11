@@ -370,6 +370,65 @@ await test('scroll stability: preserved HTML blocks reserve their preview height
  assert.equal(block.style.minHeight,'');
 });
 
+await test('P0 composition: slow candidate replacement and cancellation in paragraph and table preserve history',async()=>{
+ for(const table of [false,true]){
+  const original=table?'| 单元格 |\n| --- |\n| 正文 |\n':'正文\n';
+  await act(async()=>store.getState().setContent(original,'a','command'));
+  await act(async()=>app.getVisualEditor().navigate(table?3:1,table?5:3));
+  const paragraph=document.querySelector(table?'.ProseMirror td p':'.ProseMirror > p');
+  const editor=paragraph.closest('.ProseMirror');
+  await act(async()=>paragraph.dispatchEvent(new dom.window.CompositionEvent('compositionstart',{bubbles:true})));
+  for(const text of ['正文n','正文ni','正文你']){
+   await act(async()=>{const current=document.querySelector(table?'.ProseMirror td p':'.ProseMirror > p');current.firstChild.textContent=text;document.getSelection().collapse(current.firstChild,text.length);current.dispatchEvent(new dom.window.InputEvent('input',{inputType:'insertCompositionText',isComposing:true,bubbles:true}));await pause(800);});
+  }
+  await act(async()=>{editor.dispatchEvent(new dom.window.CompositionEvent('compositionend',{bubbles:true}));await pause(70);});
+  const confirmed=content();assert.equal(confirmed,original.replace('正文','正文你'));
+  await act(async()=>app.saveFile());assert.equal(writes.at(-1).content,confirmed);
+  await act(async()=>app.markdownHistory());assert.equal(content(),original);
+  await act(async()=>app.getVisualEditor().navigate(table?3:1,table?5:3));
+  const restored=document.querySelector(table?'.ProseMirror td p':'.ProseMirror > p');
+  await act(async()=>restored.dispatchEvent(new dom.window.CompositionEvent('compositionstart',{bubbles:true})));
+  for(const text of ['正文zhong','正文']) await act(async()=>{const current=document.querySelector(table?'.ProseMirror td p':'.ProseMirror > p');current.firstChild.textContent=text;document.getSelection().collapse(current.firstChild,text.length);current.dispatchEvent(new Event('input',{bubbles:true}));await pause(30);});
+  await act(async()=>{editor.dispatchEvent(new dom.window.CompositionEvent('compositionend',{bubbles:true}));await pause(70);app.markdownHistory(true);});
+  assert.equal(content(),confirmed);
+ }
+});
+await test('P0 composition: undo during composition settlement cannot be overwritten by the stale view',async()=>{
+ const original='正文\n';await act(async()=>store.getState().setContent(original,'a','command'));
+ await act(async()=>app.getVisualEditor().navigate(1,3));
+ const editor=document.querySelector('.ProseMirror'),paragraph=editor.querySelector('p');
+ await act(async()=>editor.dispatchEvent(new dom.window.CompositionEvent('compositionstart',{bubbles:true})));
+ await act(async()=>{paragraph.firstChild.textContent='正文ni';document.getSelection().collapse(paragraph.firstChild,4);paragraph.dispatchEvent(new dom.window.InputEvent('input',{inputType:'insertCompositionText',isComposing:true,bubbles:true}));await pause(40);});
+ await act(async()=>app.markdownHistory());assert.equal(content(),original);
+ await act(async()=>{editor.dispatchEvent(new dom.window.CompositionEvent('compositionend',{bubbles:true}));await pause(80);});
+ assert.equal(content(),original);assert.equal(editor.textContent.trim(),'正文');
+});
+await test('P0 composition: nested code/raw editors and Markdown source capture IME as one edit',async()=>{
+ const {EditorView}=await import('@codemirror/view');
+ for(const kind of ['code','raw','source']){
+  const original=kind==='raw'?'<div>正文</div>\n':kind==='code'?'```text\n正文\n```\n':'正文\n';
+  await act(async()=>store.getState().setContent(original,'a','command'));
+  let cm;
+  if(kind==='source'){
+   await act(async()=>{root.render(React.createElement(RetainedEditors));store.setState({activeId:'a',markdownMode:'source'});await pause(120);});
+   cm=app.getActiveView();
+  }else{
+   await act(async()=>{await pause(80);document.querySelector(kind==='raw'?'.md-raw-edit':'.md-code-preview').dispatchEvent(new dom.window.MouseEvent(kind==='raw'?'click':'mousedown',{button:0,clientX:-1,clientY:-1,bubbles:true,cancelable:true}));});
+   cm=EditorView.findFromDOM(document.querySelector(kind==='raw'?'.md-raw-source .cm-editor':'.md-code-editor .cm-editor'));
+  }
+  const initial=cm.state.doc.toString();
+  await act(async()=>cm.contentDOM.dispatchEvent(new dom.window.CompositionEvent('compositionstart',{bubbles:true})));
+  const originalNow=Date.now;let time=originalNow();Date.now=()=>time;
+  try {for(const text of ['n','ni','你']){time+=1500;await act(async()=>cm.dispatch({changes:{from:0,to:cm.state.doc.length,insert:initial.replace('正文','正文'+text)}}));}}
+  finally {Date.now=originalNow;}
+  await act(async()=>{cm.contentDOM.dispatchEvent(new dom.window.CompositionEvent('compositionend',{bubbles:true}));await pause(80);});
+  assert.equal(content(),original.replace('正文','正文你'),kind);
+  await act(async()=>app.markdownHistory());assert.equal(content(),original,kind);
+  await act(async()=>app.markdownHistory(true));assert.equal(content(),original.replace('正文','正文你'),kind);
+ }
+ await act(async()=>{root.render(null);store.setState({markdownMode:'visual'});});await render();
+});
+
 // Native layout is covered separately. These geometry-controlled tests exercise
 // composition events and the scroll policy, including an IME-generated scroll.
 async function imeGeometry(run) {
@@ -395,6 +454,21 @@ await test('IME round 1: native scroll during marked text does not move an alrea
 await test('IME round 2: wrapping beyond the bottom reveals only the required distance',async()=>imeGeometry(async({scroller,guard,event,caret})=>{
  event('compositionstart');caret(1500);guard.handleScroll();assert.equal(scroller.scrollTop,1025);
  caret(990);guard.handleScroll();assert.equal(scroller.scrollTop,985);
+}));
+await test('IME geometry: missing collapsed caret rectangles use adjacent text without changing the selection',async()=>imeGeometry(async({scroller,guard,event})=>{
+ const selection=document.getSelection(),node=selection.focusNode,offset=selection.focusOffset;
+ const original=window.Range.prototype.getClientRects;
+ window.Range.prototype.getClientRects=function(){return this.collapsed?[]:original.call(this);};
+ try {event('compositionstart');scroller.scrollTop=1172;guard.handleScroll();assert.equal(scroller.scrollTop,1000);assert.equal(selection.focusNode,node);assert.equal(selection.focusOffset,offset);}
+ finally {window.Range.prototype.getClientRects=original;}
+}));
+await test('IME geometry: empty paragraphs retain the viewport when WebKit has no range rectangle',async()=>imeGeometry(async({scroller,editor,guard,event})=>{
+ editor.innerHTML='<p><br></p>';const paragraph=editor.firstChild;
+ paragraph.getBoundingClientRect=()=>({top:1300-scroller.scrollTop,bottom:1320-scroller.scrollTop,height:20});
+ const selection=document.getSelection(),range=document.createRange();range.setStart(paragraph,0);range.collapse(true);selection.removeAllRanges();selection.addRange(range);
+ const original=window.Range.prototype.getClientRects;window.Range.prototype.getClientRects=()=>[];
+ try {event('compositionstart');scroller.scrollTop=1172;guard.handleScroll();assert.equal(scroller.scrollTop,1000);assert.equal(selection.focusNode,paragraph);}
+ finally {window.Range.prototype.getClientRects=original;}
 }));
 await test('IME round 3: wheel and pointer navigation override the composition anchor',async()=>imeGeometry(async({scroller,guard,event})=>{
  event('compositionstart');scroller.dispatchEvent(new dom.window.WheelEvent('wheel'));scroller.scrollTop=1400;

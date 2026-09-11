@@ -166,4 +166,23 @@ test("round 3: tab histories remain independent", () => { const a = new Markdown
 test("round 4: external replacement clears stale history", () => { const s = new MarkdownSession("old"); s.commit("edited", "source"); s.sync("disk"); assert.equal(s.undo(), false); assert.equal(s.source, "disk"); });
 test("round 4: divergent edits invalidate redo", () => { const s = new MarkdownSession("a"); s.commit("ab", "source"); s.undo(); s.commit("ac", "visual"); assert.equal(s.redo(), false); });
 test("round 4: composition-like adjacent edits form one undo group", () => { const s = new MarkdownSession(""); s.commit("n", "visual", 0); s.commit("ni", "visual", 10); s.commit("你", "visual", 20); s.breakGroup(); s.commit("你好", "visual", 30); s.undo(); assert.equal(s.source, "你"); s.undo(); assert.equal(s.source, ""); });
+test("IME history: long candidate pauses undo the complete word, never provisional pinyin", () => {
+ for (const origin of ["visual", "source"] as const) {
+  const s = new MarkdownSession("正文"); s.commit("正文前",origin,0);
+  s.beginComposition(origin); s.commit("正文前n",origin,100); s.commit("正文前ni",origin,1400); s.commit("正文前你",origin,3000); s.endComposition();
+  s.undo(); assert.equal(s.source,"正文前"); s.undo(); assert.equal(s.source,"正文"); s.redo(); s.redo(); assert.equal(s.source,"正文前你");
+ }
+});
+test("IME history: cancellation creates no history and preserves redo", () => {
+ const s = new MarkdownSession("正文"); s.commit("正文后","visual"); s.undo();
+ s.beginComposition(); s.commit("正文zhong","visual"); s.commit("正文","visual"); s.endComposition();
+ assert.equal(s.canUndo,false); assert.equal(s.canRedo,true); s.redo(); assert.equal(s.source,"正文后");
+});
+test("IME history: consecutive words, external replacement and command boundaries stay separate", () => {
+ const s = new MarkdownSession(""); s.beginComposition(); s.commit("ni","visual"); s.commit("你","visual"); s.endComposition();
+ s.beginComposition(); s.commit("你hao","visual"); s.commit("你好","visual"); s.endComposition();
+ s.undo(); assert.equal(s.source,"你"); s.redo(); assert.equal(s.source,"你好");
+ s.beginComposition(); s.commit("你好a","visual"); s.commit("# 你好a","command"); s.undo(); assert.equal(s.source,"你好a"); s.undo(); assert.equal(s.source,"你好");
+ s.beginComposition(); s.commit("你好x","visual"); s.sync("磁盘"); s.endComposition(); assert.equal(s.undo(),false); assert.equal(s.source,"磁盘");
+});
 await crepe.destroy(); dom.window.close(); console.log(`${passed} Markdown visual tests passed`);

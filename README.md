@@ -23,7 +23,7 @@ DEditor 是基于 Tauri 2、React 和 TypeScript 的桌面 Markdown / 多语言�
 
 普通代码块与实时预览使用相同的 Shiki 高亮；点击代码或聚焦后按 Enter 进入 CodeMirror 编辑，Esc 或离开代码块后恢复呈现。公式和图表沿用同一渲染链路，源码控件在悬停或聚焦时出现。进入块源码编辑时保留原呈现高度，避免高图表突然收缩带动正文；输入时直接更新原文，退出后再更新图表，未修改的预览直接复用。
 
-源码、阅读编辑和工具条共用每标签撤销历史；切换模式、切换标签后可以继续撤销。保存仍以 Markdown 原文为依据：普通文字编辑优先修改对应源范围，未编辑的块保留原样；结构调整可能规范化被修改的块。显式格式化及“保存时格式化”仍按设置执行。
+源码、阅读编辑和工具条共用每标签撤销历史；切换模式、切换标签后可以继续撤销。中文组词按完整的一次输入记录撤销，候选更新停顿不会拆成多个拼音步骤；取消组词保留原有重做记录。保存仍以 Markdown 原文为依据：普通文字编辑优先修改对应源范围，未编辑的块保留原样；结构调整可能规范化被修改的块。显式格式化及“保存时格式化”仍按设置执行。
 
 引用式链接及常见行内 HTML（颜色、键帽文字、换行等）保持正文可编辑，不锁住所在列表或表格。未识别 HTML、引用定义、frontmatter 等内容采用保留源码块，点击内容或“编辑此块源码”可就地修改，确认后返回呈现结果。`.mdx` 保留整篇源码，不执行 JSX，不提供完整 JSX 可视化编辑。图片保留 alt 说明与路径，暂不提供无法用标准 Markdown 持久化的拖动缩放。
 
@@ -152,9 +152,9 @@ npm run perf:all
 | `npm run test:file-icons` | 图标映射、授权文件和构建资源 |
 | `npm run perf:all` | store、组件、长时操作、文档、XMind 和 Rust 基准 |
 
-浏览器隔离验证入口为 `tests/markdown-visual-review.html`；`?parity&presentation` 并排运行真实 Preview 与阅读编辑，使用同一自建样例核对布局。`?interaction` 检查长文输入、搜索和光标稳定性；`?scroll` 检查高图表、长代码及文末输入时的位置变化。`?ime` 使用中文长文，提供组词事件和额外滚动的模拟按钮，用于检查输入法滚动保护；模拟测试不等同于原生候选字验收。测试只使用自建样例，不读取用户已有文档或正式应用历史。`tests/artifacts/`、截图和安装包被 Git 忽略；需要迁移时单独保存。
+浏览器隔离验证入口为 `tests/markdown-visual-review.html`；`?parity&presentation` 并排运行真实 Preview 与阅读编辑，使用同一自建样例核对布局。`?complex&parity` 使用 273 行完整自建 Markdown 核对多级嵌套、表格、代码、公式、图表和文末编辑。`?interaction` 检查长文输入、搜索和光标稳定性；`?scroll` 检查高图表、长代码及文末输入时的位置变化。`?ime` 使用中文长文，提供组词事件和额外滚动的模拟按钮，用于检查输入法滚动保护；模拟测试不等同于原生候选字验收。测试只使用自建样例，不读取用户已有文档或正式应用历史。`tests/artifacts/`、截图和安装包被 Git 忽略；需要迁移时单独保存。
 
-自动化测试不能代替真实输入法、原生保存对话框、重启恢复及双平台交互。中文组词期间已加入可视区保护，修复后的真实 IME、部分原生交互和复杂语法兼容性仍有待验收项，见 [Markdown 实施记录](docs/markdown-visual-editing-verification-2026-09-11.md)及[本次提交验证记录](docs/markdown-release-verification-2026-09-11.md)。XMind 状态见[独立验收矩阵](docs/xmind-acceptance-matrix-2026-09-11.md)。
+自动化测试不能代替真实输入法、原生保存对话框、重启恢复及双平台交互。中文组词期间已加入可视区保护，修复后的真实 IME、部分原生交互和复杂语法兼容性仍有待验收项，见 [Markdown 实施记录](docs/markdown-visual-editing-verification-2026-09-11.md)及[本次提交验证记录](docs/markdown-release-verification-2026-09-11.md)。最新组词历史修复与未完成的原生验收见 [P0 输入验证](docs/markdown-p0-input-verification-2026-09-11.md)。XMind 状态见[独立验收矩阵](docs/xmind-acceptance-matrix-2026-09-11.md)。
 
 ## 架构与持久化
 
