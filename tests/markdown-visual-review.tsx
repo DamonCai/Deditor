@@ -1,3 +1,4 @@
+import complexMarkdown from "./fixtures/markdown-complex.md?raw";
 import { imeMarkdown } from "./fixtures/markdown-ime";
 import { scrollMarkdown } from "./fixtures/markdown-scroll";
 import { presentationMarkdown } from "./fixtures/markdown-presentation";
@@ -24,7 +25,7 @@ const sample = '# 阅读时自然编辑\n\n这是**加粗**和 *斜体*，支持
 const ime = new URLSearchParams(location.search).has("ime");
 const parity = new URLSearchParams(location.search).has("parity");
 const dark = new URLSearchParams(location.search).has("dark");
-const fixture = ime ? imeMarkdown : new URLSearchParams(location.search).has("scroll") ? scrollMarkdown : new URLSearchParams(location.search).has("presentation") ? presentationMarkdown : new URLSearchParams(location.search).has("interaction") ? interactionMarkdown : sample;
+const fixture = new URLSearchParams(location.search).has("complex") ? complexMarkdown : ime ? imeMarkdown : new URLSearchParams(location.search).has("scroll") ? scrollMarkdown : new URLSearchParams(location.search).has("presentation") ? presentationMarkdown : new URLSearchParams(location.search).has("interaction") ? interactionMarkdown : sample;
 const docs = [ { id: "md-review", filePath: "/generated/visual-review.md", content: fixture, savedContent: fixture },
  { id: "md-other", filePath: "/generated/second.md", content: "# 第二个标签\n\n独立历史。\n", savedContent: "# 第二个标签\n\n独立历史。\n" },
  { id: "html-review", filePath: "/generated/isolated.html", content: "<h1>HTML 保持独立</h1><p>原有预览</p>", savedContent: "<h1>HTML 保持独立</h1><p>原有预览</p>" },

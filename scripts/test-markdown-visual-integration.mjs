@@ -43,6 +43,7 @@ export {markdownHistory} from './src/lib/markdownHistory';
 export {saveFile,saveFileAs,saveAllDirty} from './src/lib/fileio';
 export {renderMarkdown} from './src/lib/markdown';
 export {installCompositionViewport} from './src/lib/markdownVisual/compositionViewport';
+export {getBlockHint} from './src/lib/markdownVisual/blockHint';
 export {flushDocument} from './src/lib/documentFlush';
 `,resolveDir:process.cwd()},outfile:output,bundle:true,format:'esm',platform:'node',packages:'external',loader:{'.css':'empty'},plugins:[{name:'isolated-io',setup(b){
  b.onResolve({filter:/.*/},a=>a.path.endsWith('.css')?{path:'css',namespace:'stub'}:stubs[a.path]?{path:a.path,namespace:'stub'}:a.path.endsWith('/feedback')?{path:'feedback',namespace:'stub'}:undefined);
@@ -84,6 +85,56 @@ await test('heading hints: empty and nested headings track the caret through rea
  await act(async()=>root.render(null));await render();
  await act(async()=>app.getVisualEditor().navigate(5,2));assert.equal(document.querySelectorAll('.md-heading-active').length,0);
  assert.equal(content(),headings);await act(async()=>app.markdownHistory());assert.equal(content(),source);
+});
+const complexMarkdown=fs.readFileSync('tests/fixtures/markdown-complex.md','utf8');
+await test('block hint selections: clicking a table paragraph, atomic image/rule, and selecting text',async()=>{
+ const {Schema}=await import('@milkdown/kit/prose/model');
+ const {EditorState,NodeSelection,TextSelection}=await import('@milkdown/kit/prose/state');
+ const schema=new Schema({nodes:{doc:{content:'block+'},text:{group:'inline'},paragraph:{content:'inline*',group:'block'},table:{content:'table_row+',group:'block'},table_row:{content:'table_cell+'},table_cell:{content:'paragraph+'},'image-block':{group:'block',atom:true},hr:{group:'block',atom:true}}});
+ const doc=schema.node('doc',null,[schema.node('table',null,[schema.node('table_row',null,[schema.node('table_cell',null,[schema.node('paragraph',null,[schema.text('cell')])])])]),schema.node('image-block'),schema.node('hr')]);
+ const hint=selection=>app.getBlockHint(EditorState.create({doc,selection}));
+ assert.equal(hint(TextSelection.create(doc,4)).label,'| |');
+ assert.equal(hint(NodeSelection.create(doc,3)).label,'| |');
+ assert.equal(hint(NodeSelection.create(doc,doc.child(0).nodeSize)).label,'IMG');
+ assert.equal(hint(NodeSelection.create(doc,doc.child(0).nodeSize+1)).label,'---');
+ assert.equal(hint(TextSelection.create(doc,4,6)),null);
+});
+const navigateMarker=async(marker)=>{
+ const index=content().indexOf(marker);assert.notEqual(index,-1,marker);
+ const before=content().slice(0,index);
+ await act(async()=>{app.getVisualEditor().navigate(before.split('\n').length,index-before.lastIndexOf('\n')+1);await pause(25);});
+};
+await test('complex document: contextual hints cover paragraphs, nested structures, code, math, diagrams and raw blocks',async()=>{
+ await act(async()=>store.getState().setContent(complexMarkdown,'a','command'));
+ for(const [marker,label] of [
+  ['正文定位点','¶'],['综合文档 H1','H1'],['项目说明 H2','H2'],['方案设计 H3','H3'],['接口约定 H4','H4'],['边界条件 H5','H5'],['补充说明 H6','H6'],
+  ['引用定位点','>'],['深层引用定位点','>'],['引用内标题','H4'],['引用内列表定位点','-'],
+  ['无序定位点','-'],['子列表定位点','-'],['有序定位点','1.'],['深层有序定位点','1.'],['任务定位点','[ ]'],['子任务定位点','[ ]'],
+  ['表格定位点','| |'],['代码定位点','</>'],['E &= mc','$$'],['flowchart TD','UML'],['sequenceDiagram','UML'],['HTML 定位点','HTML'],['owner: 自建','YAML'],['文末定位点','¶'],
+ ]){
+  await navigateMarker(marker);
+  const active=document.querySelectorAll('[data-md-block-hint]');
+  assert.equal(active.length,1,marker);assert.equal(active[0].getAttribute('data-md-block-hint'),label,marker);
+ }
+ assert.equal(content(),complexMarkdown);
+ await act(async()=>app.markdownHistory());assert.equal(content(),source);
+});
+await test('complex document: edits at the top, inside nested list/table and at the end save and undo exactly',async()=>{
+ await act(async()=>store.getState().setContent(complexMarkdown,'a','command'));
+ for(const marker of ['正文定位点','子列表定位点','表格定位点','文末定位点']){
+  await navigateMarker(marker);
+  await act(async()=>app.getVisualEditor().insert('新增中文',false));
+ }
+ const edited=content();assert.equal((edited.match(/新增中文/g)??[]).length,4);
+ await act(async()=>app.saveFile());assert.equal(writes.at(-1).content,edited);
+ await render(true);await act(async()=>pause(30));assert.equal(document.querySelector('.md-block-hint').hidden,true);
+ await render(false);assert.equal(content(),edited);
+ for(let i=0;i<4;i++) await act(async()=>app.markdownHistory());
+ assert.equal(content(),complexMarkdown);
+ for(let i=0;i<4;i++) await act(async()=>app.markdownHistory(true));
+ assert.equal(content(),edited);
+ for(let i=0;i<5;i++) await act(async()=>app.markdownHistory());
+ assert.equal(content(),source);
 });
 await test('round 1: DOM text edit synchronously feeds shared source and save',async()=>{
  await act(async()=>{const paragraph=document.querySelector('.ProseMirror > p');paragraph.firstChild.textContent='Edited paragraph';paragraph.dispatchEvent(new Event('input',{bubbles:true}));await pause(40);});

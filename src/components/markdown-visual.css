@@ -72,21 +72,15 @@
 .md-visual-shell .milkdown .md-document .list-item > .children > .content-dom > p { margin: 0; }
 .md-visual-shell .milkdown .md-document .list-item > .children > .content-dom > p + p { margin-top: 0.5em; }
 .md-visual-shell .milkdown .md-document .list-item > .children > .content-dom > :is(ul, ol) { margin-top: 0.35em; margin-bottom: 0.5em; }
-/* Level labels occupy the existing gutter; they are never Markdown content. */
-.md-visual-shell[data-readonly="false"] .md-document :is(h1,h2,h3,h4,h5,h6) { position: relative; }
-.md-visual-shell[data-readonly="false"] .md-document :is(h1,h2,h3,h4,h5,h6)::before {
-  position: absolute; right: calc(100% + 6px); top: 0.3em; width: 22px;
-  font: 10px/1.5 "SF Mono", Menlo, Consolas, monospace; letter-spacing: 0;
-  color: var(--preview-muted); opacity: 0; text-align: right;
+/* One view-only cue in the outer gutter, including for nested blocks. */
+.md-visual-scroll { position: relative; }
+.md-block-hint {
+  position: absolute; left: 1px; width: 26px; z-index: 1;
+  font: 10px/1.5 "SF Mono", Menlo, Consolas, monospace;
+  color: var(--text-soft); opacity: 0.85; text-align: right;
   pointer-events: none; user-select: none;
 }
-.md-visual-shell[data-readonly="false"] .md-document.ProseMirror-focused .md-heading-active::before { opacity: 0.65; }
-.md-visual-shell[data-readonly="false"] .md-document h1::before { content: "H1" / ""; }
-.md-visual-shell[data-readonly="false"] .md-document h2::before { content: "H2" / ""; }
-.md-visual-shell[data-readonly="false"] .md-document h3::before { content: "H3" / ""; }
-.md-visual-shell[data-readonly="false"] .md-document h4::before { content: "H4" / ""; }
-.md-visual-shell[data-readonly="false"] .md-document h5::before { content: "H5" / ""; }
-.md-visual-shell[data-readonly="false"] .md-document h6::before { content: "H6" / ""; }
+.md-block-hint[hidden], .md-visual-shell[data-readonly="true"] .md-block-hint { display: none; }
 
 .md-visual-shell .milkdown .md-document > :nth-child(1 of :not(.ProseMirror-widget, .prosemirror-virtual-cursor)) { margin-top: 0; }
 .md-visual-shell .milkdown .md-document .milkdown-list-item-block:has(> li > [role="checkbox"]) { margin-left: -1.4em; }
@@ -108,7 +102,7 @@
 .md-raw-edit { position: absolute; right: 0; top: 0; z-index: 2; opacity: 0; }
 .md-raw-block:hover .md-raw-edit, .md-raw-block:focus-within .md-raw-edit { opacity: 1; }
 @container (max-width: 560px) {
-  .md-visual-shell[data-readonly="false"] .md-document :is(h1,h2,h3,h4,h5,h6)::before { right: calc(100% + 3px); width: 16px; font-size: 9px; }
+  .md-block-hint { left: 0; width: 18px; font-size: 8px; transform: scaleX(0.85); transform-origin: right; }
   .md-visual-shell .milkdown .md-code-editor .cm-content { padding: 14px 0; }
   .md-visual-shell .milkdown .md-code-editor .cm-line { padding: 0 16px; }
 }
