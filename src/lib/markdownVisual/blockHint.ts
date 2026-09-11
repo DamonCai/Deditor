@@ -35,7 +35,8 @@ export function getBlockHint(state: EditorState) {
           label = typeof parent.attrs.checked === "boolean" ? "[ ]" : $head.node(depth - 1).type.name === "ordered_list" ? "1." : "-";
           break;
         }
-        if (parent.type.name === "blockquote") { label = ">"; break; }
+        if (parent.type.name === "footnote_definition") { label = "[^]"; break; }
+        if (parent.type.name === "blockquote") { label = parent.attrs.callout ? "[!]" : ">"; break; }
       }
   }
   return { node, from, label };

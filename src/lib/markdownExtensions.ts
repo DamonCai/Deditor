@@ -30,8 +30,15 @@ export function markdownExtensions(md: MarkdownIt) {
       inline.content = inline.content.slice(match[0].length);
       inline.children = md.parseInline(inline.content, state.env)[0]?.children ?? [];
       const title = new state.Token("html_inline", "", 0);
-      title.content = `<span class="md-callout-title">${match[1].toUpperCase()}</span>`;
-      inline.children.unshift(title);
+      title.type = "html_block";
+      title.content = `<span class="md-callout-title">${match[1].toUpperCase()}</span><div class="md-callout-content">`;
+      const close = state.tokens.findIndex((candidate, index) => index > i && candidate.type === "blockquote_close" && candidate.level === token.level);
+      if (close >= 0) {
+        const end = new state.Token("html_block", "", 0); end.content = "</div>";
+        state.tokens.splice(close, 0, end);
+        if (!inline.content) state.tokens.splice(i + 1, 3);
+        state.tokens.splice(i + 1, 0, title);
+      }
     }
   });
   md.renderer.rules.deditor_toc = (tokens, i) => {

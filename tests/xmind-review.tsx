@@ -4,9 +4,12 @@ import { createRoot } from "react-dom/client";
 import XmindView from "../src/components/XmindView";
 import { useEditorStore } from "../src/store/editor";
 import { sampleArchive, sampleSheets } from "./fixtures/xmind";
+import { timelineVariantSheets } from "./fixtures/xmind-timeline-variants";
+import { arrowCatalogSheets } from "./fixtures/xmind-arrow-catalog";
+import { smartColorSheets } from "./fixtures/xmind-smart-colors";
 import { round6Sheets, round6StyleSheets } from "./fixtures/xmind-round6";
 import { round9ColorSheets, round9GroupSheets, round9RelationshipSheets } from "./fixtures/xmind-round9";
-import { round10GroupSheets, round10PolarSheets } from "./fixtures/xmind-round10";
+import { round10GroupSheets, round10PolarSheets, round10FlexibleSheets, round10NestedGroupSheets, round10MasterSheets } from "./fixtures/xmind-round10";
 import { round8ShapeSheets } from "./fixtures/xmind-round8";
 import { round7ShapeSheets } from "./fixtures/xmind-round7";
 import { bytesToXmindDataUrl } from "../src/lib/xmind/edit";
@@ -20,7 +23,13 @@ sheets.push({ ...structuredClone(sheets[1]), id: "up-sheet", title: "向上组�
   rootTopic: { ...structuredClone(sheets[1].rootTopic), structureClass: "org.xmind.ui.org-chart.up" } });
 const probe = new URLSearchParams(location.search).get("probe");
 const generatedProbes = ["control-probe", "direction-probe", "count-probe"];
-const archive = probe === "round10-polar" ? sampleArchive(round10PolarSheets())
+const archive = probe === "timeline-variants" ? sampleArchive(timelineVariantSheets())
+  : probe === "arrow-catalog" ? sampleArchive(arrowCatalogSheets())
+  : probe === "smart-colors" ? sampleArchive(smartColorSheets())
+  : probe === "round10-master" ? sampleArchive(round10MasterSheets())
+  : probe === "round10-nested" ? sampleArchive(round10NestedGroupSheets())
+  : probe === "round10-flexible" ? sampleArchive(round10FlexibleSheets())
+  : probe === "round10-polar" ? sampleArchive(round10PolarSheets())
   : probe === "round10-groups" ? sampleArchive(round10GroupSheets())
   : probe === "round9-groups" ? sampleArchive(round9GroupSheets())
   : probe === "round9-colors" ? sampleArchive(round9ColorSheets())

@@ -47,6 +47,8 @@ export {renderMarkdown} from './src/lib/markdown';
 export {installCompositionViewport} from './src/lib/markdownVisual/compositionViewport';
 export {loadPersisted,schedulePersist} from './src/lib/persistence';
 export {default as WritingSettings} from './src/components/MarkdownWritingSettings';
+export {collectMarkdownImages} from './src/lib/markdownImageCollect';
+export {documentImageDirectory} from './src/lib/markdownImageSettings';
 export {rebaseMarkdownImages} from './src/lib/markdownImagePaths';
 export {installTypewriter} from './src/lib/markdownVisual/typewriter';
 export {normalizeMarkdownPreferences,defaultMarkdownPreferences} from './src/lib/markdownPreferences';
@@ -390,6 +392,77 @@ await test('P2 syntax: YAML, TOC, alerts and contextual footnotes share preview 
  assert.equal(content(),original);await act(async()=>app.saveFile());assert.equal(writes.at(-1).content,original);
  await render(true);await render(false);assert.equal(content(),original);
 });
+await test('structured footnotes: direct edits update hover, preserve identifiers and undo across modes',async()=>{
+ const original='正文[^b] 和另一个[^a]。\n\n> [!TIP]\n> 普通提示 **重点**。\n\n[^a]: 第一条解释。\n\n[^b]: 第二条解释。\n';
+ await act(async()=>store.getState().setContent(original,'a','command'));await render(false);
+ assert.equal(document.querySelectorAll('.ProseMirror .md-raw-block').length,0);
+ const ref=document.querySelector('.ProseMirror .footnote-ref');assert.equal(ref.title,'第二条解释。');
+ await act(async()=>{app.getVisualEditor().navigate(8,7);app.getVisualEditor().insert('补充',false);});
+ assert.equal(content(),original.replace('第二条解释','补充第二条解释'));
+ assert.equal(document.querySelector('.ProseMirror .footnote-ref').title,'补充第二条解释。');
+ const edited=content();await render(true);await render(false);assert.equal(content(),edited);
+ await act(async()=>app.saveFile());assert.equal(writes.at(-1).content,edited);
+ await act(async()=>app.markdownHistory());assert.equal(content(),original);
+ await act(async()=>{app.getVisualEditor().navigate(4,3);app.getVisualEditor().insert('新的',false);});
+ assert.equal(content(),original.replace('普通提示','新的普通提示'));
+ await act(async()=>app.markdownHistory());assert.equal(content(),original);
+});
+await test('structured footnotes: navigation, repeated references and renumbering stay synchronized',async()=>{
+ const original='B[^b] A[^a] B[^b]\n\n[^a]: definition A\n\n[^b]: definition B\n';
+ await act(async()=>store.getState().setContent(original,'a','command'));await render(false);
+ assert.deepEqual([...document.querySelectorAll('.ProseMirror .footnote-ref')].map(e=>e.textContent),['[1]','[2]','[1:1]']);
+ await act(async()=>document.querySelector('.ProseMirror .footnote-ref a').click());
+ assert.equal(document.querySelector('.md-block-active').textContent,'definition B');assert.equal(content(),original);
+ await act(async()=>store.getState().setContent(original.replace('B[^b] ',''),'a','source'));await pause(50);
+ assert.deepEqual([...document.querySelectorAll('.ProseMirror .footnote-ref')].map(e=>e.textContent),['[1]','[2]']);
+ assert.equal(document.querySelector('.ProseMirror [data-footnote-label="a"]').id,'fn1');
+ assert.equal(document.querySelector('.ProseMirror .footnote-ref').title,'definition A');
+});
+await test('structured footnotes: nested references and every backlink agree with Preview',async()=>{
+ const original='Body[^a] again[^a].\n\n[^a]: Alpha[^b]\n\n[^b]: Beta.\n';
+ await act(async()=>store.getState().setContent(original,'a','command'));await render(false);
+ const template=document.createElement('template');template.innerHTML=await app.renderMarkdown(original,{theme:'light'});
+ assert.deepEqual([...document.querySelectorAll('.ProseMirror .footnote-ref')].map(e=>e.textContent),[...template.content.querySelectorAll('.footnote-ref')].map(e=>e.textContent));
+ const links=document.querySelectorAll('.ProseMirror [data-footnote-label="a"] a');assert.equal([...links].filter(e=>e.textContent.includes('↩︎')).length,2);
+ assert.equal(document.querySelector('.ProseMirror .footnote-ref[title="Beta."]').textContent,'[2]');
+ await act(async()=>document.querySelector('.ProseMirror [data-md-footnote-back="1"]').click());assert.equal(content(),original);
+ await act(async()=>store.getState().setContent(original.replace('again[^a]','again'),'a','source'));await pause(60);
+ assert.equal(document.querySelectorAll('.ProseMirror [data-md-footnote-back]').length,0);
+});
+await test('shorthand parity: complex fixture renders semantic marks, alerts and emoji in both modes',async()=>{
+ const original=fs.readFileSync('tests/fixtures/markdown-complex.md','utf8');
+ await act(async()=>store.getState().setContent(original,'a','command'));await render(false);
+ const template=document.createElement('template');template.innerHTML=await app.renderMarkdown(original,{theme:'light'});
+ for(const selector of ['mark','sub','sup','.md-callout-title']) {
+  assert.equal([...document.querySelectorAll('.ProseMirror '+selector)].map(e=>e.textContent).join(''),[...template.content.querySelectorAll(selector)].map(e=>e.textContent).join(''),selector);
+ }
+ assert.ok(document.querySelector('[data-md-emoji="smile"]'));assert.ok(template.content.textContent.includes('😄'));
+ assert.equal(document.querySelector('.ProseMirror .md-callout-content > p').textContent.trim(),template.content.querySelector('.md-callout-content > p').textContent.trim());
+ assert.equal(content(),original);await render(true);await render(false);assert.equal(content(),original);
+});
+await test('image metadata: per-document scalar folder rules support templates and reject malformed YAML',async()=>{
+ const folder=app.documentImageDirectory;
+ assert.equal(folder('---\ntypora-copy-images-to: "./${filename}.assets"\n---\ntext','C:\\docs\\中文.md','images'),'中文.assets');
+ for(const value of ['../escape','[bad]','*missing','"/absolute"','"a:bad"']) assert.equal(folder('---\ntypora-copy-images-to: '+value+'\n---\n','/doc/a.md','images'),'images');
+ assert.equal(folder('---\nother: &a { k: v }\ntypora-copy-images-to: *a\n---\n','/doc/a.md','images'),'images');
+ assert.equal(folder('```yaml\ntypora-copy-images-to: ignored\n```','/doc/a.md','images'),'images');
+});
+await test('image collection: copies once, patches Markdown/HTML/references, keeps failures and undo',async()=>{
+ const original='---\ntypora-copy-images-to: media\n---\n\n![one](../old/pic.png) ![again][img]\n\n<img src="../old/pic.png" width="120" alt="html">\n\n![missing](missing.png) ![web](https://example.com/a.png)\n\n`![code](../old/pic.png)`\n\n[img]: ../old/pic.png "title"\n';
+ await act(async()=>store.getState().setContent(original,'a','command'));await render(false);
+ const oldInvoke=globalThis.mdInvoke,copied=[];globalThis.mdInvoke=async(command,args)=>{
+  if(command==='read_binary_as_base64'){if(args.path.endsWith('missing.png'))throw new Error('missing');return 'cGljdHVyZQ==';}
+  if(command==='save_image'){copied.push(args);return '/generated/'+args.folder+'/'+args.name;}
+  return oldInvoke(command,args);
+ };
+ try {
+  let result;await act(async()=>{result=await app.collectMarkdownImages('a');});
+  assert.equal(result.copied,1);assert.equal(result.failures.length,1);assert.equal(result.skipped,1);assert.equal(copied.length,1);assert.equal(copied[0].folder,'media');
+  assert.ok(content().includes('`![code](../old/pic.png)`'));assert.ok(content().includes('![missing](missing.png)'));assert.ok(content().includes('title'));
+  assert.equal(content().split('media/'+copied[0].name).length-1,3);
+  await act(async()=>app.markdownHistory());assert.equal(content(),original);
+ } finally {globalThis.mdInvoke=oldInvoke;}
+});
 await test('P2 nested diagrams: preserved callouts retain inert diagram source after sanitization',async()=>{
  const original='> [!NOTE]\n> ```mermaid\n> flowchart TD\n> A --> B\n> ```\n> <img src="invalid" onerror="window.bad=1">\n\nTail\n';
  await act(async()=>store.getState().setContent(original,'a','command'));await render(true);await pause(120);
@@ -480,7 +553,7 @@ await test('P2 images: width persists through save, mode switches, undo and sour
 await test('P2 paths: Save As relocates only image destinations across POSIX and Windows folders',async()=>{
  const markdown='![a](assets/a(1).png "title")\n\n![b][pic]\n\n[pic]: <assets/b two.png> "caption"\n\n[link](assets/other.png)\n\n`![literal](assets/code.png)`\n\n<img src="assets/c.png" alt="c">\n\n![url](https://example.com/x.png)\n';
  const result=app.rebaseMarkdownImages(markdown,'/docs/note.md','/docs/sub/note.md');
- assert.match(result,/\.\.\/assets\/a\(1\)\.png/);assert.match(result,/<\.\.\/assets\/b%20two.png>/);assert.match(result,/src="\.\.\/assets\/c.png"/);
+ assert.match(result,/\.\.\/assets\/a%281%29\.png/);assert.match(result,/<\.\.\/assets\/b%20two.png>/);assert.match(result,/src="\.\.\/assets\/c.png"/);
  assert.ok(result.includes('[link](assets/other.png)'));assert.ok(result.includes('`![literal](assets/code.png)`'));assert.ok(result.includes('https://example.com/x.png'));
  assert.equal(app.rebaseMarkdownImages('![x](assets/x.png)','C:\\Docs\\a.md','C:\\Docs\\sub\\b.md'),'![x](../assets/x.png)');
  assert.equal(app.rebaseMarkdownImages('![x](assets/x.png)','C:\\Docs\\a.md','D:\\Other\\b.md'),'![x](C:/Docs/assets/x.png)');
@@ -490,6 +563,22 @@ await test('P2 paths: Save As relocates only image destinations across POSIX and
  await act(async()=>{store.getState().setContent('![x](assets/x.png)\n','a','command');store.setState(s=>({tabs:s.tabs.map(t=>t.id==='a'?{...t,filePath:'/generated/sub/original.md'}:t)}));});
  await render();await act(async()=>app.saveFileAs());assert.equal(writes.at(-1).content,'![x](sub/assets/x.png)\n');
  assert.equal(content(),writes.at(-1).content);
+});
+await test('image path audit: escaped Markdown, HTML attributes, encoded folders and Windows case remain valid',async()=>{
+ const r=app.rebaseMarkdownImages;
+ const escaped=String.raw`![x](assets/a\(1\).png)`;
+ assert.equal(r(escaped,'/docs/a.md','/docs/a.md',{from:'/docs/assets/a(1).png',to:'/docs/assets/new.png'}),'![x](assets/new.png)');
+ assert.equal(r(escaped,'/docs/a.md','/docs/a.md',{from:'/docs/other.png',to:'/docs/new.png'}),escaped);
+ const brackets=r('![x](assets/a.png)','/docs/a.md','/docs/a.md',{from:'/docs/assets/a.png',to:'/docs/assets/unclosed(.png'});
+ assert.equal(brackets,'![x](assets/unclosed%28.png)');
+ assert.ok((await app.renderMarkdown(brackets,{theme:'light'})).includes('<img '));
+ const quoted=r('<img src="assets/a.png" alt="keep">','/docs/a.md','/docs/a.md',{from:'/docs/assets/a.png',to:'/docs/assets/b"quote.png'});
+ const template=document.createElement('template');template.innerHTML=quoted;
+ assert.equal(template.content.querySelector('img').getAttribute('src'),'assets/b"quote.png');assert.equal(template.content.querySelector('img').getAttribute('alt'),'keep');
+ assert.equal(r(quoted,'/docs/a.md','/docs/a.md',{from:'/docs/assets/b"quote.png',to:'/docs/assets/final.png'}),'<img src="assets/final.png" alt="keep">');
+ assert.equal(r('![x](old%20dir/a.png)','/docs/a.md','/docs/old dir/a.md'),'![x](a.png)');
+ assert.equal(r('![x](assets/a.png)','C:/Docs/a.md','C:/Docs/a.md',{from:'c:/docs/assets/a.png',to:'C:/Docs/assets/b.png'}),'![x](assets/b.png)');
+ const posix='![x](assets/a.png)';assert.equal(r(posix,'/Docs/a.md','/Docs/a.md',{from:'/docs/assets/a.png',to:'/docs/assets/b.png'}),posix);
 });
 await test('P2 move: application rename updates open Markdown image targets with undo and save',async()=>{
  const before='![x](assets/old.png)\n';await act(async()=>{store.getState().setContent(before,'a','command');await pause(40);});
@@ -531,10 +620,11 @@ await test('P3 typewriter: default off, explicit centering and composition exclu
 await test('P3 preferences: invalid old values restore defaults and writing styles stay Markdown-only',async()=>{
  const htmlBefore=store.getState().tabs.find(t=>t.id==='b').content;
  assert.deepEqual(app.normalizeMarkdownPreferences(null),app.defaultMarkdownPreferences);
+ assert.equal(app.normalizeMarkdownPreferences({documentTheme:'serif'}).documentTheme,'default');
  assert.equal(app.normalizeMarkdownPreferences({imageDirectory:'../private',typewriter:'true',documentTheme:'unknown'}).imageDirectory,'assets');
  assert.equal(app.normalizeMarkdownPreferences({imageDirectory:'media\\images'}).imageDirectory,'media/images');
- await act(async()=>store.setState(s=>({markdownSettings:{...s.markdownSettings,documentTheme:'serif',focusParagraph:true}})));
- assert.equal(document.querySelector('.md-visual-shell').dataset.mdTheme,'serif');assert.equal(document.querySelector('.md-visual-shell').dataset.mdFocus,'true');
+ await act(async()=>store.setState(s=>({markdownSettings:{...s.markdownSettings,documentTheme:'compact',focusParagraph:true}})));
+ assert.equal(document.querySelector('.md-visual-shell').dataset.mdTheme,'compact');assert.equal(document.querySelector('.md-visual-shell').dataset.mdFocus,'true');
  assert.equal(store.getState().tabs.find(t=>t.id==='b').content,htmlBefore);
  await act(async()=>store.setState({markdownSettings:{...app.defaultMarkdownPreferences}}));
 });
@@ -657,14 +747,17 @@ await test('P3 settings UI and persistence: explicit options survive reload, old
  await act(async()=>root.render(React.createElement(app.WritingSettings)));
  await act(async()=>document.querySelector('.md-writing-settings button').click());
  const theme=document.querySelector('select[aria-label="Document theme"]');assert.ok(theme);
- await act(async()=>{theme.value='serif';theme.dispatchEvent(new Event('change',{bubbles:true}));});
- assert.equal(store.getState().markdownSettings.documentTheme,'serif');
+ await act(async()=>{theme.value='compact';theme.dispatchEvent(new Event('change',{bubbles:true}));});
+ assert.equal(store.getState().markdownSettings.documentTheme,'compact');
  const typewriter=[...document.querySelectorAll('.md-writing-panel label')].find(e=>e.textContent==='Typewriter mode').querySelector('input');
  assert.equal(typewriter.checked,false);await act(async()=>typewriter.click());assert.equal(store.getState().markdownSettings.typewriter,true);
  app.schedulePersist({sidebarPx:230,previewPct:50});await pause(750);
- assert.equal(JSON.parse(persistedState).markdownSettings.typewriter,true);assert.equal(JSON.parse(persistedState).markdownSettings.documentTheme,'serif');
+ assert.equal(JSON.parse(persistedState).markdownSettings.typewriter,true);assert.equal(JSON.parse(persistedState).markdownSettings.documentTheme,'compact');
  await act(async()=>{store.setState({markdownSettings:{...app.defaultMarkdownPreferences}});await app.loadPersisted();});
- assert.equal(store.getState().markdownSettings.typewriter,true);assert.equal(store.getState().markdownSettings.documentTheme,'serif');
+ assert.equal(store.getState().markdownSettings.typewriter,true);assert.equal(store.getState().markdownSettings.documentTheme,'compact');
+ const oldTheme=JSON.parse(persistedState);oldTheme.markdownSettings.documentTheme='serif';persistedState=JSON.stringify(oldTheme);
+ await act(async()=>app.loadPersisted());assert.equal(store.getState().markdownSettings.documentTheme,'default');
+ assert.equal(document.querySelector('option[value="serif"]'),null);
  const legacy=JSON.parse(persistedState);delete legacy.markdownSettings;persistedState=JSON.stringify(legacy);
  await act(async()=>app.loadPersisted());assert.deepEqual(store.getState().markdownSettings,app.defaultMarkdownPreferences);
 });

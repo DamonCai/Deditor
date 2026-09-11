@@ -1,3 +1,7 @@
+import { readFileSync } from "node:fs";
+import { shorthandRemark, highlightRemark, shorthandMarks, emojiSchema, shorthandInputRules, configureShorthand } from "../src/lib/markdownVisual/shorthand";
+import { strikethroughInputRule } from "@milkdown/kit/preset/gfm";
+import { editableBlockquote, footnoteReference, footnoteDefinition, footnoteUpdates, footnoteNodeView } from "../src/lib/markdownVisual/structuredBlocks";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { MarkdownSession } from "../src/lib/markdownSession";
@@ -23,9 +27,9 @@ const { EditorState, TextSelection } = await import("@milkdown/kit/prose/state")
 const { history } = await import("@milkdown/kit/plugin/history");
 const { trailing } = await import("@milkdown/kit/plugin/trailing");
 const crepe = new CrepeBuilder({ root: document.querySelector("#editor") }).addFeature(codeMirror).addFeature(latex).addFeature(imageBlock);
-crepe.editor.use(absoluteHeadingInputRule).use(faithfulLink).use(faithfulInlineHtml).use(faithfulImage).use(extendedTableCells.flat()).use(inlineSchemas.flat()).config(configureInlineSerialization).use(frontmatter).use(rawRemark(false)).use(rawSchema);
+crepe.editor.use(shorthandRemark).use(highlightRemark).use(shorthandMarks.flat()).use(emojiSchema).use(shorthandInputRules).config(configureShorthand).use(editableBlockquote).use(footnoteReference).use(footnoteDefinition).use(footnoteUpdates).use(absoluteHeadingInputRule).use(faithfulLink).use(faithfulInlineHtml).use(faithfulImage).use(extendedTableCells.flat()).use(inlineSchemas.flat()).config(configureInlineSerialization).use(frontmatter).use(rawRemark(false)).use(rawSchema);
 await crepe.editor.remove(remarkInlineLinkPlugin.plugin); await crepe.editor.remove(remarkPreserveEmptyLinePlugin.plugin);
-await crepe.editor.remove(wrapInHeadingInputRule);
+await crepe.editor.remove(wrapInHeadingInputRule); await crepe.editor.remove(strikethroughInputRule);
 await crepe.editor.remove(history); await crepe.editor.remove(trailing); await crepe.create();
 let passed = 0;
 const test = (name: string, fn: () => void) => { fn(); passed++; console.log(`PASS ${name}`); };
@@ -39,6 +43,56 @@ crepe.editor.action(ctx => {
    const tr = state.tr.insertText(replacement, position, position + text.length);
    return model.apply(tr.doc);
  };
+ test("structured: footnotes and alert prose are editable and patch exact source", () => {
+   const source = "正文[^n] 后文。\n\n> [!NOTE]\n> 提示 **重点**。\n\n[^n]: 脚注解释。\n";
+   const model = make(source);
+   assert.equal(model.doc.firstChild!.child(1).type.name, "footnote_reference");
+   assert.equal(editText(model, "后文", "更多"), source.replace("后文", "更多"));
+   assert.equal(editText(model, "提示", "注意"), source.replace("后文", "更多").replace("提示", "注意"));
+   assert.equal(editText(model, "脚注解释", "新的解释"), source.replace("后文", "更多").replace("提示", "注意").replace("脚注解释", "新的解释"));
+ });
+ test("structured: alerts preserve CRLF, nesting and marker spelling during repeated edits", () => {
+   for (const source of ["> [!tip]\r\n> message **bold**\r\n\r\ntail\r\n", "> > [!WARNING]\n> > message\n> >\n> > - nested\n\nend\n", "> [!NOTE]\n>\n> ## message\n>\n> - nested\n\nend\n"]) {
+     const model = make(source);
+     assert.equal(model.apply(model.doc), source);
+     assert.equal(editText(model, "message", "中文"), source.replace("message", "中文"));
+     assert.equal(editText(model, "中文", "新的内容"), source.replace("message", "新的内容"));
+     assert.equal(make(model.source).doc.eq(model.doc), true);
+   }
+ });
+ test("structured: footnote identifiers and literal markers survive structural edits", () => {
+   const source = "Text[^Note-One] again[^Note-One].\n\n[^Note-One]: explanation\n\n    second paragraph\n\ntail\n";
+   const model = make(source); let raw = 0; model.doc.descendants(n => { if (n.type.name === "deditor_raw") raw++; }); assert.equal(raw, 0);
+   editText(model, "explanation", "a *literal* explanation");
+   assert.equal(make(model.source).doc.textContent, model.doc.textContent);
+   assert.match(model.source, /\[\^Note-One\]:/);
+   assert.equal(editText(model, "second paragraph", "changed paragraph"), model.source);
+   assert.equal(make(model.source).doc.textContent, model.doc.textContent);
+ });
+ test("structured: alert structure serializes with its marker and editable children", () => {
+   for (const source of ["> [!NOTE]\n> message\n", "> [!TIP]\n>\n> - item\n", "> [!CAUTION]\n"]) {
+     const model = make(source); assert.match(serialize(model.doc), /\[!(NOTE|TIP|CAUTION)\]/);
+     assert.equal(parse(serialize(model.doc)).eq(model.doc), true, JSON.stringify({source, output: serialize(model.doc), before:model.doc.toJSON(), after:parse(serialize(model.doc)).toJSON()}));
+   }
+ });
+ test("shorthand: highlight, scripts and emoji load as editable semantic nodes", () => {
+   const source = "==highlight **bold**== H~2~O X^2^ :smile: :unknown_name: `H~2~O :smile:`\\n".replace(/\\n$/, "\n");
+   const model = make(source); let types: string[] = []; model.doc.descendants(n => { types.push(...n.marks.map(m => m.type.name)); if (n.type.name === "deditor_emoji") types.push(n.type.name); });
+   for (const type of ["deditor_mark", "deditor_subscript", "deditor_superscript", "deditor_emoji"]) assert.ok(types.includes(type), type);
+   assert.equal(model.apply(model.doc), source);
+   assert.equal(editText(model, "highlight", "中文"), source.replace("highlight", "中文"));
+   assert.equal(editText(model, "2", "3"), source.replace("highlight", "中文").replace("~2~", "~3~"));
+   assert.equal(make(model.source).doc.eq(model.doc), true);
+   assert.equal(parse(serialize(model.doc)).eq(model.doc), true);
+ });
+ test("shorthand: escapes, invalid delimiters, code and strikethrough stay distinct", () => {
+   for (const source of [String.raw`\==literal== \~sub~ \^sup^ \:smile:`, "== == H~two words~ X^two words^ :not_an_emoji:", "`==mark== ~sub~ ^sup^ :smile:`", "```md\n==mark== ~sub~ ^sup^ :smile:\n```\n"]) {
+     const model = make(source); let shorthand = 0; model.doc.descendants(n => { if (n.type.name === "deditor_emoji" || n.marks.some(m => /deditor_(mark|subscript|superscript)/.test(m.type.name))) shorthand++; });
+     assert.equal(shorthand, 0, source); assert.equal(model.apply(model.doc), source);
+   }
+   const model = make("~~deleted~~ H~2~O");assert.equal(model.doc.firstChild!.firstChild!.marks[0].type.name, "strike_through");
+ });
+ test("complex: complete review fixture loads without loss", () => { const source = readFileSync("tests/fixtures/markdown-complex.md", "utf8"); const model = make(source); assert.equal(model.apply(model.doc), source); });
  const samples = ["", "\n\n", "# 中文标题\n\n正文  \n下一行\n", "标题\n====\n\n正文\n", "+ 一\n+ 二\n\n后文\n", "7. 一\n8. 二\n", "# CRLF\r\n\r\n中文\r\n", "\\*原样\\* &amp; **粗体**\n", "[label][ref]\n\n[ref]: <https://example.com> 'title'\n", "<span style=\"color:#e53e3e\">红色</span>\n\n尾部\n", "---\ntitle: demo\n---\n\n正文\n", "$$\nx^2\n$$\n\n```mermaid\ngraph LR\n A-->B\n```\n", "| 项目 | 内容 |\n| :--- | ---: |\n| 测试 | - a<br>- b |\n", "~~~js\nconst x=1;\n~~~\n\n尾段\n"];
  test("round 1: switching all 14 syntax fixtures preserves exact source", () => { for (const source of samples) { const model = make(source); assert.equal(model.apply(model.doc), source); assert.equal(model.reset(source).eq(model.doc), true); assert.equal(model.source, source); } });
  test("round 1: edit paragraph leaves headings, gaps and unknown blocks byte-identical", () => {
@@ -135,6 +189,14 @@ crepe.editor.action(ctx => {
      model.apply(view.state.doc);
    }
  };
+ test("shorthand: character-by-character typing creates marks without multiplying delimiters", () => {
+   for (const [source, type, text] of [["==high==", "deditor_mark", "high"],["~2~","deditor_subscript","2"],["^2^","deditor_superscript","2"],["~~gone~~","strike_through","gone"]]) {
+     const model=make("");inputInto(model,1,source);
+     assert.equal(model.doc.firstChild!.textContent,text,source);assert.equal(model.doc.firstChild!.firstChild!.marks[0].type.name,type);
+     assert.equal(make(model.source).doc.eq(model.doc),true);
+   }
+   const model=make("");inputInto(model,1,":smile:");assert.equal(model.doc.firstChild!.firstChild!.type.name,"deditor_emoji");assert.equal(model.source.trim(),":smile:");
+ });
  test("reported heading bug: typed hashes set an absolute level across all 42 prior/target combinations", () => {
    for(let previous=0;previous<=6;previous++) for(let level=1;level<=6;level++) {
      const original=(previous ? "#".repeat(previous)+" " : "")+"Title\n\nTail\n";

@@ -59,5 +59,15 @@
       "icon": "summary-right-angle"
     }
   ],
-  "evidence": "Packaged palette mapping, not a native save/reopen test"
+  "evidence": "Packaged palette mapping, not a native save/reopen test",
+  "nativeGallery": "2026-09-11: native-group-shapes.xmind opened without repair; nine boundary and five summary shapes viewed in original Xmind.",
+  "geometryFacts": {
+    "source": "renderer/1857.js",
+    "polygon": "Hide boundary title, keep outward edge flat, hull follows inward edges of covered topics",
+    "waves": "Two alternating quadratic lobes per period, control amplitude 2.5",
+    "tension": "One inward quadratic lobe per period, control amplitude 5",
+    "defaultBoundaryTitle": "Left inset 14 + border width; wrap against remaining boundary width; preserve stored title",
+    "defaultSummary": "round",
+    "defaultCallout": "Native master gallery: short 5px gap above owner; green fill and white title when no theme or topic override"
+  }
 }

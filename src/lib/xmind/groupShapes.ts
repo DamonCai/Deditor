@@ -3,6 +3,11 @@ export const BOUNDARY_SHAPES = ['roundedRect', 'rect', 'polygon', 'roundedPolygo
 type Box = { x: number; y: number; width: number; height: number };
 type Point = [number, number];
 
+export function boundaryHidesTitle(shape?: string): boolean {
+  const name=shape?.split('.').pop()?.toLowerCase();
+  return name==='polygon' || name==='roundedpolygon';
+}
+
 export function boundaryOverflow(shape?: string): number {
   const name = shape?.split('.').pop()?.toLowerCase();
   return name === 'cross' ? 10 : name === 'scallops' || name === 'waves' ? 5 : 0;
@@ -38,7 +43,7 @@ function polygonPath(points: Point[], rounded: boolean): string {
 }
 
 /** Independent fill and border paths support open-corner and extended-line frames. */
-export function boundaryGeometry(shape: string | undefined, width: number, height: number, members: readonly Box[] = []): {fillPath: string; borderPath: string} | null {
+export function boundaryGeometry(shape: string | undefined, width: number, height: number, members: readonly Box[] = [], padding=14, direction: 'left'|'right'|'up'|'down'='right'): {fillPath: string; borderPath: string} | null {
   const name=shape?.split('.').pop()?.toLowerCase();
   const w=Math.max(0,width),h=Math.max(0,height),rect=`M0,0 H${w} V${h} H0 Z`;
   if(name==='focus') {
@@ -48,9 +53,10 @@ export function boundaryGeometry(shape: string | undefined, width: number, heigh
   if(name==='cross') return {fillPath:rect,borderPath:`M-10,0 H${w+10} M${w},-10 V${h+10} M${w+10},${h} H-10 M0,${h+10} V-10`};
   if(name==='polygon' || name==='roundedpolygon') {
     const points: Point[]=members.flatMap(b=> {
-      const x=Math.max(0,b.x-14),y=Math.max(0,b.y-14),r=Math.min(w,b.x+b.width+14),bottom=Math.min(h,b.y+b.height+14);
-      return [[x,y],[r,y],[r,bottom],[x,bottom]] as Point[];
+      const x=Math.max(0,b.x-padding),y=Math.max(0,b.y-padding),r=Math.min(w,b.x+b.width+padding),bottom=Math.min(h,b.y+b.height+padding);
+      return (direction==='left' ? [[r,y],[r,bottom]] : direction==='up' ? [[x,bottom],[r,bottom]] : direction==='down' ? [[x,y],[r,y]] : [[x,y],[x,bottom]]) as Point[];
     });
+    if(points.length) points.push(...(direction==='left'?[[0,0],[0,h]]:direction==='up'?[[0,0],[w,0]]:direction==='down'?[[0,h],[w,h]]:[[w,0],[w,h]]) as Point[]);
     const path=polygonPath(points.length ? hull(points) : [[0,0],[w,0],[w,h],[0,h]],name==='roundedpolygon');
     return {fillPath:path,borderPath:path};
   }
@@ -63,7 +69,8 @@ export function boundaryGeometry(shape: string | undefined, width: number, heigh
       const point=(fraction: number,out: number): Point => [start[0]+dx*fraction+(length?dy/length*out:0),start[1]+dy*fraction-(length?dx/length*out:0)];
       for(let step=0;step<count;step++) {
         const a=step/count,b=(step+1)/count,amplitude=name==='tension'?-5:5;
-        if(name==='waves') path+=` Q${point(a+(b-a)/4,5)} ${point((a+b)/2,0)} Q${point(a+(b-a)*3/4,-5)} ${point(b,0)}`;
+        if(name==='waves') path+=` Q${point(a+(b-a)/4,2.5)} ${point((a+b)/2,0)} Q${point(a+(b-a)*3/4,-2.5)} ${point(b,0)}`;
+        else if(name==='tension') path+=` Q${point((a+b)/2,-5)} ${point(b,0)}`;
         else path+=` C${point(a+(b-a)/4,amplitude)} ${point(a+(b-a)*3/4,amplitude)} ${point(b,0)}`;
       }
     });

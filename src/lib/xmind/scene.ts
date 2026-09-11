@@ -1,5 +1,6 @@
+import { colorLuminance, automaticTextColor, smartTextColor, levelTextColor } from "./colors";
 import { isPunctuationShape } from "./punctuationShapes";
-import { BOUNDARY_SHAPES, SUMMARY_SHAPES, boundaryOverflow } from "./groupShapes";
+import { BOUNDARY_SHAPES, SUMMARY_SHAPES, boundaryOverflow, boundaryHidesTitle } from "./groupShapes";
 import { shapeSize, shapeName, ALL_TOPIC_SHAPES } from "./shapes";
 import { shapeContentCenter, advancedShapeScale, flowContentScale, referenceSymbol } from "./shapePaths";
 import { relationshipGeometry } from "./relationship";
@@ -58,11 +59,16 @@ export interface Edge {
 }
 export interface SceneGroup extends Box {
   memberBoxes?: Box[];
+  memberIds?: string[];
+  memberGroupIds?: string[];
+  padding?: number;
+  growthDirection?: "left" | "right" | "down" | "up";
   id: string;
   parent: string;
   title: string;
   titleLines: string[];
   titleWidth: number;
+  titleOffsetX: number;
   titleHeight: number;
   titleFontSize: number;
   titleLineHeight: number;
@@ -96,7 +102,11 @@ export const STRUCTURES = [
   ["org.xmind.ui.timeline.horizontal", "timeline"],
   ["org.xmind.ui.timeline.horizontal.rtl", "timelineLeft"],
   ["org.xmind.ui.timeline.through.vertical", "timelineVertical"],
+  ["org.xmind.ui.timeline.through.vertical.btt", "timelineVerticalUp"],
+  ["org.xmind.ui.timeline.through.symmetric.vertical", "timelineSymmetric"],
+  ["org.xmind.ui.timeline.through.symmetric.vertical.btt", "timelineSymmetricUp"],
   ["org.xmind.ui.timeline.sided.horizontal", "timelineSided"],
+  ["org.xmind.ui.timeline.sided.horizontal.rtl", "timelineSidedLeft"],
   ["org.xmind.ui.fishbone.leftHeaded", "fishbone"],
   ["org.xmind.ui.fishbone.rightHeaded", "fishboneRight"],
 ] as const;
@@ -118,33 +128,6 @@ const defined = (p?: Properties): Properties =>
   Object.fromEntries(
     Object.entries(p ?? {}).filter(([, v]) => v !== "inherited"),
   );
-function automaticTextColor(fill: string, opacity = 1, background = "#FFFFFF"): string {
-  const rgba = (color: string) => {
-    let hex = /^#([\da-f]{3,8})$/i.exec(color)?.[1];
-    if (!hex || ![3, 4, 6, 8].includes(hex.length)) return null;
-    if (hex.length < 5) hex = Array.from(hex, c => c + c).join("");
-    return [0, 2, 4].map(index => parseInt(hex.slice(index, index + 2), 16) / 255)
-      .concat(hex.length === 8 ? parseInt(hex.slice(6), 16) / 255 : 1);
-  };
-  const bg = rgba(background) ?? [1, 1, 1, 1];
-  const base = bg.slice(0, 3).map(c => c * bg[3] + 1 - bg[3]);
-  const foreground = rgba(fill);
-  const alpha = foreground ? foreground[3] * opacity : 0;
-  const rgb = base.map((c, i) => (foreground?.[i] ?? c) * alpha + c * (1 - alpha));
-  const [r, g, b] = rgb.map(c => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.179 ? "#000000" : "#FFFFFF";
-}
-/** Native level styles keep hue/saturation and use 20% HSL lightness. */
-function levelTextColor(fill: string): string {
-  const hex = /^#([\da-f]{6})$/i.exec(fill)?.[1];
-  if (!hex) return automaticTextColor(fill);
-  const rgb = [0, 2, 4].map(index => parseInt(hex.slice(index, index + 2), 16) / 255);
-  const min = Math.min(...rgb), max = Math.max(...rgb), delta = max - min;
-  if (!delta) return "#333333";
-  const saturation = delta / (1 - Math.abs(max + min - 1));
-  const low = 0.2 * (1 - saturation), span = 0.4 * saturation;
-  return "#" + rgb.map(value => Math.floor((low + (value - min) / delta * span) * 255 + 1e-8).toString(16).padStart(2,"0")).join("").toUpperCase();
-}
 export function styleFor(
   sheet: Sheet,
   topic: Topic,
@@ -171,35 +154,56 @@ export function styleFor(
   const p: Properties = {
     "fo:font-weight": kind === "summaryTopic" ? "400" : kind === "floatingTopic" ? "500" : depth === 0 ? "800" : depth === 1 ? "500" : "400",
     ...connection,
-    ...(autoFill && depth > 0 ? { "svg:fill": connection?.["line-color"] ?? branchColor,
-      ...(depth > 1 && level ? { "svg:fill-opacity": "0.2" } : {}) } : {}),
+    ...(autoFill && depth > 0 ? { "svg:fill": connection?.["line-color"] ?? branchColor } : {}),
     ...defined(themeProperties),
     ...defined(topic.style?.properties),
   };
+  // A partial native theme uses the base border defaults. Only an explicit
+  // inherited border follows the branch; a missing border does not use the palette.
+  const borderSource = { ...themeProperties, ...topic.style?.properties };
+  for (const suffix of ["color", "width", "pattern"] as const) {
+    const key = `border-line-${suffix}`;
+    if (borderSource[key] === "inherited") {
+      p[key] = p[`line-${suffix}`] ?? (suffix === "color" ? branchColor : suffix === "width" ? "1" : "solid");
+    } else if (tier && (kind === "floatingTopic" || (!kind && depth === 0)) && !p[key]) {
+      p[key] = suffix === "color" ? "#000000" : suffix === "width" ? "1" : "solid";
+    }
+  }
   const fill = (p["fill-pattern"] === "none" || isPunctuationShape(p["shape-class"] ?? "")) ? "none" : p["svg:fill"] ??
-    (kind === "floatingTopic" || kind === "summaryTopic" ? "#00897B" : kind === "calloutTopic" ? "#EEEEEE" : depth === 0 ? "#3949AB" : depth === 1 || p["fill-pattern"] === "solid" ? "#EEEEEE" : "none");
-  const fillOpacity = Math.max(0, Math.min(1, number(p["svg:fill-opacity"], 1)));
+    (kind ? "#00897B" : depth === 0 ? "#3949AB" : depth === 1 || p["fill-pattern"] === "solid" ? "#EEEEEE" : "none");
+  // Native topic fills carry alpha in the color. The pale inherited level fill
+  // is a theme rule, not the boundary-only svg:opacity or svg:fill-opacity.
+  const explicitFill = defined(topic.style?.properties)["svg:fill"];
+  const fillOpacity = autoFill && depth > 1 && level && !explicitFill ? 0.2 : 1;
   const background = sheet.style?.properties?.["svg:fill"] ?? sheet.theme?.map?.properties?.["svg:fill"] ?? "#FFFFFF";
   const readableColor = automaticTextColor(fill, fillOpacity, background);
+  const multiBranch = !!theme.map?.properties?.["multi-line-colors"]?.trim();
+  let palette = theme.map?.properties?.["color-list"]?.split(/\s+/).filter(Boolean) ?? ["#FFFFFF", "#000000"];
+  if (multiBranch && !kind && depth === 1) palette = ["#FFFFFF", "#000000"];
+  if (multiBranch && !kind && depth > 1) palette = ["#FFFFFF", levelTextColor(p["line-color"] ?? branchColor)];
+  let smartColor = autoText ? smartTextColor(fill, fillOpacity, background, palette) : readableColor;
+  const centralFill = defined(themeProperties)["svg:fill"];
+  if (autoText && !kind && depth === 0 && fill === "none" && centralFill && centralFill !== "none") {
+    const a = colorLuminance(centralFill), b = colorLuminance(background);
+    if ((Math.max(a, b) + .05) / (Math.min(a, b) + .05) >= 3) smartColor = centralFill;
+  }
   const color = p["fo:color"] ?? (autoText
-    ? level && autoFill ? levelTextColor(p["svg:fill"] ?? branchColor)
-      : readableColor
+    ? smartColor
     : fill === "none" && (depth === 0 || kind === "floatingTopic" || kind === "summaryTopic") ? readableColor
-      : fill !== "none" && p["svg:fill"] ? readableColor
-        : depth === 0 || kind === "floatingTopic" || kind === "summaryTopic" ? "#FFFFFF" : "#333333");
+      : depth === 0 || kind ? "#FFFFFF" : "#333333");
   return {
     properties: p,
     fontSize: Math.max(
       9,
       Math.min(
         64,
-        number(p["fo:font-size"], kind === "floatingTopic" || kind === "summaryTopic" ? 14 : depth === 0 ? 30 : depth === 1 ? 18 : 14),
+        number(p["fo:font-size"], kind ? 14 : depth === 0 ? 30 : depth === 1 ? 18 : 14),
       ),
     ),
     fill,
     fillOpacity,
     color,
-    stroke: p["border-line-color"] ?? (kind === "calloutTopic" ? "none" : p["line-color"] ?? branchColor),
+    stroke: p["border-line-pattern"] === "none" ? "none" : p["border-line-color"] ?? (kind === "calloutTopic" ? "none" : p["line-color"] ?? branchColor),
     lineColor: p["line-color"] ?? branchColor,
     shape: p["shape-class"] ?? (kind === "calloutTopic" || kind === "floatingTopic" || kind === "summaryTopic" || depth < 2 ? "roundedRect" : "underline"),
   };
@@ -222,11 +226,19 @@ export function topicStyle(sheet: Sheet, id: string): ReturnType<typeof styleFor
   return visit(sheet.rootTopic,0,0) ?? styleFor(sheet,sheet.rootTopic,0,0);
 }
 export function groupStyle(sheet: Sheet, group: Group, summary: boolean): Properties {
-  return {
-    "line-color": "#00897B", "svg:fill": "#00897B", "svg:fill-opacity": "0.2", "fo:color": "#FFFFFF",
-    ...defined(sheet.theme?.[summary ? "summary" : "boundary"]?.properties),
+  const theme=sheet.theme?.[summary ? "summary" : "boundary"]?.properties;
+  const properties:Properties = {
+    "line-color": "#00897B", "svg:fill": "#00897B", "svg:opacity": "0.2", "fo:color": "#FFFFFF",
+    ...(summary ? {"shape-class":"org.xmind.summaryShape.round"} : {}),
+    ...defined(theme),
     ...defined(group.style?.properties),
   };
+  if (!summary && theme?.['fo:color']==='inherited' && !defined(group.style?.properties)['fo:color']) {
+    properties['fo:color']=smartTextColor(properties['line-color'],1,
+      sheet.style?.properties?.['svg:fill']??sheet.theme?.map?.properties?.['svg:fill']??'#FFFFFF',
+      sheet.theme?.map?.properties?.['color-list']?.split(/\s+/).filter(Boolean)??['#FFFFFF','#000000']);
+  }
+  return properties;
 }
 export type Measure = (
   text: string,
@@ -306,19 +318,41 @@ export function buildScene(
 ): Scene {
   const warnings = new Set<string>();
   function groupTitle(title: string, width: number, properties: Properties) {
+    if(boundaryHidesTitle(properties['shape-class'])) title='';
     const titleFontSize = Math.max(9, Math.min(64, number(properties["fo:font-size"],14)));
     const titleLineHeight = titleFontSize + 4;
-    const titleLines = title ? wrap(title,Math.max(titleFontSize*2,Math.min(160,width/2)-12),titleFontSize,properties,measure) : [];
+    const inset=14+Math.max(0,number(properties['line-width'],2));
+    const titleLines = title ? wrap(title,Math.max(titleFontSize*2,width-inset*2-12),titleFontSize,properties,measure) : [];
+    const titleWidth=titleLines.length ? Math.max(40,...titleLines.map(line=>measure(line,titleFontSize,properties)+12)) : 0;
     return {titleLines,titleFontSize,titleLineHeight,
-      titleWidth: titleLines.length ? Math.max(40,...titleLines.map(line=>measure(line,titleFontSize,properties)+12)) : 0,
+      titleWidth,titleOffsetX:Math.min(inset,Math.max(0,width-titleWidth)),
       titleHeight: titleLines.length ? titleLines.length*titleLineHeight+8 : 0};
   }
   const groupBounds = (g: SceneGroup): Box => {
-    const extra=g.summary?0:boundaryOverflow(g.properties['shape-class']);
+    const extra=g.summary?0:boundaryOverflow(g.properties['shape-class'])+Math.max(0,number(g.properties['line-width'],2))/2;
     return boundsOf([
       {x:g.x-extra,y:g.y-extra,width:g.width+extra*2,height:g.height+extra*2},
-      {x:g.x+(g.width-g.titleWidth)/2,y:g.y-g.titleHeight,width:g.titleWidth,height:g.titleHeight},
+      {x:g.x+g.titleOffsetX,y:g.y-g.titleHeight,width:g.titleWidth,height:g.titleHeight},
     ]);
+  };
+  const groupPadding=(properties:Properties)=>Math.max(14,9+Math.max(0,number(properties['line-width'],2)));
+  const groupFrame=(boxes:Box[],padding:number) => {
+    const b=boundsOf(boxes);
+    return {x:b.x-padding,y:b.y-padding,width:b.width+padding*2,height:b.height+padding*2,
+      padding,memberBoxes:boxes.map(box=>({...box,x:box.x-b.x+padding,y:box.y-b.y+padding}))};
+  };
+  const reflectGroups=(fragment:Fragment) => {
+    // Nodes have already moved. Re-measure rather than mirroring cached boxes:
+    // tags remain left aligned, and nested frame titles have their own extents.
+    for(const group of fragment.groups) {
+      const boxes=fragment.nodes.filter(n=>group.memberIds?.includes(n.topic.id)).map(nodeVisualBounds);
+      boxes.push(...fragment.groups.filter(g=>group.memberGroupIds?.includes(g.id)).map(groupBounds));
+      if(boxes.length)Object.assign(group,groupFrame(boxes,group.padding??14));
+      else group.x=-group.x-group.width;
+      Object.assign(group,groupTitle(group.title,group.width,group.properties));
+      if(group.side==='right')group.side='left';else if(group.side==='left')group.side='right';
+      if(group.growthDirection==='right')group.growthDirection='left';else if(group.growthDirection==='left')group.growthDirection='right';
+    }
   };
   function layout(
     topic: Topic,
@@ -476,10 +510,11 @@ export function buildScene(
         return indices.length ? [{start:Math.min(...indices),end:Math.max(...indices),title:g.title ?? "",properties:groupStyle(sheet,g,!!g.topicId)}] : [];
       });
       const before: number[] = parts.map((_,i)=>Math.max(0,...groupRanges.filter(g=>g.start===i).map(g=> {
-        const width = Math.max(...parts.slice(g.start,g.end+1).map(p=>p.bounds.width)) + 28;
-        return 18 + boundaryOverflow(g.properties['shape-class']) + (vertical ? 0 : groupTitle(g.title,width,g.properties).titleHeight);
+        const padding=groupPadding(g.properties);
+        const width = Math.max(...parts.slice(g.start,g.end+1).map(p=>p.bounds.width)) + padding*2;
+        return padding+4 + boundaryOverflow(g.properties['shape-class']) + (vertical ? 0 : groupTitle(g.title,width,g.properties).titleHeight);
       })));
-      const after: number[] = parts.map((_,i)=>Math.max(0,...groupRanges.filter(g=>g.end===i).map(g=>18+boundaryOverflow(g.properties['shape-class']))));
+      const after: number[] = parts.map((_,i)=>Math.max(0,...groupRanges.filter(g=>g.end===i).map(g=>groupPadding(g.properties)+4+boundaryOverflow(g.properties['shape-class']))));
       const length = before.reduce((a,b)=>a+b,0) + after.reduce((a,b)=>a+b,0) +
         parts.reduce(
           (sum, f) => sum + (vertical ? f.bounds.width : f.bounds.height),
@@ -530,7 +565,7 @@ export function buildScene(
         };
         const center=(anchorY(parts[0])+anchorY(parts[parts.length-1]))/2;
         for(const part of parts) shift(part,0,-center);
-        if(direction === "side") {
+        if(direction === "side" && sc!=="org.xmind.ui.map.unbalanced.symmetric") {
           const clearance=(part: Fragment)=>(height+part.nodes[0].height)/2+3;
           if(parts.length===1) {
             shift(parts[0],0,(d === "left" ? 1 : -1)*clearance(parts[0]));
@@ -581,7 +616,7 @@ export function buildScene(
           // reserves its own content width. Consecutive joints stay staggered.
           const base = Math.max(cursor, laneEnds[j % 2] + 44);
           const branchIndex = depth === 0 ? j : branch;
-          const bare = { ...child, children: { ...child.children, attached: [] } };
+          const bare = { ...child, boundaries:undefined,summaries:undefined,children: { ...child.children, attached: [] } };
           const part = layout(bare, depth + 1, branchIndex, "right", topic.id);
           const cause = part.nodes[0];
           cause.topic = child;
@@ -593,6 +628,16 @@ export function buildScene(
             const above = anchorY - f.bounds.y, below = f.bounds.y + f.bounds.height - anchorY;
             return { anchorY, before: sign < 0 ? above : below, after: sign < 0 ? below : above };
           });
+          for(const group of [...child.boundaries??[],...child.summaries??[]]) {
+            const range=/^\((\d+),(\d+)\)$/.exec(group.range??'');
+            if(!range||!slots[+range[1]]||!slots[+range[2]])continue;
+            const properties=groupStyle(sheet,group,!!group.topicId),padding=groupPadding(properties);
+            const extent=padding+Math.max(0,number(properties['line-width'],2))/2+boundaryOverflow(properties['shape-class']);
+            const width=Math.max(...leaves.slice(+range[1],+range[2]+1).map(f=>f.bounds.width))+padding*2;
+            const title=groupTitle(group.title??'',width,properties).titleHeight;
+            slots[+range[1]].before+=extent+(sign<0?title:0);
+            slots[+range[2]].after+=extent+(sign>0?title:0);
+          }
           const minimumReach = folded.has(child.id) && child.children?.attached?.length ? 70 : 50;
           const reach = Math.max(minimumReach, slots.reduce((sum, slot, k) => sum + slot.before + slot.after + (k ? 3 : 24), 0) + 48);
           const tip = { x: base + reach / Math.sqrt(3), y: sign * reach };
@@ -612,7 +657,7 @@ export function buildScene(
             distance -= slots[k].after;
           });
           attachGroups(part, cause);
-          part.bounds = boundsOf([...part.nodes.map(nodeVisualBounds), ...part.groups]);
+          part.bounds = boundsOf([...part.nodes.map(nodeVisualBounds), ...part.groups.map(groupBounds)]);
           laneEnds[j % 2] = part.bounds.x + part.bounds.width;
           ribs.push({ part, base, tip });
           cursor = base + 36;
@@ -627,54 +672,78 @@ export function buildScene(
       });
       if (sc.toLowerCase().includes("rightheaded")) {
         for (const n of fragment.nodes.slice(1)) n.x = -n.x - n.width;
-        for (const g of fragment.groups) { g.x = -g.x - g.width; if(g.side === "right") g.side="left"; else if(g.side === "left") g.side="right"; }
+        reflectGroups(fragment);
         for (const edge of fragment.edges) {
           for (const point of [...(edge.points ?? []), ...(edge.trunk ?? [])]) point.x = -point.x;
           if (edge.direction === "right") edge.direction = "left";
           else if (edge.direction === "left") edge.direction = "right";
         }
       }
-    } else if (sc === "org.xmind.ui.timeline.through.vertical") {
-      // Native through-vertical: the milestones share the central axis and
-      // their ordinary logic subtrees alternate right and left.
-      node.direction = "down";
-      let cursor = height / 2 + 100;
+    } else if (["org.xmind.ui.timeline.through.vertical", "org.xmind.ui.timeline.through.vertical.btt", "org.xmind.ui.timeline.through.symmetric.vertical", "org.xmind.ui.timeline.through.symmetric.vertical.btt"].includes(sc)) {
+      // Keep detail reading order intact when the main axis grows upward.
+      // Reflecting the complete subtree would incorrectly reverse A/B rows.
+      const upward=sc.endsWith('.btt'),symmetric=sc.includes('.symmetric.');
+      node.direction = upward ? "up" : "down";
+      let cursor = (upward?-1:1)*(height / 2 + 100);
       let previous = node;
       children.forEach((child, i) => {
-        const part = layout(child, depth + 1, depth === 0 ? i : branch, i % 2 ? "left" : "right", topic.id,
+        // Native symmetric timelines give each milestone a symmetric mind
+        // map, rather than alternating entire detail subtrees between sides.
+        const displayedChild=symmetric?{...child,structureClass:'org.xmind.ui.map.unbalanced.symmetric'}:child;
+        const part = layout(displayedChild, depth + 1, depth === 0 ? i : branch, i % 2 ? "left" : "right", topic.id,
           false, undefined, depth > 0 ? connectionStyle(node) : undefined);
         const milestone = part.nodes[0];
-        shift(part, -milestone.x - milestone.width / 2, cursor - milestone.y);
+        milestone.topic=child;
+        shift(part, -milestone.x - milestone.width / 2, cursor - milestone.y - (upward ? milestone.height : 0));
         let clearance = 0;
         for (const next of [...part.nodes.map(nodeVisualBounds), ...part.groups.map(groupBounds)]) {
           for (const prior of [...fragment.nodes.map(nodeVisualBounds), ...fragment.groups.map(groupBounds)]) {
             if (next.x < prior.x + prior.width && prior.x < next.x + next.width)
-              clearance = Math.max(clearance, prior.y + prior.height + 24 - next.y);
+              clearance = Math.max(clearance, upward ? next.y + next.height + 24 - prior.y : prior.y + prior.height + 24 - next.y);
           }
         }
-        if (clearance > 0) shift(part, 0, clearance);
+        if (clearance > 0) shift(part, 0, upward ? -clearance : clearance);
         fragment.nodes.push(...part.nodes);
         fragment.groups.push(...part.groups);
-        fragment.edges.push({ from: topic.id, to: child.id, direction: "down", brace: false,
-          points: [{ x: 0, y: previous.y + previous.height }, { x: 0, y: milestone.y }] }, ...part.edges);
+        fragment.edges.push({ from: topic.id, to: child.id, direction: upward ? "up" : "down", brace: false,
+          points: [{ x: 0, y: previous.y + (upward?0:previous.height) }, { x: 0, y: milestone.y + (upward?milestone.height:0) }] }, ...part.edges);
         previous = milestone;
-        cursor = milestone.y + milestone.height + 100;
+        cursor = upward ? milestone.y - 100 : milestone.y + milestone.height + 100;
       });
-    } else if (direction === "timeline" && ["org.xmind.ui.timeline.horizontal", "org.xmind.ui.timeline.horizontal.rtl", "org.xmind.ui.timeline.sided.horizontal"].includes(sc)) {
+    } else if (direction === "timeline" && ["org.xmind.ui.timeline.horizontal", "org.xmind.ui.timeline.horizontal.rtl", "org.xmind.ui.timeline.sided.horizontal", "org.xmind.ui.timeline.sided.horizontal.rtl"].includes(sc)) {
       // Milestones sit on the axis. Their details alternate above and below,
       // with a shared vertical stem beside a compact stack of rightward topics.
-      const sided = sc === "org.xmind.ui.timeline.sided.horizontal";
+      const sided = sc.startsWith("org.xmind.ui.timeline.sided.horizontal");
+      // A boundary makes its milestones one alternating unit, so its frame
+      // stays on one side of the spine. Overlapping ranges form one unit.
+      const linked=Array.from({length:Math.max(0,children.length-1)},()=>false);
+      if(sided) for(const boundary of topic.boundaries??[]) {
+        const range=/^\((\d+),(\d+)\)$/.exec(boundary.range??'');
+        if(!range)continue;
+        const start=Number(range[1]),end=Number(range[2]);
+        if(start>end||end>=children.length)continue;
+        for(let i=start;i<end;i++)linked[i]=true;
+      }
+      let unit=0;
+      const aboveAxis=children.map((_,i)=>{
+        if(i&&!linked[i-1])unit++;
+        return unit%2===0;
+      });
       let cursor = width / 2 + (sided ? 24 : 100);
       let previous = node;
       children.forEach((child, i) => {
         const branchIndex = depth === 0 ? i : branch;
-        const above = i % 2 === 0;
-        const bare = child.structureClass ? child : { ...child, children: { ...child.children, attached: [] } };
+        const above = aboveAxis[i];
+        // Off-axis timelines own the immediate milestone/detail arrangement,
+        // including milestones carrying a stored structure override. Keep that
+        // override in the document while rendering the native compact stack.
+        const independentStructure=!sided&&!!child.structureClass;
+        const bare = independentStructure ? child : { ...child, structureClass:undefined, boundaries:undefined, summaries:undefined, children: { ...child.children, attached: [] } };
         const part = layout(bare, depth + 1, branchIndex, "right", topic.id);
         const milestone = part.nodes[0];
         milestone.topic = child;
         shift(part, cursor - milestone.x, -milestone.y + (sided ? above ? -24 - milestone.height : 24 : -milestone.height / 2));
-        if (!child.structureClass) {
+        if (!independentStructure) {
           milestone.direction = above ? "up" : "down";
           const details = (folded.has(child.id) ? [] : child.children?.attached ?? [])
             .map(t => layout(t, depth + 2, branchIndex, "right", child.id, false, undefined, connectionStyle(milestone)));
@@ -693,6 +762,31 @@ export function buildScene(
               points: [{ x, y: above ? milestone.y : milestone.y + milestone.height }, { x, y: anchorY }, { x: target.x, y: anchorY }] }, ...detail.edges);
           });
           attachGroups(part, milestone);
+          // Group captions extend beyond their member boxes. Reserve that
+          // height before the compact stack so a caption cannot cover its
+          // owning milestone (including after RTL reflection).
+          const descendants=part.nodes.filter(n=>n!==milestone);
+          const childGroups=part.groups.filter(g=>!g.memberIds?.includes(milestone.topic.id));
+          const boxes=[...descendants.map(nodeVisualBounds),...childGroups.map(groupBounds)];
+          if(boxes.length) {
+            const extent=boundsOf(boxes);
+            const dy=above?Math.min(0,milestone.y-24-extent.y-extent.height)
+              :Math.max(0,milestone.y+milestone.height+24-extent.y);
+            if(dy) {
+              for(const n of descendants)n.y+=dy;
+              for(const g of childGroups)g.y+=dy;
+              for(const edge of part.edges) {
+                for(const [i,point] of (edge.points??[]).entries())if(edge.from!==milestone.topic.id||i>0)point.y+=dy;
+                for(const point of edge.trunk??[])point.y+=dy;
+              }
+              for(const g of part.groups.filter(g=>g.memberIds?.includes(milestone.topic.id))) {
+                const members=part.nodes.filter(n=>g.memberIds?.includes(n.topic.id)).map(nodeVisualBounds);
+                members.push(...part.groups.filter(n=>g.memberGroupIds?.includes(n.id)).map(groupBounds));
+                Object.assign(g,groupFrame(members,g.padding??14));
+                Object.assign(g,groupTitle(g.title,g.width,g.properties));
+              }
+            }
+          }
           part.bounds = boundsOf([...part.nodes.map(nodeVisualBounds), ...part.groups.map(groupBounds)]);
         }
         // Opposite sides may share horizontal space. Only boxes occupying
@@ -725,11 +819,7 @@ export function buildScene(
           if (n.direction === "right") n.direction = "left";
           else if (n.direction === "left") n.direction = "right";
         }
-        for (const g of fragment.groups) {
-          g.x = -g.x - g.width;
-          if (g.side === "right") g.side = "left";
-          else if (g.side === "left") g.side = "right";
-        }
+        reflectGroups(fragment);
         for (const edge of fragment.edges) {
           for (const point of [...(edge.points ?? []), ...(edge.trunk ?? [])]) point.x = -point.x;
           if (edge.direction === "right") edge.direction = "left";
@@ -779,8 +869,8 @@ export function buildScene(
       );
       shift(
         f,
-        t.position?.x ?? 0,
-        t.position?.y ?? -height / 2 - 80 - f.nodes[0].height / 2 - i * 80,
+        t.position?.x ?? (f.nodes[0].width>width ? (f.nodes[0].width-width)*(direction==='left'?-0.5:0.5) : 0),
+        t.position?.y ?? -height / 2 - 5 - f.nodes[0].height / 2 - i * (f.nodes[0].height+5),
       );
       fragment.nodes.push(...f.nodes);
       fragment.groups.push(...f.groups);
@@ -801,27 +891,24 @@ export function buildScene(
     const groups = fragment.groups;
     const rangeBox = (g: Group) => {
       const m = /^\((\d+),(\d+)\)$/.exec(g.range ?? "");
-      if (!m) return;
+      if (!m && g.range!=='master') return;
       const ids = new Set<string>();
       const collect = (t: Topic) => {
         ids.add(t.id);
-        for (const c of t.children?.attached ?? []) collect(c);
+        for (const c of [...t.children?.attached??[],...t.children?.summary??[],...t.children?.callout??[]]) collect(c);
       };
-      (n.topic.children?.attached ?? [])
-        .slice(+m[1], +m[2] + 1)
-        .forEach(collect);
+      if(g.range==='master')collect(n.topic);
+      else (n.topic.children?.attached ?? []).slice(+m![1], +m![2] + 1).forEach(collect);
       const nodes = fragment.nodes.filter((v) => ids.has(v.topic.id));
       if (!nodes.length) return;
-      const b = boundsOf(nodes.map(nodeVisualBounds));
+      const nested=fragment.groups.filter(group=>ids.has(group.parent));
+      const boxes=[...nodes.map(nodeVisualBounds),...nested.map(groupBounds)];
       return {
-        x: b.x - 14,
-        y: b.y - 14,
-        width: b.width + 28,
-        height: b.height + 28,
-        memberBoxes: nodes.map(nodeVisualBounds).map(box=>({...box,x:box.x-b.x+14,y:box.y-b.y+14})),
+        ...groupFrame(boxes,groupPadding(groupStyle(sheet,g,!!g.topicId))),
+        memberIds:nodes.map(node=>node.topic.id),memberGroupIds:nested.map(group=>group.id),
       };
     };
-    for (const g of n.topic.boundaries ?? []) {
+    const attachBoundary=(g:Group) => {
       const b = rangeBox(g);
       if (b)
         groups.push({
@@ -831,9 +918,11 @@ export function buildScene(
           title: g.title ?? "",
           ...groupTitle(g.title ?? "",b.width,groupStyle(sheet,g,false)),
           summary: false,
+          growthDirection: n.direction==='left'||n.direction==='up'||n.direction==='down'?n.direction:'right',
           properties: groupStyle(sheet,g,false),
         });
-    }
+    };
+    for(const g of n.topic.boundaries??[])if(g.range!=='master')attachBoundary(g);
     for (const g of n.topic.summaries ?? []) {
       const b = rangeBox(g);
       if (!b) continue;
@@ -885,6 +974,9 @@ export function buildScene(
         fragment.edges.push(...f.edges);
       }
     }
+    // Master boundaries contain this topic, normal child frames, summaries and
+    // callouts. Later master frames also enclose earlier ones, as in the file.
+    for(const g of n.topic.boundaries??[])if(g.range==='master')attachBoundary(g);
   }
   const groups = initial.groups;
   for (const group of groups) {
@@ -901,11 +993,12 @@ export function buildScene(
     const g = relationshipGeometry(sheet, relation, from, to);
     if (g.unsupportedPolar) warnings.add("relationship-polar-controls");
     // Include the curve's control hull and label in Fit, not just topic boxes.
-    for (const point of g.straight ? [g.start, g.end] : [g.start, g.c1, g.c2, g.end])
+    for (const point of g.straight ? [g.start, g.end] : g.bounds)
       relationBoxes.push({ ...point, width: 0, height: 0 });
-    const textWidth = measure(relation.title ?? "", g.fontSize, g.properties);
-    relationBoxes.push({ x: g.label.x - textWidth / 2, y: g.label.y - g.fontSize,
-      width: textWidth, height: g.fontSize * 2 });
+    const textWidth = Math.max(...g.labelLines.map(line=>measure(line,g.fontSize,g.properties)));
+    const textHeight = (g.labelLines.length-1)*g.labelLineHeight+g.fontSize*2;
+    relationBoxes.push({ x: g.label.x - textWidth / 2, y: g.label.y - textHeight/2,
+      width: textWidth, height: textHeight });
   }
   const b = boundsOf([...initial.nodes.map(nodeVisualBounds), ...groups.map(groupBounds), ...relationBoxes]);
   return {

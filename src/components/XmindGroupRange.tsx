@@ -14,6 +14,7 @@ export default function XmindGroupRange({
 }) {
   const t = useT(),
     match = /^\((\d+),(\d+)\)$/.exec(group.range ?? "");
+  if(group.range==='master')return <p className="xm-help">{t('xmind.rangeWholeTopic')}</p>;
   if (!match) return null;
   const start = Number(match[1]),
     end = Number(match[2]),

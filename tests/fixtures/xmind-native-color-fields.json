@@ -1,0 +1,11 @@
+{
+  "source": "Xmind.app/Contents/Resources/app.asar:renderer/1857.js",
+  "sourceSha256": "4518bf24d5c02562e4d75162ecf4a0840db756f40fafc66a497f59b11fba58e0",
+  "topicOpacity": "Topic computed style has fillColor but no fillOpacity; color alpha is retained. Neither svg:fill-opacity nor svg:opacity multiplies topic fill alpha. Inherited pale level fill is a separate theme rule.",
+  "boundaryOpacity": "JSON importer/exporter maps svg:opacity to fillOpacity; view multiplies color alpha by it. svg:fill-opacity is not mapped.",
+  "missingTextColor": "Fallback central/callout/summary/floating styles use white; explicit pale fill does not opt into automatic text color. Main topic fallback is #333333.",
+  "nativeEvidence": "round10/native-colors-read-verification.json; original own light/dark sample screenshots in CUA history",
+  "limits": "Smart light/dark topic, boundary and relationship colors now viewed in original. Partial central/floating border correction verified in Review11. Broader smart combinations remain pending.",
+  "smartTextRule": "The inherited text rule prefers white at contrast > 3, otherwise selects the palette entry with maximal contrast if > 3, finally black. Rainbow main topics use white/black; rainbow subtopics use white and their branch hue at HSL lightness 20. An unfilled central topic may use its theme fill if contrast >= 3.",
+  "partialTopicBorderRule": "Original Review10 own smart-fonts sample: partial central/floating theme with omitted border fields renders a black 1-unit solid border, independent of palette. Explicit inherited border color/width/pattern follows branch; base topic cascade confirms black/1/solid."
+}

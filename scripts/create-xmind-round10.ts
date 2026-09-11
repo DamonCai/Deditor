@@ -1,9 +1,15 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { sampleArchive } from '../tests/fixtures/xmind';
-import { round10GroupSheets, round10PolarSheets } from '../tests/fixtures/xmind-round10';
+import { round10GroupSheets, round10PolarSheets, round10FlexibleSheets, round10NestedGroupSheets, round10MasterSheets } from '../tests/fixtures/xmind-round10';
 const directory='tests/artifacts/xmind-round10';
 mkdirSync(directory,{recursive:true});
 writeFileSync(`${directory}/native-group-shapes.xmind`,sampleArchive(round10GroupSheets()));
 console.log(`${directory}/native-group-shapes.xmind`);
 writeFileSync(`${directory}/native-polar-controls.xmind`,sampleArchive(round10PolarSheets()));
 console.log(`${directory}/native-polar-controls.xmind`);
+writeFileSync(`${directory}/native-flexible-controls.xmind`,sampleArchive(round10FlexibleSheets()));
+console.log(`${directory}/native-flexible-controls.xmind`);
+writeFileSync(`${directory}/native-nested-groups.xmind`,sampleArchive(round10NestedGroupSheets()));
+console.log(`${directory}/native-nested-groups.xmind`);
+writeFileSync(`${directory}/native-master-boundaries.xmind`,sampleArchive(round10MasterSheets()));
+console.log(`${directory}/native-master-boundaries.xmind`);

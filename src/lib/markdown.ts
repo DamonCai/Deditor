@@ -1,3 +1,8 @@
+import type { PluginSimple } from "markdown-it";
+import mark from "markdown-it-mark";
+import sub from "markdown-it-sub";
+import sup from "markdown-it-sup";
+import { markdownEmoji } from "./markdownShorthand";
 import footnote from "markdown-it-footnote";
 import { markdownExtensions } from "./markdownExtensions";
 import MarkdownIt from "markdown-it";
@@ -29,7 +34,8 @@ async function loadKatex(): Promise<void> {
         // KaTeX HTML is mounted into the preview.
         import("katex/dist/katex.min.css"),
       ]);
-      md.use(katex);
+      // Node/CJS packages can expose the plugin under a second default wrapper.
+      md.use(typeof katex === "function" ? katex : (katex as { default: PluginSimple }).default);
       katexLoaded = true;
     })();
   }
@@ -104,6 +110,7 @@ md.use(anchor, { permalink: false });
 md.use(markdownTableLists);
 md.use(taskLists, { enabled: false });
 md.use(footnote);
+md.use(mark).use(sub).use(sup).use(markdownEmoji);
 md.use(markdownExtensions);
 const footnoteOpen = md.renderer.rules.footnote_open!;
 md.renderer.rules.footnote_open = (tokens, i, options, env, renderer) => {

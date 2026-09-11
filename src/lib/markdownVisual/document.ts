@@ -1,3 +1,6 @@
+import { remarkMark } from "remark-mark-highlight";
+import { remarkShorthand } from "../markdownShorthand";
+import { editableBlockTree } from "./blockTree";
 import { unified } from "unified";
 import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
@@ -10,12 +13,12 @@ export interface SourceNode {
   type: string; value?: string; children?: SourceNode[];
   position?: { start: { offset?: number }; end: { offset?: number } };
 }
-const syntax = unified().use(remarkParse).use(remarkGfm).use(remarkMath).use(remarkFrontmatter, ["yaml", "toml"]);
+const syntax = unified().use(remarkParse).use(remarkGfm, { singleTilde: false }).use(remarkMark).use(remarkShorthand).use(remarkMath).use(remarkFrontmatter, ["yaml", "toml"]);
 export function sourceTree(source: string): SourceNode { return syntax.parse(source) as SourceNode; }
-const protectedTypes = new Set(["html", "definition", "linkReference", "imageReference", "yaml", "toml", "footnoteDefinition", "footnoteReference"]);
+function editingTree(source: string): SourceNode { const tree = sourceTree(source); editableBlockTree(tree, source); return tree; }
+const protectedTypes = new Set(["html", "definition", "linkReference", "imageReference", "yaml", "toml"]);
 export function protectedBlock(node: SourceNode): boolean {
   if (node.type === "paragraph" && /^\[(?:toc|\[toc\])\]$/i.test(node.children?.map(n => n.value ?? "").join("") ?? "")) return true;
-  if (node.type === "blockquote" && /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/i.test(node.children?.[0]?.children?.map(n => n.value ?? "").join("") ?? "")) return true;
   return protectedTypes.has(node.type) || !!node.children?.some(protectedBlock);
 }
 export function range(node: SourceNode): [number, number] {
@@ -101,12 +104,25 @@ export class MarkdownDocument {
     this.source = source; this.doc = initialDoc ?? parse(source); this.index();
   }
   private index() {
-    this.ast = this.mdx && this.source ? [{ type: "deditorRaw", value: this.source, position: { start: { offset: 0 }, end: { offset: this.source.length } } }] : sourceTree(this.source).children ?? [];
+    this.ast = this.mdx && this.source ? [{ type: "deditorRaw", value: this.source, position: { start: { offset: 0 }, end: { offset: this.source.length } } }] : editingTree(this.source).children ?? [];
     if (this.ast.length > this.doc.childCount) throw new Error("Markdown source ranges do not match the editable document");
     // Crepe may append an empty paragraph for a terminal table/code/atom.
     while (this.ast.length < this.doc.childCount) this.ast.push({ type: "paragraph", position: { start: { offset: this.source.length }, end: { offset: this.source.length } } });
   }
   project(next: ProseNode) { this.doc = next; }
+  /** Reparse only a changed top-level prose block when its source boundaries remain stable. */
+  reparseInlineBlock(position: number) {
+    const resolved = this.doc.resolve(position), index = resolved.index(0), node = this.doc.child(index), ast = this.ast[index];
+    if (!ast || !["paragraph", "heading"].includes(node.type.name) || ast.type !== node.type.name) return null;
+    const [start, end] = range(ast), raw = this.source.slice(start, end);
+    // A multiline paste can introduce new blocks/definitions and affect neighbors.
+    // Those edits continue through the complete document parser.
+    if (/[\r\n]/.test(raw)) return null;
+    const definitions = this.ast.filter(n => ["definition", "footnoteDefinition"].includes(n.type)).map(n => this.source.slice(...range(n))).join("\n\n");
+    const parsed = this.parse(raw + (definitions ? "\n\n" + definitions : ""));
+    if (!parsed.firstChild || parsed.firstChild.type !== node.type) return null;
+    return { from: resolved.before(1), to: resolved.after(1), node: parsed.firstChild };
+  }
   editInline(from: number, length: number, raw: string, next: ProseNode) {
     const end = from + length, delta = raw.length - length;
     const shift = (n: SourceNode): SourceNode => ({ ...n, position: n.position ? {
@@ -115,13 +131,13 @@ export class MarkdownDocument {
     } : undefined, children: n.children?.map(shift) });
     this.source = this.source.slice(0, from) + raw + this.source.slice(end);
     this.ast = this.ast.map(shift);
-    const parsed = sourceTree(this.source).children ?? [];
+    const parsed = editingTree(this.source).children ?? [];
     if (parsed.length === this.ast.length) this.ast = parsed;
     this.doc = next;
   }
   inlineAt(position: number) {
     const offset = this.sourceOffset(position);
-    const supported = new Set(["strong", "emphasis", "delete", "link", "linkReference", "inlineCode"]);
+    const supported = new Set(["strong", "emphasis", "delete", "link", "linkReference", "inlineCode", "mark", "subscript", "superscript"]);
     let token: SourceNode | undefined;
     const walk = (n: SourceNode) => {
       const [from, to] = range(n);
@@ -153,7 +169,7 @@ export class MarkdownDocument {
     const to = oldEnd > first ? range(this.ast[oldEnd - 1])[1] : from;
     const eol = this.source.includes("\r\n") ? "\r\n" : "\n";
     const changed = after.slice(first, newEnd);
-    const definitions = this.ast.filter(node => node.type === "definition").map(node => this.source.slice(...range(node))).join("\n");
+    const definitions = this.ast.filter(node => ["definition", "footnoteDefinition"].includes(node.type)).map(node => this.source.slice(...range(node))).join("\n");
     const serializeBlock = (block: ProseNode) => block.type.name === "deditor_raw" ? block.textContent : this.serialize(next.type.create(null, block)).replace(/\n$/, "").replace(/\r?\n/g, eol);
     let parts = changed.map(serializeBlock);
     if (oldEnd - first === 1 && changed.length === 1 && changed[0].type.name !== "deditor_raw") {
@@ -181,7 +197,7 @@ export class MarkdownDocument {
     });
     let cursor = from + leading.length;
     const spans = parts.map((part, index) => {
-      const parsed = (sourceTree(part + (definitions ? "\n\n" + definitions : "")).children ?? []).filter(node => range(node)[0] < part.length);
+      const parsed = (editingTree(part + (definitions ? "\n\n" + definitions : "")).children ?? []).filter(node => range(node)[0] < part.length);
       const ast = changed[index].type.name !== "deditor_raw" && parsed.length === 1
         ? shifted(parsed[0], cursor)
         : { type: "deditorRaw", position: { start: { offset: cursor }, end: { offset: cursor + part.length } } };

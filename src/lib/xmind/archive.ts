@@ -57,8 +57,12 @@ export function replaceArchiveEntry(
     single.byteLength,
   );
   const singleCentral = singleView.getUint32(single.length - 6, true);
+  // History serializes earlier document states again. A fresh ZIP timestamp
+  // would make identical content look dirty after undoing to a saved state.
+  singleView.setUint32(10, u32(target.offset + 10), true);
   const local = single.subarray(0, singleCentral),
     record = single.slice(singleCentral, single.length - 22);
+  record.set(target.record.subarray(12, 16), 12);
   const delta = local.length - (after - target.offset);
   const directory = entries.map((e) => {
     const rec = e === target ? record : e.record;

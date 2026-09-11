@@ -17,10 +17,11 @@
   height: 100%;
   box-sizing: border-box;
   overflow-wrap: anywhere;
-  font-family:
+  --md-font-family:
     -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
     "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial,
     sans-serif;
+  font-family: var(--md-font-family);
   -webkit-font-smoothing: antialiased;
 }
 .dark :is(.preview, .milkdown .ProseMirror.md-document) {
@@ -390,6 +391,13 @@
 :is(.preview, .milkdown .ProseMirror.md-document) .footnotes { font-size: 0.88em; color: var(--preview-muted); }
 :is(.preview, .milkdown .ProseMirror.md-document) .footnote-ref { font-size: 0.75em; vertical-align: super; }
 
-:is(.preview[data-md-theme="serif"], .md-visual-shell[data-md-theme="serif"] .md-document) { font-family: Georgia, "Songti SC", "Noto Serif CJK SC", serif; }
 :is(.preview[data-md-theme="compact"], .md-visual-shell[data-md-theme="compact"] .md-document) { line-height: 1.6; }
 :is(.preview[data-md-theme="compact"], .md-visual-shell[data-md-theme="compact"] .md-document) p { margin-top: 0.65em; margin-bottom: 0.65em; }
+
+/* Directly editable alert/footnote content shares the preview spacing. */
+:is(.preview, .milkdown .ProseMirror.md-document) .md-callout-content > :first-child { margin-top: 0; }
+:is(.preview, .milkdown .ProseMirror.md-document) .md-callout-content > :last-child { margin-bottom: 0; }
+.milkdown .md-document .md-footnote-content { display: contents; }
+.milkdown .md-document sup.footnote-ref { cursor: pointer; }
+
+:is(.preview, .milkdown .ProseMirror.md-document) mark { background: #f6d54a70; color: inherit; }

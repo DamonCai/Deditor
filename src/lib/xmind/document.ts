@@ -181,7 +181,7 @@ export type Command =
     }
   | { type: "position"; id: string; x: number; y: number }
   | { type: "relationship"; from: string; to: string; title: string }
-  | { type: "relationship-update"; id: string; title?: string; properties?: Properties; controlPoints?: Record<string, { x: number; y: number } | { amount: number; angle: number }> }
+  | { type: "relationship-update"; id: string; title?: string; properties?: Properties; controlPoints?: Record<string, { x: number; y: number } | { amount: number; angle: number }>; flexibleControlPoints?: {x:number;y:number;[key:string]:unknown}[] }
   | { type: "relationship-reconnect"; id: string; end: 0 | 1; topicId: string }
   | { type: "relationship-delete"; id: string }
   | { type: "group-update"; parent: string; id: string; title?: string; properties?: Properties; range?: { start: number; end: number } }
@@ -192,6 +192,7 @@ export type Command =
       ids: string[];
       kind: "boundary" | "summary";
       title: string;
+      master?: boolean;
     };
 const newId = () => crypto.randomUUID().replaceAll("-", "");
 export const newTopic = (title: string): Topic => ({
@@ -309,6 +310,10 @@ export function editDocument(
           if ('x' in point ? !Number.isFinite(point.x) || !Number.isFinite(point.y)
             : !Number.isFinite(point.amount) || !Number.isFinite(point.angle)) throw new Error("Invalid control point");
         relation.controlPoints = { ...(relation.controlPoints as object ?? {}), ...command.controlPoints };
+      }
+      if(command.flexibleControlPoints) {
+        if(command.flexibleControlPoints.some(p=>!Number.isFinite(p.x)||!Number.isFinite(p.y)))throw new Error('Invalid control point');
+        relation.flexibleControlPoints=command.flexibleControlPoints.map(p=>({...p}));
       }
       break;
     }
@@ -481,6 +486,11 @@ export function editDocument(
     case "group": {
       const p = findTopic(root, command.parent);
       if (!p) throw new Error("Parent not found");
+      if(command.master) {
+        if(command.kind!=='boundary'||command.ids.length!==1||command.ids[0]!==p.id)throw new Error('Invalid whole-topic boundary');
+        (p.boundaries??=[]).push({id:newId(),range:'master',title:command.title});
+        break;
+      }
       const indices = (p.children?.attached ?? []).flatMap((c, i) =>
         command.ids.includes(c.id) ? [i] : [],
       );

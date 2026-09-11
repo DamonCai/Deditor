@@ -40,7 +40,7 @@ const PRINT_CSS = `
   #${PRINT_AREA_ID} {
     --preview-text:#343b46;--preview-heading:#202631;--preview-muted:#606b7a;--preview-link:#2864cf;--preview-code:#7350a2;--preview-code-bg:#f5f6f8;--preview-rule:#e5e8ed;
     height:auto;overflow:visible;color-scheme:light;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font-family: var(--md-font-family);
     color: #1f2328;
     background: #ffffff;
     max-width: 820px;
@@ -211,7 +211,6 @@ async function printDocument(root: HTMLElement, appearance: Partial<ExportAppear
     document.head.appendChild(style);
   }
   style.textContent = previewCss + PRINT_CSS + exportTemplateCss.replaceAll(".preview", `#${PRINT_AREA_ID}.preview`) + `
-#${PRINT_AREA_ID}[data-md-theme="serif"] { font-family: Georgia, "Songti SC", "Noto Serif CJK SC", serif; }
 #${PRINT_AREA_ID}[data-md-theme="compact"] { line-height:1.6; }
 #${PRINT_AREA_ID}[data-md-theme="compact"] p { margin:.65em 0; }`;
   let area = document.getElementById(PRINT_AREA_ID);

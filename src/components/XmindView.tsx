@@ -1,4 +1,5 @@
 import XmindGroupRange from "./XmindGroupRange";
+import XmindNumberInput from "./XmindNumberInput";
 import { BOUNDARY_SHAPES, SUMMARY_SHAPES } from "../lib/xmind/groupShapes";
 import XmindRelationshipInspector from "./XmindRelationshipInspector";
 import { ALL_TOPIC_SHAPES } from "../lib/xmind/shapes";
@@ -312,6 +313,12 @@ export default function XmindView({ dataUrl, tabId }: Props) {
       });
     return map;
   }, [sheet]);
+  const groupOwner=sheet && findTopic(sheet.rootTopic,parents.get(selected[0])??'');
+  const siblingIndices=(groupOwner?.children?.attached??[]).flatMap((topic,i)=>selected.includes(topic.id)?[i]:[]);
+  const canGroupSiblings=selected.length>0&&siblingIndices.length===selected.length&&
+    Math.max(...siblingIndices)-Math.min(...siblingIndices)+1===selected.length;
+  const canGroupWholeTopic=selected.length===1&&
+    [...groupOwner?.children?.detached??[],...groupOwner?.children?.summary??[]].some(topic=>topic.id===selected[0]);
   const saveCamera = useCallback(
     (camera: Camera) => {
       cameras.current.set(sheetId, camera);
@@ -347,12 +354,14 @@ export default function XmindView({ dataUrl, tabId }: Props) {
     setSelected([n.id]);
   };
   const group = (kind: "boundary" | "summary") => {
+    const master=kind==='boundary'&&canGroupWholeTopic;
     if (selected.length)
       execute({
         type: "group",
-        parent: parents.get(selected[0]) ?? "",
+        parent: master?selected[0]:parents.get(selected[0]) ?? "",
         ids: selected,
         kind,
+        master,
         title: t(`xmind.${kind}`),
       });
   };
@@ -459,14 +468,14 @@ export default function XmindView({ dataUrl, tabId }: Props) {
             </Button>
             <Button
               size="sm"
-              disabled={!selected.length || !parents.get(selected[0])}
+              disabled={!canGroupSiblings&&!canGroupWholeTopic}
               onClick={() => group("boundary")}
             >
               {t("xmind.boundary")}
             </Button>
             <Button
               size="sm"
-              disabled={!selected.length || !parents.get(selected[0])}
+              disabled={!canGroupSiblings}
               onClick={() => group("summary")}
             >
               {t("xmind.summary")}
@@ -585,15 +594,25 @@ export default function XmindView({ dataUrl, tabId }: Props) {
               <XmindGroupRange group={groupInfo.group} owner={findTopic(sheet.rootTopic,groupInfo.parent)!}
                 readonly={!editing} onCommand={execute} />
               <div className="xm-color-row">
-                {[["svg:fill","fill","#E9F1FA"],["line-color","lineColor","#A2B3C9"]].map(([key,label,fallback]) =>
+                {[["svg:fill","fill","#E9F1FA"],["line-color","lineColor","#A2B3C9"],
+                  ...(!groupInfo.summary ? [["fo:color","textColor","#FFFFFF"]] : [])].map(([key,label,fallback]) =>
                   <label key={key}>{t(`xmind.${label}`)}<input type="color" aria-label={t(`xmind.${label}`)}
                     disabled={!editing} value={colorInputValue(groupStyle(sheet,groupInfo.group,groupInfo.summary)[key],fallback)}
                     onChange={e=>execute({type:"group-update",id:groupInfo.group.id,parent:groupInfo.parent,properties:{[key]:e.target.value,...(key === "svg:fill" ? {"fill-pattern":"solid"} : {})}})} /></label>)}
               </div>
+              {!groupInfo.summary && <>
+                <label className="xm-field">{t("xmind.fontSize")}
+                  <XmindNumberInput label={t("xmind.fontSize")} min={9} max={64} disabled={!editing}
+                    value={parseFloat(selectedGroupStyle["fo:font-size"] ?? "14") || 14}
+                    onCommit={size => updateGroupStyle({"fo:font-size":String(size)})} />
+                </label>
+                <Button size="sm" disabled={!editing} pressed={selectedGroupStyle["fo:font-weight"] === "bold" || Number(selectedGroupStyle["fo:font-weight"]) >= 600}
+                  onClick={() => updateGroupStyle({"fo:font-weight":selectedGroupStyle["fo:font-weight"] === "bold" || Number(selectedGroupStyle["fo:font-weight"]) >= 600 ? "normal" : "bold"})}>{t("xmind.bold")}</Button>
+              </>}
               {!groupInfo.summary && <Button size="sm" disabled={!editing} pressed={selectedGroupStyle["fill-pattern"] === "none"}
                 onClick={() => updateGroupStyle({"fill-pattern":selectedGroupStyle["fill-pattern"] === "none" ? "solid" : "none"})}>{t("xmind.noFill")}</Button>}
               <label className="xm-field">{t("xmind.lineWidth")}
-                <input type="number" min={0} max={20} step={0.5} disabled={!editing}
+                <input type="number" aria-label={t("xmind.lineWidth")} min={0} max={20} step={0.5} disabled={!editing}
                   value={parseFloat(selectedGroupStyle["line-width"] ?? "2") || 0}
                   onChange={e => { const width = e.target.valueAsNumber; if (Number.isFinite(width) && width >= 0 && width <= 20) updateGroupStyle({"line-width":String(width)}); }} />
               </label>
@@ -687,18 +706,14 @@ export default function XmindView({ dataUrl, tabId }: Props) {
                 </Button>
                 <label className="xm-field">
                   {t("xmind.fontSize")}
-                  <input
-                    type="number"
+                  <XmindNumberInput
+                    label={t("xmind.fontSize")}
                     min={9}
                     max={64}
-                    value={fontSize ?? ""}
+                    value={fontSize}
                     placeholder={t("xmind.mixed")}
                     disabled={!editing}
-                    onChange={(e) => {
-                      const n = +e.target.value;
-                      if (n >= 9 && n <= 64)
-                        properties({ "fo:font-size": `${n}pt` });
-                    }}
+                    onCommit={n => properties({ "fo:font-size": `${n}pt` })}
                   />
                 </label>
                 <label className="xm-field">

@@ -7,6 +7,7 @@ import {
   type Sheet,
 } from "../src/lib/xmind/document";
 import { buildScene } from "../src/lib/xmind/scene";
+import { flexibleRelationshipRoute } from "../src/lib/xmind/flexibleRelationship";
 const sheets: Sheet[] = [
   {
     id: "s",
@@ -70,3 +71,31 @@ console.log(
 // Broad regression bounds avoid treating scheduler noise as a functional bug.
 assert.ok(median(saves) < 500, "10 archive edits should stay under 500ms");
 assert.ok(median(layouts) < 1000, "10 layouts should stay under 1000ms");
+
+// A saved manual path can contain thousands of control points. Moving a segment
+// must not copy every accumulated route prefix for each candidate elbow.
+const controlCount = 10000;
+const controls = Array.from({ length: controlCount }, (_, i) => ({
+  x: 100 + i * 20,
+  y: i % 2 ? 100 : -100,
+}));
+const routeTimes: number[] = [];
+for (let run = 0; run < 4; run++) {
+  const start = performance.now();
+  const geometry = flexibleRelationshipRoute(
+    "org.xmind.relationshipShape.zigzag",
+    { x: 20, y: 0 }, { x: controlCount * 20 + 200, y: 0 },
+    controls,
+    { x: 0, y: 0 }, { x: controlCount * 20 + 220, y: 0 },
+  );
+  if (run) routeTimes.push(performance.now() - start);
+  const route = geometry.route!;
+  let controlIndex = 0;
+  for (let i = 0; i < route.length; i++) {
+    if (route[i] === controls[controlIndex]) controlIndex++;
+    if (i) assert.ok(route[i].x === route[i - 1].x || route[i].y === route[i - 1].y);
+  }
+  assert.equal(controlIndex, controlCount, "all saved waypoints remain in order");
+}
+console.log(JSON.stringify({ controlCount, route_ms: routeTimes, route_median: median(routeTimes) }, null, 2));
+assert.ok(median(routeTimes) < 500, "10,000-control routing should stay under 500ms");

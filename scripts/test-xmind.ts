@@ -1,6 +1,8 @@
+import { moveOrthogonalSegment } from '../src/lib/xmind/flexibleRelationship';
+import { smartColorSheets } from '../tests/fixtures/xmind-smart-colors';
 import { groupRangeAxis, groupRangeBounds, groupRangeReversed, nearestGroupMember } from '../src/lib/xmind/groupRange';
 import { BOUNDARY_SHAPES, SUMMARY_SHAPES, boundaryGeometry, boundaryOverflow, summaryPath } from '../src/lib/xmind/groupShapes';
-import { round10GroupSheets, round10PolarSheets } from '../tests/fixtures/xmind-round10';
+import { round10GroupSheets, round10PolarSheets, round10FlexibleSheets, round10NestedGroupSheets, round10MasterSheets } from '../tests/fixtures/xmind-round10';
 import nativeGroupShapes from '../tests/fixtures/xmind-native-group-shapes.json';
 import { round9RelationshipSheets } from '../tests/fixtures/xmind-round9';
 import { ARROW_SHAPES, arrowDrawing } from '../src/lib/xmind/arrows';
@@ -14,7 +16,7 @@ import nativeAdvancedShapes from "../tests/fixtures/xmind-native-advanced-shapes
 import { round7ShapeSheets } from "../tests/fixtures/xmind-round7";
 import { TOPIC_SHAPES, shapePolygon, shapeSize } from "../src/lib/xmind/shapes";
 import { topicDropTarget } from "../src/lib/xmind/drop";
-import { movedRelationshipControl, relationshipDropTarget, relationshipGeometry, topicAnchor } from "../src/lib/xmind/relationship";
+import { movedRelationshipControl, relationshipDropTarget, relationshipGeometry, relationshipStyle, topicAnchor } from "../src/lib/xmind/relationship";
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { unzipSync, strFromU8, zipSync, strToU8 } from "fflate";
@@ -30,6 +32,7 @@ import {
   type Sheet,
 } from "../src/lib/xmind/document";
 import { buildScene, nodeVisualBounds, edgePath, STRUCTURES, topicStyle, groupStyle } from "../src/lib/xmind/scene";
+import { timelineVariantSheets } from "../tests/fixtures/xmind-timeline-variants";
 import { round6Sheets } from "../tests/fixtures/xmind-round6";
 import { sampleArchive, sampleSheets } from "../tests/fixtures/xmind";
 // Preserve the original CLI smoke-test entry point.
@@ -429,6 +432,20 @@ test(5, "no-op title preserves native titleUnedited flag", () => {
     title: sheets[0].rootTopic.title,
   });
   assert.equal(result, sheets);
+});
+test(4, "ZIP history serialization stays identical across clock changes", () => {
+  const original=zipSync({'content.json':[strToU8('original'),{mtime:new Date(2001,1,3,4,5,6)}]});
+  const RealDate=Date;
+  try {
+    globalThis.Date=class extends RealDate { constructor(){super(2031,2,4,5,6,8);} } as DateConstructor;
+    const first=replaceArchiveEntry(original,'content.json',strToU8('saved state'));
+    globalThis.Date=class extends RealDate { constructor(){super(2041,3,5,6,7,10);} } as DateConstructor;
+    const replay=replaceArchiveEntry(original,'content.json',strToU8('saved state'));
+    assert.deepEqual(replay,first,'undoing to saved content must reproduce its archive bytes');
+    const oldView=new DataView(original.buffer),newView=new DataView(first.buffer);
+    assert.equal(newView.getUint32(10,true),oldView.getUint32(10,true));
+    assert.equal(strFromU8(unzipSync(first)['content.json']),'saved state');
+  } finally { globalThis.Date=RealDate; }
 });
 test(
   4,
@@ -864,7 +881,7 @@ test(4, "three-branch maps put the lone left topic below center without shifting
 });
 test(4, "native group defaults and inherited colors resolve consistently", () => {
   const sheet=sampleSheets()[0], group={id:'test',range:'(0,0)'};
-  assert.equal(groupStyle(sheet,group,false)['svg:fill-opacity'],'0.2');
+  assert.equal(groupStyle(sheet,group,false)['svg:opacity'],'0.2');
   assert.equal(groupStyle({...sheet,theme:{}},group,true)['line-color'],'#00897B');
   sheet.theme={boundary:{properties:{'svg:fill':'#123456','line-color':'#654321'}}};
   assert.equal(groupStyle(sheet,{...group,style:{properties:{'svg:fill':'inherited'}}},false)['svg:fill'],'#123456');
@@ -1016,6 +1033,11 @@ test(1, "native vertical, off-axis and leftward timeline axes remain distinct", 
     } else if (sheet.rootTopic.structureClass!.includes("sided")) {
       main.forEach((n,i) => assert.ok(i % 2 ? n.y > 0 : n.y + n.height < 0));
       assert.equal(scene.edges.filter(e=>e.trunk).length,4);
+      if(sheet.rootTopic.structureClass!.endsWith('.rtl')) {
+        assert.equal(root.direction,'left');
+        assert.ok(main.every(n=>n.x+n.width<root.x));
+        assert.ok(main.every((n,i)=>!i||n.x<main[i-1].x));
+      }
     } else {
       main.forEach(n => assert.ok(Math.abs(n.y+n.height/2)<0.001));
       if (sheet.rootTopic.structureClass!.endsWith("rtl")) {
@@ -1027,6 +1049,93 @@ test(1, "native vertical, off-axis and leftward timeline axes remain distinct", 
     }
     assert.equal(JSON.stringify(sheet),before);
   }
+});
+test(2, "off-axis boundaries keep consecutive milestones on one side and preserve structure overrides", () => {
+  for(const template of round6Sheets().filter(s=>s.rootTopic.structureClass!.includes('sided'))) {
+    for(const [ranges,sides] of [
+      [['(0,1)'],[true,true,false,true]],
+      [['(1,2)'],[true,false,false,true]],
+      [['(0,1)','(1,2)'],[true,true,true,false]],
+      [['(0,1)','(2,3)'],[true,true,false,false]],
+      [['(2,1)','(0,99)','master'],[true,false,true,false]],
+    ] as [string[],boolean[]][]) {
+      const sheet=structuredClone(template),root=sheet.rootTopic;
+      const children=root.children!.attached!;
+      children[1].structureClass='org.xmind.ui.org-chart.down';
+      root.boundaries=ranges.map((range,i)=>({id:`range-${i}`,title:'Grouped stages',range}));
+      const before=JSON.stringify(sheet);
+      for(const folded of [new Set<string>(),new Set([children[0].id]),new Set(children.map(c=>c.id))]) {
+        const scene=buildScene(sheet,folded),main=children.map(c=>scene.nodes.find(n=>n.topic.id===c.id)!);
+        main.forEach((n,i)=>assert.ok(sides[i]?n.y+n.height<0:n.y>0,`${template.title} ${ranges} stage ${i}`));
+        if(!folded.has(children[1].id)) {
+          const details=scene.nodes.filter(n=>n.parent===children[1].id);
+          assert.ok(details.every(n=>sides[1]?n.y+n.height<main[1].y:n.y>main[1].y+main[1].height));
+          assert.ok(details[0].y<details[1].y,'stored org-chart override does not replace the native detail stack');
+        }
+        for(const [i,a] of scene.nodes.entries()) for(const b of scene.nodes.slice(i+1))
+          assert.ok(a.x+a.width<=b.x+.01||b.x+b.width<=a.x+.01||a.y+a.height<=b.y+.01||b.y+b.height<=a.y+.01,'grouped milestones do not overlap');
+      }
+      assert.equal(JSON.stringify(sheet),before);
+      const doc=openDocument(sampleArchive([sheet]));
+      const edited=editDocument(doc.sheets,sheet.id,{type:'title',id:children[0].id,title:'Saved stage'});
+      const reopened=openDocument(writeDocument(doc,edited));
+      assert.equal(reopened.sheets[0].rootTopic.children!.attached![0].title,'Saved stage');
+      assert.equal(reopened.sheets[0].rootTopic.children!.attached![1].structureClass,'org.xmind.ui.org-chart.down');
+      assert.deepEqual(reopened.sheets[0].rootTopic.boundaries,root.boundaries);
+    }
+  }
+});
+test(2, "timeline detail boundary captions clear the milestone and master frames remain unique", () => {
+  for(const sheet of round6Sheets().filter(s=>s.rootTopic.structureClass!.includes('horizontal'))) {
+    const children=sheet.rootTopic.children!.attached!;
+    children.forEach((child,i)=>{child.boundaries=[
+      {id:`detail-${i}`,range:'(0,1)',title:'Long caption\nSecond line',style:{properties:{'fo:font-size':'28'}}},
+      {id:`master-${i}`,range:'master',title:'Whole stage'},
+    ];});
+    const scene=buildScene(sheet);
+    children.forEach((child,i)=>{
+      const milestone=scene.nodes.find(n=>n.topic.id===child.id)!;
+      const frame=scene.groups.find(g=>g.id===`detail-${i}`)!;
+      assert.equal(scene.groups.filter(g=>g.id===`master-${i}`).length,1);
+      assert.ok(frame.y+frame.height<milestone.y || frame.y-frame.titleHeight>milestone.y+milestone.height,
+        `${sheet.title} caption must not cover stage ${i}`);
+      const master=scene.groups.find(g=>g.id===`master-${i}`)!;
+      assert.ok(master.y<=Math.min(milestone.y,frame.y-frame.titleHeight));
+      assert.ok(master.y+master.height>=Math.max(milestone.y+milestone.height,frame.y+frame.height));
+    });
+  }
+});
+test(2, "upward through timelines preserve detail reading order, groups, fold states and archive fields", () => {
+  const sheet=timelineVariantSheets()[0],children=sheet.rootTopic.children!.attached!;
+  children[0].children!.attached![0].title='Long 中文 detail '.repeat(12);
+  children[1].boundaries=[{id:'detail-group',range:'(0,1)',title:'明细分组'}];
+  sheet.rootTopic.boundaries=[{id:'stage-group',range:'(0,1)',title:'前两阶段'}];
+  const before=JSON.stringify(sheet);
+  for(const fold of [new Set<string>(),new Set([children[0].id]),new Set(children.map(c=>c.id))]) {
+    const scene=buildScene(sheet,fold),root=scene.nodes[0],main=children.map(c=>scene.nodes.find(n=>n.topic.id===c.id)!);
+    assert.equal(root.direction,'up');assert.equal(scene.warnings.length,0);
+    for(const [i,n] of main.entries()) {
+      assert.ok(Math.abs(n.x+n.width/2)<.001);
+      assert.ok(n.y+n.height<(i?main[i-1].y:root.y));
+      const details=scene.nodes.filter(d=>d.parent===n.topic.id);
+      if(details.length) {
+        assert.ok(details[0].y<details[1].y,'A precedes B in upward main-axis layouts');
+        assert.ok(details.every(d=>i%2?d.x+d.width<n.x:d.x>n.x+n.width));
+      }
+    }
+    assert.equal(groupRangeAxis(root,scene.nodes),'y');
+    assert.equal(groupRangeReversed(sheet.rootTopic,scene.nodes,'y'),true);
+    for(const [i,a] of scene.nodes.entries())for(const b of scene.nodes.slice(i+1))
+      assert.ok(a.x+a.width<=b.x+.01||b.x+b.width<=a.x+.01||a.y+a.height<=b.y+.01||b.y+b.height<=a.y+.01);
+    for(const edge of scene.edges.filter(e=>e.from===root.topic.id))assert.equal(edge.direction,'up');
+  }
+  assert.equal(JSON.stringify(sheet),before);
+  const doc=openDocument(sampleArchive([sheet]));
+  const edited=editDocument(doc.sheets,sheet.id,{type:'fold',ids:[children[0].id],folded:true});
+  const saved=openDocument(writeDocument(doc,edited));
+  assert.equal(saved.sheets[0].rootTopic.structureClass,'org.xmind.ui.timeline.through.vertical.btt');
+  assert.equal(saved.sheets[0].rootTopic.children!.attached![0].branch,'folded');
+  assert.deepEqual(saved.sheets[0].rootTopic.boundaries,sheet.rootTopic.boundaries);
 });
 test(2, "timeline variants keep long, mixed and grouped subtrees separate at every fold state", () => {
   for (const sheet of round6Sheets()) {
@@ -1063,14 +1172,75 @@ test(1, "native inherited rainbow fill, level style and automatic text stay visi
   const main=scene.nodes.find(n=>n.topic.id==='vertical-main-0')!;
   const detail=scene.nodes.find(n=>n.topic.id==='vertical-detail-0-a')!;
   assert.equal(main.fill,"#FF6B6B");assert.equal(detail.fill,"#FF6B6B");
-  assert.equal(detail.properties['svg:fill-opacity'],'0.2');
+  assert.equal(detail.properties['svg:fill-opacity'],undefined);
   assert.equal(detail.fillOpacity,0.2);assert.equal(detail.color,'#660000');
   assert.equal(scene.nodes.find(n=>n.topic.id==='vertical-detail-2-a')!.color,'#1E4733');
   const topic=sheet.rootTopic.children!.attached![0].children!.attached![0];
   topic.style={properties:{'svg:fill':'#123456','svg:fill-opacity':'0.7','fo:color':'#FEDCBA','fo:font-size':'22pt'}};
   const overridden=topicStyle(sheet,topic.id);
   assert.equal(overridden.fill,'#123456');assert.equal(overridden.properties['svg:fill-opacity'],'0.7');
-  assert.equal(overridden.color,'#FEDCBA');assert.equal(overridden.fontSize,22);
+  assert.equal(overridden.fillOpacity,1);assert.equal(overridden.color,'#FEDCBA');assert.equal(overridden.fontSize,22);
+});
+test(2, "smart inherited text prefers readable white, uses the theme palette and keeps explicit colors", () => {
+  const sheets = smartColorSheets();
+  const original = structuredClone(sheets);
+  for (const [index, sheet] of sheets.entries()) {
+    const scene = buildScene(sheet);
+    const colors = scene.nodes.map(node => node.color.toUpperCase());
+    assert.deepEqual(colors, index
+      ? ['#FFFFFF', '#FFFFFF', '#243B53', '#FFFFFF', '#FFFFFF', '#9A2250', '#FFFFFF']
+      : ['#0055CC', '#FFFFFF', '#243B53', '#243B53', '#243B53', '#9A2250', '#FFFFFF']);
+    for (const node of scene.nodes) assert.equal(topicStyle(sheet, node.topic.id).color, node.color);
+  }
+  const rainbow = round6Sheets()[0];
+  const main = rainbow.rootTopic.children!.attached![0];
+  main.style = { properties: { 'svg:fill': '#777777' } };
+  rainbow.theme!.map!.properties!['color-list'] = '#FFFFFF #9A2250';
+  assert.equal(topicStyle(rainbow, main.id).color, '#FFFFFF');
+  const doc = openDocument(sampleArchive(sheets));
+  const edited = editDocument(doc.sheets, sheets[0].id, { type: 'title', id: 'smart-0-1', title: '保存智能文字' });
+  const reopened = openDocument(writeDocument(doc, edited));
+  assert.equal(topicStyle(reopened.sheets[0], 'smart-0-1').color, '#243B53');
+  assert.deepEqual(sheets, original, 'computed colors must never modify the original styles');
+  assert.deepEqual(reopened.sheets.map(sheet => sheet.theme), original.map(sheet => sheet.theme));
+});
+test(2, "partial themes keep base borders distinct from explicit branch inheritance", () => {
+  const sheet = smartColorSheets()[0];
+  const topic = sheet.rootTopic.children!.detached![0];
+  const before = JSON.stringify(sheet);
+  const original = topicStyle(sheet, topic.id);
+  assert.equal(original.stroke, '#000000');
+  assert.equal(original.properties['border-line-width'], '1');
+  assert.equal(original.properties['border-line-pattern'], 'solid');
+  assert.equal(JSON.stringify(sheet), before);
+  topic.style!.properties = { ...topic.style!.properties,
+    'line-color': '#E05566', 'line-width': '4', 'line-pattern': 'dash',
+    'border-line-color': 'inherited', 'border-line-width': 'inherited', 'border-line-pattern': 'inherited' };
+  const inherited = topicStyle(sheet, topic.id);
+  assert.equal(inherited.stroke, '#E05566');
+  assert.equal(inherited.properties['border-line-width'], '4');
+  assert.equal(inherited.properties['border-line-pattern'], 'dash');
+  topic.style!.properties['border-line-color'] = '#007799';
+  assert.equal(topicStyle(sheet, topic.id).stroke, '#007799');
+  topic.style!.properties['border-line-pattern'] = 'none';
+  assert.equal(topicStyle(sheet, topic.id).stroke, 'none');
+});
+
+test(2, "smart relationship and boundary labels use their actual background and preserve explicit overrides", () => {
+  for (const [index, sheet] of smartColorSheets().entries()) {
+    sheet.theme!.relationship = { properties: { 'fo:color': 'inherited', 'line-color': '#777777' } };
+    sheet.theme!.boundary = { properties: { 'fo:color': 'inherited', 'line-color': '#FFF4CC' } };
+    const relation = { id: 'smart-relation', end1Id: `smart-${index}-0`, end2Id: `smart-${index}-1` };
+    const boundary = { id: 'smart-boundary', range: '(0,1)', title: '边界颜色' };
+    assert.equal(relationshipStyle(sheet, relation)['fo:color'], index ? '#FFFFFF' : '#243B53');
+    assert.equal(groupStyle(sheet, boundary, false)['fo:color'], '#243B53');
+    assert.equal(groupStyle(sheet, { ...boundary, style: { properties: { 'line-color': '#777777' } } }, false)['fo:color'], '#FFFFFF');
+    const explicit = { properties: { 'fo:color': '#9A2250' } };
+    assert.equal(relationshipStyle(sheet, { ...relation, style: explicit })['fo:color'], '#9A2250');
+    assert.equal(groupStyle(sheet, { ...boundary, style: explicit }, false)['fo:color'], '#9A2250');
+    assert.equal(sheet.theme!.relationship.properties!['fo:color'], 'inherited');
+    assert.equal(sheet.theme!.boundary.properties!['fo:color'], 'inherited');
+  }
 });
 test(2, "basic shapes contain padded content and have finite outline anchors", () => {
   for (const shape of TOPIC_SHAPES) for (const [w,h] of [[50,24],[70,300],[450,34]]) {
@@ -1115,7 +1285,7 @@ test(5, "relationship inherited overrides preserve theme colors and finite width
   const sheet=round6Sheets()[0],scene=buildScene(sheet);
   const relation={id:'rel-style',end1Id:scene.nodes[0].topic.id,end2Id:scene.nodes[1].topic.id,style:{properties:{'line-color':'inherited','fo:color':'inherited','line-width':'invalid'}}};
   const g=relationshipGeometry(sheet,relation,scene.nodes[0],scene.nodes[1]);
-  assert.equal(g.color,'#00000066');assert.equal(g.properties['fo:color'],undefined);assert.equal(g.width,1.5);
+  assert.equal(g.color,'#00000066');assert.equal(g.properties['fo:color'],'#000000');assert.equal(g.textColor,'#000000');assert.equal(g.width,1.5);
   assert.ok(!/NaN|Infinity/.test(g.path));
 });
 test(2, "long draft editors stay visible at 10 and 400 percent without changing topic styles", () => {
@@ -1362,22 +1532,25 @@ test(2, "group range geometry follows visible descendants and nearest member ord
   assert.equal(nearestGroupMember(owner,mirrored,'y',-image.y-image.height/2),2);
 });
 
-test(2, "missing text colors stay readable on explicit light/dark fills without rewriting saved styles", () => {
+test(2, "native missing text colors and topic alpha keep defaults without rewriting saved styles", () => {
   const sheets=sampleSheets(),sheet=sheets[0],floating=findTopic(sheet.rootTopic,'floating')!;
   const before=structuredClone(sheets);
-  assert.equal(topicStyle(sheet,'floating')!.color,'#000000');
+  assert.equal(topicStyle(sheet,'floating')!.color,'#FFFFFF','native floating default remains white on a pale explicit fill');
   assert.deepEqual(sheets,before);
   floating.style!.properties!['svg:fill']='#112244';
-  assert.equal(topicStyle(sheet,'floating')!.color,'#FFFFFF');
   floating.style!.properties!['svg:fill-opacity']='0.2';
-  assert.equal(topicStyle(sheet,'floating')!.color,'#000000','translucent dark fill on a light canvas needs dark text');
+  floating.style!.properties!['svg:opacity']='0.3';
+  const opaque=topicStyle(sheet,'floating');
+  assert.equal(opaque.color,'#FFFFFF');assert.equal(opaque.fillOpacity,1,'topic opacity comes from color alpha, not boundary opacity fields');
   floating.style!.properties!['svg:fill']='#FFFFFF80';
   sheet.style={properties:{'svg:fill':'#112244'}};
-  assert.equal(topicStyle(sheet,'floating')!.color,'#FFFFFF','combine fill alpha and opacity over the sheet background');
-  floating.style!.properties!['fill-pattern']='none';
-  assert.equal(topicStyle(sheet,'floating')!.color,'#FFFFFF','no-fill uses the actual sheet background');
+  assert.equal(topicStyle(sheet,'floating')!.fill,'#FFFFFF80');
+  assert.equal(topicStyle(sheet,'floating')!.fillOpacity,1,'preserve the color alpha without multiplying an unsupported field');
   floating.style!.properties!['fo:color']='#FFAACC';
   assert.equal(topicStyle(sheet,'floating')!.color,'#FFAACC');
+  const doc=openDocument(sampleArchive(sheets));
+  const edited=editDocument(doc.sheets,sheet.id,{type:'title',id:'floating',title:'Alpha preserved'});
+  assert.deepEqual(findTopic(openDocument(writeDocument(doc,edited)).sheets[0].rootTopic,'floating')!.style,floating.style);
 });
 
 test(2, "range handles follow vertical and reverse timelines instead of connector directions", () => {
@@ -1385,7 +1558,7 @@ test(2, "range handles follow vertical and reverse timelines instead of connecto
     const scene=buildScene(sheet),root=scene.nodes.find(n=>n.topic.id===sheet.rootTopic.id)!;
     const axis=groupRangeAxis(root,scene.nodes);
     assert.equal(axis,sheet.id==='round6-vertical'?'y':'x');
-    assert.equal(groupRangeReversed(root.topic,scene.nodes,axis),sheet.id==='round6-left');
+    assert.equal(groupRangeReversed(root.topic,scene.nodes,axis),sheet.rootTopic.structureClass!.endsWith('.rtl'));
   }
   const sheet=round6Sheets()[0];
   sheet.rootTopic.structureClass='org.xmind.ui.org-chart.down';
@@ -1450,6 +1623,58 @@ test(2, "native boundary shapes enclose members and keep open borders separate f
   assert.notEqual(poly.borderPath,'M0,0 H200 V200 H0 Z','polygon follows the different member widths');
 });
 
+test(2, "native polygon frames hide stored titles and keep the far edge flat in every direction", () => {
+  const [sheet]=round10GroupSheets(),before=structuredClone(sheet),scene=buildScene(sheet);
+  for(const group of scene.groups) {
+    const hidden=/\.(polygon|roundedPolygon)$/.test(group.properties['shape-class']);
+    assert.equal(group.titleLines.length===0,hidden);
+    if(hidden) { assert.ok(group.title.length>0);assert.equal(group.titleHeight,0); }
+  }
+  assert.deepEqual(sheet,before,'hidden titles remain in the document');
+  const members=[{x:14,y:14,width:60,height:30},{x:80,y:120,width:106,height:66}];
+  for(const direction of ['left','right','up','down'] as const) {
+    const geometry=boundaryGeometry('polygon',200,200,members,14,direction)!;
+    const points=[...geometry.borderPath.matchAll(/[ML]([\d.-]+),([\d.-]+)/g)].map(m=>[+m[1],+m[2]]);
+    const edge=direction==='right'?[[200,0],[200,200]]:direction==='left'?[[0,0],[0,200]]:direction==='up'?[[0,0],[200,0]]:[[0,200],[200,200]];
+    for(const corner of edge)assert.ok(points.some(p=>p[0]===corner[0]&&p[1]===corner[1]));
+  }
+});
+
+test(2, "manual orthogonal segment moves keep endpoint stubs and survive a fresh route", () => {
+  const sheet=round10FlexibleSheets()[0],scene=buildScene(sheet),relation=sheet.relationships![2];
+  const a=scene.nodes.find(n=>n.topic.id===relation.end1Id)!,b=scene.nodes.find(n=>n.topic.id===relation.end2Id)!;
+  const g=relationshipGeometry(sheet,relation,a,b),before=structuredClone(relation);
+  assert.ok(g.virtualControls!.length>=3);
+  for(const handle of g.virtualControls!) {
+    const moved={...handle,[handle.segment!.axis]:handle[handle.segment!.axis]+35};
+    const route=moveOrthogonalSegment(g.route!,handle.segment!,moved);
+    assert.deepEqual(route.slice(0,2),g.route!.slice(0,2));
+    assert.deepEqual(route.slice(-2),g.route!.slice(-2));
+    for(let i=1;i<route.length;i++)assert.ok(Math.abs(route[i].x-route[i-1].x)<1e-7||Math.abs(route[i].y-route[i-1].y)<1e-7);
+    const next={...relation,flexibleControlPoints:route.slice(2,-2).map(p=>({x:p.x-a.x-a.width/2,y:p.y-a.y-a.height/2}))};
+    const rerouted=relationshipGeometry(sheet,next,a,b);
+    assert.deepEqual(rerouted.start,g.start);assert.deepEqual(rerouted.end,g.end);
+    assert.ok(!/NaN|Infinity/.test(rerouted.path));
+    assert.ok(rerouted.flexibleControls!.some(p=>Math.abs(p[handle.segment!.axis]-moved[handle.segment!.axis])<1e-7));
+  }
+  assert.deepEqual(relation,before);
+});
+
+test(2, "manual curve insertion positions and short Cartesian controls remain finite without mutating vectors", () => {
+  const sheet=sampleSheets()[0],template=buildScene(sheet).nodes[0];
+  const a={...template,x:0,y:0,width:100,height:60,shape:'rect'},b={...a,x:500};
+  for(const shape of ['curved','angled']) {
+    const relation={id:'short-manual',end1Id:'a',end2Id:'b',flexibleControlPoints:[{x:3,y:4},{x:260,y:90},{x:0,y:0}],
+      style:{properties:{'shape-class':`org.xmind.relationshipShape.flexible.${shape}`}}};
+    const before=structuredClone(relation),g=relationshipGeometry(sheet,relation,a,b);
+    assert.deepEqual(g.flexibleControls![0],{x:56,y:38},'native nonzero control vectors have ten-unit minimum length');
+    assert.deepEqual(g.flexibleControls![2],{x:50,y:30},'zero stays at the source center');
+    assert.equal(g.virtualControls!.length,4);
+    for(const p of g.virtualControls!)assert.ok(Number.isFinite(p.x)&&Number.isFinite(p.y));
+    assert.deepEqual(relation,before);
+  }
+});
+
 test(2, "polar controls rotate fractions of the endpoint vector without moving outline anchors", () => {
   const sheet=sampleSheets()[0],template=buildScene(sheet).nodes[0];
   const a={...template,x:0,y:0,width:100,height:60,shape:'rect'},b={...a,x:300};
@@ -1486,6 +1711,127 @@ test(3, "polar drag, reconnect and archive preserve fixed endpoints, opposite co
   assert.equal(saved.end2Id,'polar-2-1');assert.deepEqual(relation,before);
   assert.deepEqual(reopened.files['attachments/keep.bin'],doc.files['attachments/keep.bin']);
   assert.throws(()=>editDocument(sheets,sheet.id,{type:'relationship-update',id:relation.id,controlPoints:{'0':{amount:NaN,angle:0}}}),/Invalid control/);
+});
+
+test(2, "manual relationship paths use every saved waypoint and Fit contains their distant bends", () => {
+  const sheet=round10FlexibleSheets()[0],before=structuredClone(sheet),scene=buildScene(sheet);
+  for(const relation of sheet.relationships!) {
+    const a=scene.nodes.find(n=>n.topic.id===relation.end1Id)!,b=scene.nodes.find(n=>n.topic.id===relation.end2Id)!;
+    const g=relationshipGeometry(sheet,relation,a,b);
+    assert.equal(g.flexibleControls!.length,3);
+    if(g.route && relation.id.endsWith('2')) {
+      const middle=g.flexibleControls![1],index=g.route.findIndex(p=>p.x===middle.x&&p.y===middle.y);
+      assert.ok(index>0 && index<g.route.length-1);
+      assert.equal(g.route[index-1].y,middle.y,'native zigzag enters the middle waypoint horizontally');
+      assert.equal(g.route[index+1].y,middle.y,'native zigzag continues horizontally through the middle waypoint');
+    }
+    for(const point of g.flexibleControls!) {
+      assert.ok(g.path.includes(`${point.x},${point.y}`),'path passes through each saved waypoint');
+      assert.ok(point.x>=scene.bounds.x && point.x<=scene.bounds.x+scene.bounds.width);
+    }
+    if(g.route && relation.id.endsWith('2'))for(let i=1;i<g.route.length;i++) {
+      assert.ok(g.route[i].x===g.route[i-1].x||g.route[i].y===g.route[i-1].y);
+      if(i>1) {
+        const a=g.route[i-2],b=g.route[i-1],c=g.route[i];
+        assert.ok((b.x-a.x)*(c.x-b.x)+(b.y-a.y)*(c.y-b.y)>=0,'route does not immediately double back at a waypoint');
+      }
+    }
+    const far={...relation,flexibleControlPoints:[{x:-1800,y:2200},{x:-1800,y:2200},{x:450,y:-40}]};
+    const result=relationshipGeometry(sheet,far,a,b);assert.ok(!/NaN|Infinity/.test(result.path));
+    sheet.relationships=[far];const enlarged=buildScene(sheet);
+    const fa=enlarged.nodes.find(n=>n.topic.id===relation.end1Id)!,fb=enlarged.nodes.find(n=>n.topic.id===relation.end2Id)!;
+    for(const point of relationshipGeometry(sheet,far,fa,fb).bounds)
+      assert.ok(point.x>=enlarged.bounds.x && point.y<=enlarged.bounds.y+enlarged.bounds.height);
+  }
+  sheet.relationships=before.relationships;assert.deepEqual(sheet,before);
+});
+
+test(3, "manual waypoint edits preserve ordinary controls, references, metadata and resources", () => {
+  const sheets=round10FlexibleSheets(),sheet=sheets[0],relation=sheet.relationships![0];
+  relation.controlPoints={'0':{amount:.25,angle:.5}};relation.custom={retain:true};
+  const doc=openDocument(sampleArchive(sheets)),before=structuredClone(relation);
+  const points=(relation.flexibleControlPoints as {x:number;y:number}[]).map((p,i)=>i===1?{...p,y:150,custom:'keep'}:{...p});
+  const edited=editDocument(sheets,sheet.id,{type:'relationship-update',id:relation.id,flexibleControlPoints:points});
+  const reopened=openDocument(writeDocument(doc,edited)),saved=reopened.sheets[0].relationships![0];
+  assert.deepEqual(saved,{...before,flexibleControlPoints:points});assert.deepEqual(relation,before);
+  assert.deepEqual(reopened.files['attachments/keep.bin'],doc.files['attachments/keep.bin']);
+  assert.throws(()=>editDocument(sheets,sheet.id,{type:'relationship-update',id:relation.id,flexibleControlPoints:[{x:Infinity,y:0}]}),/Invalid control/);
+});
+
+test(2, "mirrored polygon groups follow visible members and nested frames including labels and thick strokes", () => {
+  for(const sheet of round10NestedGroupSheets()) {
+    const scene=buildScene(sheet),outer=scene.groups.find(g=>g.id.endsWith('-outer'))!;
+    for(const group of scene.groups.filter(g=>!g.id.endsWith('-outer'))) {
+      const owner=findTopic(sheet.rootTopic,group.parent)!;
+      if(sheet.rootTopic.structureClass!.includes('fishbone')) {
+        const cause=scene.nodes.find(n=>n.topic.id===owner.id)!,stroke=parseFloat(group.properties['line-width']??'2');
+        assert.ok(cause.y+cause.height<=group.y-group.titleHeight-stroke/2 || cause.y>=group.y+group.height+stroke/2,
+          'fishbone cause cannot overlap its child frame or frame title');
+      }
+      for(const topic of owner.children!.attached!) {
+        const node=scene.nodes.find(n=>n.topic.id===topic.id)!,box=nodeVisualBounds(node);
+        assert.ok(group.memberBoxes!.some(b=>Math.abs(group.x+b.x-box.x)<1e-7&&Math.abs(group.y+b.y-box.y)<1e-7&&Math.abs(b.width-box.width)<1e-7),
+          'polygon member geometry must follow the reflected node and its left-aligned labels');
+        const stroke=parseFloat(group.properties['line-width']??'2');
+        assert.ok(box.x>=group.x+stroke/2 && box.y>=group.y+stroke/2,'thick stroke cannot cover member content');
+      }
+      if(!group.id.endsWith('-2')) {
+        assert.ok(group.x>=outer.x && group.x+group.width<=outer.x+outer.width,'outer frame includes child frame width');
+        assert.ok(group.y-group.titleHeight>=outer.y && group.y+group.height<=outer.y+outer.height,'outer frame includes child title and bottom');
+      }
+    }
+  }
+});
+
+test(2, "native master example keeps titles left aligned, summaries curved and default callouts close", () => {
+  const sheet=round10MasterSheets()[0],before=structuredClone(sheet),scene=buildScene(sheet);
+  const owner=scene.nodes.find(n=>n.topic.id==='whole-branch')!,callout=scene.nodes.find(n=>n.topic.id==='whole-callout')!;
+  assert.equal(owner.y-(callout.y+callout.height),5,'default callout has a short tail, not an 80px gap');
+  assert.deepEqual([callout.fill,callout.color,callout.fontSize],['#00897B','#FFFFFF',14]);
+  const whole=scene.groups.find(g=>g.id==='whole-second')!;
+  assert.ok(whole.titleOffsetX<whole.width/4,'outer title sits near the left edge');
+  const summary=scene.groups.find(g=>g.summary)!;
+  assert.equal(summary.properties['shape-class'],'org.xmind.summaryShape.round');
+  assert.deepEqual(sheet,before);
+  const stored=findTopic(sheet.rootTopic,'whole-callout')!;stored.position={x:170,y:120};
+  const moved=buildScene(sheet),bubble=moved.nodes.find(n=>n.topic.id==='whole-callout')!,parent=moved.nodes.find(n=>n.topic.id==='whole-branch')!;
+  assert.ok(Math.abs(bubble.x+bubble.width/2-parent.x-parent.width/2-170)<1e-7);
+  assert.ok(Math.abs(bubble.y+bubble.height/2-parent.y-parent.height/2-120)<1e-7);
+});
+
+test(2, "whole-topic boundaries include nested frames, summaries and callouts and survive folding", () => {
+  const sheets=round10MasterSheets(),sheet=sheets[0],before=structuredClone(sheet),scene=buildScene(sheet);
+  const first=scene.groups.find(g=>g.id==='whole-first')!,outer=scene.groups.find(g=>g.id==='whole-second')!;
+  assert.ok(first && outer,'master ranges must render');
+  for(const id of ['whole-branch','whole-a','whole-b','whole-summary','whole-callout'])assert.ok(first.memberIds!.includes(id));
+  assert.equal(first.memberIds!.includes('whole-neighbor'),false);
+  assert.ok(first.memberGroupIds!.includes('summary-master'));
+  assert.ok(outer.memberGroupIds!.includes(first.id));
+  assert.ok(outer.y<=first.y-first.titleHeight);
+  const folded=editDocument(sheets,sheet.id,{type:'fold',ids:['whole-branch'],folded:true});
+  const foldedScene=buildScene(folded[0],new Set(['whole-branch']));
+  assert.ok(foldedScene.groups.some(g=>g.id==='whole-first'));
+  assert.equal(foldedScene.nodes.some(n=>n.topic.id==='whole-a'),false);
+  assert.deepEqual(sheet,before);
+});
+
+test(3, "whole-topic boundary creation, rename and child edits preserve master ranges in the archive", () => {
+  const sheets=round10MasterSheets(),sheet=sheets[0],doc=openDocument(sampleArchive(sheets));
+  const created=editDocument(sheets,sheet.id,{type:'group',parent:'whole-neighbor',ids:['whole-neighbor'],kind:'boundary',master:true,title:'整体'});
+  const boundary=findTopic(created[0].rootTopic,'whole-neighbor')!.boundaries![0];assert.equal(boundary.range,'master');
+  const added=editDocument(created,sheet.id,{type:'add',parent:'whole-neighbor',topic:{id:'new-child',title:'新主题'},kind:'attached'});
+  const renamed=editDocument(added,sheet.id,{type:'group-update',parent:'whole-neighbor',id:boundary.id,title:'整体新标题'});
+  const reopened=openDocument(writeDocument(doc,renamed)),owner=findTopic(reopened.sheets[0].rootTopic,'whole-neighbor')!;
+  assert.deepEqual(owner.boundaries![0],{...boundary,title:'整体新标题'});assert.equal(owner.children!.attached![0].id,'new-child');
+  assert.deepEqual(reopened.files['attachments/keep.bin'],doc.files['attachments/keep.bin']);
+  assert.throws(()=>editDocument(sheets,sheet.id,{type:'group',parent:'whole-neighbor',ids:['whole-neighbor'],kind:'summary',master:true,title:'Invalid'}),/Invalid whole-topic/);
+});
+
+test(1, "synthetic native archives use a structured creator and list every payload in the manifest", () => {
+  const files=unzipSync(sampleArchive()),metadata=JSON.parse(strFromU8(files['metadata.json'])),manifest=JSON.parse(strFromU8(files['manifest.json']));
+  assert.equal(typeof metadata.creator,'object');assert.equal(typeof metadata.creator.name,'string');
+  assert.equal(metadata.dataStructureVersion,'3');
+  for(const name of Object.keys(files).filter(name=>name!=='manifest.json'))assert.ok(name in manifest['file-entries']);
 });
 
 console.log(`${passed} XMind tests passed`);

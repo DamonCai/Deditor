@@ -10,6 +10,7 @@ export function round6Sheets(): Sheet[] {
     ['sided', '离轴时间轴', 'org.xmind.ui.timeline.sided.horizontal'],
     ['left', '向左时间轴', 'org.xmind.ui.timeline.horizontal.rtl'],
     ['horizontal', '水平时间轴', 'org.xmind.ui.timeline.horizontal'],
+    ['sided-left', '向左离轴时间轴', 'org.xmind.ui.timeline.sided.horizontal.rtl'],
   ];
   return structures.map(([id, title, structureClass]) => {
     const topic = (suffix: string, title: string, children?: Topic[]): Topic => ({

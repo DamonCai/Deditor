@@ -194,8 +194,10 @@ export function sampleSheets(): Sheet[] {
 export function sampleArchive(sheets = sampleSheets()) {
   return zipSync({
     "content.json": strToU8(JSON.stringify(sheets)),
-    "metadata.json": strToU8('{"creator":"XMind","custom":true}'),
-    "manifest.json": strToU8('{"file-entries":{"resources/sample.svg":{}}}'),
+    "metadata.json": strToU8(JSON.stringify({creator:{name:'DEditor synthetic review',version:'10'},
+      dataStructureVersion:'3',layoutEngineVersion:'5',custom:true})),
+    "manifest.json": strToU8(JSON.stringify({'file-entries':Object.fromEntries(
+      ['content.json','metadata.json','resources/sample.svg','attachments/keep.bin'].map(name=>[name,{}]))})),
     "resources/sample.svg": strToU8(
       '<svg xmlns="http://www.w3.org/2000/svg" width="130" height="70"><rect width="130" height="70" rx="10" fill="#5385C5"/><path d="M24 35H106M65 16V54" stroke="white" stroke-width="3"/></svg>',
     ),

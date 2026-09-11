@@ -135,12 +135,15 @@ try {
     assert.doesNotMatch(html, /<script|javascript:|onclick=/);
   });
   await test("HTML/PDF capture the selected document theme and export template", async () => {
-    const snapshot = { content: "# Report\n\nBody", filePath: "report.md", documentTheme: "serif", exportTemplate: "report" };
+    const snapshot = { content: "# Report\n\nBody", filePath: "report.md", documentTheme: "compact", exportTemplate: "report" };
     await e.exportMarkdown(snapshot, "html");
-    assert.match(writes.at(-1).content, /data-md-theme="serif" data-export-template="report"/);
+    assert.match(writes.at(-1).content, /data-md-theme="compact" data-export-template="report"/);
     await e.exportMarkdown(snapshot, "pdf");
-    assert.equal(document.getElementById("deditor-print-area").dataset.mdTheme, "serif");
+    assert.equal(document.getElementById("deditor-print-area").dataset.mdTheme, "compact");
     assert.equal(document.getElementById("deditor-print-area").dataset.exportTemplate, "report");
+    const legacy = await e.standalonePage("<p>safe</p>", "Title", "light", { documentTheme: "serif" });
+    assert.match(legacy, /data-md-theme="default"/);
+    assert.doesNotMatch(legacy, /font-family: Georgia/);
     const html = await e.standalonePage("<p>safe</p>", "Title", "light", { documentTheme: '\"bad', exportTemplate: "unknown" });
     assert.match(html, /data-md-theme="default" data-export-template="default"/);
   });

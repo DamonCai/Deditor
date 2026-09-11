@@ -1,3 +1,4 @@
+import { documentImageDirectory } from "../lib/markdownImageSettings";
 import { markdownSession, sourceChange } from "../lib/markdownSession";
 import { installMarkdownComposition } from "../lib/markdownComposition";
 import { markdownHistory } from "../lib/markdownHistory";
@@ -869,7 +870,7 @@ async function handleImagePaste(blob: File, mime: string, view: EditorView) {
   const isMd = isMarkdown(filePath);
   const subtype = mime.split("/")[1]?.toLowerCase() ?? "png";
   const ext = subtype === "jpeg" ? "jpg" : subtype;
-  const folder = isMd ? useEditorStore.getState().markdownSettings.imageDirectory : "assets";
+  const folder = isMd ? documentImageDirectory(view.state.doc.toString(), filePath, useEditorStore.getState().markdownSettings.imageDirectory) : "assets";
   const name = `paste-${Date.now()}.${ext}`;
   const buf = await blob.arrayBuffer();
   const base64 = arrayBufferToBase64(buf);

@@ -1,3 +1,4 @@
+import { editableBlockTree } from "./blockTree";
 import { sizedImages } from "./image";
 import { tableListTree } from "./tableLists";
 import { inlineHtmlMarks } from "./inline";
@@ -8,6 +9,7 @@ import { protectedTree, type SourceNode } from "./document";
 export const frontmatter = $remark("deditorFrontmatter", () => remarkFrontmatter, ["yaml", "toml"]);
 export function rawRemark(mdx: boolean) {
   return $remark("deditorPreserve", () => () => (tree: unknown, file: { value: unknown }) => {
+    editableBlockTree(tree as SourceNode, String(file.value));
     tableListTree(tree as SourceNode, String(file.value));
     inlineHtmlMarks(tree as SourceNode);
     referenceLinks(tree as SourceNode);

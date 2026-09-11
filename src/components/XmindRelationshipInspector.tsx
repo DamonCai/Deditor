@@ -1,6 +1,7 @@
 import type { Command, Relationship, Sheet } from "../lib/xmind/document";
 import { walkTopics } from "../lib/xmind/document";
-import { relationshipStyle } from "../lib/xmind/relationship";
+import { relationshipStyle, relationshipTextColor } from "../lib/xmind/relationship";
+import XmindNumberInput from "./XmindNumberInput";
 import { ARROW_SHAPES, RELATIONSHIP_SHAPES } from "../lib/xmind/arrows";
 import { useT } from "../lib/i18n";
 import { Button } from "./ui/Button";
@@ -59,7 +60,7 @@ export default function XmindRelationshipInspector({
       <div className="xm-panel-section">{t("xmind.relationship")}</div>
       <label className="xm-field">
         {t("xmind.relationshipText")}
-        <input
+        <textarea rows={3}
           key={`${relation.id}-${relation.title}`}
           aria-label={t("xmind.relationshipText")}
           defaultValue={relation.title ?? ""}
@@ -157,7 +158,7 @@ export default function XmindRelationshipInspector({
       <div className="xm-color-row">
         {[
           ["line-color", "lineColor", "#348C83"],
-          ["fo:color", "textColor", p["line-color"] ?? "#348C83"],
+          ["fo:color", "textColor", relationshipTextColor(p)],
         ].map(([key, label, fallback]) => (
           <label key={key}>
             {t(`xmind.${label}`)}
@@ -177,18 +178,13 @@ export default function XmindRelationshipInspector({
       </div>
       <label className="xm-field">
         {t("xmind.fontSize")}
-        <input
-          type="number"
-          aria-label={t("xmind.fontSize")}
+        <XmindNumberInput
+          label={t("xmind.fontSize")}
           min={9}
           max={64}
           disabled={readonly}
           value={parseFloat(p["fo:font-size"] ?? "12") || 12}
-          onChange={(e) => {
-            const v = e.target.valueAsNumber;
-            if (Number.isFinite(v) && v >= 9 && v <= 64)
-              update({ "fo:font-size": `${v}pt` });
-          }}
+          onCommit={v => update({ "fo:font-size": `${v}pt` })}
         />
       </label>
       <Button

@@ -17,7 +17,7 @@ export const inlineSourceSchema = $nodeSchema("deditor_inline_source", () => ({
 
 /** A temporary document projection: entering/leaving never edits the source. */
 export function installInlineSource(view: EditorView, document: MarkdownDocument, boundary: () => void) {
-  let active: { from: number; sourceFrom: number; raw: string } | null = null;
+  let active: { from: number; sourceFrom: number; raw: string; initialRaw: string; original: import("@milkdown/kit/prose/model").Fragment } | null = null;
   let queued = false, destroyed = false, suppressAt = -1;
   const find = () => {
     let found: { node: import("@milkdown/kit/prose/model").Node; pos: number } | null = null;
@@ -28,10 +28,23 @@ export function installInlineSource(view: EditorView, document: MarkdownDocument
     if (!active) return;
     const current = find();
     const offset = sourceOffset ?? (current ? active.sourceFrom + Math.max(0, Math.min(current.node.content.size, view.state.selection.head - current.pos - 1)) : active.sourceFrom);
-    active = null; boundary();
-    const next = document.reset(document.source);
+    const previous = active; active = null; boundary();
+    const tr = view.state.tr;
+    if (current && current.node.textContent === previous.initialRaw) {
+      // Caret-only navigation restores this fragment without reparsing the document.
+      tr.replaceWith(current.pos, current.pos + current.node.nodeSize, previous.original);
+      document.project(tr.doc);
+    } else {
+      const block = current ? document.reparseInlineBlock(current.pos) : null;
+      if (block) {
+        tr.replaceWith(block.from, block.to, block.node);
+        document.project(tr.doc);
+      } else {
+        const next = document.reset(document.source);
+        tr.replaceWith(0, view.state.doc.content.size, next.content);
+      }
+    }
     const pos = document.positionAtSource(offset);
-    const tr = view.state.tr.replaceWith(0, view.state.doc.content.size, next.content);
     tr.setSelection(sourceAnchor === undefined ? Selection.near(tr.doc.resolve(pos)) : TextSelection.between(tr.doc.resolve(document.positionAtSource(sourceAnchor)), tr.doc.resolve(pos)));
     suppressAt = tr.selection.head;
     view.dispatch(tr.setMeta(inlineProjection, true));
@@ -57,7 +70,7 @@ export function installInlineSource(view: EditorView, document: MarkdownDocument
       if (!token) return;
       const offset = Math.min(token.raw.length, Math.max(0, document.sourceOffset(selection.head) - token.sourceFrom));
       const node = view.state.schema.nodes.deditor_inline_source.create({ sourceFrom: token.sourceFrom }, view.state.schema.text(token.raw));
-      active = { from: token.from, sourceFrom: token.sourceFrom, raw: token.raw }; boundary();
+      active = { from: token.from, sourceFrom: token.sourceFrom, raw: token.raw, initialRaw: token.raw, original: view.state.doc.slice(token.from, token.to).content }; boundary();
       const tr = view.state.tr.replaceWith(token.from, token.to, node);
       tr.setSelection(TextSelection.create(tr.doc, token.from + 1 + offset));
       view.dispatch(tr.setMeta(inlineProjection, true));

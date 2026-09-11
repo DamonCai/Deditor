@@ -1,3 +1,7 @@
+import { documentImageDirectory } from "../lib/markdownImageSettings";
+import { shorthandRemark, highlightRemark, shorthandMarks, emojiSchema, shorthandInputRules, configureShorthand } from "../lib/markdownVisual/shorthand";
+import { strikethroughInputRule } from "@milkdown/kit/preset/gfm";
+import { editableBlockquote, footnoteReference, footnoteDefinition, footnoteUpdates, footnoteNodeView } from "../lib/markdownVisual/structuredBlocks";
 import { sharedHeadingIds } from "../lib/markdownVisual/headingIds";
 import { installTypewriter } from "../lib/markdownVisual/typewriter";
 import { pasteTableClipboard } from "../lib/markdownVisual/tablePaste";
@@ -82,7 +86,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
       const name = `image-${crypto.randomUUID()}.${ext}`;
       const bytes = new Uint8Array(await file.arrayBuffer()); let binary = "";
       for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
-      try { const folder = useEditorStore.getState().markdownSettings.imageDirectory; await saveImage(base, name, btoa(binary), folder); return `${folder}/${name}`; }
+      try { const folder = documentImageDirectory(sourceRef.current, filePath, useEditorStore.getState().markdownSettings.imageDirectory); await saveImage(base, name, btoa(binary), folder); return `${folder}/${name}`; }
       catch (err) { logError("Markdown image upload failed", err); void showError(String(err)); throw err; }
     };
     const initialSource = sourceRef.current;
@@ -99,7 +103,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
         inlineUploadButton: t("md.uploadImage"), blockUploadButton: t("md.uploadImage"), blockConfirmButton: t("common.confirm"),
         inlineUploadPlaceholderText: t("md.imageUrlLabel"), blockUploadPlaceholderText: t("md.imageUrlLabel"), blockCaptionPlaceholderText: t("md.imageAltLabel") })
       .addFeature(latex);
-    crepe.editor.use(inlineSourceSchema).use(absoluteHeadingInputRule).use(activeBlockHint).use(sharedHeadingIds).use(faithfulLink).use(faithfulInlineHtml).use(faithfulImage).use(extendedTableCells.flat()).use(inlineSchemas.flat()).config(configureInlineSerialization).use(frontmatter).use(rawRemark(mdx)).use(rawSchema);
+    crepe.editor.use(shorthandRemark).use(highlightRemark).use(shorthandMarks.flat()).use(emojiSchema).use(shorthandInputRules).config(configureShorthand).use(editableBlockquote).use(footnoteReference).use(footnoteDefinition).use(footnoteUpdates).use(inlineSourceSchema).use(absoluteHeadingInputRule).use(activeBlockHint).use(sharedHeadingIds).use(faithfulLink).use(faithfulInlineHtml).use(faithfulImage).use(extendedTableCells.flat()).use(inlineSchemas.flat()).config(configureInlineSerialization).use(frontmatter).use(rawRemark(mdx)).use(rawSchema);
     crepe.editor.config(ctx => ctx.update(editorViewOptionsCtx, prev => ({ ...prev, attributes: { class: "md-document", "aria-label": t("md.visualEditor"), spellcheck: "false" },
       handleKeyDown: (view, event) => {
         if (event.key !== "Tab" || !view.editable || !isInTable(view.state)) return false;
@@ -125,7 +129,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
     })));
     const initialize = async () => {
       await crepe.editor.remove(history); await crepe.editor.remove(trailing);
-      await crepe.editor.remove(wrapInHeadingInputRule);
+      await crepe.editor.remove(wrapInHeadingInputRule); await crepe.editor.remove(strikethroughInputRule);
       await crepe.editor.remove(syncHeadingIdPlugin);
       await crepe.editor.remove(remarkInlineLinkPlugin.plugin);
       await crepe.editor.remove(remarkPreserveEmptyLinePlugin.plugin);
@@ -174,7 +178,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
         const typewriter = installTypewriter(view, scroller.current!);
         cleanupTypewriter = typewriter.destroy;
         const originalImageView = view.props.nodeViews?.["image-block"];
-        view.setProps({ nodeViews: { ...view.props.nodeViews, ...(originalImageView ? { "image-block": accessibleImageView(originalImageView, language) } : {}), deditor_raw: rawView(filePath, tabId), code_block: codeView(tabId, theme) },
+        view.setProps({ nodeViews: { ...view.props.nodeViews, ...(originalImageView ? { "image-block": accessibleImageView(originalImageView, language) } : {}), footnote_reference: footnoteNodeView, footnote_definition: footnoteNodeView, deditor_raw: rawView(filePath, tabId), code_block: codeView(tabId, theme) },
           handleScrollToSelection: () => compositionViewport.handleScroll(),
           dispatchTransaction: tr => {
             if (cancelled) return;

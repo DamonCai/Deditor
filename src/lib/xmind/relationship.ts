@@ -1,5 +1,7 @@
 import { shapeName, shapePolygon } from "./shapes";
 import { advancedShape } from "./shapePaths";
+import { defaultFlexibleControls, flexibleRelationshipRoute } from './flexibleRelationship';
+import { smartTextColor } from './colors';
 import type { Relationship, Sheet } from "./document";
 import type { Box, SceneNode } from "./scene";
 
@@ -91,8 +93,16 @@ function routeMidpoint(points: Point[]): Point {
 
 export function relationshipStyle(sheet: Sheet, relation: Relationship): Record<string,string> {
   const defined=(p?:Record<string,string>)=>Object.fromEntries(Object.entries(p??{}).filter(([,value])=>value!=="inherited"));
-  return {...defined(sheet.theme?.relationship?.properties),...defined(relation.style?.properties)};
+  const theme=sheet.theme?.relationship?.properties;
+  const properties={...defined(theme),...defined(relation.style?.properties)};
+  if (!properties['fo:color'] && theme?.['fo:color']==='inherited') {
+    const background=sheet.style?.properties?.['svg:fill']??sheet.theme?.map?.properties?.['svg:fill']??'#FFFFFF';
+    properties['fo:color']=smartTextColor(background,1,'#FFFFFF',
+      sheet.theme?.map?.properties?.['color-list']?.split(/\s+/).filter(Boolean)??['#FFFFFF','#000000']);
+  }
+  return properties;
 }
+export const relationshipTextColor = (properties: Record<string,string>) => properties["fo:color"] ?? "#333333";
 export function relationshipGeometry(sheet: Sheet, relation: Relationship, a: SceneNode, b: SceneNode) {
   const ca = center(a), cb = center(b);
   const properties=relationshipStyle(sheet,relation);
@@ -180,10 +190,22 @@ export function relationshipGeometry(sheet: Sheet, relation: Relationship, a: Sc
   const pattern = properties["line-pattern"] ?? "dash";
   const dash = pattern === "solid" ? undefined : pattern === "dot" ? "1 4"
     : pattern === "dash-dot" ? "6 3 1 3" : "6 4";
+  const storedFlexible=Array.isArray(relation.flexibleControlPoints)?relation.flexibleControlPoints.filter(cartesian):[];
+  const flexibleControls=flexible?(storedFlexible.length?storedFlexible.map(p=>{
+    const length=Math.hypot(p.x,p.y),scale=length>0&&length<10?10/length:1;
+    return {x:ca.x+p.x*scale,y:ca.y+p.y*scale};
+  })
+    :zigzag?[c1,c2]:defaultFlexibleControls(start,end)):undefined;
+  const manual=flexibleControls?flexibleRelationshipRoute(shape,start,end,flexibleControls,ca,cb):undefined;
+  const fontSize=Math.max(9, numeric(properties["fo:font-size"], 12));
   return { start, end, c1, c2, label, path, dash, properties, straight, route,
+    ...(manual?{path:manual.path,label:manual.label,route:manual.route}:{}),
+    flexibleControls,bounds:manual?.bounds??[start,c1,c2,end],
+    virtualControls:manual?.virtualControls,
     color: properties["line-color"] ?? "#348C83",
+    textColor: relationshipTextColor(properties),
     width: Math.max(0.5, numeric(properties["line-width"], 1.5)),
-    fontSize: Math.max(9, numeric(properties["fo:font-size"], 12)),
+    fontSize, labelLines:(relation.title??"").split(/\r\n?|\n/), labelLineHeight:fontSize*1.4,
     beginArrow: properties["arrow-begin-class"] ?? "none",
     endArrow: properties["arrow-end-class"] ?? "org.xmind.arrowShape.herringbone",
     unsupportedPolar: [controls?.[0],controls?.[1]].some(p=>p && typeof p==='object' && ('amount' in p || 'angle' in p) && !polar(p) && !cartesian(p)),

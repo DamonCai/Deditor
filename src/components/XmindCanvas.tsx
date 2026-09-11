@@ -805,22 +805,26 @@ export default function XmindCanvas({
             </g>
           );
     };
+    const groupAncestors=new Map<string,number>();
+    for(const group of scene.groups)for(const id of group.memberGroupIds??[])
+      groupAncestors.set(id,(groupAncestors.get(id)??0)+1);
     return <>
-        {scene.groups.map((g) => {
+        {[...scene.groups].sort((a,b)=>(groupAncestors.get(a.id)??0)-(groupAncestors.get(b.id)??0)).map((g) => {
           const lineWidth = parseFloat(g.properties["line-width"] ?? "2");
-          const opacity = parseFloat(g.properties["svg:fill-opacity"] ?? "0.2");
+          const opacity = parseFloat(g.properties["svg:opacity"] ?? "0.2");
           const strokeWidth = Number.isFinite(lineWidth) ? Math.max(0, lineWidth) : 2;
           const dash = strokeDash(g.properties["line-pattern"] ?? (g.summary ? "solid" : "dash"));
-          const boundary=g.summary?null:boundaryGeometry(g.properties['shape-class'],g.width,g.height,g.memberBoxes);
+          const boundary=g.summary?null:boundaryGeometry(g.properties['shape-class'],g.width,g.height,g.memberBoxes,g.padding,g.growthDirection);
           return (
           <g key={g.id} data-group={g.id} role="button" tabIndex={0} aria-label={g.title || t(g.summary ? "xmind.summary" : "xmind.boundary")}
             aria-pressed={selectedGroup === g.id}
             onKeyDown={e=>{if(e.key==='Enter'||e.key===' ') {e.preventDefault();e.stopPropagation();setSelectedRelationship(null);onSelectGroup(g.id);host.current?.focus();}}}
             onPointerDown={e=>{e.stopPropagation();host.current?.focus();setSelectedRelationship(null);onSelectGroup(g.id);}}
+            onClick={e=>{e.stopPropagation();setSelectedRelationship(null);onSelectGroup(g.id);}}
             onDoubleClick={e=>{e.stopPropagation();onSelectGroup(g.id);}}
             style={{cursor:"pointer"}} transform={dragOffset && draggedIds.has(g.parent) ? `translate(${dragOffset.x},${dragOffset.y})` : undefined}>
             {selectedGroup === g.id && <rect x={g.x-4} y={g.y-4} width={g.width+8} height={g.height+8} rx={16} fill="none" stroke="var(--accent)" strokeWidth={2} pointerEvents="none" />}
-            <rect x={g.x} y={g.y} width={g.width} height={g.height} rx={14} fill="none" stroke="transparent" strokeWidth={14} pointerEvents="stroke" />
+            <rect x={g.x} y={g.y} width={g.width} height={g.height} rx={14} fill="none" stroke="transparent" strokeWidth={14/camera.zoom} pointerEvents="stroke" />
             {g.summary ? (
               <path
                 transform={
@@ -861,12 +865,12 @@ export default function XmindCanvas({
               />
             )}
             {g.titleLines.length > 0 && <g data-group-title={g.id}>
-              <rect x={g.x+(g.width-g.titleWidth)/2} y={g.y-g.titleHeight}
+              <rect x={g.x+g.titleOffsetX} y={g.y-g.titleHeight}
                 width={g.titleWidth} height={g.titleHeight} rx={4} fill={g.properties["line-color"]} />
-              <text x={g.x+g.width/2} y={g.y-g.titleHeight+4+g.titleFontSize}
+              <text x={g.x+g.titleOffsetX+g.titleWidth/2} y={g.y-g.titleHeight+4+g.titleFontSize}
                 textAnchor="middle" fill={g.properties["fo:color"]} fontSize={g.titleFontSize}
                 fontFamily={g.properties["fo:font-family"]} fontWeight={g.properties["fo:font-weight"]}>
-                {g.titleLines.map((line,i)=><tspan key={i} x={g.x+g.width/2} dy={i?g.titleLineHeight:0}>{line}</tspan>)}
+                {g.titleLines.map((line,i)=><tspan key={i} x={g.x+g.titleOffsetX+g.titleWidth/2} dy={i?g.titleLineHeight:0}>{line}</tspan>)}
               </text>
             </g>}
           </g>
