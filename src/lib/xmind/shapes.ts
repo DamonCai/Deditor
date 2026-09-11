@@ -1,10 +1,11 @@
-import { ADVANCED_SHAPES, advancedShapeScale } from './shapePaths';
+import { PUNCTUATION_SHAPES, isPunctuationShape, punctuationPadding } from './punctuationShapes';
+import { ADVANCED_SHAPES, FLOWCHART_SHAPES, advancedShapeScale, flowContentScale, referenceSymbol } from './shapePaths';
 
 export const TOPIC_SHAPES = [
   'roundedRect', 'rect', 'ellipse', 'diamond', 'underline', 'ellipserect.compact',
   'circle.compact', 'doubleunderline', 'parallelogram', 'hexagon', 'roundedhexagon', 'ellipticrectangle',
 ] as const;
-export const ALL_TOPIC_SHAPES = [...TOPIC_SHAPES, ...ADVANCED_SHAPES] as const;
+export const ALL_TOPIC_SHAPES = [...TOPIC_SHAPES, ...ADVANCED_SHAPES, ...PUNCTUATION_SHAPES, ...FLOWCHART_SHAPES] as const;
 
 export function shapeName(shape: string): string {
   const name = shape.replace(/^org\.xmind\.topicShape\./, '').toLowerCase();
@@ -14,10 +15,14 @@ export function shapeName(shape: string): string {
 /** Shape-specific room around the already padded content rectangle. */
 export function shapeSize(shape: string, width: number, height: number) {
   const name = shapeName(shape);
+  if (isPunctuationShape(name)) return { width: width + punctuationPadding(name), height };
+  if(referenceSymbol(name))return {width:Math.max(width,80),height:height+80};
+  const flowScale=flowContentScale(name);
+  if(flowScale)return {width:width*flowScale[0],height:height*flowScale[1]};
   const advancedScale = advancedShapeScale(name);
   if (advancedScale) return { width: width * advancedScale, height: height * advancedScale };
   if (name.startsWith('circle')) {
-    const diameter = Math.hypot(width, height);
+    const diameter = Math.hypot(width, height) + (name==='circle.double'?16:0);
     return { width: diameter, height: diameter };
   }
   if (/ellipse|oval/.test(name)) return { width: width * Math.SQRT2, height: height * Math.SQRT2 };

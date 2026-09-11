@@ -1,3 +1,5 @@
+import XmindGroupRange from "./XmindGroupRange";
+import XmindRelationshipInspector from "./XmindRelationshipInspector";
 import { ALL_TOPIC_SHAPES } from "../lib/xmind/shapes";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
@@ -70,6 +72,9 @@ export default function XmindView({ dataUrl, tabId }: Props) {
   const [sheetId, setSheetId] = useState(""),
     [selected, setSelected] = useState<string[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
+  const [selectedRelationship,setSelectedRelationship]=useState<string|null>(null);
+  useEffect(()=>{if(selected.length||selectedGroup)setSelectedRelationship(null);},[selected,selectedGroup]);
+  useEffect(()=>setSelectedRelationship(null),[sheetId]);
   useEffect(() => { if(selected.length) setSelectedGroup(null); }, [selected]);
   const [inspector, setInspector] = useState(true),
     [outline, setOutline] = useState(false),
@@ -79,10 +84,11 @@ export default function XmindView({ dataUrl, tabId }: Props) {
   useEffect(() => {
     if (!inspector || !inspectField) return;
     const field = inspectorRef.current?.querySelector<HTMLTextAreaElement>(`[data-field="${inspectField}"]`);
-    field?.scrollIntoView({ block: "nearest" });
-    field?.focus();
+    if (!field) return;
+    field.scrollIntoView({ block: "nearest" });
+    field.focus();
     setInspectField(null);
-  }, [inspector, inspectField, selected]);
+  }, [inspector, inspectField, selected, selectedRelationship]);
   const [resources, setResources] = useState<Record<string, string>>({});
   const cameras = useRef(new Map<string, Camera>()),
     draftFlush = useRef<(() => void) | null>(null);
@@ -295,6 +301,7 @@ export default function XmindView({ dataUrl, tabId }: Props) {
   const updateGroupStyle = (properties: Record<string, string>) => {
     if (groupInfo) execute({type:"group-update", id:groupInfo.group.id, parent:groupInfo.parent, properties});
   };
+  const relation=sheet?.relationships?.find(r=>r.id===selectedRelationship);
   const topic = sheet ? findTopic(sheet.rootTopic, selected[0]) : undefined;
   const parents = useMemo(() => {
     const map = new Map<string, string>();
@@ -545,8 +552,10 @@ export default function XmindView({ dataUrl, tabId }: Props) {
           sheet={sheet}
           readonly={!editing}
           selected={selected}
-          onSelect={(ids) => { setSelected(ids); if(ids.length) setSelectedGroup(null); }}
+          onSelect={(ids) => { setSelected(ids); if(ids.length) { setSelectedGroup(null); setSelectedRelationship(null); } }}
           selectedGroup={groupInfo ? selectedGroup : null}
+          selectedRelationship={relation?.id??null}
+          onSelectRelationship={(id)=>{setSelectedRelationship(id);if(id)setInspector(true);}}
           onSelectGroup={(id) => { setSelectedGroup(id); if(id) { setSelected([]); setInspector(true); } }}
           onCommand={execute}
           onUndo={undo}
@@ -557,7 +566,7 @@ export default function XmindView({ dataUrl, tabId }: Props) {
           onCamera={saveCamera}
           onLink={followLink}
           onInspect={(field, id) => {
-            if (id) { setSelected([id]); setSelectedGroup(null); }
+            if (id) { setSelected([id]); setSelectedGroup(null); setSelectedRelationship(null); }
             setInspector(true);
             if (field) setInspectField(field);
           }}
@@ -568,10 +577,12 @@ export default function XmindView({ dataUrl, tabId }: Props) {
             <div className="xm-panel-title">
               {t("xmind.inspector")}
             </div>
-            {groupInfo ? <>
+            {relation ? <XmindRelationshipInspector sheet={sheet} relation={relation} readonly={!editing} onCommand={execute} /> : groupInfo ? <>
               <div className="xm-panel-section">{t(groupInfo.summary ? "xmind.summary" : "xmind.boundary")}</div>
               {field(t("xmind.title"), (groupInfo.group.topicId && findTopic(sheet.rootTopic,groupInfo.group.topicId)?.title) || groupInfo.group.title || "",
                 title => execute({type:"group-update",id:groupInfo.group.id,parent:groupInfo.parent,title}))}
+              <XmindGroupRange group={groupInfo.group} owner={findTopic(sheet.rootTopic,groupInfo.parent)!}
+                readonly={!editing} onCommand={execute} />
               <div className="xm-color-row">
                 {[["svg:fill","fill","#E9F1FA"],["line-color","lineColor","#A2B3C9"]].map(([key,label,fallback]) =>
                   <label key={key}>{t(`xmind.${label}`)}<input type="color" aria-label={t(`xmind.${label}`)}

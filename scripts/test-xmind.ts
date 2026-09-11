@@ -1,10 +1,17 @@
+import { groupRangeAxis, groupRangeBounds, groupRangeReversed, nearestGroupMember } from '../src/lib/xmind/groupRange';
+import { round9RelationshipSheets } from '../tests/fixtures/xmind-round9';
+import { ARROW_SHAPES, arrowDrawing } from '../src/lib/xmind/arrows';
+import nativeArrows from '../tests/fixtures/xmind-native-arrows.json';
+import nativeFlowchart from "../tests/fixtures/xmind-native-flowchart-shapes.json";
+import { PUNCTUATION_SHAPES, punctuationPath } from "../src/lib/xmind/punctuationShapes";
+import nativePunctuation from "../tests/fixtures/xmind-native-punctuation-shapes.json";
 import { draftBox } from "../src/lib/xmind/draft";
-import { ADVANCED_SHAPES, advancedShape, pointInOutline, shapeContentCenter } from "../src/lib/xmind/shapePaths";
+import { ADVANCED_SHAPES, FLOWCHART_SHAPES, referenceSymbol, advancedShape, pointInOutline, shapeContentCenter } from "../src/lib/xmind/shapePaths";
 import nativeAdvancedShapes from "../tests/fixtures/xmind-native-advanced-shapes.json";
 import { round7ShapeSheets } from "../tests/fixtures/xmind-round7";
 import { TOPIC_SHAPES, shapePolygon, shapeSize } from "../src/lib/xmind/shapes";
 import { topicDropTarget } from "../src/lib/xmind/drop";
-import { relationshipGeometry, topicAnchor } from "../src/lib/xmind/relationship";
+import { relationshipDropTarget, relationshipGeometry, topicAnchor } from "../src/lib/xmind/relationship";
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { unzipSync, strFromU8, zipSync, strToU8 } from "fflate";
@@ -19,7 +26,7 @@ import {
   duplicateTopic,
   type Sheet,
 } from "../src/lib/xmind/document";
-import { buildScene, edgePath, STRUCTURES, topicStyle, groupStyle } from "../src/lib/xmind/scene";
+import { buildScene, nodeVisualBounds, edgePath, STRUCTURES, topicStyle, groupStyle } from "../src/lib/xmind/scene";
 import { round6Sheets } from "../tests/fixtures/xmind-round6";
 import { sampleArchive, sampleSheets } from "../tests/fixtures/xmind";
 // Preserve the original CLI smoke-test entry point.
@@ -1195,4 +1202,192 @@ test(4, "advanced rich topics place markers beside titles and labels below the o
     assert.equal(node.topic.title,sheet.rootTopic.children!.detached!.find(t=>t.id===node.topic.id)!.title);
   }
 });
+test(2, "external label rows reserve sibling and group space without moving outline anchors",()=>{
+  for(const structureClass of ['org.xmind.ui.logic.right','org.xmind.ui.org-chart.down','org.xmind.ui.map.unbalanced']) {
+    const sheet:Sheet={id:'label-layout',title:'Labels',rootTopic:{id:'label-root',title:'Root',structureClass,
+      boundaries:[{id:'label-group',range:'(0,2)'}],children:{attached:Array.from({length:3},(_,i)=>({
+        id:`label-${i}`,title:'Topic',labels:['Alpha','中文标签','A long label that wraps '.repeat(i+1)],
+      }))}}};
+    const scene=buildScene(sheet), children=scene.nodes.filter(n=>n.parent==='label-root'), group=scene.groups[0];
+    for(const n of children) {
+      const b=nodeVisualBounds(n);
+      assert.ok(b.height>n.height);
+      assert.ok(b.y+b.height<=group.y+group.height);
+      for(const label of n.labels)assert.ok(label.y>=n.height);
+      const hit=topicAnchor(n,{x:n.x+n.width/2,y:n.y+10000});
+      assert.ok(hit.y<=n.y+n.height+1e-7,'a link touches the shape, not the labels');
+      for(const other of children.filter(o=>o!==n)) {
+        const o=nodeVisualBounds(other);
+        assert.ok(b.x+b.width<=o.x || o.x+o.width<=b.x || b.y+b.height<=o.y || o.y+o.height<=b.y,'labels overlap an adjacent topic');
+      }
+    }
+    const bare=structuredClone(sheet);bare.rootTopic.children!.attached!.forEach(t=>delete t.labels);
+    const bareNodes=buildScene(bare).nodes;
+    for(const n of children){const b=bareNodes.find(t=>t.topic.id===n.topic.id)!;assert.equal(n.width,b.width);assert.equal(n.height,b.height);}
+  }
+});
+test(1, "native punctuation shapes keep open strokes, readable text and saved fill semantics",()=>{
+  assert.deepEqual(nativePunctuation.map(v=>v.shape),PUNCTUATION_SHAPES.map(s=>`org.xmind.topicShape.${s}`));
+  for(const fixture of nativePunctuation) {
+    const sheet:Sheet={id:'punctuation-sheet',title:'Punctuation',rootTopic:{id:'punctuation-root',title:'中文 Unicode ✨\nSecond line',customWidth:320,
+      style:{properties:{'svg:fill':'#102030','fill-pattern':'solid',keep:'unchanged'}}}};
+    const doc=openDocument(sampleArchive([sheet]));
+    const next=editDocument(doc.sheets,sheet.id,{type:'properties',id:'punctuation-root',properties:{'shape-class':fixture.shape}});
+    const root=next[0].rootTopic,n=buildScene(next[0]).nodes[0];
+    assert.equal(root.customWidth,undefined);
+    assert.equal(root.style!.properties!['fill-pattern'],fixture.fill);
+    assert.equal(root.style!.properties!['svg:fill'],'#102030');
+    assert.equal(root.style!.properties!.keep,'unchanged');
+    assert.equal(n.fill,'none');assert.equal(n.color,'#000000');
+    const path=punctuationPath(fixture.shape,n.width,n.height)!;
+    assert.ok(path && !/NaN|Infinity|Z/.test(path));
+    assert.ok(n.content.x>=32);
+    assert.deepEqual(buildScene(next[0]).warnings,[]);
+    const reopened=openDocument(writeDocument(doc,next));
+    assert.equal(reopened.sheets[0].rootTopic.style!.properties!['shape-class'],fixture.shape);
+    assert.equal(reopened.sheets[0].rootTopic.title,sheet.rootTopic.title);
+    const batch=editDocument(doc.sheets,sheet.id,{type:'properties-many',ids:['punctuation-root'],properties:{'shape-class':fixture.shape}});
+    assert.deepEqual(batch,next);
+  }
+});
+test(2, "native flowchart shapes contain titles and connect at the outer contour",()=>{
+  assert.deepEqual(nativeFlowchart.map(v=>v.shape),FLOWCHART_SHAPES.map(s=>`org.xmind.topicShape.${s}`));
+  for(const fixture of nativeFlowchart)for(const title of ['中文\nEnglish','长文字 '.repeat(30)]) {
+    const sheet:Sheet={id:'flow-sheet',title:'Flowchart',rootTopic:{id:'flow-root',title,labels:['Label'],
+      style:{properties:{'shape-class':fixture.shape,'svg:fill':'#EEFAFF','fo:color':'#102030'}}}};
+    const scene=buildScene(sheet),n=scene.nodes[0],c=n.content;
+    assert.deepEqual(scene.warnings,[]);
+    const geometry=advancedShape(fixture.shape,n.width,n.height);
+    if(geometry) {
+      for(const x of [c.x,c.x+c.width])for(const y of [c.y,c.y+c.height])
+        assert.ok(pointInOutline([x,y],geometry.outline),`${fixture.shape} clips title at ${x},${y}`);
+      for(let i=0;i<36;i++) {
+        const angle=i*Math.PI/18,point=topicAnchor(n,{x:n.x+n.width/2+10000*Math.cos(angle),y:n.y+n.height/2+10000*Math.sin(angle)});
+        const distance=Math.min(...geometry.outline.map(([ax,ay],j)=>{
+          const [bx,by]=geometry.outline[(j+1)%geometry.outline.length],ex=bx-ax,ey=by-ay;
+          const px=point.x-n.x,py=point.y-n.y;
+          const t=Math.max(0,Math.min(1,((px-ax)*ex+(py-ay)*ey)/(ex*ex+ey*ey)||0));
+          return Math.hypot(px-ax-t*ex,py-ay-t*ey);
+        }));
+        assert.ok(distance<1e-7,`${fixture.shape} link misses outline`);
+      }
+    } else if(referenceSymbol(fixture.shape))assert.ok(c.y>=80,'reference title belongs below the symbol');
+    else {assert.equal(n.width,n.height);assert.ok(Math.hypot(c.width,c.height)+14<=n.width);}
+    assert.ok(n.labels[0].y>n.height);
+    const doc=openDocument(sampleArchive([sheet]));
+    const edited=editDocument(doc.sheets,sheet.id,{type:'title',id:'flow-root',title:'保存核对'});
+    assert.equal(openDocument(writeDocument(doc,edited)).sheets[0].rootTopic.style!.properties!['shape-class'],fixture.shape);
+  }
+});
+test(3, "relationship reconnect and format edits preserve raw fields and reject dangling/self ends", () => {
+  const doc=openDocument(sampleArchive()), before=doc.sheets[0].relationships![0];
+  let sheets=editDocument(doc.sheets,'sheet-main',{type:'relationship-reconnect',id:'rel',end:0,topicId:'floating'});
+  assert.deepEqual(sheets[0].relationships![0],{...before,end1Id:'floating'});
+  assert.equal(editDocument(sheets,'sheet-main',{type:'relationship-reconnect',id:'rel',end:0,topicId:'floating'}),sheets);
+  for(const topicId of ['missing','edit'])assert.throws(()=>editDocument(sheets,'sheet-main',{type:'relationship-reconnect',id:'rel',end:0,topicId}),/different topics/);
+  sheets=editDocument(sheets,'sheet-main',{type:'relationship-update',id:'rel',properties:{'arrow-end-class':'org.xmind.arrowShape.hook','line-width':'4'}});
+  const reopened=openDocument(writeDocument(doc,sheets));
+  assert.equal(reopened.sheets[0].relationships![0].end1Id,'floating');
+  assert.deepEqual(reopened.sheets[0].relationships![0].controlPoints,before.controlPoints);
+  assert.deepEqual(reopened.sheets[0].rootTopic,doc.sheets[0].rootTopic);
+  assert.deepEqual(reopened.files['attachments/keep.bin'],doc.files['attachments/keep.bin']);
+});
+test(2, "relationship endpoint targets exclude the opposite end and prefer the smallest overlapping topic", () => {
+  const n=buildScene(sampleSheets()[0]).nodes[0];
+  const large={...n,x:0,y:0,width:100,height:100,topic:{id:'large',title:'Large'}};
+  const small={...large,width:30,height:30,topic:{id:'small',title:'Small'}};
+  assert.equal(relationshipDropTarget([large,small],{x:20,y:20},'large')?.topic.id,'small');
+  assert.equal(relationshipDropTarget([large,small],{x:20,y:20},'none')?.topic.id,'small');
+  assert.equal(relationshipDropTarget([large,small],{x:200,y:20},'none'),undefined);
+});
+test(1, "all native arrow fields have distinct artwork instead of falling back to one triangle", () => {
+  assert.deepEqual(nativeArrows.map(a=>a.value),ARROW_SHAPES.map(a=>'org.xmind.arrowShape.'+a));
+  const drawn=nativeArrows.filter(a=>!a.value.endsWith('.none')&&!a.value.endsWith('.dot')).map(a=>arrowDrawing(a.value)!.path);
+  assert.equal(new Set(drawn).size,9);
+  assert.ok(drawn.every(path=>!path.includes('NaN')));
+});
+
+test(2, "native relationship shape variants use finite curves, segments and orthogonal routes", () => {
+  const sheet=round9RelationshipSheets()[0],scene=buildScene(sheet);
+  for(const relation of sheet.relationships!) {
+    const a=scene.nodes.find(n=>n.topic.id===relation.end1Id)!,b=scene.nodes.find(n=>n.topic.id===relation.end2Id)!;
+    const g=relationshipGeometry(sheet,relation,a,b),shape=relation.style!.properties!['shape-class'];
+    assert.ok(!/NaN|Infinity/.test(g.path));
+    if(shape.includes('zigzag')) {
+      assert.ok(!g.path.includes('C'));
+      for(let i=1;i<g.route!.length;i++)assert.ok(g.route![i].x===g.route![i-1].x||g.route![i].y===g.route![i-1].y,'orthogonal segments remain axis-aligned');
+    } else if(shape.includes('curved'))assert.ok(g.path.includes('C'));
+    else assert.ok(!g.path.includes('C'));
+    if(shape.includes('flexible.curved')) {
+      const dx=b.x+b.width/2-a.x-a.width/2,dy=b.y+b.height/2-a.y-a.height/2;
+      assert.ok(Math.abs((g.c1.x-a.x-a.width/2)*dy-(g.c1.y-a.y-a.height/2)*dx)<1e-8,'flexible curves begin collinear');
+    }
+  }
+});
+
+test(3, "boundary and summary range edits preserve crossing groups, summary descendants and archive entries", () => {
+  const doc=openDocument(sampleArchive());
+  let sheets=editDocument(doc.sheets,'sheet-main',{type:'group-update',parent:'read',id:'boundary',range:{start:1,end:2}});
+  assert.equal(findTopic(sheets[0].rootTopic,'read')!.boundaries![0].range,'(1,2)');
+  const owner=findTopic(sheets[0].rootTopic,'read')!;
+  owner.summaries=[{id:'cross-summary',range:'(0,1)',topicId:'range-summary',custom:{preserve:true}}];
+  owner.children!.summary=[{id:'range-summary',title:'Summary',children:{attached:[{id:'range-detail',title:'Detail'}]}}];
+  const before=structuredClone(sheets);
+  sheets=editDocument(sheets,'sheet-main',{type:'group-update',parent:'read',id:'cross-summary',range:{start:0,end:2}});
+  const after=findTopic(sheets[0].rootTopic,'read')!;
+  assert.deepEqual(after.boundaries,findTopic(before[0].rootTopic,'read')!.boundaries);
+  assert.deepEqual(after.children!.summary,findTopic(before[0].rootTopic,'read')!.children!.summary);
+  assert.deepEqual(after.summaries![0],{...findTopic(before[0].rootTopic,'read')!.summaries![0],range:'(0,2)'});
+  const reopened=openDocument(writeDocument(doc,sheets));
+  assert.deepEqual(reopened.sheets,sheets);
+  assert.deepEqual(reopened.files['attachments/keep.bin'],doc.files['attachments/keep.bin']);
+  for(const range of [{start:-1,end:2},{start:1,end:0},{start:0,end:99},{start:.5,end:1}])
+    assert.throws(()=>editDocument(sheets,'sheet-main',{type:'group-update',parent:'read',id:'boundary',range}),/Invalid group range/);
+});
+
+test(2, "group range geometry follows visible descendants and nearest member order", () => {
+  const sheet=sampleSheets()[0],scene=buildScene(sheet),owner=findTopic(sheet.rootTopic,'read')!;
+  const short=groupRangeBounds(owner,0,1,scene.nodes)!,long=groupRangeBounds(owner,0,2,scene.nodes)!;
+  assert.ok(long.height>short.height);
+  const image=scene.nodes.find(n=>n.topic.id==='image')!;
+  assert.equal(nearestGroupMember(owner,scene.nodes,'y',image.y+image.height/2),2);
+  assert.ok(long.y+long.height>=image.y+image.height+14-1e-8);
+  assert.equal(groupRangeBounds(owner,99,100,scene.nodes),null);
+  assert.equal(groupRangeReversed(owner,scene.nodes,'y'),false);
+  const mirrored=scene.nodes.map(n=>({...n,y:-n.y-n.height}));
+  assert.equal(groupRangeReversed(owner,mirrored,'y'),true);
+  assert.equal(nearestGroupMember(owner,mirrored,'y',-image.y-image.height/2),2);
+});
+
+test(2, "missing text colors stay readable on explicit light/dark fills without rewriting saved styles", () => {
+  const sheets=sampleSheets(),sheet=sheets[0],floating=findTopic(sheet.rootTopic,'floating')!;
+  const before=structuredClone(sheets);
+  assert.equal(topicStyle(sheet,'floating')!.color,'#000000');
+  assert.deepEqual(sheets,before);
+  floating.style!.properties!['svg:fill']='#112244';
+  assert.equal(topicStyle(sheet,'floating')!.color,'#FFFFFF');
+  floating.style!.properties!['svg:fill-opacity']='0.2';
+  assert.equal(topicStyle(sheet,'floating')!.color,'#000000','translucent dark fill on a light canvas needs dark text');
+  floating.style!.properties!['svg:fill']='#FFFFFF80';
+  sheet.style={properties:{'svg:fill':'#112244'}};
+  assert.equal(topicStyle(sheet,'floating')!.color,'#FFFFFF','combine fill alpha and opacity over the sheet background');
+  floating.style!.properties!['fill-pattern']='none';
+  assert.equal(topicStyle(sheet,'floating')!.color,'#FFFFFF','no-fill uses the actual sheet background');
+  floating.style!.properties!['fo:color']='#FFAACC';
+  assert.equal(topicStyle(sheet,'floating')!.color,'#FFAACC');
+});
+
+test(2, "range handles follow vertical and reverse timelines instead of connector directions", () => {
+  for (const sheet of round6Sheets()) {
+    const scene=buildScene(sheet),root=scene.nodes.find(n=>n.topic.id===sheet.rootTopic.id)!;
+    const axis=groupRangeAxis(root,scene.nodes);
+    assert.equal(axis,sheet.id==='round6-vertical'?'y':'x');
+    assert.equal(groupRangeReversed(root.topic,scene.nodes,axis),sheet.id==='round6-left');
+  }
+  const sheet=round6Sheets()[0];
+  sheet.rootTopic.structureClass='org.xmind.ui.org-chart.down';
+  const scene=buildScene(sheet);
+  assert.equal(groupRangeAxis(scene.nodes[0],scene.nodes),'x');
+});
+
 console.log(`${passed} XMind tests passed`);

@@ -4,6 +4,29 @@ export const ADVANCED_SHAPES = [
   'cutdiamond.compact', 'shield.compact', 'fatLeftArrow.compact', 'fatRightArrow.compact',
   'label.compact', 'bookmark.compact', 'singlebreakangle', 'stack', 'card',
 ] as const;
+export const FLOWCHART_SHAPES = [
+  'decision.compact','manualInput','predefinedProcess','manualOperation','database','document',
+  'multiDocument','delay','data','onPageReference','offPageReference','circle.double','flag',
+  'trapezoid','trapezoid.inverse',
+] as const;
+export function referenceSymbol(shape: string): 'on' | 'off' | undefined {
+  const name=shape.replace(/^org\.xmind\.topicShape\./,'').toLowerCase();
+  return name==='onpagereference'?'on':name==='offpagereference'?'off':undefined;
+}
+// Separate horizontal/vertical insets keep flowchart shapes compact while
+// reserving their sloping edges, page waves and internal decoration lines.
+const flowContent:Record<string,[number,number,number,number]>={
+  'decision.compact':[.5,.5,2,2], manualinput:[.5,.6,1,1/.8],
+  predefinedprocess:[.5,.5,1/.74,1], manualoperation:[.5,.5,1/.6,1],
+  database:[.5,.575,1,2], document:[.5,.35,1,1/.7],
+  multidocument:[.4,.475,1/.8,1/.55], delay:[.4,.5,1/.8,1/.8],
+  data:[.5,.5,1/.6,1], flag:[.625,.5,1/.75,1],
+  trapezoid:[.5,.5,1/.6,1], 'trapezoid.inverse':[.5,.5,1/.6,1],
+};
+export function flowContentScale(shape: string): [number,number] | undefined {
+  const value=flowContent[shape.replace(/^org\.xmind\.topicShape\./,'').toLowerCase()];
+  return value ? [value[2]*1.01,value[3]*1.01] : undefined;
+}
 type Point = [number, number];
 type Segment = ['M' | 'L', number, number] | ['C', number, number, number, number, number, number];
 
@@ -22,6 +45,22 @@ const polygons: Record<string, Point[]> = {
   'bookmark.compact': [[0,0],[1,0],[1,1],[0,1],[.25,.5]],
   singlebreakangle: [[0,0],[.75,0],[1,.25],[1,1],[0,1]],
 };
+Object.assign(polygons, {
+  'decision.compact':[[.5,0],[1,.5],[.5,1],[0,.5]],
+  manualinput:[[0,.2],[1,0],[1,1],[0,1]],
+  predefinedprocess:[[0,0],[1,0],[1,1],[0,1]],
+  manualoperation:[[0,0],[1,0],[.8,1],[.2,1]],
+  flag:[[.25,0],[1,0],[1,1],[.25,1],[0,.5]],
+  trapezoid:[[.2,0],[.8,0],[1,1],[0,1]],
+  'trapezoid.inverse':[[0,0],[1,0],[.8,1],[.2,1]],
+});
+Object.assign(definitions, {
+  database:[['M',0,.15],['C',0,-.05,1,-.05,1,.15],['L',1,.85],['C',1,1.05,0,1.05,0,.85],['L',0,.15]],
+  document:[['M',0,0],['L',1,0],['L',1,.8],['C',.67,.65,.33,1.1,0,1],['L',0,0]],
+  multidocument:[['M',0,.2],['L',.8,.2],['L',.8,.8],['C',.54,.65,.26,1.1,0,1],['L',0,.2]],
+  delay:[['M',0,0],['L',.5,0],['C',7/6,0,7/6,1,.5,1],['L',0,1]],
+  data:[['M',.25,0],['L',.95,0],['C',1,0,1,.08,.98,.15],['L',.8,.9],['C',.78,.98,.76,1,.7,1],['L',.05,1],['C',0,1,0,.92,.02,.85],['L',.2,.1],['C',.22,.02,.23,0,.25,0]],
+} satisfies Record<string,Segment[]>);
 polygons['star.compact'] = Array.from({length:10},(_,i) => {
   const angle=-Math.PI/2+i*Math.PI/5, radius=i%2?.22:.5;
   return [.5+radius*Math.cos(angle),.5+radius*Math.sin(angle)];
@@ -64,10 +103,15 @@ export function advancedShape(shape: string, w: number, h: number) {
   // Decorative lines are separate from the hit outline: arrows must not stop
   // on a fold or on the front page of the stack.
   const detail=name==='singlebreakangle' ? `M${w*.75},0 V${h*.25} H${w}`
-    : name==='card' ? `M${w*.02},${h*.15} V${h*.85}` : undefined;
-  const back=name==='stack' ? `M${w*.1},${h*.1} H${w} V${h} H${w*.1} Z` : undefined;
+    : name==='card' ? `M${w*.02},${h*.15} V${h*.85}`
+    : name==='predefinedprocess' ? `M${w*.12},0 V${h} M${w*.88},0 V${h}`
+    : name==='database' ? `M0,${h*.15} C0,${h*.35} ${w},${h*.35} ${w},${h*.15}` : undefined;
+  const back=name==='stack' ? `M${w*.1},${h*.1} H${w} V${h} H${w*.1} Z` : name==='multidocument' ? `M${w*.1},${h*.1} H${w*.9} V${h*.7} M${w*.2},0 H${w} V${h*.6}` : undefined;
   if(name==='stack') outline.splice(0,outline.length,...([
     [0,0],[.9,0],[.9,.1],[1,.1],[1,1],[.1,1],[.1,.9],[0,.9],
+  ] as Point[]).map(([x,y])=>[x*w,y*h] as Point));
+  if(name==='multidocument') outline.splice(0,3,...([
+    [0,.2],[.1,.2],[.1,.1],[.2,.1],[.2,0],[1,0],[1,.6],[.9,.6],[.9,.7],[.8,.7],[.8,.8],
   ] as Point[]).map(([x,y])=>[x*w,y*h] as Point));
   return {path,outline,detail,back};
 }
@@ -83,6 +127,7 @@ export function pointInOutline([x,y]: Point, outline: Point[]): boolean {
 const contentScales=new Map<string,number>();
 export function shapeContentCenter(shape: string): Point {
   const name=shape.replace(/^org\.xmind\.topicShape\./,'').toLowerCase();
+  if(flowContent[name])return [flowContent[name][0],flowContent[name][1]];
   if(name==='fatleftarrow.compact')return [.7,.5];
   if(name==='fatrightarrow.compact')return [.3,.5];
   if(name==='label.compact')return [.4,.5];

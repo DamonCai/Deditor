@@ -2217,6 +2217,125 @@ test(1, 'XMind relationship selection, draft save and delete preserve topics and
   assert.equal(document.querySelectorAll('[data-topic]').length,nodeCount);
   await click('Undo');assert.ok(document.querySelector('[data-relationship="rel"]'));
 });
+test(3, 'XMind relationship inspector preserves selection through style and endpoint edits, then undo restores bytes', async () => {
+  await mountXmind();
+  const original=store.getState().tabs[0].content;
+  await act(async()=>document.querySelector('[data-relationship="rel"]').dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true,button:0})));
+  const field=label=>document.querySelector(`select[aria-label="${label}"]`);
+  assert.ok(field('Start topic'));
+  assert.equal(field('End arrow').options.length,11);
+  assert.equal(field('Shape').options.length,7);
+  assert.equal(field('Line pattern').selectedOptions[0].textContent,'Dashed');
+  await act(async()=>{field('End arrow').value='org.xmind.arrowShape.hook';field('End arrow').dispatchEvent(new window.Event('change',{bubbles:true}));});
+  assert.equal(xmindSheets()[0].relationships[0].style.properties['arrow-end-class'],'org.xmind.arrowShape.hook');
+  await act(async()=>{field('Start topic').value='floating';field('Start topic').dispatchEvent(new window.Event('change',{bubbles:true}));});
+  assert.equal(xmindSheets()[0].relationships[0].end1Id,'floating');
+  assert.ok(field('Start topic'),'relationship selection survives format edits');
+  await act(async()=>app.saveFile());
+  assert.equal(app.openXmindDocument(new Uint8Array(Buffer.from(writes.at(-1).data,'base64'))).sheets[0].relationships[0].end1Id,'floating');
+  await click('Undo');await click('Undo');assert.equal(store.getState().tabs[0].content,original);
+  await selectR3('read');assert.equal(field('Start topic'),null,'topic selection restores topic inspector');
+});
+
+test(3, 'XMind endpoint drag previews without saving and supports cancel, invalid drops and one-step undo', async () => {
+  await mountXmind();
+  const before=store.getState().tabs[0].content;
+  await act(async()=>document.querySelector('[data-relationship="rel"]').dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true,button:0})));
+  const svg=document.querySelector('.xm-svg'), handle=document.querySelector('[data-endpoint="0"]');
+  handle.setPointerCapture=()=>{};
+  const client=id=>{
+    const node=document.querySelector(`[data-topic="${id}"]`),box=node.querySelector('[data-topic-hitbox]');
+    const [x,y]=node.getAttribute('transform').match(/[-\d.]+/g).map(Number);
+    const [vx,vy,vw,vh]=svg.getAttribute('viewBox').split(' ').map(Number);
+    const zoom=parseFloat(document.querySelector('.xm-zoom span').textContent)/100;
+    return {clientX:(x+Number(box.getAttribute('width'))/2-vx-vw/2)*zoom,clientY:(y+Number(box.getAttribute('height'))/2-vy-vh/2)*zoom};
+  };
+  const target=client('floating');
+  const event=async(type,point=target)=>act(async()=>handle.dispatchEvent(new window.MouseEvent(type,{bubbles:true,button:0,...point})));
+  const path=()=>document.querySelector('[data-relationship-path]').getAttribute('d'),oldPath=path();
+  await event('pointerdown');await event('pointermove');assert.notEqual(path(),oldPath);
+  assert.equal(store.getState().tabs[0].content,before);
+  await act(async()=>window.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+  await event('pointerup');assert.equal(store.getState().tabs[0].content,before);assert.equal(path(),oldPath);
+  await event('pointerdown');await event('pointermove',client('edit'));await event('pointerup',client('edit'));
+  assert.equal(store.getState().tabs[0].content,before,'opposite endpoint cannot create a self-loop');
+  await event('pointerdown');await event('pointermove');await event('pointercancel');await event('pointerup');
+  assert.equal(store.getState().tabs[0].content,before);
+  await event('pointerdown');await event('pointermove');await event('pointerup');
+  assert.equal(xmindSheets()[0].relationships[0].end1Id,'floating');
+  await click('Undo');assert.equal(store.getState().tabs[0].content,before);
+});
+
+test(2, 'XMind relationship inspector saves a focused title and standalone preview disables edits', async () => {
+  await mountXmind();
+  await act(async()=>document.querySelector('[data-relationship="rel"]').dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true,button:0})));
+  const input=document.querySelector('input[aria-label="Relationship text"]');
+  await act(async()=>{input.focus();setInput(input,'面板未离焦保存');});
+  await act(async()=>app.saveFile());
+  assert.equal(app.openXmindDocument(new Uint8Array(Buffer.from(writes.at(-1).data,'base64'))).sheets[0].relationships[0].title,'面板未离焦保存');
+  await act(async()=>root.unmount());root=undefined;
+  await render(React.createElement(app.XmindView,{dataUrl:xmindUrl(app.sampleArchive())}));
+  await act(async()=>document.querySelector('[data-relationship="rel"]').dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true,button:0})));
+  assert.equal(document.querySelector('[data-endpoint]'),null);
+  for(const field of document.querySelectorAll('.xm-inspector input,.xm-inspector select'))assert.equal(field.disabled,true);
+});
+
+test(3, 'XMind changing a group range keeps topics and unrelated data, saves and undoes once', async () => {
+  await mountXmind();
+  const original=store.getState().tabs[0].content,topics=xmindSheets()[0].rootTopic.children.attached;
+  const node=document.querySelector('[data-group="boundary"]');
+  await act(async()=>node.dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true,button:0})));
+  const start=document.querySelector('select[aria-label="First topic in range"]'),end=document.querySelector('select[aria-label="Last topic in range"]');
+  assert.equal(start.value,'0');assert.equal(end.value,'1');
+  await act(async()=>{end.value='2';end.dispatchEvent(new window.Event('change',{bubbles:true}));});
+  assert.equal(xmindSheets()[0].rootTopic.children.attached[0].boundaries[0].range,'(0,2)');
+  assert.deepEqual(xmindSheets()[0].rootTopic.children.attached[0].children,topics[0].children);
+  await act(async()=>app.saveFile());
+  assert.equal(app.openXmindDocument(new Uint8Array(Buffer.from(writes.at(-1).data,'base64'))).sheets[0].rootTopic.children.attached[0].boundaries[0].range,'(0,2)');
+  await click('Undo');assert.equal(store.getState().tabs[0].content,original);
+});
+
+test(3, 'XMind group range handles preview, cancel and commit one history entry', async () => {
+  await mountXmind();
+  const before=store.getState().tabs[0].content;
+  await act(async()=>document.querySelector('[data-group="boundary"]').dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true,button:0})));
+  const handle=document.querySelector('[data-group-handles="boundary"] [data-range-handle="end"]');assert.ok(handle);
+  handle.setPointerCapture=()=>{};
+  const svg=document.querySelector('.xm-svg'),node=document.querySelector('[data-topic="image"]'),box=node.querySelector('[data-topic-hitbox]');
+  const [x,y]=node.getAttribute('transform').match(/[-\d.]+/g).map(Number),[vx,vy,vw,vh]=svg.getAttribute('viewBox').split(' ').map(Number);
+  const zoom=parseFloat(document.querySelector('.xm-zoom span').textContent)/100;
+  const clientX=(x+Number(box.getAttribute('width'))/2-vx-vw/2)*zoom,clientY=(y+Number(box.getAttribute('height'))/2-vy-vh/2)*zoom;
+  const event=async(type)=>act(async()=>handle.dispatchEvent(new window.MouseEvent(type,{bubbles:true,button:0,clientX,clientY})));
+  await event('pointerdown');await event('pointermove');
+  assert.ok(document.querySelector('[data-group-handles] > rect'),'range outline previews before commit');
+  assert.equal(store.getState().tabs[0].content,before);
+  await act(async()=>window.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+  await event('pointerup');assert.equal(store.getState().tabs[0].content,before);
+  await event('pointerdown');await event('pointermove');await event('pointerup');
+  assert.equal(xmindSheets()[0].rootTopic.children.attached[0].boundaries[0].range,'(0,2)');
+  await click('Undo');assert.equal(store.getState().tabs[0].content,before);
+});
+
+test(3, 'XMind vertical and reverse timeline range drags extend toward the displayed siblings', async () => {
+  for (const [structure,vertical] of [['org.xmind.ui.timeline.through.vertical',true],['org.xmind.ui.timeline.horizontal.rtl',false]]) {
+    const sheets=[{id:'range-sheet',title:'Range',rootTopic:{id:'range-root',title:'Root',structureClass:structure,
+      children:{attached:[0,1,2].map(i=>({id:`range-${i}`,title:`Topic ${i}`}))},boundaries:[{id:'range-group',range:'(0,0)',title:'Range'}]}}];
+    await mountXmind(true,zipSync({'content.json':strToU8(JSON.stringify(sheets))}));
+    const before=store.getState().tabs[0].content;
+    await act(async()=>document.querySelector('[data-group="range-group"]').dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true,button:0})));
+    const start=document.querySelector('[data-range-handle="start"]'),end=document.querySelector('[data-range-handle="end"]');
+    assert.ok(vertical?Number(end.getAttribute('cy'))>Number(start.getAttribute('cy')):Number(end.getAttribute('cx'))<Number(start.getAttribute('cx')));
+    const svg=document.querySelector('.xm-svg'),target=document.querySelector('[data-topic="range-2"]'),box=target.querySelector('[data-topic-hitbox]');
+    const [x,y]=target.getAttribute('transform').match(/[-\d.]+/g).map(Number),[vx,vy,vw,vh]=svg.getAttribute('viewBox').split(' ').map(Number);
+    const zoom=parseFloat(document.querySelector('.xm-zoom span').textContent)/100;
+    const clientX=(x+Number(box.getAttribute('width'))/2-vx-vw/2)*zoom,clientY=(y+Number(box.getAttribute('height'))/2-vy-vh/2)*zoom;
+    end.setPointerCapture=()=>{};
+    for(const type of ['pointerdown','pointermove','pointerup'])await act(async()=>end.dispatchEvent(new window.MouseEvent(type,{bubbles:true,button:0,clientX,clientY})));
+    assert.equal(xmindSheets()[0].rootTopic.boundaries[0].range,'(0,2)');
+    await click('Undo');assert.equal(store.getState().tabs[0].content,before);
+  }
+});
+
 test(2, 'XMind relationship Escape cancels title and control-point drags', async () => {
   await mountXmind();
   const before=store.getState().tabs[0].content;
@@ -2329,7 +2448,7 @@ test(1,'XMind mixed styles show no first-topic value and batch formatting is one
   await selectR3('mix-a');await selectR3('mix-b',true);
   assert.equal(document.querySelector('input[type="number"]').value,'');
   assert.equal(document.querySelector('input[type="number"]').placeholder,'Mixed');
-  assert.equal(document.querySelectorAll('.xm-color-value[data-mixed]').length,1);
+  assert.equal(document.querySelectorAll('.xm-color-value[data-mixed]').length,2,'fill and derived text color both differ');
   assert.equal(button('Bold').getAttribute('aria-pressed'),'mixed');
   assert.equal(button('No fill').getAttribute('aria-pressed'),'mixed');
   assert.equal(document.querySelector('textarea[aria-label="Topic text"]'),null);
@@ -2378,6 +2497,32 @@ test(3,'XMind native advanced shapes render and inspector changes preserve unrel
   assert.equal(topics.at(-1).style.properties['shape-class'],shapes[0].shape);
   assert.equal(topics.at(-1).style.properties['vendor-shape-data'],'keep');
   assert.deepEqual(topics.slice(0,-1),sheets[0].rootTopic.children.attached.slice(0,-1));
+  await click('Undo');assert.equal(store.getState().tabs[0].content,before);
+});
+test(4,'XMind punctuation and flowchart palette render their distinct symbols and undo fill changes',async()=>{
+  const punctuation=JSON.parse(fs.readFileSync('tests/fixtures/xmind-native-punctuation-shapes.json','utf8'));
+  const flow=JSON.parse(fs.readFileSync('tests/fixtures/xmind-native-flowchart-shapes.json','utf8'));
+  const shapes=[...punctuation,...flow];
+  const sheets=[{id:'palette-sheet',title:'Palette',rootTopic:{id:'palette-root',title:'Root',children:{attached:shapes.map(({shape},index)=>({
+    id:`palette-${index}`,title:'中文 English',style:{properties:{'shape-class':shape,'svg:fill':'#123456','fo:color':'#102030'}}
+  }))}}}];
+  await mountXmind(true,zipSync({'content.json':strToU8(JSON.stringify(sheets))}));
+  for(const [index,{shape}] of shapes.entries()) {
+    await selectR3(`palette-${index}`);
+    const node=document.querySelector(`[data-topic="palette-${index}"]`);
+    const select=[...document.querySelectorAll('.xm-field select')].find(el=>el.parentElement.textContent.includes('Shape'));
+    assert.equal(select.value,shape);
+    if(/PageReference$/.test(shape))assert.ok(node.querySelector('[data-reference-symbol]'));
+    else if(shape.endsWith('circle.double'))assert.equal([...node.children].filter(el=>el.tagName.toLowerCase()==='circle').length,2);
+    else if(shape.endsWith('doubleQuote'))assert.equal(node.querySelector('g[aria-hidden="true"]').textContent,'“”');
+    else assert.ok([...node.children].some(el=>el.tagName.toLowerCase()==='path'),shape);
+  }
+  const before=store.getState().tabs[0].content;
+  const select=[...document.querySelectorAll('.xm-field select')].find(el=>el.parentElement.textContent.includes('Shape'));
+  await act(async()=>{select.value=punctuation[0].shape;select.dispatchEvent(new window.Event('change',{bubbles:true}));});
+  const changed=xmindSheets()[0].rootTopic.children.attached.at(-1);
+  assert.equal(changed.style.properties['fill-pattern'],'none');
+  assert.equal(changed.style.properties['svg:fill'],'#123456');
   await click('Undo');assert.equal(store.getState().tabs[0].content,before);
 });
 test(3,'XMind mixed custom widths batch-edit, reset and undo as single actions',async()=>{

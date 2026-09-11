@@ -1,5 +1,6 @@
+import { isPunctuationShape } from "./punctuationShapes";
 import { shapeSize, shapeName, ALL_TOPIC_SHAPES } from "./shapes";
-import { shapeContentCenter, advancedShapeScale } from "./shapePaths";
+import { shapeContentCenter, advancedShapeScale, flowContentScale, referenceSymbol } from "./shapePaths";
 import { relationshipGeometry } from "./relationship";
 import { topicIndicators, type TopicIndicator } from "./indicators";
 import {
@@ -22,6 +23,7 @@ export interface SceneNode extends Box {
   lines: string[];
   content: Box;
   imageHeight: number;
+  imageWidth: number;
   labelLines: string[];
   labels: (Box & { lines: string[] })[];
   indicators: TopicIndicator[];
@@ -114,10 +116,19 @@ const defined = (p?: Properties): Properties =>
   Object.fromEntries(
     Object.entries(p ?? {}).filter(([, v]) => v !== "inherited"),
   );
-function automaticTextColor(fill: string): string {
-  const hex = /^#([\da-f]{6})/i.exec(fill)?.[1];
-  if (!hex) return "#000000";
-  const rgb = [0, 2, 4].map(index => parseInt(hex.slice(index, index + 2), 16) / 255);
+function automaticTextColor(fill: string, opacity = 1, background = "#FFFFFF"): string {
+  const rgba = (color: string) => {
+    let hex = /^#([\da-f]{3,8})$/i.exec(color)?.[1];
+    if (!hex || ![3, 4, 6, 8].includes(hex.length)) return null;
+    if (hex.length < 5) hex = Array.from(hex, c => c + c).join("");
+    return [0, 2, 4].map(index => parseInt(hex.slice(index, index + 2), 16) / 255)
+      .concat(hex.length === 8 ? parseInt(hex.slice(6), 16) / 255 : 1);
+  };
+  const bg = rgba(background) ?? [1, 1, 1, 1];
+  const base = bg.slice(0, 3).map(c => c * bg[3] + 1 - bg[3]);
+  const foreground = rgba(fill);
+  const alpha = foreground ? foreground[3] * opacity : 0;
+  const rgb = base.map((c, i) => (foreground?.[i] ?? c) * alpha + c * (1 - alpha));
   const [r, g, b] = rgb.map(c => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
   return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.179 ? "#000000" : "#FFFFFF";
 }
@@ -163,12 +174,17 @@ export function styleFor(
     ...defined(themeProperties),
     ...defined(topic.style?.properties),
   };
-  const fill = p["fill-pattern"] === "none" ? "none" : p["svg:fill"] ??
+  const fill = (p["fill-pattern"] === "none" || isPunctuationShape(p["shape-class"] ?? "")) ? "none" : p["svg:fill"] ??
     (kind === "floatingTopic" || kind === "summaryTopic" ? "#00897B" : kind === "calloutTopic" ? "#EEEEEE" : depth === 0 ? "#3949AB" : depth === 1 || p["fill-pattern"] === "solid" ? "#EEEEEE" : "none");
+  const fillOpacity = Math.max(0, Math.min(1, number(p["svg:fill-opacity"], 1)));
+  const background = sheet.style?.properties?.["svg:fill"] ?? sheet.theme?.map?.properties?.["svg:fill"] ?? "#FFFFFF";
+  const readableColor = automaticTextColor(fill, fillOpacity, background);
   const color = p["fo:color"] ?? (autoText
     ? level && autoFill ? levelTextColor(p["svg:fill"] ?? branchColor)
-      : automaticTextColor(fill === "none" ? sheet.theme?.map?.properties?.["svg:fill"] ?? "#ffffff" : fill)
-    : depth === 0 || kind === "floatingTopic" || kind === "summaryTopic" ? "#FFFFFF" : "#333333");
+      : readableColor
+    : fill === "none" && (depth === 0 || kind === "floatingTopic" || kind === "summaryTopic") ? readableColor
+      : fill !== "none" && p["svg:fill"] ? readableColor
+        : depth === 0 || kind === "floatingTopic" || kind === "summaryTopic" ? "#FFFFFF" : "#333333");
   return {
     properties: p,
     fontSize: Math.max(
@@ -179,7 +195,7 @@ export function styleFor(
       ),
     ),
     fill,
-    fillOpacity: Math.max(0, Math.min(1, number(p["svg:fill-opacity"], 1))),
+    fillOpacity,
     color,
     stroke: p["border-line-color"] ?? (kind === "calloutTopic" ? "none" : p["line-color"] ?? branchColor),
     lineColor: p["line-color"] ?? branchColor,
@@ -317,7 +333,7 @@ export function buildScene(
     const customWidth = typeof topic.customWidth === "number" && Number.isFinite(topic.customWidth) && topic.customWidth > 0
       ? Math.max(40,Math.min(10000,topic.customWidth)) : undefined;
     const horizontalPadding = kind === "floatingTopic" ? 26 : depth === 0 ? 64 : depth === 1 ? 40 : 12;
-    const scale = advancedShapeScale(shapeName(style.shape)) ?? 1;
+    const scale = flowContentScale(style.shape)?.[0] ?? advancedShapeScale(shapeName(style.shape)) ?? 1;
     const widthHint = customWidth === undefined ? number(
       p["fo:max-width"] ?? p["fo:width"],
       depth === 0 ? 260 : 210,
@@ -365,7 +381,7 @@ export function buildScene(
     const width=customWidth===undefined ? naturalSize.width : Math.max(customWidth,naturalSize.width);
     const height=naturalSize.height;
     const [centerX,centerY]=shapeContentCenter(style.shape);
-    const content = { x: width*centerX - contentWidth/2, y: height*centerY - contentHeight/2,
+    const content = { x: width*centerX - contentWidth/2, y: height*centerY - contentHeight/2 + (referenceSymbol(style.shape)?40:0),
       width: contentWidth, height: contentHeight };
     // Native tags sit below the outline, left aligned and packed into rows.
     // Their bounds participate in layout/Fit without inflating the topic shape.
@@ -406,7 +422,7 @@ export function buildScene(
       detached,
       direction: inherited,
       lines,
-      content, imageHeight, labelLines, labels, indicators, indicatorColumns, labelY, indicatorY, titleX, titleAnchor, indicatorPositions,
+      content, imageHeight, imageWidth, labelLines, labels, indicators, indicatorColumns, labelY, indicatorY, titleX, titleAnchor, indicatorPositions,
       ...style,
       x: -width / 2,
       y: -height / 2,

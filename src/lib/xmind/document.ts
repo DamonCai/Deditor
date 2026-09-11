@@ -1,3 +1,4 @@
+import { isPunctuationShape } from "./punctuationShapes";
 import { replaceArchiveEntry } from "./archive";
 import { unzipSync, strFromU8, strToU8 } from "fflate";
 import { parseXmind, type XmindTopic } from "./parse";
@@ -180,9 +181,10 @@ export type Command =
     }
   | { type: "position"; id: string; x: number; y: number }
   | { type: "relationship"; from: string; to: string; title: string }
-  | { type: "relationship-update"; id: string; title?: string; controlPoints?: Record<string, { x: number; y: number }> }
+  | { type: "relationship-update"; id: string; title?: string; properties?: Properties; controlPoints?: Record<string, { x: number; y: number }> }
+  | { type: "relationship-reconnect"; id: string; end: 0 | 1; topicId: string }
   | { type: "relationship-delete"; id: string }
-  | { type: "group-update"; parent: string; id: string; title?: string; properties?: Properties }
+  | { type: "group-update"; parent: string; id: string; title?: string; properties?: Properties; range?: { start: number; end: number } }
   | { type: "group-delete"; parent: string; id: string }
   | {
       type: "group";
@@ -282,6 +284,12 @@ export function editDocument(
         owner.summaries = owner.summaries?.filter(g => g.id !== command.id);
         if (group.topicId) removeTopic(owner, group.topicId);
       } else {
+        if (command.range) {
+          const {start,end}=command.range,count=owner.children?.attached?.length??0;
+          if(!Number.isInteger(start)||!Number.isInteger(end)||start<0||end<start||end>=count)
+            throw new Error("Invalid group range");
+          group.range=`(${start},${end})`;
+        }
         if (command.title !== undefined) {
           group.title = command.title;
           const summary = group.topicId && findTopic(owner, group.topicId);
@@ -295,11 +303,21 @@ export function editDocument(
       const relation = sheet.relationships?.find((r) => r.id === command.id);
       if (!relation) throw new Error("Relationship not found");
       if (command.title !== undefined) relation.title = command.title;
+      if (command.properties) relation.style={...relation.style,properties:{...relation.style?.properties,...command.properties}};
       if (command.controlPoints) {
         for (const point of Object.values(command.controlPoints))
           if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) throw new Error("Invalid control point");
         relation.controlPoints = { ...(relation.controlPoints as object ?? {}), ...command.controlPoints };
       }
+      break;
+    }
+    case "relationship-reconnect": {
+      if(command.end!==0&&command.end!==1)throw new Error("Invalid relationship endpoint");
+      const relation=sheet.relationships?.find(r=>r.id===command.id);
+      if(!relation)throw new Error("Relationship not found");
+      const other=command.end===0?relation.end2Id:relation.end1Id;
+      if(!findTopic(root,command.topicId)||command.topicId===other)throw new Error("Select two different topics");
+      relation[command.end===0?'end1Id':'end2Id']=command.topicId;
       break;
     }
     case "relationship-delete":
@@ -325,6 +343,7 @@ export function editDocument(
         if(command.properties['shape-class'] && command.properties['shape-class']!==target.style?.properties?.['shape-class'])
           delete target.customWidth;
         target.style = { ...target.style, properties: { ...target.style?.properties, ...command.properties } };
+        if(isPunctuationShape(command.properties["shape-class"] ?? ""))target.style.properties!["fill-pattern"]="none";
       }
       break;
     case "width":
@@ -350,6 +369,7 @@ export function editDocument(
         ...topic.style,
         properties: { ...topic.style?.properties, ...command.properties },
       };
+      if(isPunctuationShape(command.properties["shape-class"] ?? ""))topic.style.properties!["fill-pattern"]="none";
       break;
     case "notes":
       if (!topic) throw new Error("Topic not found");

@@ -1,18 +1,17 @@
+import { arrowDrawing, arrowName } from "../lib/xmind/arrows";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Command, Relationship, Sheet } from "../lib/xmind/document";
 import type { Box, Measure, SceneNode } from "../lib/xmind/scene";
 import { draftBox } from "../lib/xmind/draft";
-import { relationshipGeometry, type Point } from "../lib/xmind/relationship";
+import { relationshipDropTarget, relationshipGeometry, type Point } from "../lib/xmind/relationship";
 import { useT } from "../lib/i18n";
 
-function Arrow({ id, kind, color }: { id: string; kind: string; color: string }) {
-  const shape = kind.split(".").pop()?.toLowerCase();
-  if (shape === "none") return null;
-  return <marker id={id} viewBox="0 0 12 12" refX={11} refY={6} markerWidth={8} markerHeight={8} orient="auto-start-reverse">
-    {shape === "dot" ? <circle cx={7} cy={6} r={4} fill={color} />
-      : shape?.includes("diamond") ? <path d="M1,6 L6,1 11,6 6,11 Z" fill={color} />
-        : shape?.includes("triangle") ? <path d="M1,1 L11,6 1,11 Z" fill={color} />
-          : <path d="M2,1 L11,6 2,11" stroke={color} strokeWidth={1.5} fill="none" />}
+function Arrow({ id, kind, color, begin = false }: { id: string; kind: string; color: string; begin?: boolean }) {
+  const shape=arrowName(kind),drawing=arrowDrawing(kind);
+  if(shape==='none')return null;
+  return <marker id={id} viewBox="0 0 12 12" refX={11} refY={6} markerWidth={shape==='hook'?6:4.5} markerHeight={shape==='hook'?6:4.5} orient="auto-start-reverse">
+    {shape==='dot' ? <circle cx={6} cy={6} r={5} fill={color} />
+      : drawing && <path d={drawing.path} transform={begin && shape==='hook' ? 'translate(0 12) scale(1 -1)' : undefined} fill={drawing.filled?color:'none'} stroke={drawing.filled?'none':color} strokeWidth={1.5} />}
   </marker>;
 }
 
@@ -21,6 +20,7 @@ interface Props {
   sheet: Sheet;
   from: SceneNode;
   to: SceneNode;
+  nodes: readonly SceneNode[];
   selected: boolean;
   readonly: boolean;
   markerPrefix: string;
@@ -38,12 +38,14 @@ export default function XmindRelationship(props: Props) {
   const [preview, setPreview] = useState<Record<string, Point> | null>(null);
   const [editing, setEditing] = useState(false), [draft, setDraft] = useState("");
   const dragging = useRef<{ index: number; moved: boolean } | null>(null);
+  const endpointDrag = useRef<{end:0|1; moved:boolean}|null>(null);
+  const [endpointPreview,setEndpointPreview]=useState<{end:0|1;target:SceneNode}|null>(null);
   const cancelled = useRef(false);
   const group = useRef<SVGGElement>(null);
   const focusCanvas = () => (group.current?.closest(".xm-canvas") as HTMLElement | null)?.focus();
   const geometry = relationshipGeometry(sheet, preview ? { ...relation, controlPoints: {
     ...(relation.controlPoints as object ?? {}), ...preview,
-  } } : relation, from, to);
+  } } : relation, endpointPreview?.end===0?endpointPreview.target:from, endpointPreview?.end===1?endpointPreview.target:to);
   const { start, end, c1, c2, label, path, color, width, properties } = geometry;
   const editor = editing ? draftBox({ ...from, x: label.x - 100, y: label.y - 18, width: 200, height: 36,
     content: { x: 0, y: 0, width: 200, height: 36 }, imageHeight: 0, fontSize: geometry.fontSize, properties },
@@ -61,7 +63,7 @@ export default function XmindRelationship(props: Props) {
     props.registerFlush(() => commitRef.current());
     return () => props.registerFlush(null);
   }, [editing, props.registerFlush]);
-  const cancelDrag = () => { dragging.current = null; setPreview(null); };
+  const cancelDrag = () => { dragging.current = null; endpointDrag.current=null; setEndpointPreview(null); setPreview(null); };
   useEffect(() => {
     const cancel = (e: globalThis.KeyboardEvent) => { if (e.key === "Escape" && !e.isComposing && e.keyCode !== 229) cancelDrag(); };
     window.addEventListener("keydown", cancel);
@@ -82,8 +84,8 @@ export default function XmindRelationship(props: Props) {
       (e.currentTarget.closest(".xm-canvas") as HTMLElement)?.focus();
       props.onSelect();
     }}
-    onDoubleClick={(e) => { e.stopPropagation(); if (!(e.target as Element).closest("[data-control]")) edit(); }}>
-    <defs><Arrow id={`${id}-start`} kind={geometry.beginArrow} color={color} />
+    onDoubleClick={(e) => { e.stopPropagation(); if (!(e.target as Element).closest("[data-control],[data-endpoint]")) edit(); }}>
+    <defs><Arrow id={`${id}-start`} kind={geometry.beginArrow} color={color} begin />
       <Arrow id={`${id}-end`} kind={geometry.endArrow} color={color} /></defs>
     {selected && <path d={path} fill="none" stroke="#80CFFF" strokeWidth={width + 6} opacity={0.55} pointerEvents="none" />}
     <path d={path} data-relationship-path fill="none" stroke={color} strokeWidth={width}
@@ -119,6 +121,34 @@ export default function XmindRelationship(props: Props) {
           }}
           onPointerCancel={cancelDrag} />
       </g>;
+    })}
+    {endpointPreview && <rect x={endpointPreview.target.x-3} y={endpointPreview.target.y-3}
+      width={endpointPreview.target.width+6} height={endpointPreview.target.height+6}
+      rx={6} fill="none" stroke="#299AD8" strokeWidth={2} pointerEvents="none" />}
+    {selected && !readonly && ([start,end] as const).map((point,index)=> {
+      const endpoint=index as 0|1,other=index===0?to.topic.id:from.topic.id;
+      return <circle key={`endpoint-${index}`} cx={point.x} cy={point.y} r={6}
+        fill="#299AD8" stroke="#fff" strokeWidth={2} data-endpoint={index}
+        aria-label={t('xmind.endpoint',{index:index+1})} style={{cursor:'crosshair'}}
+        onDoubleClick={e=>e.stopPropagation()}
+        onPointerDown={e=>{
+          if(e.button!==0)return;
+          endpointDrag.current={end:endpoint,moved:false};
+          e.currentTarget.setPointerCapture(e.pointerId);
+        }}
+        onPointerMove={e=>{
+          if(!endpointDrag.current)return;
+          endpointDrag.current.moved=true;
+          const target=relationshipDropTarget(props.nodes,props.toWorld(e.clientX,e.clientY),other);
+          setEndpointPreview(target?{end:endpoint,target}:null);
+        }}
+        onPointerUp={e=>{
+          if(!endpointDrag.current)return;
+          const target=relationshipDropTarget(props.nodes,props.toWorld(e.clientX,e.clientY),other);
+          if(endpointDrag.current.moved&&target)onCommand({type:'relationship-reconnect',id:relation.id,end:endpoint,topicId:target.topic.id});
+          cancelDrag();
+        }}
+        onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag} />;
     })}
     {editing ? <foreignObject x={label.x - 100 + editor!.x} y={label.y - 18 + editor!.y} width={editor!.width} height={editor!.height}>
       <input autoFocus aria-label={t("xmind.editRelationship")} value={draft}

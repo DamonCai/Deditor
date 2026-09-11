@@ -1,6 +1,9 @@
+import XmindGroupHandles from "./XmindGroupHandles";
+import { groupRangeAxis } from "../lib/xmind/groupRange";
+import { punctuationPath } from "../lib/xmind/punctuationShapes";
 import { draftBox } from "../lib/xmind/draft";
 import { shapeName, shapePolygon, strokeDash, ellipticRectanglePath } from "../lib/xmind/shapes";
-import { advancedShape } from "../lib/xmind/shapePaths";
+import { advancedShape, referenceSymbol } from "../lib/xmind/shapePaths";
 import { topicDropTarget, type DropTarget } from "../lib/xmind/drop";
 import XmindRelationship from "./XmindRelationship";
 import XmindIndicator from "./XmindIndicator";
@@ -45,6 +48,8 @@ interface Props {
   readonly: boolean;
   selected: string[];
   selectedGroup: string | null;
+  selectedRelationship: string | null;
+  onSelectRelationship: (id: string | null) => void;
   onSelectGroup: (id: string | null) => void;
   onSelect: (ids: string[]) => void;
   onCommand: (command: Command) => void;
@@ -78,9 +83,23 @@ function NodeShape({ node: n }: { node: SceneNode }) {
     strokeWidth: Math.max(0, Number.isFinite(parseFloat(n.properties["border-line-width"] ?? "")) ? parseFloat(n.properties["border-line-width"]) : 1.5),
     strokeDasharray: strokeDash(n.properties["border-line-pattern"]),
   };
+  const reference=referenceSymbol(shape);
+  if(reference) return reference==='on'
+    ? <circle data-reference-symbol cx={w/2} cy={40} r={30} {...props} />
+    : <path data-reference-symbol d={`M${w/2-30},10 H${w/2+30} V40 L${w/2},70 L${w/2-30},40 Z`} {...props} />;
+  if(shape==='circle.double') return <>
+    <circle cx={w/2} cy={h/2} r={w/2} {...props} />
+    <circle cx={w/2} cy={h/2} r={Math.max(1,w/2-7)} {...props} fill="none" />
+  </>;
+  if(shape==='doublequote')return <g aria-hidden="true" fill={n.stroke} fontFamily="Georgia, serif" fontSize={Math.min(30,h*.55)} fontWeight={700}>
+    <text x={2} y={h/2} dominantBaseline="central">“</text>
+    <text x={w-2} y={h/2} textAnchor="end" dominantBaseline="central">”</text>
+  </g>;
+  const punctuation = punctuationPath(shape,w,h);
+  if(punctuation) return <path data-punctuation d={punctuation} {...props} fill="none" strokeLinejoin="round" strokeLinecap="round" />;
   const advanced = advancedShape(shape, w, h);
   if (advanced) return <>
-    {advanced.back && <path d={advanced.back} {...props} />}
+    {advanced.back && <path d={advanced.back} {...props} fill={shape==="multidocument"?"none":props.fill} />}
     <path d={advanced.path} {...props} strokeLinejoin="round" />
     {advanced.detail && <path d={advanced.detail} {...props} fill="none" />}
   </>;
@@ -122,6 +141,8 @@ export default function XmindCanvas({
   readonly,
   selected,
   selectedGroup,
+  selectedRelationship,
+  onSelectRelationship: setSelectedRelationship,
   onSelectGroup,
   onSelect,
   onCommand,
@@ -159,10 +180,8 @@ export default function XmindCanvas({
   }, [sheet]);
   const [editing, setEditing] = useState<string | null>(null),
     [draft, setDraft] = useState("");
-  const [selectedRelationship, setSelectedRelationship] = useState<string | null>(null);
   const relationshipFlush = useRef<(() => void) | null>(null);
   const setRelationshipFlush = useCallback((flush: (() => void) | null) => { relationshipFlush.current = flush; }, []);
-  useEffect(() => { if (selected.length) setSelectedRelationship(null); }, [selected]);
   const [context, setContext] = useState<{ x: number; y: number } | null>(null);
   const menu = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -251,14 +270,11 @@ export default function XmindCanvas({
   };
   const fit = () => {
     const b = scene.bounds;
-    setCamera({
-      x: b.x + b.width / 2,
-      y: b.y + b.height / 2,
-      zoom: Math.max(
-        0.001,
-        Math.min(1.3, size.width / b.width, size.height / b.height),
-      ),
-    });
+    // Reserve screen space for the floating zoom bar even on very tall maps.
+    const bottom = Math.min(64, size.height / 3);
+    const zoom = Math.max(0.001, Math.min(1.3, Math.max(1,size.width-24)/b.width,
+      Math.max(1,size.height-bottom)/b.height));
+    setCamera({x:b.x+b.width/2,y:b.y+b.height/2+bottom/(2*zoom),zoom});
   };
   useEffect(() => {
     const el = host.current;
@@ -642,9 +658,9 @@ export default function XmindCanvas({
               {img && (
                 <image
                   href={img}
-                  x={n.content.x}
+                  x={n.content.x + (n.content.width - n.imageWidth)/2}
                   y={n.content.y}
-                  width={n.content.width}
+                  width={n.imageWidth}
                   height={imageHeight}
                   preserveAspectRatio="xMidYMid meet"
                 />
@@ -887,7 +903,7 @@ export default function XmindCanvas({
         {(sheet.relationships ?? []).map((relation) => {
           const from = displayById.get(relation.end1Id), to = displayById.get(relation.end2Id);
           if (!from || !to) return null;
-          return <XmindRelationship key={relation.id} relation={relation} sheet={sheet} from={from} to={to}
+          return <XmindRelationship key={relation.id} relation={relation} sheet={sheet} from={from} to={to} nodes={Array.from(displayById.values())}
             readonly={readonly} selected={selectedRelationship === relation.id} markerPrefix={viewId}
             onSelect={() => { onSelectGroup(null); onSelect([]); setSelectedRelationship(relation.id); }}
             onCommand={onCommand} registerFlush={setRelationshipFlush}
@@ -899,9 +915,22 @@ export default function XmindCanvas({
                 y: c.y + (y - rect.top - rect.height / 2) / c.zoom };
             }} />;
         })}
+        {!readonly && selectedGroup && (()=>{
+          const box=scene.groups.find(g=>g.id===selectedGroup);
+          const ownerNode=box&&displayById.get(box.parent);
+          if(!box||!ownerNode)return null;
+          const owner=ownerNode.topic,group=[...(owner.boundaries??[]),...(owner.summaries??[])].find(g=>g.id===box.id);
+          if(!group)return null;
+          const axis=groupRangeAxis(ownerNode,Array.from(displayById.values()));
+          return <XmindGroupHandles key={box.id} group={group} box={box} owner={owner} nodes={Array.from(displayById.values())}
+            zoom={camera.zoom} axis={axis} onCommand={onCommand} toWorld={(x,y)=>{
+              const rect=svg.current!.getBoundingClientRect(),c=cameraRef.current;
+              return {x:c.x+(x-rect.left-rect.width/2)/c.zoom,y:c.y+(y-rect.top-rect.height/2)/c.zoom};
+            }}/>;
+        })()}
         {scene.nodes.filter(n => n.topic.id === editing).map(renderNode)}
     </>;
-  }, [scene, selected, query, dragOffset, resources, readonly, editing, draft, editing || selectedRelationship ? camera : null, size.width, size.height,
+  }, [scene, selected, query, dragOffset, resources, readonly, editing, draft, editing || selectedRelationship || selectedGroup ? camera : null, size.width, size.height,
     folded, t, commitEdit, toggleFold, byId, displayById, draggedIds, braceEdges, fishboneRibs, sheet, viewId,
     selectedRelationship, selectedGroup, onSelectGroup, onCommand, onSelect, onInspect, onLink, setRelationshipFlush]);
 
