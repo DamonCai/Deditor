@@ -1,3 +1,4 @@
+import { imeMarkdown } from "./fixtures/markdown-ime";
 import { scrollMarkdown } from "./fixtures/markdown-scroll";
 import { presentationMarkdown } from "./fixtures/markdown-presentation";
 import { interactionMarkdown } from "./fixtures/markdown-interaction";
@@ -20,9 +21,10 @@ import "../src/styles.css";
 // Browser-only asset URL substitute; native file IO is covered separately.
 Object.defineProperty(window, "__TAURI_INTERNALS__", { value: { convertFileSrc: (path: string) => new URL(path, location.origin).href }, configurable: true });
 const sample = '# 阅读时自然编辑\n\n这是**加粗**和 *斜体*，支持中文连续输入。\n\n## 任务清单\n\n+ [ ] 编写正文\n+ [x] 保留原文\n\n## 表格\n\n| 项目 | 状态 |\n| :--- | ---: |\n| 编辑器 | 就绪 |\n| 历史 | 待验证 |\n\n## 代码与公式\n\n```typescript\nconst message = "你好";\n```\n\n$$\nx^2 + y^2 = z^2\n$$\n\n```mermaid\ngraph LR\n  A[阅读] --> B[编辑]\n```\n\n## 扩展语法\n\n<span style="color:#e53e3e">彩色文字</span>\n\n[引用链接][ref]\n\n[ref]: https://example.com "保留定义"\n\n最后一段保留三空格。   \n';
+const ime = new URLSearchParams(location.search).has("ime");
 const parity = new URLSearchParams(location.search).has("parity");
 const dark = new URLSearchParams(location.search).has("dark");
-const fixture = new URLSearchParams(location.search).has("scroll") ? scrollMarkdown : new URLSearchParams(location.search).has("presentation") ? presentationMarkdown : new URLSearchParams(location.search).has("interaction") ? interactionMarkdown : sample;
+const fixture = ime ? imeMarkdown : new URLSearchParams(location.search).has("scroll") ? scrollMarkdown : new URLSearchParams(location.search).has("presentation") ? presentationMarkdown : new URLSearchParams(location.search).has("interaction") ? interactionMarkdown : sample;
 const docs = [ { id: "md-review", filePath: "/generated/visual-review.md", content: fixture, savedContent: fixture },
  { id: "md-other", filePath: "/generated/second.md", content: "# 第二个标签\n\n独立历史。\n", savedContent: "# 第二个标签\n\n独立历史。\n" },
  { id: "html-review", filePath: "/generated/isolated.html", content: "<h1>HTML 保持独立</h1><p>原有预览</p>", savedContent: "<h1>HTML 保持独立</h1><p>原有预览</p>" },
@@ -42,6 +44,11 @@ function Review() {
    <div className="document-toolbar" style={{ flexShrink: 0 }}>
      {docs.map(t => <Button size="sm" key={t.id} pressed={id === t.id} onClick={() => useEditorStore.setState({ activeId: t.id })}>{t.filePath.split("/").pop()}</Button>)}
      <Button size="sm" onClick={() => { const next = theme === "light" ? "dark" : "light"; useEditorStore.setState({ theme: next }); document.documentElement.classList.toggle("dark", next === "dark"); }}>主题</Button>
+     {ime && <>
+       <Button size="sm" onMouseDown={event => event.preventDefault()} onClick={() => document.querySelector(".md-document")?.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "" }))}>模拟开始组词</Button>
+       <Button size="sm" onMouseDown={event => event.preventDefault()} onClick={() => { const scroller = document.querySelector(".md-visual-scroll"); if (scroller) scroller.scrollTop += 172; }}>模拟输入法滚动</Button>
+       <Button size="sm" onMouseDown={event => event.preventDefault()} onClick={() => document.querySelector(".md-document")?.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "" }))}>模拟结束组词</Button>
+     </>}
      <Button size="sm" onClick={() => { flushDocument(id); const text = useEditorStore.getState().tabs.find(t => t.id === id)!.content; setSaved(text); useEditorStore.getState().markSaved(); }}>保存快照</Button>
    </div>
    {html ? <HtmlToolbar /> : !xmind ? <MarkdownToolbar /> : null}

@@ -42,6 +42,7 @@ export {getVisualEditor} from './src/lib/markdownVisualBridge';
 export {markdownHistory} from './src/lib/markdownHistory';
 export {saveFile,saveFileAs,saveAllDirty} from './src/lib/fileio';
 export {renderMarkdown} from './src/lib/markdown';
+export {installCompositionViewport} from './src/lib/markdownVisual/compositionViewport';
 export {flushDocument} from './src/lib/documentFlush';
 `,resolveDir:process.cwd()},outfile:output,bundle:true,format:'esm',platform:'node',packages:'external',loader:{'.css':'empty'},plugins:[{name:'isolated-io',setup(b){
  b.onResolve({filter:/.*/},a=>a.path.endsWith('.css')?{path:'css',namespace:'stub'}:stubs[a.path]?{path:a.path,namespace:'stub'}:a.path.endsWith('/feedback')?{path:'feedback',namespace:'stub'}:undefined);
@@ -291,4 +292,45 @@ await test('scroll stability: preserved HTML blocks reserve their preview height
  await act(async()=>block.querySelector('.cm-content').dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true})));
  assert.equal(block.style.minHeight,'');
 });
+
+// Native layout is covered separately. These geometry-controlled tests exercise
+// composition events and the scroll policy, including an IME-generated scroll.
+async function imeGeometry(run) {
+ const scroller=document.createElement('div'),editor=document.createElement('div');
+ const text=document.createTextNode('中文输入');editor.append(text);scroller.append(editor);document.body.append(scroller);
+ Object.defineProperties(scroller,{clientHeight:{value:500},clientTop:{value:0},scrollHeight:{value:5000}});
+ scroller.getBoundingClientRect=()=>({top:100,bottom:600,height:500,left:0,right:600,width:600});
+ scroller.scrollTop=1000;
+ let caretY=1200;
+ const original=window.Range.prototype.getClientRects;
+ window.Range.prototype.getClientRects=()=>[{top:100+caretY-scroller.scrollTop,bottom:120+caretY-scroller.scrollTop,height:20}];
+ const selection=document.getSelection(),range=document.createRange();range.setStart(text,2);range.collapse(true);selection.removeAllRanges();selection.addRange(range);
+ const guard=app.installCompositionViewport(editor,scroller);
+ const event=type=>editor.dispatchEvent(new dom.window.CompositionEvent(type,{bubbles:true}));
+ try {await run({scroller,editor,guard,event,caret:y=>caretY=y});}
+ finally {guard.destroy();scroller.remove();window.Range.prototype.getClientRects=original;selection.removeAllRanges();}
+}
+await test('IME round 1: native scroll during marked text does not move an already visible caret',async()=>imeGeometry(async({scroller,guard,event})=>{
+ event('compositionstart');scroller.scrollTop=1172;
+ assert.equal(guard.handleScroll(),true);assert.equal(scroller.scrollTop,1000);
+ scroller.scrollTop=1172;scroller.dispatchEvent(new Event('scroll'));await pause(40);assert.equal(scroller.scrollTop,1000);
+}));
+await test('IME round 2: wrapping beyond the bottom reveals only the required distance',async()=>imeGeometry(async({scroller,guard,event,caret})=>{
+ event('compositionstart');caret(1500);guard.handleScroll();assert.equal(scroller.scrollTop,1025);
+ caret(990);guard.handleScroll();assert.equal(scroller.scrollTop,985);
+}));
+await test('IME round 3: wheel and pointer navigation override the composition anchor',async()=>imeGeometry(async({scroller,guard,event})=>{
+ event('compositionstart');scroller.dispatchEvent(new dom.window.WheelEvent('wheel'));scroller.scrollTop=1400;
+ assert.equal(guard.handleScroll(),false);await pause(40);assert.equal(scroller.scrollTop,1400);
+ event('compositionstart');scroller.dispatchEvent(new Event('pointerdown',{bubbles:true}));assert.equal(guard.handleScroll(),false);
+}));
+await test('IME round 4: confirmation is protected and ordinary input resumes afterwards',async()=>imeGeometry(async({scroller,guard,event})=>{
+ event('compositionstart');event('compositionend');scroller.scrollTop=1172;guard.handleScroll();assert.equal(scroller.scrollTop,1000);
+ await pause(65);scroller.scrollTop=1300;assert.equal(guard.handleScroll(),false);
+ event('compositionstart');event('compositionend');event('compositionstart');await pause(65);assert.equal(guard.handleScroll(),true);
+}));
+await test('IME round 5: leaving the editor and destroying the view cannot pull scrolling back',async()=>imeGeometry(async({scroller,editor,guard,event})=>{
+ event('compositionstart');document.getSelection().removeAllRanges();scroller.scrollTop=1250;guard.handleScroll();assert.equal(scroller.scrollTop,1250);
+ guard.destroy();scroller.scrollTop=1450;editor.dispatchEvent(new Event('input',{bubbles:true}));await pause(40);assert.equal(scroller.scrollTop,1450);
+}));
 await act(async()=>root.unmount());assert.deepEqual(runtimeErrors,[]);dom.window.close();console.log(`${passed} integration tests passed`);

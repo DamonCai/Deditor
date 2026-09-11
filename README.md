@@ -152,9 +152,9 @@ npm run perf:all
 | `npm run test:file-icons` | 图标映射、授权文件和构建资源 |
 | `npm run perf:all` | store、组件、长时操作、文档、XMind 和 Rust 基准 |
 
-浏览器隔离验证入口为 `tests/markdown-visual-review.html`；`?parity&presentation` 并排运行真实 Preview 与阅读编辑，使用同一自建样例核对布局。`?interaction` 检查长文输入、搜索和光标稳定性；`?scroll` 检查高图表、长代码及文末输入时的位置变化。测试只使用自建样例，不读取用户已有文档或正式应用历史。`tests/artifacts/`、截图和安装包被 Git 忽略；需要迁移时单独保存。
+浏览器隔离验证入口为 `tests/markdown-visual-review.html`；`?parity&presentation` 并排运行真实 Preview 与阅读编辑，使用同一自建样例核对布局。`?interaction` 检查长文输入、搜索和光标稳定性；`?scroll` 检查高图表、长代码及文末输入时的位置变化。`?ime` 使用中文长文，提供组词事件和额外滚动的模拟按钮，用于检查输入法滚动保护；模拟测试不等同于原生候选字验收。测试只使用自建样例，不读取用户已有文档或正式应用历史。`tests/artifacts/`、截图和安装包被 Git 忽略；需要迁移时单独保存。
 
-自动化测试不能代替真实输入法、原生保存对话框、重启恢复及双平台交互。Markdown 的真实 IME、部分原生交互和复杂语法兼容性仍有待验收项，见 [Markdown 实施记录](docs/markdown-visual-editing-verification-2026-09-11.md)及[本次提交验证记录](docs/markdown-release-verification-2026-09-11.md)。XMind 状态见[独立验收矩阵](docs/xmind-acceptance-matrix-2026-09-11.md)。
+自动化测试不能代替真实输入法、原生保存对话框、重启恢复及双平台交互。中文组词期间已加入可视区保护，修复后的真实 IME、部分原生交互和复杂语法兼容性仍有待验收项，见 [Markdown 实施记录](docs/markdown-visual-editing-verification-2026-09-11.md)及[本次提交验证记录](docs/markdown-release-verification-2026-09-11.md)。XMind 状态见[独立验收矩阵](docs/xmind-acceptance-matrix-2026-09-11.md)。
 
 ## 架构与持久化
 

@@ -1,3 +1,4 @@
+import { installCompositionViewport } from "../lib/markdownVisual/compositionViewport";
 import { faithfulLink } from "../lib/markdownVisual/references";
 import { absoluteHeadingInputRule } from "../lib/markdownVisual/heading";
 import { faithfulImage, accessibleImageView } from "../lib/markdownVisual/image";
@@ -62,7 +63,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
     view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, from, to)).scrollIntoView());
   };
   useEffect(() => {
-    let cancelled = false, cleanupFlush = () => {}, cleanupInput = () => {}, cleanupAccessibility = () => {};
+    let cancelled = false, cleanupFlush = () => {}, cleanupInput = () => {}, cleanupAccessibility = () => {}, cleanupCompositionViewport = () => {};
     setReady(false); setError("");
     const host = document.createElement("div"); root.current!.append(host);
     const session = markdownSession(tabId, sourceRef.current); session.breakGroup();
@@ -151,8 +152,11 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
           const live = useEditorStore.getState().tabs.find(tab => tab.id === tabId);
           if (live && live.content !== content) useEditorStore.getState().setContent(content, tabId, "visual");
         };
+        const compositionViewport = installCompositionViewport(view.dom, scroller.current!);
+        cleanupCompositionViewport = compositionViewport.destroy;
         const originalImageView = view.props.nodeViews?.["image-block"];
         view.setProps({ nodeViews: { ...view.props.nodeViews, ...(originalImageView ? { "image-block": accessibleImageView(originalImageView) } : {}), deditor_raw: rawView(filePath, tabId), code_block: codeView(tabId, theme) },
+          handleScrollToSelection: () => compositionViewport.handleScroll(),
           dispatchTransaction: tr => {
             if (cancelled) return;
             const result = view.state.applyTransaction(tr);
@@ -204,7 +208,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
     return () => {
       runtime.current?.flush();
       session.breakGroup(); session.visualScroll = scroller.current?.scrollTop ?? session.visualScroll;
-      cancelled = true; cleanupFlush(); cleanupInput(); cleanupAccessibility(); runtime.current = null;
+      cancelled = true; cleanupFlush(); cleanupInput(); cleanupAccessibility(); cleanupCompositionViewport(); runtime.current = null;
       if (getVisualEditor()?.tabId === tabId) setVisualEditor(null);
       void crepe.destroy().catch(err => logError("Markdown visual editor cleanup failed", err)); host.remove();
     };
