@@ -1,6 +1,6 @@
-/* Document typography is scoped to the preview, independent of IDE chrome.
+/* Shared document typography for preview and visual editing, independent of IDE chrome.
    Keep blocks in normal flow: scroll sync relies on their offsetTop values. */
-.preview {
+:is(.preview, .milkdown .ProseMirror.md-document) {
   --preview-text: #343b46;
   --preview-heading: #202631;
   --preview-muted: #606b7a;
@@ -9,7 +9,7 @@
   --preview-code-bg: #f5f6f8;
   --preview-rule: #e5e8ed;
   padding: 32px 32px 72px;
-  font-size: 16px;
+  font-size: calc(16px + var(--md-document-zoom, 0px));
   line-height: 1.85;
   color: var(--preview-text);
   overflow-y: auto;
@@ -23,7 +23,7 @@
     sans-serif;
   -webkit-font-smoothing: antialiased;
 }
-.dark .preview {
+.dark :is(.preview, .milkdown .ProseMirror.md-document) {
   --preview-text: #cbd0d9;
   --preview-heading: #edf0f5;
   --preview-muted: #a1a9b6;
@@ -33,7 +33,7 @@
   --preview-rule: #363a42;
   color-scheme: dark;
 }
-.preview > * {
+:is(.preview, .milkdown .ProseMirror.md-document) > * {
   /* Left-aligned reading column — content keeps a comfortable line length
      (860px cap) but every block (paragraph, heading, table) shares the same
      left edge for a clean visual baseline. */
@@ -41,68 +41,74 @@
   margin-left: 0;
   margin-right: 0;
 }
-.preview h1,
-.preview h2,
-.preview h3,
-.preview h4,
-.preview h5,
-.preview h6 {
+:is(.preview, .milkdown .ProseMirror.md-document) h1,
+:is(.preview, .milkdown .ProseMirror.md-document) h2,
+:is(.preview, .milkdown .ProseMirror.md-document) h3,
+:is(.preview, .milkdown .ProseMirror.md-document) h4,
+:is(.preview, .milkdown .ProseMirror.md-document) h5,
+:is(.preview, .milkdown .ProseMirror.md-document) h6 {
   color: var(--preview-heading);
   font-weight: 650;
   margin: 1.7em 0 0.65em;
   line-height: 1.45;
   scroll-margin-top: 24px;
+  padding: 0;
+  font-family: inherit;
 }
-.preview h1 {
+:is(.preview, .milkdown .ProseMirror.md-document) h1 {
   font-size: 2em;
   font-weight: 700;
   letter-spacing: -0.025em;
   margin-bottom: 0.8em;
 }
-.preview h2 {
+:is(.preview, .milkdown .ProseMirror.md-document) h2 {
   font-size: 1.45em;
   letter-spacing: -0.015em;
   border-bottom: 1px solid var(--preview-rule);
   padding-bottom: 0.45em;
 }
-.preview h3 {
+:is(.preview, .milkdown .ProseMirror.md-document) h3 {
   font-size: 1.25em;
 }
-.preview h4 {
+:is(.preview, .milkdown .ProseMirror.md-document) h4 {
   font-size: 1.1em;
 }
-.preview h5 {
+:is(.preview, .milkdown .ProseMirror.md-document) h5 {
   font-size: 1em;
 }
-.preview h6 {
+:is(.preview, .milkdown .ProseMirror.md-document) h6 {
   font-size: 0.95em;
   color: var(--preview-muted);
 }
-.preview > :first-child {
+:is(.preview, .milkdown .ProseMirror.md-document) > :first-child {
   margin-top: 0;
 }
-.preview :is(h1, h2, h3, h4, h5, h6) + :is(h2, h3, h4, h5, h6) {
+:is(.preview, .milkdown .ProseMirror.md-document) :is(h1, h2, h3, h4, h5, h6) + :is(h2, h3, h4, h5, h6) {
   margin-top: 1em;
 }
-.preview p {
+:is(.preview, .milkdown .ProseMirror.md-document) p {
   margin: 0 0 1em;
+  padding-block: 0;
+  line-height: inherit;
 }
-.preview a {
+:is(.preview, .milkdown .ProseMirror.md-document) a {
   color: var(--preview-link);
   text-decoration: underline;
   text-decoration-color: color-mix(in srgb, var(--preview-link) 35%, transparent);
   text-underline-offset: 3px;
 }
-.preview a:hover {
+:is(.preview, .milkdown .ProseMirror.md-document) a:hover {
   text-decoration-color: currentColor;
 }
-.preview a:focus-visible {
+:is(.preview, .milkdown .ProseMirror.md-document) a:focus-visible {
   outline: 2px solid var(--preview-link);
   outline-offset: 3px;
   border-radius: 2px;
 }
 /* Inline code stays quieter than syntax-highlighted fenced blocks. */
-.preview code {
+:is(.preview, .milkdown .ProseMirror.md-document) code {
+  display: inline;
+  line-height: inherit;
   background: var(--preview-code-bg);
   color: var(--preview-code);
   padding: 0.18em 0.4em;
@@ -110,7 +116,7 @@
   font-size: 0.88em;
   font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
 }
-.preview pre {
+:is(.preview, .milkdown .ProseMirror.md-document) pre {
   margin: 1.4em 0;
   padding: 0;
   border-radius: 8px;
@@ -121,7 +127,7 @@
   border: 1px solid var(--preview-rule);
 }
 /* pre > code: reset the inline-code coloring inside fenced blocks. */
-.preview pre code {
+:is(.preview, .milkdown .ProseMirror.md-document) pre code {
   background: transparent;
   color: inherit;
   padding: 18px 20px;
@@ -130,16 +136,17 @@
   line-height: 1.75;
   border-radius: 0;
 }
-.preview pre.shiki {
+:is(.preview, .milkdown .ProseMirror.md-document) pre.shiki {
   padding: 18px 20px;
   /* Shiki owns token colors; the document owns the code block surface. */
   background-color: var(--preview-code-bg) !important;
 }
-.preview pre.shiki code {
+:is(.preview, .milkdown .ProseMirror.md-document) pre.shiki code {
   padding: 0;
 }
 /* A restrained accent distinguishes quotations without competing with text. */
-.preview blockquote {
+:is(.preview, .milkdown .ProseMirror.md-document) blockquote {
+  box-sizing: border-box;
   margin: 1.4em 0;
   padding: 12px 18px;
   color: var(--preview-muted);
@@ -147,54 +154,54 @@
   border-radius: 0 6px 6px 0;
   background: color-mix(in srgb, var(--preview-link) 5%, var(--bg));
 }
-.preview blockquote > :first-child {
+:is(.preview, .milkdown .ProseMirror.md-document) blockquote > :first-child {
   margin-top: 0;
 }
-.preview blockquote > :last-child {
+:is(.preview, .milkdown .ProseMirror.md-document) blockquote > :last-child {
   margin-bottom: 0;
 }
-.preview ul,
-.preview ol {
+:is(.preview, .milkdown .ProseMirror.md-document) ul,
+:is(.preview, .milkdown .ProseMirror.md-document) ol {
   padding-left: 1.65em;
   margin: 0 0 1em;
 }
-.preview ul {
+:is(.preview, .milkdown .ProseMirror.md-document) ul {
   list-style: disc outside;
 }
-.preview ol {
+:is(.preview, .milkdown .ProseMirror.md-document) ol {
   list-style: decimal outside;
 }
-.preview ul ul,
-.preview ol ul {
+:is(.preview, .milkdown .ProseMirror.md-document) ul ul,
+:is(.preview, .milkdown .ProseMirror.md-document) ol ul {
   list-style: circle outside;
 }
-.preview ul ul ul,
-.preview ol ul ul {
+:is(.preview, .milkdown .ProseMirror.md-document) ul ul ul,
+:is(.preview, .milkdown .ProseMirror.md-document) ol ul ul {
   list-style: square outside;
 }
-.preview li {
+:is(.preview, .milkdown .ProseMirror.md-document) li {
   margin: 0.35em 0;
   padding-left: 0.15em;
 }
-.preview li > :is(ul, ol) {
+:is(.preview, .milkdown .ProseMirror.md-document) li > :is(ul, ol) {
   margin-top: 0.35em;
   margin-bottom: 0.5em;
 }
-.preview li > p {
+:is(.preview, .milkdown .ProseMirror.md-document) li > p {
   margin: 0;
 }
-.preview li > p + p {
+:is(.preview, .milkdown .ProseMirror.md-document) li > p + p {
   margin-top: 0.5em;
 }
-.preview li::marker {
+:is(.preview, .milkdown .ProseMirror.md-document) li::marker {
   color: var(--preview-muted);
 }
-.preview li.task-list-item,
-.preview li:has(> input[type="checkbox"]) {
+:is(.preview, .milkdown .ProseMirror.md-document) li.task-list-item,
+:is(.preview, .milkdown .ProseMirror.md-document) li:has(> input[type="checkbox"]) {
   list-style: none;
   margin-left: -1.4em;
 }
-.preview .task-list-item-checkbox {
+:is(.preview, .milkdown .ProseMirror.md-document) .task-list-item-checkbox {
   width: 14px;
   height: 14px;
   margin: 0 0.5em 0 0;
@@ -204,7 +211,7 @@
 /* Table: GitHub/Typora style — full border, zebra rows. Left-aligned with
    the rest of the reading column; if the table is wider than the preview pane
    it gets its own horizontal scrollbar instead of pushing the pane wider. */
-.preview table {
+:is(.preview, .milkdown .ProseMirror.md-document) table {
   border-collapse: collapse;
   margin: 1.4em 0;
   display: block;
@@ -216,34 +223,35 @@
   /* Wide tables scroll within the document instead of widening its pane. */
   overflow-wrap: normal;
 }
-.preview th,
-.preview td {
+:is(.preview, .milkdown .ProseMirror.md-document) th,
+:is(.preview, .milkdown .ProseMirror.md-document) td {
   border: 1px solid var(--preview-rule);
   padding: 10px 16px;
   vertical-align: top;
 }
-.preview th {
+:is(.preview, .milkdown .ProseMirror.md-document) th {
   background: var(--preview-code-bg);
   color: var(--preview-heading);
   font-weight: 600;
   text-align: left;
 }
-.preview tr:nth-child(2n) td {
+:is(.preview, .milkdown .ProseMirror.md-document) tr:nth-child(2n) td {
   background: color-mix(in srgb, var(--preview-text) 2%, var(--bg));
 }
-.preview hr {
+:is(.preview, .milkdown .ProseMirror.md-document) hr {
   border: none;
   border-top: 1px solid var(--preview-rule);
   margin: 2.5em 0;
   height: 0;
+  padding: 0;
 }
-.preview img {
+:is(.preview, .milkdown .ProseMirror.md-document) img {
   max-width: 100%;
   height: auto;
   display: block;
   margin: 16px 0;
 }
-.preview kbd {
+:is(.preview, .milkdown .ProseMirror.md-document) kbd {
   padding: 2px 6px;
   font: 0.8em "SF Mono", Menlo, Consolas, monospace;
   color: var(--preview-muted);
@@ -252,14 +260,14 @@
   border-bottom-width: 2px;
   border-radius: 4px;
 }
-.preview .katex-display {
+:is(.preview, .milkdown .ProseMirror.md-document) .katex-display {
   overflow-x: auto;
   overflow-y: hidden;
   padding: 4px 0;
 }
 
 /* PlantUML diagram */
-.preview .plantuml-diagram {
+:is(.preview, .milkdown .ProseMirror.md-document) .plantuml-diagram {
   display: flex;
   justify-content: flex-start;
   margin: 1.2em 0;
@@ -269,18 +277,18 @@
   border-radius: 8px;
   overflow-x: auto;
 }
-.preview .plantuml-diagram img,
-.preview .plantuml-diagram svg {
+:is(.preview, .milkdown .ProseMirror.md-document) .plantuml-diagram img,
+:is(.preview, .milkdown .ProseMirror.md-document) .plantuml-diagram svg {
   max-width: 100%;
   height: auto;
 }
-.preview .plantuml-diagram .plantuml-loading {
+:is(.preview, .milkdown .ProseMirror.md-document) .plantuml-diagram .plantuml-loading {
   color: var(--text-soft);
   font-size: 12px;
   font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
   padding: 8px 12px;
 }
-.preview .plantuml-diagram.error {
+:is(.preview, .milkdown .ProseMirror.md-document) .plantuml-diagram.error {
   flex-direction: column;
   align-items: stretch;
   color: var(--error-text);
@@ -289,11 +297,11 @@
   font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
   font-size: 13px;
 }
-.preview .plantuml-diagram.error .plantuml-error-msg {
+:is(.preview, .milkdown .ProseMirror.md-document) .plantuml-diagram.error .plantuml-error-msg {
   font-size: 12px;
   margin-bottom: 6px;
 }
-.preview .plantuml-diagram.error .plantuml-source {
+:is(.preview, .milkdown .ProseMirror.md-document) .plantuml-diagram.error .plantuml-source {
   background: var(--bg-mute);
   color: var(--text-soft);
   padding: 8px 12px;
@@ -306,7 +314,7 @@
 }
 
 /* Mermaid diagram */
-.preview .mermaid-diagram {
+:is(.preview, .milkdown .ProseMirror.md-document) .mermaid-diagram {
   display: flex;
   justify-content: flex-start;
   margin: 1.2em 0;
@@ -316,17 +324,17 @@
   border-radius: 8px;
   overflow-x: auto;
 }
-.preview .mermaid-diagram svg {
+:is(.preview, .milkdown .ProseMirror.md-document) .mermaid-diagram svg {
   max-width: 100%;
   height: auto;
 }
-.preview .mermaid-diagram .mermaid-loading {
+:is(.preview, .milkdown .ProseMirror.md-document) .mermaid-diagram .mermaid-loading {
   color: var(--text-soft);
   font-size: 12px;
   font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
   padding: 8px 12px;
 }
-.preview .mermaid-diagram.error {
+:is(.preview, .milkdown .ProseMirror.md-document) .mermaid-diagram.error {
   flex-direction: column;
   align-items: stretch;
   color: var(--error-text);
@@ -335,11 +343,11 @@
   font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
   font-size: 13px;
 }
-.preview .mermaid-diagram.error .mermaid-error-msg {
+:is(.preview, .milkdown .ProseMirror.md-document) .mermaid-diagram.error .mermaid-error-msg {
   font-size: 12px;
   margin-bottom: 6px;
 }
-.preview .mermaid-diagram.error .mermaid-source {
+:is(.preview, .milkdown .ProseMirror.md-document) .mermaid-diagram.error .mermaid-source {
   background: var(--bg-mute);
   color: var(--text-soft);
   padding: 8px 12px;

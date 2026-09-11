@@ -109,3 +109,7 @@ HTML、JSON、SQL、其他代码、XMind、图片/PDF/音视频继续使用各�
 - [ProseMirror 内嵌 CodeMirror 示例](https://prosemirror.net/examples/codemirror/)
 
 这些资料说明基础能力，不构成 DEditor 的实现或验收证据；后续接入时需重新确认版本和 API。
+
+## 呈现一致性补充
+
+用户再次指出阅读编辑与实时预览展示不同，现改为共用正文样式，添加 H1–H6 提示，修正测试页未使用真实 Preview 的问题。代码用相同高亮结果，点击/Enter 进入编辑，Esc/失焦恢复。撤销保真与滚动历史同时补充回归。具体原因、五轮验证及待验收范围见 [呈现一致性记录](markdown-presentation-fix-2026-09-11.md)。

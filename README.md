@@ -15,9 +15,13 @@ DEditor 是基于 Tauri 2、React 和 TypeScript 的桌面 Markdown / 多语言�
 | 阅读编辑 | 在排版后的文章中直接输入、选择、删除和修改内容 |
 | 只读 | 使用同一文章呈现组件，关闭编辑操作 |
 
+阅读编辑与实时预览共用正文排版：标题、段落、列表、引用、表格、代码、公式及图片在相同栏宽和字号下保持一致，字号调整同时生效。阅读编辑的标题左侧显示轻量 H1–H6 级别提示；提示不写入 Markdown，在只读和导出中隐藏。
+
 阅读编辑基于 Milkdown / ProseMirror，支持标题、粗斜体、删除线、颜色与高亮、列表、引用、任务框、表格、链接、图片及公式。表格可直接编辑单元格，Tab / Shift+Tab 导航，末单元格 Tab 增加一行；兼容已有的表格内列表扩展。
 
 代码块内嵌 CodeMirror，支持高亮与语言设置。公式、Mermaid 和 PlantUML 显示渲染结果，并提供块源码编辑入口。Mermaid 与 KaTeX 在本地渲染，PlantUML 使用联网服务。
+
+普通代码块与实时预览使用相同的 Shiki 高亮；点击代码或聚焦后按 Enter 进入 CodeMirror 编辑，Esc 或离开代码块后恢复呈现。公式和图表沿用同一渲染链路，源码控件在悬停或聚焦时出现。
 
 源码、阅读编辑和工具条共用每标签撤销历史；切换模式、切换标签后可以继续撤销。保存仍以 Markdown 原文为依据：普通文字编辑优先修改对应源范围，未编辑的块保留原样；结构调整可能规范化被修改的块。显式格式化及“保存时格式化”仍按设置执行。
 
@@ -148,7 +152,7 @@ npm run perf:all
 | `npm run test:file-icons` | 图标映射、授权文件和构建资源 |
 | `npm run perf:all` | store、组件、长时操作、文档、XMind 和 Rust 基准 |
 
-浏览器隔离验证入口为 `tests/markdown-visual-review.html`。测试只使用自建样例，不读取用户已有文档或正式应用历史。`tests/artifacts/`、截图和安装包被 Git 忽略；需要迁移时单独保存。
+浏览器隔离验证入口为 `tests/markdown-visual-review.html`；`?parity&presentation` 并排运行真实 Preview 与阅读编辑，使用同一自建样例核对布局。`?interaction` 检查长文输入、搜索和光标稳定性。测试只使用自建样例，不读取用户已有文档或正式应用历史。`tests/artifacts/`、截图和安装包被 Git 忽略；需要迁移时单独保存。
 
 自动化测试不能代替真实输入法、原生保存对话框、重启恢复及双平台交互。Markdown 的真实 IME、部分原生交互和复杂语法兼容性仍有待验收项，见 [Markdown 实施记录](docs/markdown-visual-editing-verification-2026-09-11.md)及[本次提交验证记录](docs/markdown-release-verification-2026-09-11.md)。XMind 状态见[独立验收矩阵](docs/xmind-acceptance-matrix-2026-09-11.md)。
 

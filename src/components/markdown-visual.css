@@ -1,7 +1,7 @@
 .md-visual-shell { position: relative; display: flex; flex-direction: column; height: 100%; min-width: 0; color: var(--text); background: var(--bg); }
 .md-visual-layout { display: flex; flex: 1; min-height: 0; }
-.md-visual-scroll { flex: 1; overflow: auto; min-width: 0; overscroll-behavior: contain; }
-.md-visual-content { max-width: 960px; margin: auto; min-height: 100%; }
+.md-visual-scroll { flex: 1; overflow: auto; min-width: 0; overscroll-behavior: contain; container-type: inline-size; }
+.md-visual-content { width: 100%; min-height: 100%; }
 .md-visual-controls { position: absolute; right: 10px; top: 6px; z-index: 5; display: flex; gap: 4px; background: var(--bg); border-radius: 4px; }
 .md-visual-search { display: flex; align-items: center; gap: 5px; padding: 6px 80px 6px 10px; border-bottom: 1px solid var(--border); flex-wrap: wrap; font-size: 12px; }
 .md-visual-search input { width: min(250px, 50%); }
@@ -32,16 +32,7 @@
   --crepe-shadow-1: var(--shadow-popup);
   --crepe-shadow-2: var(--shadow-popup);
 }
-.md-visual-shell .milkdown .ProseMirror { padding: 48px 56px 160px; min-height: 100%; line-height: 1.8; overflow-wrap: anywhere; }
-.md-visual-shell .milkdown .ProseMirror p { margin: 0.7em 0; }
-.md-visual-shell .milkdown .ProseMirror h1,
-.md-visual-shell .milkdown .ProseMirror h2,
-.md-visual-shell .milkdown .ProseMirror h3 { font-family: var(--crepe-font-title); line-height: 1.4; margin: 1.25em 0 0.6em; }
-.md-visual-shell .milkdown .ProseMirror h1 { font-size: 2em; }
-.md-visual-shell .milkdown .ProseMirror h2 { font-size: 1.6em; }
-.md-visual-shell .milkdown .ProseMirror h3 { font-size: 1.3em; }
-.md-visual-shell .milkdown .ProseMirror code { font-size: 0.9em; }
-.md-visual-shell .milkdown .ProseMirror > :first-child { margin-top: 0; }
+.md-visual-shell .milkdown .ProseMirror.md-document { min-height: 100%; height: auto; overflow: visible; }
 .md-visual-shell .milkdown button:focus-visible,
 .md-visual-shell .milkdown input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .md-visual-shell .milkdown .cm-editor { font-size: var(--md-visual-font-size); }
@@ -50,25 +41,93 @@
 .md-raw-edit:hover { background: var(--hover-bg) !important; }
 .md-raw-source { margin-top: 6px; border-left: 2px solid var(--accent); }
 .md-raw-preview { overflow: auto; }
- .md-visual-shell[data-readonly="true"] .md-raw-block:has(.md-raw-preview:empty) { display: none; }
-.md-visual-shell .milkdown .milkdown-table-block td,
-.md-visual-shell .milkdown .milkdown-table-block th { border-color: var(--border); }
-.md-visual-shell .milkdown .label-wrapper .checked svg { fill: var(--accent); }
-.md-visual-shell .milkdown .label-wrapper .unchecked svg { fill: var(--text-soft); }
+.md-visual-shell[data-readonly="true"] .md-raw-block:has(.md-raw-preview:empty) { display: none; }
 .md-visual-shell .milkdown [role="checkbox"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .md-visual-shell[data-readonly="true"] .md-raw-edit { display: none; }
 @media (max-width: 760px) {
-  .md-visual-shell .milkdown .ProseMirror { padding: 40px 24px 100px; }
   .md-visual-toc { flex-basis: 140px; }
 }
 .md-visual-shell .milkdown .handle[data-show="false"] { pointer-events: none; }
-.md-code-block { border: 1px solid var(--border); border-radius: 5px; margin: 1em 0; overflow: hidden; }
-.md-code-bar { display: flex; gap: 8px; align-items: center; padding: 4px 8px !important; border-bottom: 1px solid var(--border); background: var(--hover-bg); font-size: 11px; }
+.md-code-bar { display: flex; gap: 8px; align-items: center; padding: 4px 8px !important; background: var(--bg); font-size: 11px; }
 .md-code-bar input { width: 130px; min-width: 0; }
 .md-code-bar .deditor-btn { padding: 3px 8px !important; }
-.md-code-preview { padding: 12px !important; overflow: auto; }
+.md-code-preview { overflow: auto; }
 .md-code-preview svg { max-width: 100%; height: auto; }
 .md-visual-shell[data-readonly="true"] .md-code-toggle { display: none; }
 
 /* Markdown has no standard persisted resize ratio. Keep image alt text semantic. */
 .md-visual-shell .milkdown-image-block .image-resize-handle { display: none; }
+
+/* Node-view wrappers adapt to the shared document flow, without styling IDE chrome. */
+.md-document blockquote::before { display: none; }
+/* Table font is .9em in the shared sheet: retain its 1.4em outer spacing. */
+.md-visual-shell .milkdown .md-document .milkdown-table-block { margin: 1.26em 0; }
+.md-visual-shell .milkdown .md-document .milkdown-table-block table { margin: 0; }
+.md-visual-shell .milkdown .md-document :is(td, th) > p { margin: 0; }
+.md-visual-shell .milkdown .md-document .milkdown-list-item-block { margin: 0.35em 0; padding: 0; }
+.md-visual-shell .milkdown .md-document .list-item { position: relative; gap: 0; padding-left: 0.15em; margin: 0; }
+.md-visual-shell .milkdown .md-document .list-item .label-wrapper { position: absolute; right: 100%; width: 1.5em; height: 1.85em; padding: 0; color: var(--preview-muted); }
+.md-visual-shell .milkdown .md-document .list-item .label-wrapper .label { height: auto; width: auto; padding: 0; line-height: inherit; }
+.md-visual-shell .milkdown .md-document .list-item .label-wrapper svg { width: 14px; height: 14px; }
+.md-visual-shell .milkdown .md-document .list-item > .children > .content-dom > p { margin: 0; }
+.md-visual-shell .milkdown .md-document .list-item > .children > .content-dom > p + p { margin-top: 0.5em; }
+.md-visual-shell .milkdown .md-document .list-item > .children > .content-dom > :is(ul, ol) { margin-top: 0.35em; margin-bottom: 0.5em; }
+/* Level labels occupy the existing gutter; they are never Markdown content. */
+.md-visual-shell[data-readonly="false"] .md-document :is(h1,h2,h3,h4,h5,h6) { position: relative; }
+.md-visual-shell[data-readonly="false"] .md-document :is(h1,h2,h3,h4,h5,h6)::before {
+  position: absolute; right: calc(100% + 6px); top: 0.3em; width: 22px;
+  font: 10px/1.5 "SF Mono", Menlo, Consolas, monospace; letter-spacing: 0;
+  color: var(--preview-muted); opacity: 0.65; text-align: right;
+  pointer-events: none; user-select: none;
+}
+.md-visual-shell[data-readonly="false"] .md-document h1::before { content: "H1" / ""; }
+.md-visual-shell[data-readonly="false"] .md-document h2::before { content: "H2" / ""; }
+.md-visual-shell[data-readonly="false"] .md-document h3::before { content: "H3" / ""; }
+.md-visual-shell[data-readonly="false"] .md-document h4::before { content: "H4" / ""; }
+.md-visual-shell[data-readonly="false"] .md-document h5::before { content: "H5" / ""; }
+.md-visual-shell[data-readonly="false"] .md-document h6::before { content: "H6" / ""; }
+
+.md-visual-shell .milkdown .md-document > :nth-child(1 of :not(.ProseMirror-widget, .prosemirror-virtual-cursor)) { margin-top: 0; }
+.md-visual-shell .milkdown .md-document .milkdown-list-item-block:has(> li > [role="checkbox"]) { margin-left: -1.4em; }
+.md-visual-shell .milkdown .md-document .md-code-block { position: relative; border: 0; border-radius: 0; margin: 1.4em 0; overflow: visible; }
+.md-visual-shell .milkdown .md-document .md-code-block[data-kind="diagram"] { margin: 1.2em 0; }
+.md-visual-shell .milkdown .md-document .md-code-block[data-kind="math"] { margin: 1em 0; }
+.md-visual-shell .milkdown .md-document .md-code-preview { padding: 0 !important; }
+.md-visual-shell .milkdown .md-document .md-code-preview > :first-child { margin-top: 0; }
+.md-visual-shell .milkdown .md-document .md-code-preview > :last-child { margin-bottom: 0; }
+.md-code-bar { position: absolute; right: 4px; top: 4px; z-index: 2; border: 1px solid var(--border); border-radius: 4px; opacity: 0; pointer-events: none; }
+.md-code-block:hover .md-code-bar, .md-code-block:focus-within .md-code-bar { opacity: 1; pointer-events: auto; }
+.md-visual-shell .milkdown .md-code-editor .cm-editor { height: auto; background: var(--preview-code-bg); border: 1px solid var(--preview-rule); border-radius: 8px; }
+.md-visual-shell .milkdown .md-code-editor .cm-scroller { font-size: 13px; line-height: 1.75; }
+.md-visual-shell .milkdown .md-code-editor .cm-content { padding: 18px 0; }
+.md-visual-shell .milkdown .md-code-editor .cm-line { padding: 0 20px; }
+.md-visual-shell .milkdown .md-code-editor .cm-gutters { display: none; }
+.md-visual-shell .milkdown .md-code-editor .cm-activeLine { background: transparent; }
+.md-visual-shell .milkdown .md-raw-block:has(.md-raw-preview:empty):not(:focus-within) { height: 0; margin: 0; }
+.md-raw-edit { position: absolute; right: 0; top: 0; z-index: 2; opacity: 0; }
+.md-raw-block:hover .md-raw-edit, .md-raw-block:focus-within .md-raw-edit { opacity: 1; }
+@container (max-width: 560px) {
+  .md-visual-shell[data-readonly="false"] .md-document :is(h1,h2,h3,h4,h5,h6)::before { right: calc(100% + 3px); width: 16px; font-size: 9px; }
+  .md-visual-shell .milkdown .md-code-editor .cm-content { padding: 14px 0; }
+  .md-visual-shell .milkdown .md-code-editor .cm-line { padding: 0 16px; }
+}
+.md-visual-shell .milkdown .md-document .md-code-preview,
+.md-visual-shell .milkdown .md-document .md-raw-preview { white-space: normal; }
+.md-visual-shell .milkdown .md-document .md-code-preview .katex-display { margin: 0; }
+.md-visual-shell .milkdown .md-document .list-item > .label-wrapper[role="checkbox"] { position: static; flex: 0 0 14px; margin-right: 0.8em; }
+.md-visual-shell .milkdown .md-document .list-item > .children > .content-dom > :is(ul,ol):last-child { margin-bottom: 0; }
+.md-visual-shell .milkdown .md-document .list-item .label-wrapper svg { fill: var(--preview-muted); }
+.md-visual-shell .milkdown .md-document .list-item .label-wrapper .checked svg { fill: var(--preview-link); }
+.md-visual-shell .milkdown .md-document .milkdown-image-block { margin: max(16px, 1em) 0; }
+.md-visual-shell .milkdown .md-document .milkdown-image-block > .image-wrapper { margin: 0; min-width: 0; max-width: 100%; }
+.md-visual-shell .milkdown .md-document .milkdown-image-block img { min-height: 0; height: auto !important; margin: 0; }
+.md-visual-shell .milkdown .md-document .content-dom > :is(ul,ol) > .milkdown-list-item-block:last-child { margin-bottom: 0; }
+
+.md-visual-shell .milkdown .md-document [data-type="math_inline"] { color: inherit; padding: 0; display: inline; vertical-align: baseline; }
+
+.md-visual-shell .milkdown .md-code-block [hidden] { display: none !important; }
+
+.md-visual-shell .milkdown .md-document .label-wrapper:not([role="checkbox"]) .label:has(svg) svg { display: none; }
+.md-visual-shell .milkdown .md-document .label-wrapper:not([role="checkbox"]) .label:has(svg)::before { content: "•"; }
+.md-visual-shell .milkdown .md-document ul ul .label-wrapper:not([role="checkbox"]) .label:has(svg)::before { content: "◦"; }
+.md-visual-shell .milkdown .md-document ul ul ul .label-wrapper:not([role="checkbox"]) .label:has(svg)::before { content: "▪"; }

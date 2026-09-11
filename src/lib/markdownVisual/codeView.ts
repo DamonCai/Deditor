@@ -1,6 +1,6 @@
 import type { Node as ProseNode } from "@milkdown/kit/prose/model";
 import type { EditorView as ProseView, NodeView } from "@milkdown/kit/prose/view";
-import { TextSelection } from "@milkdown/kit/prose/state";
+import { NodeSelection, TextSelection } from "@milkdown/kit/prose/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { EditorState, Prec, Compartment } from "@codemirror/state";
 import { basicSetup } from "codemirror";
@@ -28,14 +28,18 @@ export function codeView(tabId: string, theme: "light" | "dark") {
     const copy = document.createElement("button"); copy.className = "deditor-btn"; copy.dataset.variant = "ghost"; copy.textContent = tStatic("editor.copy");
     copy.onclick = () => { void navigator.clipboard.writeText(node.textContent).catch(err => logError("Markdown code copy failed", err)); };
     bar.append(language, toggle, copy);
-    const editor = document.createElement("div"), preview = document.createElement("div"); preview.className = "markdown-body md-code-preview";
+    const editor = document.createElement("div"), preview = document.createElement("div"); preview.className = "md-code-preview"; editor.className = "md-code-editor";
     dom.append(bar, editor, preview);
     const languageCompartment = new Compartment(), editableCompartment = new Compartment();
     const cm = new EditorView({ parent: editor, state: EditorState.create({ doc: node.textContent, extensions: [basicSetup, EditorView.lineWrapping,
       theme === "dark" ? islandDark : islandLight, languageCompartment.of([]), editableCompartment.of([EditorView.editable.of(view.editable), EditorState.readOnly.of(!view.editable)]),
       Prec.highest(keymap.of([
         { key: "Mod-z", run: () => !view.editable || markdownHistory(false, tabId) }, { key: "Mod-Shift-z", run: () => !view.editable || markdownHistory(true, tabId) },
-        { key: "Escape", run: () => { expanded = false; render(); view.focus(); return true; } },
+        { key: "Escape", run: () => {
+          const pos = getPos();
+          if (pos !== undefined) view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, pos)));
+          expanded = false; render(); view.focus(); return true;
+        } },
         { key: "ArrowDown", run: () => {
           if (!view.editable) return false;
           if (cm.state.selection.main.head !== cm.state.doc.length) return false;
@@ -68,12 +72,12 @@ export function codeView(tabId: string, theme: "light" | "dark") {
       const token = ++generation;
       controllers.forEach(controller => controller.abort()); controllers = [];
       const lang = String(node.attrs.language ?? "").toLowerCase();
-      const diagram = ["mermaid", "plantuml", "latex"].includes(lang);
-      editor.hidden = diagram && !expanded; preview.hidden = !diagram;
+      const diagram = ["mermaid", "plantuml", "puml", "uml", "latex"].includes(lang);
+      dom.dataset.kind = lang === "latex" ? "math" : diagram ? "diagram" : "code";
+      editor.hidden = !expanded; preview.hidden = expanded;
       toggle.hidden = !diagram || !view.editable;
       toggle.textContent = tStatic(expanded ? "md.hideSource" : "md.editSourceBlock");
       language.readOnly = !view.editable;
-      if (!diagram) return;
       const fence = "`".repeat(Math.max(3, ...Array.from(node.textContent.matchAll(/`+/g), m => m[0].length + 1)));
       const source = lang === "latex" ? `$$\n${node.textContent}\n$$` : `${fence}${lang}\n${node.textContent}\n${fence}`;
       void renderMarkdown(source, { theme }).then(html => {
@@ -88,6 +92,22 @@ export function codeView(tabId: string, theme: "light" | "dark") {
         controllers = [hydrateMermaid(preview, theme), hydratePlantuml(preview)];
       }).catch(err => { logError("Markdown code preview failed", err); if (!destroyed && token === generation) preview.textContent = String(err); });
     }
+    preview.onmousedown = event => {
+      if (!view.editable || event.button !== 0) return;
+      event.preventDefault(); expanded = true; render();
+      const pos = cm.posAtCoords({ x: event.clientX, y: event.clientY });
+      if (pos !== null) cm.dispatch({ selection: { anchor: pos } });
+      cm.focus();
+    };
+    preview.onkeydown = event => {
+      if (!view.editable || event.key !== "Enter") return;
+      event.preventDefault(); event.stopPropagation(); expanded = true; render(); cm.focus();
+    };
+    const collapse = (event: FocusEvent) => {
+      if (dom.contains(event.relatedTarget as Node | null)) return;
+      if (expanded) { expanded = false; render(); }
+    };
+    dom.addEventListener("focusout", collapse);
     toggle.onclick = () => { if (!view.editable) return; expanded = !expanded; render(); if (expanded) cm.focus(); };
     language.onchange = () => {
       if (!view.editable) return;
@@ -122,7 +142,7 @@ export function codeView(tabId: string, theme: "light" | "dark") {
         if (languageChanged) loadLanguage();
         if (textChanged || languageChanged || language.readOnly === view.editable) render();
         return true;
-      }, destroy() { view.dom.removeEventListener("deditor-editable-change", modeChanged); destroyed = true; generation++; controllers.forEach(controller => controller.abort()); cm.destroy(); },
+      }, destroy() { view.dom.removeEventListener("deditor-editable-change", modeChanged); dom.removeEventListener("focusout", collapse); destroyed = true; generation++; controllers.forEach(controller => controller.abort()); cm.destroy(); },
     };
   };
 }

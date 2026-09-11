@@ -77,6 +77,7 @@ export default function Preview({
   // Self-subscribed per tab — each PreviewHost slot only re-renders for its
   // own tab's content / filePath / dirty flips.
   const source = useTabContent(tabId);
+  const fontSize = useEditorStore(s => s.tabs.find(tab => tab.id === tabId)?.zoomFontSize ?? s.editorFontSize);
   const filePath = useTabFilePath(tabId);
   const [cachedHtml, setHtml] = useState("");
   const html = retainDom ? cachedHtml : "";
@@ -781,7 +782,7 @@ export default function Preview({
         <div
           ref={containerRef}
           className={`preview${readingMode ? " preview-fullwidth" : ""}`}
-          style={{ flex: 1 }}
+          style={{ flex: 1, "--md-document-zoom": `${fontSize - 14}px` } as React.CSSProperties}
           dangerouslySetInnerHTML={{ __html: html }}
         />
         {readingMode && (

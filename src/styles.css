@@ -185,10 +185,10 @@ body,
 }
 /* Respond to the pane, not the window: split previews can be very narrow. */
 @container (max-width: 560px) {
-  .preview { padding: 24px 20px 48px; font-size: 15px; }
-  .preview pre code, .preview pre.shiki { padding: 14px 16px; }
-  .preview pre.shiki code { padding: 0; }
-  .preview th, .preview td { padding: 8px 12px; }
+  :is(.preview, .milkdown .ProseMirror.md-document) { padding: 24px 20px 48px; font-size: calc(15px + var(--md-document-zoom, 0px)); }
+  :is(.preview, .milkdown .ProseMirror.md-document) pre code, :is(.preview, .milkdown .ProseMirror.md-document) pre.shiki { padding: 14px 16px; }
+  :is(.preview, .milkdown .ProseMirror.md-document) pre.shiki code { padding: 0; }
+  :is(.preview, .milkdown .ProseMirror.md-document) th, :is(.preview, .milkdown .ProseMirror.md-document) td { padding: 8px 12px; }
 }
 /* The rail and hover panel overlay the reading canvas. Only explicit pinning
    reserves a column; entering/leaving the outline never reflows the text. */

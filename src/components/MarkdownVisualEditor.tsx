@@ -30,7 +30,7 @@ import { MarkdownDocument } from "../lib/markdownVisual/document";
 import { frontmatter, rawRemark, rawSchema } from "../lib/markdownVisual/raw";
 import { rawView } from "../lib/markdownVisual/rawView";
 import { visualCommands } from "../lib/markdownVisual/commands";
-import { markdownSession } from "../lib/markdownSession";
+import { markdownSession, type MarkdownSession } from "../lib/markdownSession";
 import { markdownHistory } from "../lib/markdownHistory";
 import { setVisualEditor, getVisualEditor } from "../lib/markdownVisualBridge";
 import { registerDocumentFlush } from "../lib/documentFlush";
@@ -42,7 +42,7 @@ import { Button } from "./ui/Button";
 import "@milkdown/crepe/theme/common/style.css";
 import "./markdown-visual.css";
 
-interface Runtime { crepe: CrepeBuilder; view: EditorView; document: MarkdownDocument; sync: (source: string) => void; flush: () => void }
+interface Runtime { session: MarkdownSession; crepe: CrepeBuilder; view: EditorView; document: MarkdownDocument; sync: (source: string) => void; flush: () => void }
 export default function MarkdownVisualEditor({ tabId, readonly = false, theme }: { tabId: string; readonly?: boolean; theme: "light" | "dark" }) {
   const t = useT();
   const source = useTabContent(tabId), filePath = useTabFilePath(tabId);
@@ -92,7 +92,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
         inlineUploadPlaceholderText: t("md.imageUrlLabel"), blockUploadPlaceholderText: t("md.imageUrlLabel"), blockCaptionPlaceholderText: t("md.imageAltLabel") })
       .addFeature(latex);
     crepe.editor.use(absoluteHeadingInputRule).use(faithfulLink).use(faithfulInlineHtml).use(faithfulImage).use(extendedTableCells.flat()).use(inlineSchemas.flat()).config(configureInlineSerialization).use(frontmatter).use(rawRemark(mdx)).use(rawSchema);
-    crepe.editor.config(ctx => ctx.update(editorViewOptionsCtx, prev => ({ ...prev, attributes: { "aria-label": t("md.visualEditor"), spellcheck: "false" },
+    crepe.editor.config(ctx => ctx.update(editorViewOptionsCtx, prev => ({ ...prev, attributes: { class: "md-document", "aria-label": t("md.visualEditor"), spellcheck: "false" },
       handleKeyDown: (view, event) => {
         if (event.key !== "Tab" || !view.editable || !isInTable(view.state)) return false;
         event.preventDefault();
@@ -190,7 +190,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
         view.dom.addEventListener("beforeinput", beforeInput, true);
         view.dom.addEventListener("compositionend", compositionEnd);
         cleanupInput = () => { clearTimeout(compositionTimer); view.dom.removeEventListener("beforeinput", beforeInput, true); view.dom.removeEventListener("compositionend", compositionEnd); };
-        runtime.current = { crepe, view, document, sync, flush };
+        runtime.current = { session, crepe, view, document, sync, flush };
         sync(sourceRef.current);
         const position = Math.min(view.state.doc.content.size, session.sourceCursor === null ? session.visualSelection.head : document.positionAtSource(session.sourceCursor));
         view.dispatch(view.state.tr.setSelection(Selection.near(view.state.doc.resolve(position))));
@@ -242,7 +242,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
     const index = (matchIndex + delta + matches.current.length) % matches.current.length;
     setMatchIndex(index); const match = matches.current[index]; select(match.from, match.to);
   };
-  return <section className="md-visual-shell" data-readonly={readonly} style={{ "--md-visual-font-size": `${fontSize}px` } as React.CSSProperties}
+  return <section className="md-visual-shell" data-readonly={readonly} style={{ "--md-visual-font-size": `${fontSize}px`, "--md-document-zoom": `${fontSize - 14}px` } as React.CSSProperties}
     onKeyDownCapture={event => {
       if (event.nativeEvent.isComposing) return;
       const mod = event.metaKey || event.ctrlKey;
@@ -268,7 +268,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
     {error && <div className="deditor-notice" data-tone="error" role="alert">{t("md.visualError")} {error}<Button onClick={() => useEditorStore.setState({ markdownMode: "source" })}>{t("md.viewEdit")}</Button></div>}
     {!ready && !error && <div className="deditor-notice" role="status">{t("md.visualLoading")}</div>}
     <div className="md-visual-layout">
-      <div ref={scroller} className="md-visual-scroll" onScroll={() => { const rt = runtime.current; if (rt) markdownSession(tabId, rt.document.source).visualScroll = scroller.current?.scrollTop ?? 0; }}>
+      <div ref={scroller} className="md-visual-scroll" onScroll={() => { const rt = runtime.current; if (rt) rt.session.visualScroll = scroller.current?.scrollTop ?? 0; }}>
         <div ref={root} className="md-visual-content" />
       </div>
       {tocOpen && <nav className="md-visual-toc" aria-label={t("preview.toc")}>

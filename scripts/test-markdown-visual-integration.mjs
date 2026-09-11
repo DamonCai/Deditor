@@ -40,6 +40,7 @@ export {useEditorStore} from './src/store/editor';
 export {getVisualEditor} from './src/lib/markdownVisualBridge';
 export {markdownHistory} from './src/lib/markdownHistory';
 export {saveFile,saveFileAs,saveAllDirty} from './src/lib/fileio';
+export {renderMarkdown} from './src/lib/markdown';
 export {flushDocument} from './src/lib/documentFlush';
 `,resolveDir:process.cwd()},outfile:output,bundle:true,format:'esm',platform:'node',packages:'external',loader:{'.css':'empty'},plugins:[{name:'isolated-io',setup(b){
  b.onResolve({filter:/.*/},a=>a.path.endsWith('.css')?{path:'css',namespace:'stub'}:stubs[a.path]?{path:a.path,namespace:'stub'}:a.path.endsWith('/feedback')?{path:'feedback',namespace:'stub'}:undefined);
@@ -192,5 +193,62 @@ await test('reported editing bug: code caret stays in its block and readonly his
    cm.contentDOM.dispatchEvent(new dom.window.InputEvent('beforeinput',{inputType:'historyUndo',bubbles:true,cancelable:true}));
  });assert.equal(content(),expected);
  await render(false);await act(async()=>app.markdownHistory());assert.equal(content(),original);
+});
+await test('presentation: consecutive headings survive DOM reparse and undo without spacing changes',async()=>{
+ const original='# First\n## Second\n### Third\n#### Fourth\n##### Fifth\n###### Sixth\n';
+ await act(async()=>store.getState().setContent(original,'a','command'));
+ await act(async()=>{app.getVisualEditor().navigate(4,6);app.getVisualEditor().prefix("# ");});
+ await act(async()=>{app.markdownHistory();await pause(60);});
+ assert.equal(content(),original);
+ // Exercise browser DOM round-trip: generated IDs must not become semantic attributes.
+ await act(async()=>{const h=document.querySelector('.ProseMirror h4');h.firstChild.textContent='Fourth!';h.dispatchEvent(new Event('input',{bubbles:true}));await pause(60);});
+ assert.equal(content(),original.replace('Fourth','Fourth!'));
+ await act(async()=>{app.markdownHistory();await pause(60);});assert.equal(content(),original);
+});
+await test('presentation: scroll between undo and React sync cannot clear redo history',async()=>{
+ const original=content();await act(async()=>{app.getVisualEditor().navigate(1,4);app.getVisualEditor().insert('new',false);});
+ const edited=content();assert.notEqual(edited,original);
+ await act(async()=>{
+   app.markdownHistory();
+   document.querySelector('.md-visual-scroll').dispatchEvent(new Event('scroll',{bubbles:true}));
+   app.markdownHistory(true);
+ });assert.equal(content(),edited);
+});
+await test('presentation: code uses the same rendered HTML as preview without changing Markdown', async()=>{
+ const original='# Code\n\n```typescript\nconst label = "中文";\n```\n\nBottom\n';
+ await act(async()=>{store.getState().setContent(original,'a','command');await pause(150);});
+ const expected=await app.renderMarkdown('```typescript\nconst label = "中文";\n```',{theme:'light'});
+ const fragment=document.createElement('div');fragment.innerHTML=expected;
+ assert.equal(document.querySelector('.md-code-preview pre').innerHTML,fragment.querySelector('pre').innerHTML);
+ assert.equal(document.querySelector('.md-code-editor').hidden,true);
+ assert.equal(content(),original);
+ assert.ok(document.querySelector('.ProseMirror.md-document'));
+});
+await test('presentation: click code, edit, Escape, undo and redo retain shared content',async()=>{
+ const original=content();
+ await act(async()=>{document.querySelector('.md-code-preview').dispatchEvent(new dom.window.MouseEvent('mousedown',{button:0,clientX:-1,clientY:-1,bubbles:true,cancelable:true}));});
+ assert.equal(document.querySelector('.md-code-editor').hidden,false);
+ const {EditorView}=await import('@codemirror/view');
+ const cm=EditorView.findFromDOM(document.querySelector('.md-code-editor .cm-editor'));
+ await act(async()=>cm.dispatch({changes:{from:6,to:11,insert:'title'},selection:{anchor:11}}));
+ assert.equal(content(),original.replace('label','title'));
+ await act(async()=>{cm.contentDOM.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));await pause(100);});
+ assert.equal(document.querySelector('.md-code-editor').hidden,true);
+ assert.match(document.querySelector('.md-code-preview pre').textContent,/title/);
+ await act(async()=>{app.markdownHistory();await pause(100);});assert.equal(content(),original);
+ await act(async()=>{app.markdownHistory(true);await pause(100);});assert.equal(content(),original.replace('label','title'));
+});
+await test('presentation: keyboard Enter opens code and blur restores the rendered block',async()=>{
+ const original=content();
+ await act(async()=>{document.querySelector('.md-code-preview pre').dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));});
+ assert.equal(document.querySelector('.md-code-editor').hidden,false);
+ await act(async()=>{document.querySelector('.md-code-editor .cm-content').dispatchEvent(new dom.window.FocusEvent('focusout',{relatedTarget:document.body,bubbles:true}));await pause(80);});
+ assert.equal(document.querySelector('.md-code-editor').hidden,true);assert.equal(content(),original);
+});
+await test('presentation: readonly code clicks do not open editing or alter source',async()=>{
+ const original=content();await render(true);
+ await act(async()=>{document.querySelector('.md-code-preview').dispatchEvent(new dom.window.MouseEvent('mousedown',{button:0,bubbles:true,cancelable:true}));});
+ assert.equal(document.querySelector('.md-code-editor').hidden,true);assert.equal(content(),original);
+ await render(false);
 });
 await act(async()=>root.unmount());assert.deepEqual(runtimeErrors,[]);dom.window.close();console.log(`${passed} integration tests passed`);
