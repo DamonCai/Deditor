@@ -183,6 +183,13 @@ md.renderer.rules.image = (tokens, idx, options, env, self) => {
   return originalImage(tokens, idx, options, env, self);
 };
 
+/** Heading routing uses the exact parser/slug policy used by the real preview. */
+export function markdownHeadingTargets(source: string) {
+  return md.parse(source, {}).filter(token => token.type === "heading_open").map(token => ({
+    id: token.attrGet("id") ?? "", line: (token.map?.[0] ?? 0) + 1,
+  }));
+}
+
 export interface RenderOptions {
   theme: "light" | "dark";
   documentSource?: string;

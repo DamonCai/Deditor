@@ -15,7 +15,7 @@ const timingRestores: (() => void)[] = [];
 const profiledViews = new WeakSet<object>();
 if (new URLSearchParams(location.search).has("long")) {
   for (const [prototype, methods] of [
-    [MarkdownDocument.prototype, ['apply', 'sourceOffset']],
+    [MarkdownDocument.prototype, ['apply', 'sourceOffset', 'reset', 'index']],
     [ProseView.prototype, ['updateState', 'updatePluginViews', 'scrollToSelection']], [ProseState.prototype, ['applyTransaction']],
   ] as const) for (const method of methods) {
     const target = prototype as unknown as Record<string, (...args: any[]) => any>;
@@ -37,7 +37,7 @@ if (new URLSearchParams(location.search).has("long")) {
   }
 }
 import { createRoot } from "react-dom/client";
-import MarkdownVisualEditor from "../src/components/MarkdownVisualEditor";
+import MarkdownVisualSlot from "../src/components/MarkdownVisualSlot";
 import Preview from "../src/components/Preview";
 import MarkdownToolbar from "../src/components/MarkdownToolbar";
 import EditorSlot from "../src/components/EditorSlot";
@@ -77,6 +77,26 @@ function Review() {
  const [parityResult, setParityResult] = React.useState<ReturnType<typeof checkMarkdownPresentation> | null>(null);
  const [saved, setSaved] = React.useState("");
  const [samples, setSamples] = React.useState<string[]>([]);
+ const [modeSamples, setModeSamples] = React.useState<string[]>([]);
+ React.useEffect(() => {
+   if (!longReview) return;
+   let pending = 0;
+   const unsubscribe = useEditorStore.subscribe((next, previous) => {
+     if (next.markdownMode === previous.markdownMode && next.activeId === previous.activeId) return;
+     cancelAnimationFrame(pending);
+     timings.length = 0;
+     const started = performance.now(), expected = next.markdownMode, active = next.activeId;
+     const check = () => {
+       const current = useEditorStore.getState();
+       if (current.markdownMode !== expected || current.activeId !== active) return;
+       const ready = expected === "visual" ? document.querySelector('.ProseMirror[contenteditable="true"]') : expected === "source" ? document.querySelector('.cm-editor') : document.querySelector('.preview h1');
+       if (!ready) { pending = requestAnimationFrame(check); return; }
+       pending = requestAnimationFrame(() => setModeSamples(values => [...values.slice(-11), `${expected}:${(performance.now()-started).toFixed(1)}ms ${timings.filter(value => /^(reset|index|updateState):/.test(value)).join(" ")}`]));
+     };
+     pending = requestAnimationFrame(check);
+   });
+   return () => { unsubscribe(); cancelAnimationFrame(pending); };
+ }, []);
  React.useEffect(() => {
    if (!longReview) return;
    let start = 0, events: string[] = [];
@@ -116,13 +136,15 @@ function Review() {
    </div>
    {parityResult && <output data-testid="presentation-check" style={{ flexShrink: 0, height: 48, overflow: "auto", fontSize: 12 }}>{JSON.stringify(parityResult)}</output>}
    {longReview && <output data-testid="input-frame-timings" style={{ flexShrink: 0, height: 64, overflow: "auto", fontSize: 12 }}>输入事件与画面计时（ms，非 IME）：{samples.join(' / ')}</output>}
+   {longReview && <output data-testid="mode-latencies">模式就绪与下一帧：{modeSamples.join(" / ")}</output>}
    {longReview && <input aria-label="原生输入框计时对照" placeholder="原生输入框计时对照" />}
    {html ? <HtmlToolbar /> : !xmind ? <MarkdownToolbar /> : null}
    <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
     {xmind ? <XmindView tabId={id} dataUrl={tab.content} filePath={tab.filePath} /> : html ? <><EditorSlot tabId={id} active theme={theme} fontSize={14} /><HtmlPreview tabId={id} /></> : <>
       <div style={{ flex: 1, minWidth: 0, display: parity || mode === "visual" ? "none" : "block" }}><EditorSlot key={id} tabId={id} active theme={theme} fontSize={14} /></div>
       {parity && <div data-testid="parity-preview" style={{ flex: 1, minWidth: 0 }}><Preview tabId={id} theme={theme} /></div>}
-      {mode !== "source" && <div style={{ flex: 1, minWidth: 0 }}>{mode === "split" ? <Preview key={id} tabId={id} theme={theme} active /> : <MarkdownVisualEditor key={id} tabId={id} theme={theme} />}</div>}
+      {mode === "split" && <div style={{ flex: 1, minWidth: 0 }}><Preview key={id} tabId={id} theme={theme} active /></div>}
+      <MarkdownVisualSlot key={id} tabId={id} active={mode === "visual"} theme={theme} />
     </>}
    </div>
    <details style={{ maxHeight: 160, overflow: "auto", flexShrink: 0 }}><summary>原文 / 保存快照 {tab.content === tab.savedContent ? "已保存" : "未保存"}</summary><pre data-testid="source">{tab.content}</pre><pre data-testid="saved">{saved}</pre></details>

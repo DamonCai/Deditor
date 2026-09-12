@@ -78,13 +78,17 @@ export const footnoteNodeView: NodeViewConstructor = (initial, view, getPos) => 
   const contentDOM = definition ? document.createElement("div") : undefined;
   const list = document.createElement("ol"), item = document.createElement("li"), separator = document.createElement("hr");
   list.className = "footnotes-list"; separator.className = "footnotes-sep"; separator.contentEditable = "false";
-  link.className = "footnote-backref";
+  if (definition) link.className = "footnote-backref";
   const backlinks: HTMLAnchorElement[] = [];
   if (contentDOM) { contentDOM.className = "md-footnote-content"; item.className = "footnote-item"; item.append(contentDOM, document.createTextNode(" "), link); list.append(item); dom.append(separator, list); }
   else { dom.contentEditable = "false"; dom.append(link); }
+  let displayed = "";
   const update = () => {
     const info = footnoteContext(view.state.doc).get(key(node.attrs.identifier));
     const n = info?.number || 0, occurrence = Math.max(0, info?.references.indexOf(getPos() ?? -1) ?? 0);
+    const signature = JSON.stringify([n, occurrence, info?.text, info?.references.length, node.attrs.identifier, node.attrs.label]);
+    if (signature === displayed) return;
+    displayed = signature;
     if (definition) {
       dom.dataset.mdFootnoteDefinition = node.attrs.label; item.dataset.footnoteLabel = node.attrs.label;
       separator.hidden = n !== 1;

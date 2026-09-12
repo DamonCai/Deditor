@@ -30,7 +30,7 @@ import { extendedTableCells } from "../lib/markdownVisual/tableLists";
 import { inlineSchemas, faithfulInlineHtml, configureInlineSerialization } from "../lib/markdownVisual/inline";
 import { codeView } from "../lib/markdownVisual/codeView";
 import { codeBlockSchema, remarkInlineLinkPlugin, remarkPreserveEmptyLinePlugin, syncHeadingIdPlugin, wrapInHeadingInputRule } from "@milkdown/kit/preset/commonmark";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CrepeBuilder } from "@milkdown/crepe/builder";
 import { codeMirror } from "@milkdown/crepe/feature/code-mirror";
 import { table } from "@milkdown/crepe/feature/table";
@@ -65,16 +65,16 @@ import { Button } from "./ui/Button";
 import "@milkdown/crepe/theme/common/style.css";
 import "./markdown-visual.css";
 
-interface Runtime { session: MarkdownSession; crepe: CrepeBuilder; view: EditorView; document: MarkdownDocument; sync: (source: string) => void; flush: () => void; closeInline: () => void; outline: () => void }
-export default function MarkdownVisualEditor({ tabId, readonly = false, theme }: { tabId: string; readonly?: boolean; theme: "light" | "dark" }) {
+interface Runtime { session: MarkdownSession; crepe: CrepeBuilder; view: EditorView; document: MarkdownDocument; sync: (source: string) => void; flush: () => void; closeInline: () => void; outline: () => void; publish: () => void; restoreCursor: () => void }
+export default function MarkdownVisualEditor({ tabId, readonly = false, active = true, theme }: { tabId: string; readonly?: boolean; active?: boolean; theme: "light" | "dark" }) {
   const t = useT();
   const source = useTabContent(tabId), filePath = useTabFilePath(tabId);
   const language = useEditorStore(s => s.language);
   const writing = useEditorStore(s => s.markdownSettings);
   const fontSize = useEditorStore(s => s.tabs.find(tab => tab.id === tabId)?.zoomFontSize ?? s.editorFontSize);
   const root = useRef<HTMLDivElement>(null), scroller = useRef<HTMLDivElement>(null), searchInput = useRef<HTMLInputElement>(null);
-  const runtime = useRef<Runtime | null>(null), readonlyRef = useRef(readonly), sourceRef = useRef(source);
-  readonlyRef.current = readonly; sourceRef.current = source;
+  const runtime = useRef<Runtime | null>(null), readonlyRef = useRef(readonly), sourceRef = useRef(source), activeRef = useRef(active);
+  readonlyRef.current = readonly; sourceRef.current = source; activeRef.current = active;
   const imageRoot = documentImageRoot(source, filePath);
   const [error, setError] = useState("");
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -181,7 +181,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
         const document = new MarkdownDocument(initialSource, parse, serialize, mdx, view.state.doc);
         let inlineEditing: ReturnType<typeof installInlineSource> | undefined;
         const publish = () => {
-          if (cancelled) return;
+          if (cancelled || !activeRef.current) return;
           const bridge = visualCommands(view, tabId, parse, () => session.breakGroup());
           const fresh = () => { inlineEditing?.close(); return visualCommands(view, tabId, parse, () => session.breakGroup()); };
           bridge.wrap = (...args) => fresh().wrap(...args);
@@ -208,7 +208,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
           useEditorStore.getState().setActiveSelectionLength(view.state.selection.to - view.state.selection.from);
         };
         const outline = () => {
-          if (!tocOpenRef.current) return;
+          if (!activeRef.current || !tocOpenRef.current) return;
           const result: { pos: number; level: number; text: string }[] = [];
           view.state.doc.descendants((node, pos) => { if (node.type.name === "heading") result.push({ pos: pos + 1, level: node.attrs.level, text: node.textContent }); });
           headingPositions.current = result;
@@ -233,6 +233,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
             const result = view.state.applyTransaction(tr);
             view.updateState(result.state);
             const projected = tr.getMeta(inlineProjection);
+            if (!activeRef.current) return;
             if (inlineEditing?.apply(tr)) {
               if (!projected) flush();
             } else if (result.transactions.some(transaction => transaction.docChanged)) flush();
@@ -249,7 +250,15 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
           if (view.composing || composition.composing) return;
           inlineEditing?.reset();
           const next = document.reset(content), selection = view.state.selection;
-          const tr = view.state.tr.replaceWith(0, view.state.doc.content.size, next.content);
+          const current = view.state.doc;
+          let first = 0, from = 0, oldLast = current.childCount, newLast = next.childCount;
+          while (first < oldLast && first < newLast && current.child(first).eq(next.child(first))) from += current.child(first++).nodeSize;
+          let oldEnd = current.content.size, newEnd = next.content.size;
+          while (oldLast > first && newLast > first && current.child(oldLast - 1).eq(next.child(newLast - 1))) {
+            oldEnd -= current.child(--oldLast).nodeSize; newEnd -= next.child(--newLast).nodeSize;
+          }
+          const tr = view.state.tr;
+          if (oldLast !== first || newLast !== first) tr.replaceWith(from, oldEnd, next.content.cut(from, newEnd));
           tr.setSelection(Selection.near(tr.doc.resolve(Math.min(selection.head, tr.doc.content.size))));
           view.updateState(view.state.apply(tr.setMeta("addToHistory", false))); outline(); publish();
           view.dom.dispatchEvent(new Event("deditor-document-change"));
@@ -263,7 +272,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
         };
         const composition = installMarkdownComposition(view.dom, session, {
           settled: () => {
-            if (cancelled) return;
+            if (cancelled || !activeRef.current) return;
             const live = useEditorStore.getState().tabs.find(tab => tab.id === tabId);
             if (live) sync(live.content);
             publish();
@@ -271,12 +280,14 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
         });
         view.dom.addEventListener("beforeinput", beforeInput, true);
         cleanupInput = () => { composition.destroy(); view.dom.removeEventListener("beforeinput", beforeInput, true); };
-        runtime.current = { session, crepe, view, document, sync, flush, closeInline: () => inlineEditing?.close(), outline };
-        sync(sourceRef.current);
-        const position = Math.min(view.state.doc.content.size, session.sourceCursor === null ? session.visualSelection.head : document.positionAtSource(session.sourceCursor));
-        view.dispatch(view.state.tr.setSelection(Selection.near(view.state.doc.resolve(position))));
-        if (scroller.current) scroller.current.scrollTop = session.visualScroll;
-        cleanupFlush = registerDocumentFlush(tabId, flush);
+        const restoreCursor = () => {
+          const position = Math.min(view.state.doc.content.size, session.sourceCursor === null ? session.visualSelection.head : document.positionAtSource(session.sourceCursor));
+          view.dispatch(view.state.tr.setSelection(Selection.near(view.state.doc.resolve(position))));
+          if (scroller.current) scroller.current.scrollTop = session.visualScroll;
+        };
+        runtime.current = { session, crepe, view, document, sync, flush, closeInline: () => inlineEditing?.close(), outline, publish, restoreCursor };
+        if (activeRef.current) { sync(sourceRef.current); restoreCursor(); }
+        cleanupFlush = registerDocumentFlush(tabId, () => { if (activeRef.current) flush(); });
         cleanupAccessibility = installMarkdownAccessibility(view);
         crepe.setReadonly(readonlyRef.current);
         view.dom.dispatchEvent(new Event("deditor-editable-change"));
@@ -314,14 +325,14 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
       // A path/language/theme remount may follow an external source replacement in the same batch.
       // Never let the outgoing view overwrite the newer store content during cleanup.
       const outgoing = runtime.current;
-      if (outgoing && useEditorStore.getState().tabs.find(tab => tab.id === tabId)?.content === outgoing.document.source) outgoing.flush();
-      session.breakGroup(); session.visualScroll = scroller.current?.scrollTop ?? session.visualScroll;
+      if (outgoing && activeRef.current && useEditorStore.getState().tabs.find(tab => tab.id === tabId)?.content === outgoing.document.source) outgoing.flush();
+      session.breakGroup(); if (activeRef.current) session.visualScroll = scroller.current?.scrollTop ?? session.visualScroll;
       cancelled = true; releaseBindings();
       if (getVisualEditor()?.tabId === tabId) setVisualEditor(null);
       void dispose(); host.remove();
     };
   }, [tabId, filePath, language, theme, loadAttempt]);
-  useEffect(() => { runtime.current?.sync(source); }, [source]);
+  useEffect(() => { if (active) runtime.current?.sync(source); }, [source, active]);
   useEffect(() => { if (tocOpen) runtime.current?.outline(); }, [tocOpen, ready]);
   useEffect(() => {
     const scroll = scroller.current, rt = runtime.current; if (!tocOpen || !ready || !scroll || !rt) return;
@@ -342,18 +353,39 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
     return () => {scroll.removeEventListener("scroll", changed); cancelAnimationFrame(frame);};
   }, [tocOpen, ready]);
   useEffect(() => { runtime.current?.view.dom.dispatchEvent(new Event("deditor-image-root-change")); }, [imageRoot, ready]);
-  useEffect(() => {
+  const wasActive = useRef(active);
+  useLayoutEffect(() => {
     const rt = runtime.current; if (!rt) return;
+    if (!active) {
+      if (wasActive.current) {
+        rt.closeInline(); rt.view.dom.blur(); rt.session.endComposition(); rt.session.breakGroup();
+        setSearchOpen(false);
+      }
+      if (getVisualEditor()?.tabId === tabId) setVisualEditor(null);
+    } else if (!wasActive.current) {
+      // Synchronize once on return; source edits must never be overwritten by
+      // the suspended projection, including save/close and external reloads.
+      const sourceCursor = rt.session.sourceCursor;
+      rt.sync(sourceRef.current);
+      rt.session.sourceCursor = sourceCursor;
+      rt.restoreCursor(); rt.outline();
+    }
     if (readonly) rt.closeInline();
-    rt.crepe.setReadonly(readonly);
-    rt.view.dom.dispatchEvent(new Event("deditor-editable-change"));
-    markdownSession(tabId, sourceRef.current).breakGroup();
-    rt.crepe.editor.action(ctx => setVisualEditor({ ...getVisualEditor(), ...visualCommands(rt.view, tabId, ctx.get(parserCtx), () => markdownSession(tabId, sourceRef.current).breakGroup()) }));
-  }, [readonly, ready, tabId]);
+    // The hidden slot is inert. Toggling contenteditable on a very large DOM
+    // would rebuild browser editing/accessibility state on every mode switch.
+    if (root.current) root.current.inert = !active;
+    if (rt.crepe.readonly !== readonly) {
+      rt.crepe.setReadonly(readonly);
+      rt.view.dom.dispatchEvent(new Event("deditor-editable-change"));
+    }
+    rt.session.breakGroup();
+    if (active) rt.publish();
+    wasActive.current = active;
+  }, [active, readonly, ready, tabId]);
   useEffect(() => { if (runtime.current) {runtime.current.view.dom.spellcheck = writing.spellcheck; runtime.current.view.dom.dispatchEvent(new Event("deditor-writing-change"));} }, [writing, ready]);
   useEffect(() => { if (searchOpen) searchInput.current?.focus(); }, [searchOpen]);
   useEffect(() => {
-    if (!searchOpen) {
+    if (!searchOpen || !active) {
       lastSearch.current = { query: searchKey, open: false };
       matches.current = []; setMatchCount(0); setMatchIndex(0);
       return;
@@ -368,7 +400,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
       setMatchIndex(0);
       if (found[0]) select(found[0].from, found[0].to);
     } else setMatchIndex(index => Math.min(index, Math.max(0, found.length - 1)));
-  }, [query, searchKey, source, ready, searchOpen]);
+  }, [query, searchKey, source, ready, searchOpen, active]);
   const navigate = (delta: number) => {
     if (!matches.current.length) return;
     const index = (matchIndex + delta + matches.current.length) % matches.current.length;
@@ -425,7 +457,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
     {error && <div className="deditor-notice" data-tone="error" role="alert">{t("md.visualError")}<Button onClick={() => setLoadAttempt(attempt => attempt + 1)}>{t("md.visualRetry")}</Button><details><summary>{t("md.visualErrorDetails")}</summary>{error}</details><Button onClick={() => useEditorStore.setState({ markdownMode: "source" })}>{t("md.viewEdit")}</Button></div>}
     {!ready && !error && <div className="deditor-notice" role="status">{t("md.visualLoading")}</div>}
     <div className="md-visual-layout">
-      <div ref={scroller} className="md-visual-scroll" onScroll={() => { const rt = runtime.current; if (rt) rt.session.visualScroll = scroller.current?.scrollTop ?? 0; }}>
+      <div ref={scroller} className="md-visual-scroll" onScroll={() => { const rt = runtime.current; if (rt && activeRef.current) rt.session.visualScroll = scroller.current?.scrollTop ?? 0; }}>
         <div ref={root} className="md-visual-content" />
       </div>
       {tocOpen && <MarkdownOutline headings={headings} active={activeHeading} navigate={pos => {select(pos); runtime.current?.view.focus();}} />}

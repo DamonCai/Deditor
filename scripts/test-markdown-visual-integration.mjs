@@ -370,7 +370,11 @@ await test('outline: collapse, filter and selection highlight keep document unch
 await test('local links: Unicode, duplicates and escaped filename delimiters',async()=>{
  assert.deepEqual(app.localMarkdownTarget('next%23part.md#中文','/generated/a.md'),{path:'/generated/next#part.md',anchor:'中文'});
  assert.equal(app.localMarkdownTarget('literal%2520.md','/generated/a.md').path,'/generated/literal%20.md');
+ assert.equal(app.localMarkdownTarget('file:///C:/docs/next%20file.md#title','C:/docs/a.md').path,'C:/docs/next file.md');
+ assert.equal(app.localMarkdownTarget('file://server/share/next.md','C:/docs/a.md').path,'//server/share/next.md');
+ assert.equal(app.localMarkdownTarget('../next.md','/generated/literal%20/a.md').path,'/generated/next.md');
  assert.equal(app.headingSourcePosition('# 中文\n\n## 中文\n','%E4%B8%AD%E6%96%87-1').line,3);
+ const source='# 中文 :smile: ![image](pic.png) **标题**\n';const host=document.createElement('div');host.innerHTML=await app.renderMarkdown(source,{theme:'light'});assert.equal(app.headingSourcePosition(source,host.querySelector('h1').id).line,1);
 });
 await test('lazy code: long documents create code editors only when a block is edited',async()=>{
  const original=Array.from({length:100},(_,i)=>'```js\nconst value = '+i+';\n```\n').join('\n');
@@ -610,7 +614,7 @@ await test('image metadata: per-document scalar folder rules support templates a
 });
 await test('image collection: copies once, patches Markdown/HTML/references, keeps failures and undo',async()=>{
  const original='---\ntypora-copy-images-to: media\n---\n\n![one](../old/pic.png) ![again][img]\n\n<img src="../old/pic.png" width="120" alt="html">\n\n![missing](missing.png) ![web](https://example.com/a.png)\n\n`![code](../old/pic.png)`\n\n[img]: ../old/pic.png "title"\n';
- await act(async()=>store.getState().setContent(original,'a','command'));await render(false);
+ await act(async()=>store.getState().setContent(original,'a','command'));await render(false);assert.equal(content(),original,'projection sync keeps YAML exact');
  const oldInvoke=globalThis.mdInvoke,copied=[];globalThis.mdInvoke=async(command,args)=>{
   if(command==='read_binary_as_base64'){if(args.path.endsWith('missing.png'))throw new Error('missing');return 'cGljdHVyZQ==';}
   if(command==='save_image'){copied.push(args);return '/generated/'+args.folder+'/'+args.name;}
@@ -1239,6 +1243,41 @@ await test('shared surface: HTML preview and editable children switch safely wit
    }
   }
  } finally {globalThis.CSSStyleSheet=Sheet;globalThis.CSSRule=Rule;await act(async()=>{root.render(null);store.setState({markdownSettings:settings});});}
+});
+await test('retained modes: suspend defers source sync, save stays current and return reuses the editor',async()=>{
+ await act(async()=>root.render(null));
+ const original='# Stable\n\nBody **bold**.\n\n| A | B |\n| --- | --- |\n| Keep | table |\n\n[^note]: Keep definition.\n';
+ await act(async()=>store.getState().setContent(original,'a','command'));await render();
+ const pm=document.querySelector('.ProseMirror'), table=document.querySelector('.milkdown-table-block');
+ const scroll=document.querySelector('.md-visual-scroll');scroll.scrollTop=140;scroll.dispatchEvent(new Event('scroll'));
+ await act(async()=>root.render(React.createElement(app.Visual,{tabId:'a',active:false,theme:'light'})));
+ assert.equal(document.querySelector('.md-visual-content').inert,true);assert.equal(app.getVisualEditor(),null);
+ for(let i=0;i<30;i++)await act(async()=>store.getState().setContent(original+'\nSource '+i+'\n','a','source'));
+ assert.equal(pm.textContent.includes('Source 29'),false,'hidden projection never reparses typing');
+ const changed=content();await act(async()=>{app.flushDocument('a');await app.saveFile();});assert.equal(content(),changed);assert.equal(writes.at(-1).content,changed);
+ await render();assert.equal(document.querySelector('.ProseMirror'),pm);assert.equal(document.querySelector('.milkdown-table-block'),table,'unchanged table keeps its live controls');assert.equal(pm.getAttribute('contenteditable'),'true');assert.match(pm.textContent,/Source 29/);assert.ok(app.getVisualEditor()?.navigate);assert.ok(app.getVisualEditor()?.find);
+ await navigateMarker('Source 29');await act(async()=>app.getVisualEditor().insert('visual ',false));const visual=content();
+ await act(async()=>app.markdownHistory());assert.equal(content(),changed);await act(async()=>app.markdownHistory(true));assert.equal(content(),visual);
+ await act(async()=>root.render(React.createElement(app.Visual,{tabId:'a',active:false,theme:'light'})));
+ await act(async()=>store.getState().setContent('# External replacement\n','a','command'));
+ await act(async()=>root.render(null));assert.equal(content(),'# External replacement\n');await render();
+});
+await test('lifecycle stress: repeated table documents release every editor and preserve source',async()=>{
+ await act(async()=>root.render(null));
+ const {Editor:MilkdownEditor}=await import('@milkdown/kit/core');
+ const count=Number(process.env.DEDITOR_STRESS_TABLES)||30;
+ const original=Array.from({length:count},(_,i)=>`## Section ${i}\n\nText **bold** and reference[^note].\n\n| A | B |\n| --- | ---: |\n| Cell | ${i} |\n`).join('\n')+'\n[^note]: Note body.\n';
+ const make=MilkdownEditor.make;let created=0,destroyed=0;
+ MilkdownEditor.make=function(...args){const editor=make.apply(this,args);created++;const destroy=editor.destroy;editor.destroy=async(...args)=>{const result=await destroy(...args);destroyed++;return result;};return editor;};
+ try {
+  await act(async()=>store.getState().setContent(original,'a','command'));
+  for(let cycle=0;cycle<6;cycle++) {
+   await render();assert.equal(document.querySelectorAll('.ProseMirror .milkdown-table-block').length,count);assert.equal(content(),original);
+   await act(async()=>root.render(null));await act(async()=>pause(40));
+   assert.equal(destroyed,created,'all remounted editors disposed');assert.equal(document.querySelectorAll('.ProseMirror').length,0);
+   if(process.env.DEDITOR_STRESS_TABLES){globalThis.gc?.();console.log('STRESS '+JSON.stringify({cycle,tables:count,heapMB:Math.round(process.memoryUsage().heapUsed/1048576),created,destroyed}));}
+  }
+ } finally {MilkdownEditor.make=make;await act(async()=>root.render(null));}
 });
 await test('lifecycle: cancelled startup finishes before disposal and cannot clear the replacement editor',async()=>{
  const {Editor:MilkdownEditor}=await import('@milkdown/kit/core');

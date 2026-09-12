@@ -4,7 +4,7 @@ import { Decoration, DecorationSet } from "@milkdown/kit/prose/view";
 import { sourceTree, type SourceNode } from "./document";
 import type { Node as ProseNode } from "@milkdown/kit/prose/model";
 function plain(node: SourceNode): string {
-  return ["text", "inlineCode", "image"].includes(node.type) ? node.value ?? (node as SourceNode & { alt?: string }).alt ?? "" : node.children?.map(plain).join("") ?? "";
+  return ["text", "inlineCode"].includes(node.type) ? node.value ?? (node as SourceNode & { alt?: string }).alt ?? "" : node.children?.map(plain).join("") ?? "";
 }
 const rawHeadings = new WeakMap<object, string[]>();
 const headingDecorations = new WeakMap<ProseNode, DecorationSet>();
@@ -29,6 +29,7 @@ export const sharedHeadingIds = $prose(() => new Plugin({ props: { decorations(s
     node.descendants(child => {
       if (child.type.name === "deditor_inline_source") { text += plain(sourceTree(child.textContent)); return false; }
       if (child.isText) text += child.text;
+      else if (child.type.name === "deditor_emoji") text += `:${child.attrs.name}:`;
     });
     decorations.push(Decoration.node(pos, pos + node.nodeSize, { id: id(text) }));
     return false;

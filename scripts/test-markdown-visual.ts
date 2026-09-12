@@ -42,6 +42,32 @@ const test = (name: string, fn: () => void) => { fn(); passed++; console.log(`PA
 crepe.editor.action(ctx => {
  const parse = ctx.get(parserCtx), serialize = ctx.get(serializerCtx);
  const make = (source: string) => new MarkdownDocument(source, parse, serialize);
+ test("source reset: local edits match full parsing and retain interleaved source ranges", () => {
+   const source = "# Head\r\n\r\nFirst **bold** paragraph.\r\n\r\n[^note]: Definition.\r\n\r\nLast paragraph[^note].\r\n";
+   const document = make(source), untouched = document.doc.lastChild;
+   for (const [from, to] of [["First", "中文First"], ["**bold**", "*italic*"], ["# Head", "# New head"], ["中文First", "First"]]) {
+     const next = document.source.replace(from, to); document.reset(next);
+     assert.ok(document.doc.eq(parse(next)), from); assert.equal(document.source, next);
+   }
+   assert.equal(document.doc.lastChild, untouched, "untouched footnote keeps node identity");
+   let at = 0; document.doc.descendants((node, pos) => { if (node.isText && node.text?.startsWith("Last paragraph")) at = pos; });
+   const edited = EditorState.create({doc: document.doc}).tr.insertText("Added ", at).doc;
+   const expected = document.source.replace("Last paragraph", "Added Last paragraph");
+   assert.equal(document.apply(edited), expected);
+   assert.match(document.source, /Added Last paragraph\[\^note\]/);
+   assert.ok(document.source.includes("[^note]: Definition.\r\n\r\n"));
+ });
+ test("source reset: structural and contextual edits fall back to the complete document", () => {
+   for (const [before, after] of [
+     ["Body\n\nOther\n", "# Body\n\nOther\n"],
+     ["Body\n\nOther\n", "Body\n\nNew\n\nOther\n"],
+     ["[A][r]\n\n[r]: https://a.test\n", "[B][r]\n\n[r]: https://b.test\n"],
+     ["Before[^a].\n\n[^a]: Note.\n", "Before[^b].\n\n[^b]: Note.\n"],
+     ["---\nfolder: assets\n---\n\nBody\n", "---\nfolder: media\n---\n\nBody\n"],
+     ["| A |\n| --- |\n| cell |\n", "| A | B |\n| --- | --- |\n| cell | new |\n"],
+   ]) { const document = make(before); assert.ok(document.reset(after).eq(parse(after))); assert.equal(document.source, after); }
+ });
+
  test("native caret: mark affinity keeps arrow behavior and yields to composition", () => {
    const view = ctx.get(editorViewCtx), previous = view.state;
    const doc = parse('plain **bold** plain'); let end = 0;

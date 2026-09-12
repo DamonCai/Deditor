@@ -179,7 +179,36 @@ export class MarkdownDocument {
     if (to <= from || !this.doc.resolve(from).sameParent(this.doc.resolve(to))) return null;
     return { from, to, sourceFrom, raw };
   }
-  reset(source: string) { this.source = source; this.doc = this.parse(source); this.index(); return this.doc; }
+  reset(source: string) {
+    const change = sourceChange(this.source, source), end = change.from + change.removed.length;
+    // Plain, single-line edits inside one existing block have no effect on
+    // neighboring Markdown boundaries. Reference/HTML syntax and line edits
+    // deliberately use the complete parser because their context can be global.
+    if (source !== this.source && !this.mdx && !/[\r\n]/.test(change.removed + change.inserted)) {
+      const index = this.ast.findIndex(node => { const [a, b] = range(node); return a <= change.from && end <= b; });
+      const previous = this.ast[index];
+      if (previous && ["paragraph", "heading", "blockquote", "table", "code", "math"].includes(previous.type)) {
+        const [start, stop] = range(previous), delta = change.inserted.length - change.removed.length;
+        const raw = this.source.slice(start, change.from) + change.inserted + this.source.slice(end, stop);
+        if (!/[\[<]/.test(raw)) {
+          const ast = editingTree(raw).children ?? [], parsed = ast.length === 1 && ast[0].type === previous.type ? this.parse(raw) : null;
+          if (parsed?.childCount === 1 && parsed.firstChild!.type === this.doc.child(index).type) {
+            const offset = (node: SourceNode, local: boolean): SourceNode => ({ ...node,
+              position: node.position ? {
+                start: { offset: local ? start + (node.position.start.offset ?? 0) : (node.position.start.offset ?? 0) + ((node.position.start.offset ?? 0) >= stop ? delta : 0) },
+                end: { offset: local ? start + (node.position.end.offset ?? 0) : (node.position.end.offset ?? 0) + ((node.position.end.offset ?? 0) >= stop ? delta : 0) },
+              } : undefined, children: node.children?.map(child => offset(child, local)),
+            });
+            const blocks = children(this.doc); blocks[index] = parsed.firstChild!;
+            this.source = source; this.doc = this.doc.type.create(this.doc.attrs, blocks, this.doc.marks);
+            this.ast = this.ast.map((node, at) => offset(at === index ? ast[0] : node, at === index));
+            return this.doc;
+          }
+        }
+      }
+    }
+    this.source = source; this.doc = this.parse(source); this.index(); return this.doc;
+  }
   apply(next: ProseNode): string {
     if (sameSourceNode(next, this.doc)) { this.doc = next; return this.source; }
     if (this.doc.content.content.some(node => node.type.name === "footnote_definition") || next.content.content.some(node => node.type.name === "footnote_definition")) return this.applyFootnoteProjection(next);

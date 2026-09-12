@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 // @tauri-apps/api/webview transitively imports the full Window class (~62 KB).
 // We only need to listen for the file-drop event; subscribe to its raw Tauri
 // event name directly via @tauri-apps/api/event (which is already small +
@@ -23,7 +23,7 @@ interface TauriDragDropPayload {
 import EditorHost from "./components/EditorHost";
 import EditorSlot from "./components/EditorSlot";
 import PreviewHost from "./components/PreviewHost";
-const MarkdownVisualEditor = lazy(() => import("./components/MarkdownVisualEditor"));
+import MarkdownVisualSlot from "./components/MarkdownVisualSlot";
 import HtmlPreview from "./components/HtmlPreview";
 import HtmlToolbar from "./components/HtmlToolbar";
 import TitleBar from "./components/TitleBar";
@@ -534,7 +534,8 @@ export default function App() {
                 }}
               />
             )}
-            {previewEnabled && (
+            {isMarkdown(filePath) && !isDiffTab && activeTabId && <MarkdownVisualSlot key={activeTabId} tabId={activeTabId} active={previewEnabled && markdownMode === "visual"} theme={theme} />}
+            {previewEnabled && !(isMarkdown(filePath) && markdownMode === "visual") && (
               <div
                 key="preview-pane"
                 className="min-w-0"
@@ -545,8 +546,6 @@ export default function App() {
               >
                 {htmlFile && activeTabId ? (
                   <HtmlPreview key={activeTabId} tabId={activeTabId} />
-                ) : activeTabId && markdownMode === "visual" ? (
-                  <Suspense fallback={null}><MarkdownVisualEditor key={activeTabId} tabId={activeTabId} theme={theme} /></Suspense>
                 ) : (
                   <PreviewHost
                     activeId={activeTabId}

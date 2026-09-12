@@ -1,4 +1,4 @@
-import { openMarkdownFileLink } from "../lib/markdownLinks";
+import { decodeAnchor, openMarkdownFileLink } from "../lib/markdownLinks";
 import MarkdownDocumentSurface from "./MarkdownDocumentSurface";
 import { markdownDisplayHtml, hydrateMarkdownDisplay } from "../lib/markdownDisplay";
 import { installFootnotePreview } from "../lib/markdownFootnotePreview";
@@ -311,7 +311,7 @@ export default function Preview({
           if (!id) return;
           let target: HTMLElement | null = null;
           try {
-            target = root.querySelector<HTMLElement>(`#${CSS.escape(id)}`);
+            target = Array.from(root.querySelectorAll<HTMLElement>("[id]")).find(element => decodeAnchor(element.id) === id) ?? null;
           } catch { return; }
           if (!target) return;
           const dataLine = Number(target.dataset.line);
@@ -731,7 +731,7 @@ export default function Preview({
   const handleTocJump = (id: string) => {
     const root = containerRef.current;
     if (!root) return;
-    const target = root.querySelector<HTMLElement>(`#${CSS.escape(id)}`);
+    const target = Array.from(root.querySelectorAll<HTMLElement>("[id]")).find(element => decodeAnchor(element.id) === id) ?? null;
     if (!target) return;
     // Anchor on the heading's data-line (markdown.ts stamps it) so the
     // logical target survives async mermaid/plantuml hydration shifts.

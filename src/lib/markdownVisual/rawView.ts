@@ -1,3 +1,6 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { decodeAnchor, openMarkdownFileLink } from "../markdownLinks";
+import { isLocalRef } from "../pathUtil";
 import { markdownDisplayHtml, hydrateMarkdownDisplay } from "../markdownDisplay";
 import { useEditorStore } from "../../store/editor";
 import { orderFootnoteTree } from "./footnoteOrder";
@@ -83,9 +86,11 @@ export function rawView(filePath: string | null, tabId: string) {
       if (link) {
         e.preventDefault();
         const href = link.getAttribute("href") ?? "";
-        if (href.startsWith("#")) {
-          let id = href.slice(1); try { id = decodeURIComponent(id); } catch { /* Keep malformed fragments inert. */ }
-          Array.from(view.dom.querySelectorAll<HTMLElement>("[id]")).find(element => element.id === id || element.id === href.slice(1))?.scrollIntoView({ block: "nearest" });
+        if (!view.editable || e.metaKey || e.ctrlKey) {
+          if (href.startsWith("#")) {
+            Array.from(view.dom.querySelectorAll<HTMLElement>("[id]")).find(element => decodeAnchor(element.id) === decodeAnchor(href.slice(1)))?.scrollIntoView({block:"nearest"});
+          } else if (/^(https?:|mailto:)/i.test(href)) void openUrl(href).catch(error => logError("Markdown link open failed", error));
+          else if (isLocalRef(href)) void openMarkdownFileLink(href,filePath).catch(error => logError("Markdown local link open failed", error));
           return;
         }
       }
