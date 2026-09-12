@@ -6,6 +6,8 @@ import { shapeContentCenter, advancedShapeScale, flowContentScale, referenceSymb
 import { relationshipGeometry } from "./relationship";
 import { topicIndicators, type TopicIndicator } from "./indicators";
 import {
+  layoutIdentity,
+  walkTopics,
   foldableTopicIds,
   type Topic,
   type Sheet,
@@ -48,6 +50,11 @@ export interface SceneNode extends Box {
   detached: boolean;
   direction: Direction;
 }
+const nodeStyleContexts = new WeakMap<SceneNode, {
+  kind?: 'floatingTopic' | 'calloutTopic' | 'summaryTopic';
+  connection?: Properties;
+}>();
+const knownTopicShapes = new Set([...ALL_TOPIC_SHAPES.map(shapeName), 'oval']);
 export interface Edge {
   from: string;
   to: string;
@@ -267,6 +274,7 @@ function wrap(
 ): string[] {
   const lines: string[] = [];
   for (const line of text.split("\n")) {
+    if (measure(line, size, p) <= width) { lines.push(line); continue; }
     let current: string[] = [];
     const characters = textGraphemes(line);
     for (const char of characters) {
@@ -387,7 +395,7 @@ export function buildScene(
   ): Fragment {
     const style = styleFor(sheet, topic, depth, branch, kind, connection),
       p = style.properties;
-    if (![...ALL_TOPIC_SHAPES.map(shapeName), "oval"].includes(shapeName(style.shape)))
+    if (!knownTopicShapes.has(shapeName(style.shape)))
       warnings.add(style.shape);
     const customWidth = typeof topic.customWidth === "number" && Number.isFinite(topic.customWidth) && topic.customWidth > 0
       ? Math.max(40,Math.min(10000,topic.customWidth)) : undefined;
@@ -514,6 +522,7 @@ export function buildScene(
       width,
       height,
     };
+    nodeStyleContexts.set(node, { kind, connection });
     const fragment: Fragment = { nodes: [node], edges: [], groups: [], bounds: nodeVisualBounds(node) };
     const children = folded.has(topic.id)
       ? []
@@ -1076,6 +1085,32 @@ export function buildScene(
       "#ffffff",
   };
 }
+/** Per-canvas cache. Only document commands with a proven paint-only identity
+ * may reuse geometry; imports, font changes, folds and other edits rebuild it. */
+export function createSceneBuilder() {
+  let previous: { identity: object; sheet: Sheet; folded: Set<string>; measure: Measure; scene: Scene } | undefined;
+  return (sheet: Sheet, folded: Set<string> = new Set(), measure: Measure = estimate): Scene => {
+    const identity = layoutIdentity(sheet);
+    let scene: Scene;
+    if (previous && previous.sheet !== sheet && previous.identity === identity && previous.measure === measure &&
+        previous.folded.size === folded.size && [...folded].every(id => previous!.folded.has(id))) {
+      const topics = new Map<string, Topic>();
+      walkTopics(sheet.rootTopic, topic => topics.set(topic.id, topic));
+      const nodes = previous.scene.nodes.map(old => {
+        const topic = topics.get(old.topic.id)!;
+        const context = nodeStyleContexts.get(old)!;
+        const changed = JSON.stringify(topic.style?.properties) !== JSON.stringify(old.topic.style?.properties);
+        const node = { ...old, topic, ...(changed ? styleFor(sheet, topic, old.depth, old.branch, context.kind, context.connection) : {}) };
+        nodeStyleContexts.set(node, context);
+        return node;
+      });
+      scene = { ...previous.scene, nodes };
+    } else scene = buildScene(sheet, folded, measure);
+    previous = { identity, sheet, folded: new Set(folded), measure, scene };
+    return scene;
+  };
+}
+
 /** Only branch styling flows down the tree; topic fills/fonts stay tier-specific. */
 function connectionStyle(node: Pick<SceneNode, "lineColor" | "properties">): Properties {
   return { "line-color": node.lineColor,

@@ -69,6 +69,16 @@ export interface XmindDocument {
   editable: boolean;
   original: Uint8Array;
 }
+// Session-only identities, never written to a workbook. Sharing an identity
+// means an edit changed topic paint only, not its geometry or inherited lines.
+// Values do not point to old sheets, so this cannot retain an undo chain.
+const layoutIdentities = new WeakMap<Sheet, object>();
+export function layoutIdentity(sheet: Sheet): object {
+  let identity = layoutIdentities.get(sheet);
+  if (!identity) { identity = {}; layoutIdentities.set(sheet, identity); }
+  return identity;
+}
+const paintProperties = new Set(['fo:color', 'svg:fill', 'fill-pattern', 'border-line-color']);
 export const childrenOf = (topic: Topic) => [
   ...(topic.children?.attached ?? []),
   ...(topic.children?.detached ?? []),
@@ -266,6 +276,36 @@ export function editDocument(
   const index = sheets.findIndex((s) => s.id === sheetId);
   if (index < 0) throw new Error("Sheet not found");
   const original = sheets[index];
+  if (command.type === 'title') {
+    // Titles cannot alter topology. Copy only the edited topic and its ancestor
+    // path, sharing all other subtrees with the undo state.
+    const rename = (topic: Topic): Topic | undefined => {
+      if (topic.id === command.id) {
+        if (topic.title === command.title) return topic;
+        const next: Topic = { ...topic, title: command.title };
+        delete next.titleUnedited;
+        return next;
+      }
+      for (const kind of ['attached', 'detached', 'callout', 'summary'] as const) {
+        const children = topic.children?.[kind];
+        for (let i = 0; i < (children?.length ?? 0); i++) {
+          const changed = rename(children![i]);
+          if (!changed) continue;
+          if (changed === children![i]) return topic;
+          const next = children!.slice();
+          next[i] = changed;
+          return { ...topic, children: { ...topic.children, [kind]: next } };
+        }
+      }
+      return undefined;
+    };
+    const rootTopic = rename(original.rootTopic);
+    if (!rootTopic) throw new Error('Topic not found');
+    if (rootTopic === original.rootTopic) return sheets;
+    const result = sheets.slice();
+    result[index] = { ...original, rootTopic };
+    return result;
+  }
   const sheet = structuredClone(original),
     root = sheet.rootTopic;
   const topic = "id" in command ? findTopic(root, command.id) : undefined;
@@ -353,11 +393,6 @@ export function editDocument(
       }
       break;
     }
-    case "title":
-      if (!topic) throw new Error("Topic not found");
-      if (topic.title !== command.title) delete topic.titleUnedited;
-      topic.title = command.title;
-      break;
     case "properties-many":
       for (const id of command.ids) {
         const target = findTopic(root, id);
@@ -552,6 +587,9 @@ export function editDocument(
         !(oldIds.has(r.end2Id) && !ids.has(r.end2Id)),
     );
   if (JSON.stringify(original) === JSON.stringify(sheet)) return sheets;
+  if ((command.type === 'properties' || command.type === 'properties-many') &&
+      Object.keys(command.properties).every(key => paintProperties.has(key)))
+    layoutIdentities.set(sheet, layoutIdentity(original));
   const result = sheets.slice();
   result[index] = sheet;
   return result;

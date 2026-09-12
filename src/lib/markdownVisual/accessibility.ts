@@ -5,29 +5,64 @@ export function installMarkdownAccessibility(view: EditorView) {
   const attribute = (element: HTMLElement, name: string, value: string) => {
     if (element.getAttribute(name) !== value) element.setAttribute(name, value);
   };
+  const updateHandle = (handle: HTMLElement) => {
+    const hidden = !view.editable || handle.dataset.show === "false";
+    if (handle.inert !== hidden) handle.inert = hidden;
+    attribute(handle, "aria-hidden", String(hidden));
+  };
+  const updateLabel = (label: HTMLElement) => {
+    const checkbox = label.querySelector(".checked, .unchecked");
+    if (!checkbox) {
+      // A task can become an ordinary list item without replacing its label.
+      if (label.getAttribute("role") === "checkbox") {
+        for (const name of ["role", "tabindex", "aria-checked", "aria-readonly", "aria-label"])
+          if (label.hasAttribute(name)) label.removeAttribute(name);
+      }
+      return;
+    }
+    attribute(label, "role", "checkbox");
+    const tabIndex = view.editable ? 0 : -1;
+    if (label.tabIndex !== tabIndex) label.tabIndex = tabIndex;
+    attribute(label, "aria-checked", String(checkbox.classList.contains("checked")));
+    attribute(label, "aria-readonly", String(!view.editable));
+    attribute(label, "aria-label", label.parentElement?.querySelector("[data-content-dom]")?.textContent ?? tStatic("md.tasklist"));
+  };
   const update = () => {
-    view.dom.querySelectorAll<HTMLElement>(".handle[data-show]").forEach(handle => {
-      const hidden = !view.editable || handle.dataset.show === "false";
-      if (handle.inert !== hidden) handle.inert = hidden;
-      attribute(handle, "aria-hidden", String(hidden));
-    });
-    view.dom.querySelectorAll<HTMLElement>(".milkdown-list-item-block .label-wrapper").forEach(label => {
-      const checkbox = label.querySelector(".checked, .unchecked");
-      if (!checkbox) return;
-      attribute(label, "role", "checkbox");
-      const tabIndex = view.editable ? 0 : -1;
-      if (label.tabIndex !== tabIndex) label.tabIndex = tabIndex;
-      attribute(label, "aria-checked", String(checkbox.classList.contains("checked")));
-      attribute(label, "aria-readonly", String(!view.editable));
-      attribute(label, "aria-label", label.parentElement?.querySelector("[data-content-dom]")?.textContent ?? tStatic("md.tasklist"));
-    });
+    view.dom.querySelectorAll<HTMLElement>(".handle[data-show]").forEach(updateHandle);
+    view.dom.querySelectorAll<HTMLElement>(".milkdown-list-item-block .label-wrapper").forEach(updateLabel);
+  };
+  const changed = (records: MutationRecord[]) => {
+    const handles = new Set<HTMLElement>(), labels = new Set<HTMLElement>();
+    const collect = (element: HTMLElement) => {
+      if (element.matches(".handle[data-show]")) handles.add(element);
+      if (element.matches(".label-wrapper")) labels.add(element);
+    };
+    for (const record of records) {
+      const element = record.target instanceof HTMLElement ? record.target : record.target.parentElement;
+      if (!element || !view.dom.contains(element)) continue;
+      collect(element);
+      // Nested task text contributes to each ancestor task's accessible name.
+      for (let parent: HTMLElement | null = element; parent && parent !== view.dom; parent = parent.parentElement) {
+        if (parent.matches(".label-wrapper")) labels.add(parent);
+        if (parent.matches(".milkdown-list-item-block")) {
+          const label = parent.querySelector<HTMLElement>(".label-wrapper");
+          if (label) labels.add(label);
+        }
+      }
+      for (const added of record.addedNodes) {
+        if (!(added instanceof HTMLElement) || !view.dom.contains(added)) continue;
+        collect(added);
+        added.querySelectorAll<HTMLElement>(".handle[data-show], .label-wrapper").forEach(collect);
+      }
+    }
+    handles.forEach(updateHandle); labels.forEach(updateLabel);
   };
   const onKey = (event: KeyboardEvent) => {
     const label = (event.target as HTMLElement).closest<HTMLElement>('.label-wrapper[role="checkbox"]');
     if (!label || !view.editable || ![" ", "Enter"].includes(event.key)) return;
     event.preventDefault(); event.stopPropagation(); label.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
   };
-  const observer = new MutationObserver(update); observer.observe(view.dom, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "data-show"] });
+  const observer = new MutationObserver(changed); observer.observe(view.dom, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ["class", "data-show"] });
   view.dom.addEventListener("keydown", onKey, true); view.dom.addEventListener("deditor-editable-change", update); update();
   return () => { observer.disconnect(); view.dom.removeEventListener("keydown", onKey, true); view.dom.removeEventListener("deditor-editable-change", update); };
 }

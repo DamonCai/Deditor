@@ -4,7 +4,7 @@ import { installMarkdownComposition } from "../lib/markdownComposition";
 import { markdownHistory } from "../lib/markdownHistory";
 import { showError } from "../lib/feedback";
 import { documentStatsField } from "../lib/documentStats";
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { EditorState, EditorSelection, Compartment, StateEffect, Transaction } from "@codemirror/state";
 import {
   EditorView,
@@ -243,6 +243,8 @@ function TextEditor({
   // the O(N) doc.toString() + string-compare path. For a 100 KB markdown
   // file that was ~200 KB of allocation per keystroke; now zero.
   const lastEmittedRef = useRef<string | null>(null);
+  const deferredMarkdown = useRef(false);
+  deferredMarkdown.current = active === false && isMarkdown(filePath);
   const onScrollRef = useRef(onScroll);
   const onPositionChangeRef = useRef(onPositionChange);
   // Suppress outgoing scroll events for this many ms after a programmatic scroll,
@@ -262,7 +264,7 @@ function TextEditor({
     if (positionFlushTimer.current) return;
     positionFlushTimer.current = setTimeout(() => {
       positionFlushTimer.current = null;
-      onPositionChangeRef.current?.({ ...positionRef.current });
+      if (!deferredMarkdown.current) onPositionChangeRef.current?.({ ...positionRef.current });
     }, 200);
   };
 
@@ -539,13 +541,13 @@ function TextEditor({
         clearTimeout(positionFlushTimer.current);
         positionFlushTimer.current = null;
       }
-      onPositionChangeRef.current?.({ ...positionRef.current });
+      if (!deferredMarkdown.current) onPositionChangeRef.current?.({ ...positionRef.current });
       // Stash state JSON (incl. undo history) for next mount of the same tab.
       if (tabId && !noStateCache) {
         try {
           if (useEditorStore.getState().tabs.some((t) => t.id === tabId)) {
             setEditorStateCache(tabId, view.state);
-            useEditorStore.getState().setTabPosition(tabId, { ...positionRef.current });
+            if (!deferredMarkdown.current) useEditorStore.getState().setTabPosition(tabId, { ...positionRef.current });
           }
         } catch {
           /* defensive: never block unmount on a serialization error */
@@ -640,13 +642,15 @@ function TextEditor({
     return () => observer.disconnect();
   }, [externalScrollLine]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const view = viewRef.current;
     if (!view) return;
     // Fast path: this `value` is our own echo (we just emitted it via the
     // updateListener above). Skip the O(N) doc.toString() + string compare
     // entirely — saves ~200 KB of allocation per keystroke on a 100 KB file.
-    if (lastEmittedRef.current === value) return;
+    // Reading edits already live in the store and shared Markdown history.
+    // Catch the hidden source view up once, before painting it on activation.
+    if (deferredMarkdown.current || lastEmittedRef.current === value) return;
     // Slow path: external source updated `value` (persistence reload,
     // external file watch, programmatic setContent). Diff doc against the
     // new value, replace if different.
@@ -655,7 +659,7 @@ function TextEditor({
       const change = sourceChange(view.state.doc.toString(), value);
       view.dispatch({ changes: { from: change.from, to: change.from + change.removed.length, insert: change.inserted }, annotations: Transaction.addToHistory.of(false) });
     } else view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value } });
-  }, [value]);
+  }, [value, active, filePath]);
 
   useEffect(() => {
     viewRef.current?.dispatch({

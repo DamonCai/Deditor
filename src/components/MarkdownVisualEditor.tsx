@@ -57,7 +57,7 @@ import { Button } from "./ui/Button";
 import "@milkdown/crepe/theme/common/style.css";
 import "./markdown-visual.css";
 
-interface Runtime { session: MarkdownSession; crepe: CrepeBuilder; view: EditorView; document: MarkdownDocument; sync: (source: string) => void; flush: () => void; closeInline: () => void }
+interface Runtime { session: MarkdownSession; crepe: CrepeBuilder; view: EditorView; document: MarkdownDocument; sync: (source: string) => void; flush: () => void; closeInline: () => void; outline: () => void }
 export default function MarkdownVisualEditor({ tabId, readonly = false, theme }: { tabId: string; readonly?: boolean; theme: "light" | "dark" }) {
   const t = useT();
   const source = useTabContent(tabId), filePath = useTabFilePath(tabId);
@@ -71,6 +71,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
   const [error, setError] = useState("");
   const [ready, setReady] = useState(false), [searchOpen, setSearchOpen] = useState(false), [query, setQuery] = useState("");
   const [tocOpen, setTocOpen] = useState(false), [headings, setHeadings] = useState<{ pos: number; level: number; text: string }[]>([]);
+  const tocOpenRef = useRef(tocOpen); tocOpenRef.current = tocOpen;
   const [matchCount, setMatchCount] = useState(0), [matchIndex, setMatchIndex] = useState(0);
   const lastSearch = useRef({ query: "", open: false });
   const matches = useRef<{ from: number; to: number }[]>([]);
@@ -143,6 +144,9 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
       await crepe.editor.remove(syncHeadingIdPlugin);
       await crepe.editor.remove(remarkInlineLinkPlugin.plugin);
       await crepe.editor.remove(remarkPreserveEmptyLinePlugin.plugin);
+      // A mode/tab switch (or StrictMode cleanup) can cancel this asynchronous
+      // setup. Do not parse the whole document into an already detached host.
+      if (cancelled) return;
       await crepe.create();
       if (cancelled) { await crepe.destroy(); return; }
       crepe.setReadonly(readonlyRef.current);
@@ -174,6 +178,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
           useEditorStore.getState().setActiveSelectionLength(view.state.selection.to - view.state.selection.from);
         };
         const outline = () => {
+          if (!tocOpenRef.current) return;
           const result: { pos: number; level: number; text: string }[] = [];
           view.state.doc.descendants((node, pos) => { if (node.type.name === "heading") result.push({ pos: pos + 1, level: node.attrs.level, text: node.textContent }); });
           setHeadings(result);
@@ -235,7 +240,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
         });
         view.dom.addEventListener("beforeinput", beforeInput, true);
         cleanupInput = () => { composition.destroy(); view.dom.removeEventListener("beforeinput", beforeInput, true); };
-        runtime.current = { session, crepe, view, document, sync, flush, closeInline: () => inlineEditing?.close() };
+        runtime.current = { session, crepe, view, document, sync, flush, closeInline: () => inlineEditing?.close(), outline };
         sync(sourceRef.current);
         const position = Math.min(view.state.doc.content.size, session.sourceCursor === null ? session.visualSelection.head : document.positionAtSource(session.sourceCursor));
         view.dispatch(view.state.tr.setSelection(Selection.near(view.state.doc.resolve(position))));
@@ -258,6 +263,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
     };
   }, [tabId, filePath, language, theme]);
   useEffect(() => { runtime.current?.sync(source); }, [source]);
+  useEffect(() => { if (tocOpen) runtime.current?.outline(); }, [tocOpen, ready]);
   useEffect(() => { runtime.current?.view.dom.dispatchEvent(new Event("deditor-image-root-change")); }, [imageRoot, ready]);
   useEffect(() => {
     const rt = runtime.current; if (!rt) return;

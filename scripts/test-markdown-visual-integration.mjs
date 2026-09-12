@@ -211,8 +211,13 @@ await test('round 5: retained source editor relinquishes commands to visual mode
  await act(async()=>{root.render(null);store.setState({activeId:'a',markdownMode:'visual'});store.getState().setContent('# Retained\n\nbody\n','a','command');});
  await act(async()=>{root.render(React.createElement(RetainedEditors));await pause(120);});
  assert.equal(app.getActiveView(),null);assert.equal(app.getVisualEditor().tabId,'a');
+ const {EditorView:SourceView}=await import('@codemirror/view');
+ const hidden=SourceView.findFromDOM(document.querySelector('.cm-editor'));
+ const hiddenBefore=hidden.state.doc.toString();
  const before=content();await act(async()=>{app.getVisualEditor().navigate(3,5);app.getVisualEditor().insert(' visual',false);});
  const visual=content();assert.notEqual(visual,before);
+ assert.equal(hidden.state.doc.toString(),hiddenBefore,'hidden Markdown source does not process each visual edit');
+ await app.saveFile();assert.equal(writes.at(-1).content,visual,'saving reads current visual content while source is deferred');
  await act(async()=>store.setState({markdownMode:'source'}));
  assert.equal(app.getVisualEditor(),null);const view=app.getActiveView();assert.equal(view.state.doc.toString(),visual);
  await act(async()=>view.dispatch({changes:{from:view.state.doc.length,insert:' source'}}));
@@ -228,6 +233,18 @@ await test('round 5: HTML retained editor keeps its own undo while Markdown sour
  assert.equal(store.getState().tabs.find(t=>t.id==='b').content,html);assert.equal(content(),markdown);
  await act(async()=>{store.setState({activeId:'a',markdownMode:'visual'});await pause(120);});
  assert.equal(app.getActiveView(),null);assert.equal(content(),markdown);assert.equal(app.getVisualEditor().tabId,'a');
+});
+await test('deferred source: latest replacements and visual cursor survive hidden editor disposal',async()=>{
+ const {EditorView:SourceView}=await import('@codemirror/view');
+ const hidden=SourceView.findFromDOM(document.querySelector('.cm-editor')),old=hidden.state.doc.toString();
+ for(const text of ['first','second','latest']) await act(async()=>store.getState().setContent('# Deferred\n\n'+text+'\n','a','command'));
+ assert.equal(hidden.state.doc.toString(),old);
+ await act(async()=>app.getVisualEditor().navigate(3,4));
+ const cursor=store.getState().tabPositions.a.cursor,latest=content();
+ await act(async()=>{root.render(null);await pause(240);});
+ assert.equal(store.getState().tabPositions.a.cursor,cursor,'stale hidden source position must not replace the visual caret');
+ await act(async()=>{store.setState({markdownMode:'source'});root.render(React.createElement(RetainedEditors));await pause(120);});
+ assert.equal(app.getActiveView().state.doc.toString(),latest);assert.equal(content(),latest);
 });
 await test('reported editing bug: a closed or open search never steals the caret on document changes',async()=>{
  await act(async()=>{root.render(null);store.setState({activeId:'a',markdownMode:'visual'});store.getState().setContent('# Top\n\nbody\n\nBottom target\n','a','command');});await render();
@@ -279,6 +296,40 @@ await test('accessibility: unchanged controls produce no repeated attribute muta
  assert.equal(host.querySelector('.label-wrapper').tabIndex,-1);
  assert.equal(host.querySelector('.label-wrapper').getAttribute('aria-readonly'),'true');
  observer.disconnect();dispose();host.remove();
+});
+await test('accessibility: local mutations never rescan the document and nested task names stay current',async()=>{
+ const host=document.createElement('div');
+ const task=text=>`<div class="milkdown-list-item-block"><div class="label-wrapper"><span class="unchecked"></span></div><div data-content-dom>${text}</div><div class="handle" data-show="false"></div></div>`;
+ host.innerHTML='<p>plain</p>'+Array.from({length:500},(_,i)=>task('Task '+i)).join('')+'<div class="milkdown-list-item-block"><div class="label-wrapper" role="button" tabindex="0">Other control</div></div>';document.body.append(host);
+ const dispose=app.installMarkdownAccessibility({dom:host,editable:true});
+ let scans=0;const query=host.querySelectorAll;host.querySelectorAll=function(...args){scans++;return query.apply(this,args);};
+ try {
+  const handle=host.querySelector('.handle');handle.dataset.show='true';
+  host.querySelector('p').firstChild.data='plain edited';await pause(10);
+  assert.equal(scans,0);assert.equal(handle.getAttribute('aria-hidden'),'false');
+  const block=host.querySelector('.milkdown-list-item-block'),body=block.querySelector('[data-content-dom]'),label=block.querySelector('.label-wrapper');
+  body.firstChild.data='Renamed';await pause(10);assert.equal(label.getAttribute('aria-label'),'Renamed');
+  body.insertAdjacentHTML('beforeend',task('Nested'));await pause(10);
+  const nested=body.querySelector('[data-content-dom]');nested.firstChild.data='Child changed';await pause(10);
+  assert.match(label.getAttribute('aria-label'),/Child changed/);assert.equal(body.querySelector('.label-wrapper').getAttribute('aria-label'),'Child changed');
+  nested.parentElement.remove();await pause(10);assert.equal(label.getAttribute('aria-label'),'Renamed');
+  label.querySelector('span').className='bullet';await pause(10);assert.equal(label.hasAttribute('role'),false);assert.equal(label.hasAttribute('tabindex'),false);
+  assert.equal(scans,0);
+  assert.equal(host.lastElementChild.firstElementChild.getAttribute('role'),'button');
+  assert.equal(host.lastElementChild.firstElementChild.tabIndex,0);
+ } finally {dispose();host.remove();}
+});
+await test('outline: opening after edits reads current headings and positions',async()=>{
+ await act(async()=>store.getState().setContent('# First\n\nbody\n\n## Second\n','a','command'));
+ await act(async()=>{app.getVisualEditor().navigate(1,3);app.getVisualEditor().insert('New',false);});
+ const toggle=()=>[...document.querySelectorAll('.md-visual-controls button')].at(-1).click();
+ await act(async()=>toggle());assert.match(document.querySelector('.md-visual-toc').textContent,/NewFirst/);
+ await act(async()=>toggle());
+ await act(async()=>store.getState().setContent('# Replacement\n\n### Third\n','a','command'));
+ await act(async()=>toggle());assert.equal(document.querySelectorAll('.md-visual-toc button').length,2);assert.match(document.querySelector('.md-visual-toc').textContent,/Replacement.*Third/);
+ await act(async()=>document.querySelectorAll('.md-visual-toc button')[1].click());
+ assert.equal(app.getVisualEditor().heading,3);
+ await act(async()=>toggle());
 });
 await test('reported editing bug: lower reference list text is directly editable',async()=>{
  const original='# Top\n\n+ plain\n+ [label][r] <kbd>key</kbd><br>next\n+ lower\n\n[r]: https://example.com\n';

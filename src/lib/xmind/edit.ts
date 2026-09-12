@@ -227,12 +227,23 @@ export function saveSheetEdit(
 /** Encode raw bytes into a `data:application/vnd.xmind.workbook;base64,...`
  *  URL — that's the format DEditor stores xmind tab content in. */
 export function bytesToXmindDataUrl(bytes: Uint8Array): string {
-  let bin = "";
-  const CHUNK = 8192;
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  const prefix = 'data:application/vnd.xmind.workbook;base64,';
+  const native = (bytes as Uint8Array & { toBase64?: () => string }).toBase64;
+  if (typeof native === 'function') return prefix + native.call(bytes);
+  // Avoid spreading every byte into function arguments and building a second
+  // whole-archive binary string. UTF-16 code units 0..255 preserve every byte;
+  // decoding as "latin1" would incorrectly map bytes 0x80..0x9f in browsers.
+  const chunkSize = 98304; // Divisible by three: only the final chunk has padding.
+  const units = new Uint16Array(Math.min(chunkSize, bytes.length));
+  const littleEndian = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
+  const decoder = new TextDecoder(littleEndian ? 'utf-16le' : 'utf-16be');
+  const chunks: string[] = [];
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    const chunk = bytes.subarray(offset, offset + chunkSize);
+    units.set(chunk);
+    chunks.push(btoa(decoder.decode(units.subarray(0, chunk.length))));
   }
-  return `data:application/vnd.xmind.workbook;base64,${btoa(bin)}`;
+  return prefix + chunks.join('');
 }
 
 function randId(): string {

@@ -1,4 +1,6 @@
 import { richNestedSheet } from "../tests/fixtures/xmind-rich-nested";
+import { bytesToXmindDataUrl } from '../src/lib/xmind/edit';
+import { createSceneBuilder } from '../src/lib/xmind/scene';
 import { moveOrthogonalSegment } from '../src/lib/xmind/flexibleRelationship';
 import { smartColorSheets } from '../tests/fixtures/xmind-smart-colors';
 import { groupRangeAxis, groupRangeBounds, groupRangeReversed, nearestGroupMember } from '../src/lib/xmind/groupRange';
@@ -2004,5 +2006,96 @@ test(20, "label ellipsis keeps emoji and combining characters intact", () => {
     const changed=editDocument(doc.sheets,sheet.id,{type:'title',id:'r',title:'Saved'});
     assert.deepEqual(openDocument(writeDocument(doc,changed)).sheets[0].rootTopic.labels,labels);
   }
+});
+test(21, 'title history shares untouched subtrees and rejects missing targets without mutation', () => {
+  const sheets = sampleSheets();
+  const before = JSON.stringify(sheets);
+  const changed = editDocument(sheets, sheets[0].id, { type: 'title', id: 'keyboard', title: 'Changed' });
+  assert.notEqual(changed[0], sheets[0]);
+  assert.equal(changed[1], sheets[1]);
+  assert.equal(changed[0].rootTopic.children!.attached![0], sheets[0].rootTopic.children!.attached![0]);
+  assert.notEqual(changed[0].rootTopic.children!.attached![1], sheets[0].rootTopic.children!.attached![1]);
+  assert.equal(changed[0].rootTopic.children!.attached![1].children!.attached![1], sheets[0].rootTopic.children!.attached![1].children!.attached![1]);
+  assert.equal(JSON.stringify(sheets), before);
+  assert.equal(editDocument(changed, sheets[0].id, { type: 'title', id: 'keyboard', title: 'Changed' }), changed);
+  assert.throws(() => editDocument(sheets, sheets[0].id, { type: 'title', id: 'absent', title: 'Invalid' }), /Topic not found/);
+  for (const id of ['floating-child', 'callout', 'summary-topic']) {
+    const next = editDocument(sheets, sheets[0].id, { type: 'title', id, title: 'Special topic' });
+    assert.equal(findTopic(next[0].rootTopic, id)!.title, 'Special topic');
+    assert.equal(JSON.stringify(sheets), before);
+  }
+});
+test(21, 'binary encoding preserves all byte values, offset views and chunk padding', () => {
+  for (const length of [0, 1, 2, 3, 255, 256, 98303, 98304, 98305, 196607, 196608, 196609]) {
+    const buffer = Uint8Array.from({ length: length + 11 }, (_, i) => (i * 37 + 129) % 256);
+    const bytes = buffer.subarray(7, 7 + length);
+    Object.defineProperty(bytes, 'toBase64', { value: undefined }); // Exercise old WebView fallback on newer runtimes too.
+    const actual = bytesToXmindDataUrl(bytes).split(',')[1];
+    assert.equal(actual, Buffer.from(bytes).toString('base64'));
+    assert.deepEqual(new Uint8Array(Buffer.from(actual, 'base64')), bytes);
+  }
+  const native = new Uint8Array([0, 128, 255]);
+  let calls = 0;
+  Object.defineProperty(native, 'toBase64', { value(this: Uint8Array) { calls++; return Buffer.from(this).toString('base64'); } });
+  assert.ok(bytesToXmindDataUrl(native).endsWith('AID/'));
+  assert.equal(calls, 1);
+});
+
+test(21, 'paint-only scene reuse matches fresh layout across structures, topic kinds and themes', () => {
+  const fixtures = [...sampleSheets(), ...smartColorSheets(), ...timelineVariantSheets(),
+    ...STRUCTURES.map(([structure]) => richNestedSheet(structure, 1))];
+  for (const fixture of fixtures) {
+    const builder = createSceneBuilder();
+    let calls = 0;
+    const measure = (text: string, size: number) => { calls++; return Array.from(text).length * size * .6; };
+    let sheets = [fixture];
+    const first = builder(fixture, new Set(), measure);
+    const ids = first.nodes.map(n => n.topic.id);
+    for (const properties of [
+      { 'fo:color': '#123456' }, { 'svg:fill': '#AABBCC80', 'fill-pattern': 'solid' },
+      { 'fill-pattern': 'none', 'border-line-color': '#ABCDEF' },
+    ]) {
+      sheets = editDocument(sheets, fixture.id, { type: 'properties-many', ids, properties } as Parameters<typeof editDocument>[2]);
+      calls = 0;
+      const reused = builder(sheets[0], new Set(), measure);
+      assert.equal(calls, 0, `${fixture.title}: paint must not measure text again`);
+      assert.deepEqual(reused, buildScene(sheets[0], new Set(), measure));
+    }
+    // History can return to an earlier sheet with the same layout identity.
+    calls = 0;
+    assert.deepEqual(builder(fixture, new Set(), measure), first);
+    assert.equal(calls, 0);
+  }
+});
+
+test(21, 'layout reuse invalidates on geometry, folds, external documents and font measurements', () => {
+  let sheets = sampleSheets();
+  const builder = createSceneBuilder();
+  let calls = 0;
+  const measure = (text: string, size: number) => { calls++; return text.length * size * .6; };
+  builder(sheets[0], new Set(), measure);
+  for (const command of [
+    { type: 'title', id: 'read', title: 'A much longer changed title' },
+    { type: 'properties', id: 'read', properties: { 'fo:color': '#111111', 'fo:font-size': '44pt' } },
+    { type: 'properties', id: 'read', properties: { 'line-color': '#112233' } },
+    { type: 'notes', id: 'read', text: 'New notes indicator' },
+    { type: 'labels', id: 'read', labels: ['New label'] },
+  ] as Parameters<typeof editDocument>[2][]) {
+    sheets = editDocument(sheets, sheets[0].id, command);
+    calls = 0;
+    const actual = builder(sheets[0], new Set(), measure);
+    assert.ok(calls > 0);
+    assert.deepEqual(actual, buildScene(sheets[0], new Set(), measure));
+  }
+  sheets = editDocument(sheets, sheets[0].id, { type: 'properties', id: 'read', properties: { 'fo:color': '#334455' } });
+  const folds = new Set(['read']);
+  calls = 0; const folded = builder(sheets[0], folds, measure); assert.ok(calls > 0);
+  assert.deepEqual(folded, buildScene(sheets[0], folds, measure));
+  const external = openDocument(sampleArchive(sheets)).sheets[0];
+  calls = 0; builder(external, folds, measure); assert.ok(calls > 0);
+  const next = editDocument([external], external.id, { type: 'properties', id: 'read', properties: { 'fo:color': '#556677' } });
+  const otherMeasure = (text: string, size: number) => { calls++; return text.length * size; };
+  calls = 0; const resized = builder(next[0], folds, otherMeasure); assert.ok(calls > 0);
+  assert.deepEqual(resized, buildScene(next[0], folds, otherMeasure));
 });
 console.log(`${passed} XMind tests passed`);

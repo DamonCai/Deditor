@@ -30,7 +30,7 @@ import {
   walkTopics,
 } from "../lib/xmind/document";
 import {
-  buildScene,
+  createSceneBuilder,
   nodeVisualBounds,
   edgePath,
   braceConnector,
@@ -232,10 +232,9 @@ export default function XmindCanvas({
       live = false;
     };
   }, []);
-  const scene = useMemo(
-    () => buildScene(sheet, folded, measure),
-    [sheet, folded, fontsReady],
-  );
+  // Font readiness changes measured geometry, even for an unchanged sheet.
+  const buildScene = useMemo(() => createSceneBuilder(), [fontsReady]);
+  const scene = useMemo(() => buildScene(sheet, folded, measure), [sheet, folded, buildScene]);
   const byId = useMemo(
     () => new Map(scene.nodes.map((n) => [n.topic.id, n])),
     [scene],
@@ -596,7 +595,7 @@ export default function XmindCanvas({
   }, [scene]);
   const sceneContent = useMemo(() => {
     const selectedIds = new Set(selected);
-    const renderNode = (n: SceneNode) => {
+    const renderNode = (n: SceneNode, editorDraft = '') => {
           const chosen = selectedIds.has(n.topic.id),
             match =
               query &&
@@ -607,7 +606,7 @@ export default function XmindCanvas({
           // Keep the caret and the scrollable draft inside the visible canvas,
           // including when zoomed into a small part of a very large topic.
           const editorViewport = query ? { ...viewport, y: viewport.y + 40 / camera.zoom, height: viewport.height - 40 / camera.zoom } : viewport;
-          const editor = editing === n.topic.id ? draftBox(n, draft, editorViewport, camera.zoom, measure) : null;
+          const editor = editing === n.topic.id ? draftBox(n, editorDraft, editorViewport, camera.zoom, measure) : null;
           const isFolded = folded.has(n.topic.id);
           let hiddenCount = 0;
           const countChildren = (topic: Topic) => {
@@ -678,16 +677,16 @@ export default function XmindCanvas({
                   <textarea
                     aria-label={t("xmind.editTitle")}
                     autoFocus
-                    value={draft}
+                    value={editorDraft}
                     onChange={(e) => setDraft(e.target.value)}
-                    onBlur={commitEdit}
+                    onBlur={() => commitRef.current()}
                     onFocus={(e) => e.target.select()}
                     onKeyDown={(e) => {
                       e.stopPropagation();
                       if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
                       if (e.key === "Enter" && !e.shiftKey) {
                         e.preventDefault();
-                        commitEdit();
+                        commitRef.current();
                         host.current?.focus();
                       }
                       if (e.key === "Escape") {
@@ -819,7 +818,7 @@ export default function XmindCanvas({
     const groupAncestors=new Map<string,number>();
     for(const group of scene.groups)for(const id of group.memberGroupIds??[])
       groupAncestors.set(id,(groupAncestors.get(id)??0)+1);
-    return <>
+    const content = <>
         {[...scene.groups].sort((a,b)=>(groupAncestors.get(a.id)??0)-(groupAncestors.get(b.id)??0)).map((g) => {
           const lineWidth = parseFloat(g.properties["line-width"] ?? "2");
           const opacity = parseFloat(g.properties["svg:opacity"] ?? "0.2");
@@ -923,7 +922,7 @@ export default function XmindCanvas({
             />
           ) : null;
         })}
-        {scene.nodes.filter(n => n.topic.id !== editing).map(renderNode)}
+        {scene.nodes.filter(n => n.topic.id !== editing).map(n => renderNode(n))}
         {[...(sheet.relationships ?? [])].sort((a, b) =>
           Number(a.id === selectedRelationship) - Number(b.id === selectedRelationship)
         ).map((relation) => {
@@ -954,10 +953,11 @@ export default function XmindCanvas({
               return {x:c.x+(x-rect.left-rect.width/2)/c.zoom,y:c.y+(y-rect.top-rect.height/2)/c.zoom};
             }}/>;
         })()}
-        {scene.nodes.filter(n => n.topic.id === editing).map(renderNode)}
     </>;
-  }, [scene, selected, query, dragOffset, resources, readonly, editing, draft, editing || selectedRelationship || selectedGroup ? camera : null, size.width, size.height,
-    folded, foldable, t, commitEdit, toggleFold, byId, displayById, draggedIds, braceEdges, fishboneRibs, sheet, viewId,
+    const editorNode = editing ? byId.get(editing) : undefined;
+    return { content, renderEditor: (text: string) => editorNode ? renderNode(editorNode, text) : null };
+  }, [scene, selected, query, dragOffset, resources, readonly, editing, editing || selectedRelationship || selectedGroup ? camera : null, size.width, size.height,
+    folded, foldable, t, toggleFold, byId, displayById, draggedIds, braceEdges, fishboneRibs, sheet, viewId,
     selectedRelationship, selectedGroup, onSelectGroup, onCommand, onSelect, onInspect, onLink, setRelationshipFlush]);
 
   return (
@@ -1134,7 +1134,8 @@ export default function XmindCanvas({
           }
         }}
       >
-        {sceneContent}
+        {sceneContent.content}
+        {sceneContent.renderEditor(draft)}
         {dropTarget && (() => {
           const n=byId.get(dropTarget.target); if(!n) return null;
           return <g data-drop-kind={dropTarget.kind} pointerEvents="none" stroke={dropTarget.kind === "invalid" ? "var(--error-text)" : "var(--accent)"} fill="none" strokeWidth={2/camera.zoom}>

@@ -34,6 +34,7 @@
     "generate:file-icons": "node scripts/generate-file-icons.mjs",
     "test:syntax": "tsx scripts/test-syntax.ts",
     "perf:document": "tsx scripts/perf-document.ts",
+    "perf:markdown-controls": "tsx scripts/perf-markdown-controls.ts",
     "test:xmind": "tsx scripts/test-xmind.ts",
     "perf:xmind": "tsx scripts/perf-xmind.ts",
     "test:export": "node scripts/test-export.mjs",
