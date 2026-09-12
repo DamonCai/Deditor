@@ -46,7 +46,7 @@ export default function MarkdownWritingSettings() {
   };
   const set = (patch: Partial<MarkdownPreferences>) => useEditorStore.setState(s => ({ markdownSettings: { ...s.markdownSettings, ...patch } }));
   return <div className="md-writing-settings" ref={host}>
-    <Button variant="ghost" size="sm" aria-expanded={open} onClick={event => { const rect = event.currentTarget.getBoundingClientRect(); setPosition({ left: Math.max(12, Math.min(window.innerWidth - 312, rect.left)), top: rect.bottom + 4 }); setFolder(settings.imageDirectory); setEndpoint(settings.picgoEndpoint); setOpen(!open); }}>{t.settings}</Button>
+    <Button className="md-toolbar-action" variant="ghost" size="sm" aria-expanded={open} onClick={event => { const rect = event.currentTarget.getBoundingClientRect(); setPosition({ left: Math.max(12, Math.min(window.innerWidth - 312, rect.left)), top: rect.bottom + 4 }); setFolder(settings.imageDirectory); setEndpoint(settings.picgoEndpoint); setOpen(!open); }}>{t.settings}</Button>
     {historyOpen && tab && <MarkdownHistoryDialog tabId={tab.id} onClose={()=>setHistoryOpen(false)} />}
     {open && <div className="md-writing-panel" style={{ ...position, maxHeight: `calc(100vh - ${position.top + 12}px)` }} role="dialog" aria-label={t.settings} onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeAndFocus(); } }}>
       <label>{t.theme}<select aria-label={t.theme} value={settings.documentTheme} onChange={e => set({ documentTheme: e.target.value as MarkdownPreferences["documentTheme"] })}>{(["default", "compact"] as const).map(value => <option key={value} value={value}>{t[value]}</option>)}</select></label>

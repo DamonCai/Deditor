@@ -702,7 +702,9 @@ summary:focus-visible, .preview-toc-item:focus-visible, .cm-button:focus-visible
 .md-tool-group { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
 .md-tool-group + .md-tool-group { border-left: 1px solid var(--border); padding-left: 6px; }
 .md-heading-select { width: 92px; padding: 2px 6px; margin-right: 2px; }
-.md-toolbar-views { margin-left: auto; flex-shrink: 0; }
+.md-toolbar-views { display: flex; align-items: center; margin-left: auto; flex-shrink: 0; }
+.md-toolbar-action { display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 24px; line-height: 18px; }
+.md-toolbar-action > svg { display: block; flex-shrink: 0; }
 .md-tool svg { width: 14px; height: 14px; }
 .md-strike { text-decoration: line-through; font-weight: 600; }
 .md-symbol { font-size: 14px; line-height: 1; }

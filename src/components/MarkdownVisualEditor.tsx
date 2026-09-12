@@ -1,3 +1,5 @@
+import { $view } from "@milkdown/kit/utils";
+import { codeBlockView } from "@milkdown/kit/component/code-block";
 import { footnoteOrder } from "../lib/markdownVisual/footnoteOrder";
 import { mathView } from "../lib/markdownVisual/mathView";
 import { loadKatex } from "../lib/markdown";
@@ -27,7 +29,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { extendedTableCells } from "../lib/markdownVisual/tableLists";
 import { inlineSchemas, faithfulInlineHtml, configureInlineSerialization } from "../lib/markdownVisual/inline";
 import { codeView } from "../lib/markdownVisual/codeView";
-import { remarkInlineLinkPlugin, remarkPreserveEmptyLinePlugin, syncHeadingIdPlugin, wrapInHeadingInputRule } from "@milkdown/kit/preset/commonmark";
+import { codeBlockSchema, remarkInlineLinkPlugin, remarkPreserveEmptyLinePlugin, syncHeadingIdPlugin, wrapInHeadingInputRule } from "@milkdown/kit/preset/commonmark";
 import { useEffect, useRef, useState } from "react";
 import { CrepeBuilder } from "@milkdown/crepe/builder";
 import { codeMirror } from "@milkdown/crepe/feature/code-mirror";
@@ -110,6 +112,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
       catch (err) { logError("Markdown image upload failed", err); void showError(String(err)); throw err; }
     };
     const initialSource = sourceRef.current;
+    const codeNodeView = codeView(tabId, theme);
     const crepe = new CrepeBuilder({ root: host, defaultValue: initialSource })
       .addFeature(codeMirror)
       .addFeature(table, {
@@ -156,8 +159,13 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
       } },
     })));
     crepe.editor.use(nativeMarkdownCursor).use(markdownInputAssist);
+    // A rendered ProseMirror may exist before asynchronous startup has installed
+    // fidelity/history and restored the cursor. Accept input only after that boundary.
+    crepe.setReadonly(true);
     const initialize = async () => {
       if (/\\(?:ce|pu)\{/.test(initialSource)) await loadKatex();
+      await crepe.editor.remove(codeBlockView);
+      crepe.editor.use($view(codeBlockSchema.node, () => codeNodeView));
       await crepe.editor.remove(history); await crepe.editor.remove(trailing);
       await crepe.editor.remove(wrapInHeadingInputRule); await crepe.editor.remove(strikethroughInputRule);
       await crepe.editor.remove(syncHeadingIdPlugin);
@@ -168,7 +176,6 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
       if (cancelled) return;
       await crepe.create();
       if (cancelled) return;
-      crepe.setReadonly(readonlyRef.current);
       crepe.editor.action(ctx => {
         const view = ctx.get(editorViewCtx), parse = ctx.get(parserCtx), serialize = ctx.get(serializerCtx);
         const document = new MarkdownDocument(initialSource, parse, serialize, mdx, view.state.doc);
@@ -219,7 +226,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
         cleanupFootnotes = installFootnotePreview(view.dom, language);
         const originalImageView = view.props.nodeViews?.["image-block"];
         const originalInlineImageView = view.props.nodeViews?.image;
-        view.setProps({ nodeViews: { ...view.props.nodeViews, ...(originalImageView ? { "image-block": accessibleImageView(originalImageView, language) } : {}), ...(originalInlineImageView ? { image: rootAwareImageView(originalInlineImageView) } : {}), math_inline: mathView(tabId), footnote_reference: footnoteNodeView, footnote_definition: footnoteNodeView, deditor_raw: rawView(filePath, tabId), code_block: codeView(tabId, theme) },
+        view.setProps({ nodeViews: { ...view.props.nodeViews, ...(originalImageView ? { "image-block": accessibleImageView(originalImageView, language) } : {}), ...(originalInlineImageView ? { image: rootAwareImageView(originalInlineImageView) } : {}), math_inline: mathView(tabId), footnote_reference: footnoteNodeView, footnote_definition: footnoteNodeView, deditor_raw: rawView(filePath, tabId), code_block: codeNodeView },
           handleScrollToSelection: () => compositionViewport.handleScroll(),
           dispatchTransaction: tr => {
             if (cancelled) return;
@@ -271,6 +278,8 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
         if (scroller.current) scroller.current.scrollTop = session.visualScroll;
         cleanupFlush = registerDocumentFlush(tabId, flush);
         cleanupAccessibility = installMarkdownAccessibility(view);
+        crepe.setReadonly(readonlyRef.current);
+        view.dom.dispatchEvent(new Event("deditor-editable-change"));
         outline(); publish(); setReady(true);
       });
     };

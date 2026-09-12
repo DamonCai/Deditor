@@ -240,6 +240,31 @@ export class MarkdownDocument {
     const definitions = this.ast.filter(node => node.type === "footnoteDefinition").map(node=>this.source.slice(...range(node))).join("\n\n");
     const serialize = (node:ProseNode) => node.type.name === "deditor_raw" ? node.textContent : this.serialize(next.type.create(null,node)).replace(/\n$/,"").replace(/\r?\n/g,eol);
     const offsetTree = (node:SourceNode, amount:number):SourceNode => ({...node,position:node.position?{start:{offset:(node.position.start.offset??0)+amount},end:{offset:(node.position.end.offset??0)+amount}}:undefined,children:node.children?.map(child=>offsetTree(child,amount))});
+    // The usual keystroke changes one block. Avoid building a complete projection
+    // map for thousands of unaffected paragraphs/tables just because a footer exists.
+    if (before.length === after.length) {
+      let changed = -1, multiple = false;
+      for (let index = 0; index < before.length; index++) if (!sameSourceNode(before[index], after[index])) {
+        if (changed >= 0) { multiple = true; break; }
+        changed = index;
+      }
+      if (!multiple && changed >= 0 && this.ast[changed]) {
+        const ast = this.ast[changed], node = after[changed], [from, to] = range(ast);
+        let raw = serialize(node);
+        const patch = patchText(this.source.slice(from,to), ast, before[changed], node) ?? patchTasks(this.source.slice(from,to), ast, before[changed], node);
+        if (patch !== null) {
+          const parsed = this.parse(patch + (definitions ? "\n\n" + definitions : ""));
+          const candidate = children(parsed).find(child => child.type === node.type && (node.type.name !== "footnote_definition" || child.attrs.identifier === node.attrs.identifier));
+          if (candidate && this.serialize(parsed.type.create(null,candidate)) === this.serialize(next.type.create(null,node))) raw = patch;
+        }
+        const parsed = (editingTree(raw + (definitions ? "\n\n" + definitions : "")).children ?? []).filter(node => range(node)[0] < raw.length);
+        const replacement = parsed.length === 1 ? parsed[0] : {type:"deditorRaw",position:{start:{offset:0},end:{offset:raw.length}}};
+        const delta = raw.length - (to - from);
+        this.ast = this.ast.map((entry, index) => index === changed ? offsetTree(replacement, from) : delta && range(entry)[0] >= to ? offsetTree(entry, delta) : entry);
+        this.source = this.source.slice(0,from) + raw + this.source.slice(to);
+        this.doc = next; return this.source;
+      }
+    }
     const replace = (oldIndex:number|undefined, node:ProseNode|undefined, insertion:number) => {
       const old = oldIndex === undefined ? undefined : before[oldIndex], ast = oldIndex === undefined ? undefined : this.ast[oldIndex];
       if(old && node && ast && sameSourceNode(old,node)){assigned.set(node,{ast});return;}

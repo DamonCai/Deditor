@@ -290,11 +290,11 @@ export default function MarkdownToolbar() {
             </Tool>
           </div>
           <div className="md-tool-group">
-            <Button variant="ghost" size="sm" title={t("export.title")} onClick={() => {
+            <Button className="md-toolbar-action" variant="ghost" size="sm" title={t("export.title")} onClick={() => {
               const current = useEditorStore.getState();
               const tab = current.tabs.find(tab => tab.id === current.activeId);
               if (tab) setExportSnapshot({ content: tab.content, filePath: tab.filePath, theme: current.theme, documentTheme: current.markdownSettings.documentTheme, exportTemplate: current.markdownSettings.exportTemplate });
-            }}><FiDownload style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} />{t("export.button")}</Button>
+            }}><FiDownload />{t("export.button")}</Button>
           </div>
           <MarkdownWritingSettings />
           <div className="md-toolbar-views">
