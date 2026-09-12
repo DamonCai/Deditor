@@ -1,3 +1,4 @@
+import { exitBlockSource } from "./blockExit";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { decodeAnchor, openMarkdownFileLink } from "../markdownLinks";
 import { isLocalRef } from "../pathUtil";
@@ -17,6 +18,7 @@ import { hydrateLocalImages } from "../localImgHydrate";
 import { documentImageRoot } from "../markdownImageSettings";
 import { tStatic } from "../i18n";
 import { markdownHistory } from "../markdownHistory";
+import { markdownSession } from "../markdownSession";
 import { logError } from "../logger";
 import { NodeSelection, TextSelection } from "@milkdown/kit/prose/state";
 
@@ -54,7 +56,12 @@ export function rawView(filePath: string | null, tabId: string) {
         })];
       }).catch(error => { logError("Markdown preserved block render failed", error); if (!destroyed && version === generation) preview.textContent = node.textContent; });
     };
-    const close = (focus = true) => {
+    const breakHistory = () => {
+      const tab = useEditorStore.getState().tabs.find(tab => tab.id === tabId);
+      if (tab) markdownSession(tabId, tab.content).breakGroup();
+    };
+    const close = (focus = true, boundary = true) => {
+      if (boundary) breakHistory();
       cm?.destroy(); cm = null; editor.replaceChildren(); dom.style.minHeight = ""; button.textContent = tStatic("md.editSourceBlock"); render();
       const pos = getPos();
       if (focus && pos !== undefined) { view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, pos))); view.focus(); }
@@ -63,12 +70,18 @@ export function rawView(filePath: string | null, tabId: string) {
     const open = (anchor = 0, head = anchor) => {
       if (!view.editable) return;
       if (cm) return;
+      breakHistory();
       dom.style.minHeight = `${dom.getBoundingClientRect().height}px`;
       generation++; controllers.forEach(controller => controller.abort()); controllers = []; preview.hidden = true;
       button.textContent = tStatic("common.confirm");
       cm = new EditorView({ parent: editor, state: EditorState.create({ doc: node.textContent, selection: { anchor, head }, extensions: [
         basicSetup, markdown(), EditorView.lineWrapping,
-        Prec.highest(keymap.of([indentWithTab, { key: "Escape", run: () => close() }, { key: "Mod-z", run: () => markdownHistory(false, tabId) }, { key: "Mod-Shift-z", run: () => markdownHistory(true, tabId) }])),
+        Prec.highest(keymap.of([indentWithTab, ...([-1, 1] as const).map(direction => ({ key: direction < 0 ? "ArrowUp" : "ArrowDown", run: () => {
+          const selection = cm!.state.selection.main;
+          if (!selection.empty || selection.head !== (direction < 0 ? 0 : cm!.state.doc.length)) return false;
+          if (!exitBlockSource(view, node, getPos(), direction)) return false;
+          close(false, false); return true;
+        } })), { key: "Escape", run: () => close() }, { key: "Mod-z", run: () => markdownHistory(false, tabId) }, { key: "Mod-Shift-z", run: () => markdownHistory(true, tabId) }])),
         EditorView.updateListener.of(update => {
           if (updating || !(update.docChanged || update.view.hasFocus && (update.selectionSet || update.focusChanged))) return;
           const pos = getPos(); if (pos === undefined) return;
@@ -81,6 +94,15 @@ export function rawView(filePath: string | null, tabId: string) {
         }),
       ] }) }); cm.focus();
     };
+    const blur = () => {
+      const active = cm;
+      // Let the destination receive focus and the current CM update finish
+      // before destroying its DOM; never steal focus back from neighboring prose.
+      queueMicrotask(() => {
+        if (!destroyed && active && cm === active && !dom.contains(document.activeElement)) close(false);
+      });
+    };
+    dom.addEventListener("focusout", blur);
     button.onclick = () => { if (view.editable) { if (cm) close(); else open(); } };
     preview.addEventListener("click", e => {
       const link = (e.target as HTMLElement).closest("a");
@@ -142,7 +164,7 @@ export function rawView(filePath: string | null, tabId: string) {
           updating = true; cm.dispatch({ changes: { from: 0, to: cm.state.doc.length, insert: next.textContent } }); updating = false;
         }
         if (changed) render(); return true;
-      }, destroy() { controllers.forEach(controller => controller.abort()); view.dom.removeEventListener("deditor-document-change", documentChanged); view.dom.removeEventListener("deditor-editable-change", modeChanged); view.dom.removeEventListener("deditor-image-root-change", imageRootChanged); destroyed = true; generation++; cm?.destroy(); },
+      }, destroy() { dom.removeEventListener("focusout", blur); controllers.forEach(controller => controller.abort()); view.dom.removeEventListener("deditor-document-change", documentChanged); view.dom.removeEventListener("deditor-editable-change", modeChanged); view.dom.removeEventListener("deditor-image-root-change", imageRootChanged); destroyed = true; generation++; cm?.destroy(); },
     };
   };
 }

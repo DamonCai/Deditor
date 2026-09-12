@@ -252,7 +252,10 @@ const test = (round, name, fn) => tests.push({ round, name, fn });
 async function withToolbarEditor(doc, fn, selection = { anchor: 0, head: doc.length }) {
   const parent = document.createElement("div");
   document.body.appendChild(parent);
+  store.setState(s => ({ tabs: s.tabs.map(tab => tab.id === "a" ? { ...tab, content: doc } : tab) }));
   const view = new EditorView({ parent, state: EditorState.create({ doc, selection, extensions: [history(), EditorView.updateListener.of(u => {
+    // Match Editor's onChange contract so captured targets can detect pending external updates.
+    if (u.docChanged) store.setState(s => ({ tabs: s.tabs.map(tab => tab.id === "a" ? { ...tab, content: u.state.doc.toString() } : tab) }));
     if (app.getActiveView() === u.view && (u.docChanged || u.selectionSet)) app.setActiveView(u.view, "a");
   })] }) });
   app.setActiveView(view, "a");

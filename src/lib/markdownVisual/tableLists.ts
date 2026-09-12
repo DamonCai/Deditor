@@ -4,7 +4,7 @@ import { hardbreakFilterNodes } from "@milkdown/kit/preset/commonmark";
 import type { Node as ProseNode } from "@milkdown/kit/prose/model";
 import { SerializerState } from "@milkdown/kit/transformer";
 import { remarkCtx } from "@milkdown/kit/core";
-import { tableCellSchema, tableHeaderSchema } from "@milkdown/kit/preset/gfm";
+import { tableCellSchema, tableHeaderSchema, tableHeaderRowSchema } from "@milkdown/kit/preset/gfm";
 export { tableListTree } from "./tableTree";
 
 const tableCellExtensions = [tableCellSchema, tableHeaderSchema].map(schema => schema.extendSchema(previous => ctx => {
@@ -43,4 +43,10 @@ export function configureTableEditing(ctx: Ctx) {
   ctx.update(hardbreakFilterNodes.key, nodes => nodes.filter(name => name !== "table"));
 }
 
-export const extendedTableCells = [...tableCellExtensions, tableMenuPlacement];
+// An empty header row makes the generic table repair choose a data cell, which
+// the Markdown header schema cannot contain. Its fitting step can add an extra
+// data row during repair/history restore. Keep one empty header cell instead.
+const nonemptyTableHeader = tableHeaderRowSchema.extendSchema(previous => ctx => ({
+  ...previous(ctx), content: "table_header+",
+}));
+export const extendedTableCells = [...tableCellExtensions, nonemptyTableHeader, tableMenuPlacement];

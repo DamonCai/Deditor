@@ -84,6 +84,7 @@
 
 .md-visual-shell .milkdown .md-document > :nth-child(1 of :not(.ProseMirror-widget, .prosemirror-virtual-cursor)) { margin-top: 0; }
 .md-visual-shell .milkdown .md-document .milkdown-list-item-block:has(> li > [role="checkbox"]) { margin-left: -1.4em; }
+.md-visual-shell .milkdown .md-document .milkdown-list-item-block .milkdown-list-item-block:has(> li > [role="checkbox"]) { --md-task-base-indent: 0px; margin-left: 0; }
 .md-visual-shell .milkdown .md-document .md-code-block { position: relative; border: 0; border-radius: 0; margin: var(--md-block-space) 0; overflow: visible; }
 .md-visual-shell .milkdown .md-document .md-code-block[data-kind="diagram"] { margin: var(--md-diagram-space) 0; }
 .md-visual-shell .milkdown .md-document .md-code-block[data-kind="math"] { margin: 1em 0; }
@@ -91,11 +92,22 @@
 .md-visual-shell .milkdown .md-document .md-code-preview > :first-child { margin-top: 0; }
 .md-visual-shell .milkdown .md-document .md-code-preview > :last-child { margin-bottom: 0; }
 .md-code-bar { position: absolute; right: 4px; top: 4px; z-index: 2; border: 1px solid var(--border); border-radius: 4px; opacity: 0; pointer-events: none; }
-.md-code-block:hover .md-code-bar, .md-code-block:focus-within .md-code-bar { opacity: 1; pointer-events: auto; }
+.md-code-block:not([data-kind="code"]):hover .md-code-bar,
+.md-code-block:not([data-kind="code"]):focus-within .md-code-bar,
+.md-code-block[data-kind="code"] .md-code-bar:focus-within { opacity: 1; pointer-events: auto; }
+/* Ordinary code only exposes these controls through keyboard focus or an explicit context click. */
 .md-visual-shell .milkdown .md-code-editor .cm-editor { height: auto; background: var(--preview-code-bg); border: 1px solid var(--preview-rule); border-radius: 8px; }
-.md-visual-shell .milkdown .md-code-editor .cm-scroller { font-size: 13px; line-height: 1.75; }
+.md-visual-shell .milkdown .md-code-editor .cm-editor.cm-focused { outline: none; }
+.md-visual-shell .milkdown .md-code-editor .cm-scroller { font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace; font-size: 13px; line-height: 1.75; }
+.md-visual-shell .milkdown .md-code-editor .cm-content { caret-color: var(--preview-text); }
+.md-visual-shell .milkdown .md-code-editor .cm-cursor { border-left-color: var(--preview-text); }
 .md-visual-shell .milkdown .md-code-editor .cm-content { padding: 18px 0; }
+.md-visual-shell .milkdown .md-code-editor .cm-content.cm-lineWrapping { white-space: pre-wrap; word-break: normal; overflow-wrap: anywhere; }
 .md-visual-shell .milkdown .md-code-editor .cm-line { padding: 0 20px; }
+.md-visual-shell .milkdown .md-code-block[data-line-numbers="true"] .cm-line::before {
+  content: attr(data-code-line); display: inline-block; min-width: 2em; padding-right: 1em;
+  text-align: right; color: var(--preview-muted); opacity: 0.65; user-select: none;
+}
 .md-visual-shell .milkdown .md-code-editor .cm-gutters { display: none; }
 .md-visual-shell .milkdown .md-code-editor .cm-activeLine { background: transparent; }
 .md-visual-shell .milkdown .md-raw-block:has(.md-raw-preview:empty):not(:focus-within) { height: 0; margin: 0; }

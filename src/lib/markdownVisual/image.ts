@@ -1,3 +1,5 @@
+import { markdownSession } from "../markdownSession";
+import { useEditorStore } from "../../store/editor";
 import { imageBlockSchema } from "@milkdown/kit/component/image-block";
 import type { NodeViewConstructor } from "@milkdown/kit/prose/view";
 import type { SourceNode } from "./document";
@@ -44,11 +46,19 @@ export const faithfulImage = imageBlockSchema.extendSchema(previous => ctx => {
   };
 });
 
-export function accessibleImageView(original: NodeViewConstructor, language: "zh" | "en" = "en"): NodeViewConstructor {
+export function accessibleImageView(original: NodeViewConstructor, language: "zh" | "en" = "en", tabId?: string): NodeViewConstructor {
   return (initial, view, getPos, decorations, innerDecorations) => {
     let node = initial;
     const result = original(initial, view, getPos, decorations, innerDecorations);
     const dom = result.dom as HTMLElement;
+    const fieldBoundary = (event: FocusEvent) => {
+      if (!view.editable || !(event.target instanceof HTMLInputElement)) return;
+      const state = useEditorStore.getState();
+      const tab = state.tabs.find(tab => tab.id === (tabId ?? state.activeId));
+      if (tab) markdownSession(tab.id, tab.content).breakGroup();
+    };
+    dom.addEventListener("focusin", fieldBoundary);
+    dom.addEventListener("focusout", fieldBoundary);
     const label = document.createElement("div"); label.className = "md-image-width"; label.contentEditable = "false";
     const input = document.createElement("input"); input.type = "number"; input.min = "1"; input.max = "10000"; input.step = "1";
     const labels = markdownLabels[language];
@@ -58,20 +68,33 @@ export function accessibleImageView(original: NodeViewConstructor, language: "zh
     const altInput = document.createElement("input"); altInput.type = "text"; altInput.setAttribute("aria-label", t("md.imageAltLabel", language));
     altLabel.append(document.createTextNode(t("md.imageAltLabel", language) + " "), altInput); label.append(widthLabel, altLabel);
     dom.append(label);
-    let displayedWidth = node.attrs.width, displayedAlt = node.attrs.alt;
+    let displayedWidth = node.attrs.width, displayedAlt = node.attrs.alt, displayedCaption = node.attrs.caption;
     const update = () => {
       label.hidden = !view.editable;
       // An actual metadata change (including undo/redo) supersedes the field's
       // last committed value. Unrelated renders still preserve a focused draft.
       if (document.activeElement !== input || displayedWidth !== node.attrs.width) input.value = node.attrs.width ? String(node.attrs.width) : "";
       if (document.activeElement !== altInput || displayedAlt !== node.attrs.alt) altInput.value = node.attrs.alt;
-      displayedWidth = node.attrs.width; displayedAlt = node.attrs.alt;
+      const caption = dom.querySelector<HTMLInputElement>(".caption-input");
+      if (caption && (document.activeElement !== caption || displayedCaption !== node.attrs.caption)) caption.value = node.attrs.caption ?? "";
+      displayedWidth = node.attrs.width; displayedAlt = node.attrs.alt; displayedCaption = node.attrs.caption;
       dom.querySelectorAll("img").forEach(img => {
         if (img.alt !== node.attrs.alt) img.alt = node.attrs.alt;
         img.style.setProperty("width", node.attrs.width ? `${node.attrs.width}px` : "auto", "important");
         img.style.setProperty("max-width", "100%");
       });
     };
+    const captionInput = (event: Event) => {
+      const field = event.target;
+      if (!(field instanceof HTMLInputElement) || !field.classList.contains("caption-input")) return;
+      // The upstream one-second timer can commit stale text after undo or
+      // deletion. Caption edits share the same immediate history as alt/width.
+      event.stopImmediatePropagation();
+      const pos = getPos(); if (!view.editable || pos === undefined) return;
+      if (field.value !== node.attrs.caption) view.dispatch(view.state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, caption: field.value }));
+    };
+    dom.addEventListener("input", captionInput, true);
+    dom.addEventListener("blur", captionInput, true);
     const commitWidth = () => {
       const pos = getPos(); if (!view.editable || pos === undefined) return;
       const width = input.value === "" ? null : Math.max(1, Math.min(10000, Math.round(Number(input.value))));
@@ -97,6 +120,6 @@ export function accessibleImageView(original: NodeViewConstructor, language: "zh
       const accepted = result.update?.(next, deco, inner) ?? false;
       if (accepted) { node = next; decorations = deco; innerDecorations = inner; update(); }
       return accepted;
-    }, destroy() { observer.disconnect(); view.dom.removeEventListener("deditor-editable-change", modeChanged); view.dom.removeEventListener("deditor-image-root-change", modeChanged); result.destroy?.(); } };
+    }, destroy() { dom.removeEventListener("input", captionInput, true); dom.removeEventListener("blur", captionInput, true); dom.removeEventListener("focusin", fieldBoundary); dom.removeEventListener("focusout", fieldBoundary); observer.disconnect(); view.dom.removeEventListener("deditor-editable-change", modeChanged); view.dom.removeEventListener("deditor-image-root-change", modeChanged); result.destroy?.(); } };
   };
 }

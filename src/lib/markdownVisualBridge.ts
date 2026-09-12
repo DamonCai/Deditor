@@ -3,6 +3,8 @@ export interface VisualEditorBridge {
   selected: string;
   heading: number;
   editable: boolean;
+  /** Source represented by this projection, before any pending React sync. */
+  source?: string;
   marked: (marker: string) => boolean;
   focus: () => void;
   navigate?: (line: number, column?: number) => void;

@@ -818,7 +818,8 @@ await test('image root views: Preview, block/inline/HTML images update together 
  await act(async()=>store.getState().setContent(original,'a','command'));await render(false);
  const previewHost=document.createElement('div');document.body.append(previewHost);const previewRoot=createRoot(previewHost);
  try {
-  await act(async()=>{previewRoot.render(React.createElement(app.Preview,{tabId:'a',active:false,theme:'light'}));await pause(200);});
+  // This standalone parity surface is visible; omitted active renders without owning window shortcuts.
+  await act(async()=>{previewRoot.render(React.createElement(app.Preview,{tabId:'a',theme:'light'}));await pause(200);});
   await act(async()=>{await pause(150);});
   const targets=scope=>[...scope.querySelectorAll('img')].map(img=>img.getAttribute('src')).filter(src=>src?.includes('/img/')).sort();
   const expected=root=>['block','inline','raw'].map(name=>root+'/img/'+name+'.png').sort();

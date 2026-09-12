@@ -3,14 +3,23 @@ import type { MarkdownDocumentSnapshot } from "./markdownVisual/document";
 export type MarkdownOrigin = "source" | "visual" | "command";
 export interface SourceChange { from: number; removed: string; inserted: string }
 export function sourceChange(before: string, after: string): SourceChange {
+  if (before === after) return { from: before.length, removed: "", inserted: "" };
+  // Compare long unchanged ranges with native string equality. Only the edges
+  // need UTF-16 code-unit scanning; preserve the original prefix-first result.
+  const chunk = 1024;
+  const commonLength = Math.min(before.length, after.length);
   let from = 0;
-  while (from < before.length && from < after.length && before[from] === after[from]) from++;
+  while (from + chunk <= commonLength && before[from] === after[from]
+    && before.slice(from, from + chunk) === after.slice(from, from + chunk)) from += chunk;
+  while (from < commonLength && before[from] === after[from]) from++;
   let end = before.length, nextEnd = after.length;
+  while (end - chunk >= from && nextEnd - chunk >= from && before[end - 1] === after[nextEnd - 1]
+    && before.slice(end - chunk, end) === after.slice(nextEnd - chunk, nextEnd)) { end -= chunk; nextEnd -= chunk; }
   while (end > from && nextEnd > from && before[end - 1] === after[nextEnd - 1]) { end--; nextEnd--; }
   return { from, removed: before.slice(from, end), inserted: after.slice(from, nextEnd) };
 }
 export interface SourceSelection { anchor: number; head: number }
-export interface VisualHistoryState { document: MarkdownDocumentSnapshot; selection: SourceSelection; sourceSelection: SourceSelection }
+export interface VisualHistoryState { document: MarkdownDocumentSnapshot; selection: SourceSelection; selectionJSON?: Record<string, unknown>; sourceSelection: SourceSelection }
 interface Entry { changes: SourceChange[]; origin: MarkdownOrigin; time: number; beforeVisual?: VisualHistoryState; afterVisual?: VisualHistoryState }
 export class MarkdownSession {
   version = 0;
@@ -25,6 +34,7 @@ export class MarkdownSession {
   constructor(public source: string) {}
   get canUndo() { return this.past.length > 0 || !!this.composition && this.composition.source !== this.source; }
   get canRedo() { return this.future.length > 0 && (!this.composition || this.composition.source === this.source); }
+  get composing() { return this.composition !== null; }
   breakGroup() { this.boundary = true; }
   recordVisual(before: VisualHistoryState | null, after: VisualHistoryState | null) {
     const entry = this.past.at(-1);

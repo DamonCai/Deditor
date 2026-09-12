@@ -69,12 +69,17 @@ export function hydrateMermaid(
         // Initialization and rendering share one queue: export's light/SVG-text
         // settings cannot race with a dark preview or change another diagram.
         const task = renderQueue.then(async () => {
+          // A newer document can replace this root while another render holds
+          // the queue. Do not spend diagram layout work on its stale source.
+          if (ctrl.signal.aborted) return;
           const mermaid = await getMermaid(theme, forExport);
+          if (ctrl.signal.aborted) return;
           return mermaid.render(id, source);
         });
         renderQueue = task.catch(() => undefined);
-        const { svg, bindFunctions } = await task;
-        if (ctrl.signal.aborted) return;
+        const result = await task;
+        if (ctrl.signal.aborted || !result) return;
+        const { svg, bindFunctions } = result;
         el.innerHTML = svg;
         if (bindFunctions) bindFunctions(el);
       } catch (err) {

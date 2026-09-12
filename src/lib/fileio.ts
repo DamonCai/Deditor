@@ -336,6 +336,14 @@ async function saveTab(id: string, saveAs = false, automatic = false): Promise<b
       const content = snapshot.filePath && target !== snapshot.filePath && isMarkdown(snapshot.filePath) && isMarkdown(target) && useEditorStore.getState().markdownSettings.preserveImageTargets
         ? (await import("./markdownImagePaths")).rebaseMarkdownImages(snapshot.content, snapshot.filePath, target) : snapshot.content;
       const formatted = await maybeFormat(content, target, binary);
+      // Formatting and image-path loading yield to edits, reloads and closes.
+      // Recheck immediately before issuing I/O so a stale automatic save cannot
+      // overwrite a conflict or a document the user has already discarded.
+      const current = useEditorStore.getState().tabs.find((t) => t.id === id);
+      if (!current || current.filePath !== snapshot.filePath ||
+          current.savedContent !== snapshot.savedContent ||
+          current.externalChange !== snapshot.externalChange ||
+          (automatic && current.content !== snapshot.content)) return false;
       if (target !== snapshot.filePath || formatted !== snapshot.savedContent) {
         await writeTabContent(target, formatted, binary);
       }

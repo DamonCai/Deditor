@@ -36,7 +36,7 @@ export function visualCommands(view: EditorView, tabId: string, parse: (s: strin
       const at = $from.parentOffset === 0 ? $from.before() : $from.after();
       tr.replaceRange(at, at, slice);
     } else tr.replaceSelection(slice);
-    view.dispatch(tr.scrollIntoView()); focus();
+    view.dispatch(tr.scrollIntoView()); boundary(); focus();
   };
   return { tabId, editable: view.editable, selected,
     heading: $from.parent.type.name === "heading" ? $from.parent.attrs.level : 0,
@@ -50,7 +50,7 @@ export function visualCommands(view: EditorView, tabId: string, parse: (s: strin
       boundary();
       if (mark) toggleMark(mark)(view.state, view.dispatch);
       else insert(prefix + selected + suffix, false);
-      focus();
+      boundary(); focus();
     },
     prefix(prefix) {
       boundary();
@@ -81,7 +81,7 @@ export function visualCommands(view: EditorView, tabId: string, parse: (s: strin
         while (listDepth > 0 && ![nodes.bullet_list, nodes.ordered_list].includes($from.node(listDepth).type)) listDepth--;
         if (removeTasks) {
           const tr = view.state.tr;
-          for (const pos of taskItems) tr.setNodeMarkup(pos, undefined, { ...tr.doc.nodeAt(pos)!.attrs, checked: null });
+          for (const pos of taskItems) tr.setNodeMarkup(pos, undefined, { ...tr.doc.nodeAt(pos)!.attrs, checked: null, taskIndent: 0 });
           view.dispatch(tr);
           liftListItem(nodes.list_item)(view.state, view.dispatch);
         }

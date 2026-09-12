@@ -123,6 +123,7 @@
   border-radius: 2px;
 }
 /* Inline code stays quieter than syntax-highlighted fenced blocks. */
+.md-surface [data-task-indent] { margin-left: calc(var(--md-task-base-indent, -1.4em) + var(--md-task-indent, 0) * 1.8em) !important; }
 :is(.preview, .milkdown .ProseMirror.md-document) code {
   display: inline;
   line-height: inherit;
@@ -222,6 +223,7 @@
   list-style: none;
   margin-left: -1.4em;
 }
+:is(.preview, .milkdown .ProseMirror.md-document) li.task-list-item li.task-list-item { --md-task-base-indent: 0px; margin-left: 0; }
 :is(.preview, .milkdown .ProseMirror.md-document) :is(li.task-list-item, li:has(> .label-wrapper[role="checkbox"])) {
   min-height: calc(var(--md-body-line-height) * 1em);
 }
@@ -473,7 +475,10 @@
 :is(.preview, .milkdown .ProseMirror.md-document) iframe { max-width: 100%; border: 1px solid var(--border); }
 
 /* Shared fenced-code options apply to the preview and reading surface together. */
-.md-surface pre.shiki { tab-size: var(--md-code-indent, 2); }
+.md-surface :is(.preview, .milkdown .ProseMirror.md-document) pre.shiki,
+.md-surface.preview pre.shiki { tab-size: var(--md-code-indent, 2); }
 .md-surface[data-md-code-wrap="true"] pre.shiki { white-space: pre-wrap; overflow-wrap: anywhere; }
 .md-surface[data-md-code-lines="true"] pre.shiki code { counter-reset: md-code-line; }
 .md-surface[data-md-code-lines="true"] pre.shiki code > .line::before { counter-increment: md-code-line; content: counter(md-code-line); display: inline-block; min-width: 2em; padding-right: 1em; text-align: right; color: var(--preview-muted); opacity: 0.65; user-select: none; }
+/* An empty final source line still occupies a row when line numbers are off. */
+.md-surface pre.shiki code > .line:empty::after { content: "\200b"; }

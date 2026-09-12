@@ -1,7 +1,24 @@
 import { $nodeSchema } from "@milkdown/kit/utils";
 import { TextSelection, Selection, type Transaction } from "@milkdown/kit/prose/state";
 import type { EditorView } from "@milkdown/kit/prose/view";
-import type { MarkdownDocument } from "./document";
+import { sourceTree, type MarkdownDocument, type SourceNode } from "./document";
+
+function inlineBody(raw: string) {
+  const node = sourceTree(raw).children?.[0]?.children?.[0];
+  if (!node || node.position?.start.offset !== 0 || node.position?.end.offset !== raw.length) return null;
+  if (node.type === "inlineCode") {
+    const fence = raw.match(/^`+/)?.[0];
+    if (!fence || !node.value) return null;
+    const at = raw.indexOf(node.value, fence.length);
+    return { from: at < 0 ? fence.length : at, to: at < 0 ? raw.length - fence.length : at + node.value.length };
+  }
+  if (!["strong", "emphasis", "delete", "mark", "subscript", "superscript", "link"].includes(node.type)) return null;
+  const leaves: SourceNode[] = [];
+  const walk = (node: SourceNode) => { if (node.type === "text") leaves.push(node); else node.children?.forEach(walk); };
+  walk(node);
+  const from = leaves[0]?.position?.start.offset, to = leaves.at(-1)?.position?.end.offset;
+  return from === undefined || to === undefined || from === to ? null : { from, to };
+}
 
 export const inlineProjection = "deditor-inline-projection";
 export const inlineSourceSchema = $nodeSchema("deditor_inline_source", () => ({
@@ -17,8 +34,9 @@ export const inlineSourceSchema = $nodeSchema("deditor_inline_source", () => ({
 
 /** A temporary document projection: entering/leaving never edits the source. */
 export function installInlineSource(view: EditorView, document: MarkdownDocument, boundary: () => void) {
-  let active: { from: number; sourceFrom: number; raw: string; initialRaw: string; original: import("@milkdown/kit/prose/model").Fragment } | null = null;
+  let active: { from: number; sourceFrom: number; raw: string; initialRaw: string; emptyRaw: string | null; original: import("@milkdown/kit/prose/model").Fragment } | null = null;
   let queued = false, destroyed = false, suppressAt = -1;
+  let enteringAfterInput = false;
   const find = () => {
     let found: { node: import("@milkdown/kit/prose/model").Node; pos: number } | null = null;
     view.state.doc.descendants((node, pos) => { if (node.type.name === "deditor_inline_source") { found = { node, pos }; return false; } });
@@ -62,8 +80,16 @@ export function installInlineSource(view: EditorView, document: MarkdownDocument
     // the text end enables that mark again instead of switching it off.
     if (current && selection.empty && selection.head > current.pos + 1 && selection.head < current.pos + 1 + current.node.content.size) {
       const at = tr.selection.$head;
-      const marks = at.marks().length ? at.marks() : at.nodeBefore?.marks ?? at.nodeAfter?.marks;
+      const body = inlineBody(current.node.textContent), offset = selection.head - current.pos - 1;
+      const marks = body && offset === body.from ? at.nodeAfter?.marks
+        : body && offset === body.to ? at.nodeBefore?.marks
+        : at.marks().length ? at.marks() : at.nodeBefore?.marks ?? at.nodeAfter?.marks;
       if (marks?.length) tr.setStoredMarks(marks);
+    } else if (current && selection.empty && selection.$head.parent.type.name === "deditor_inline_source") {
+      // Moving beyond the delimiters leaves their formatting as well. At a
+      // rendered boundary, inclusive marks otherwise leak into outside text.
+      const at = tr.selection.$head;
+      tr.setStoredMarks(selection.head <= current.pos + 1 ? at.nodeBefore?.marks ?? [] : at.nodeAfter?.marks ?? []);
     }
     suppressAt = tr.selection.head;
     view.dispatch(tr.setMeta(inlineProjection, true));
@@ -87,9 +113,22 @@ export function installInlineSource(view: EditorView, document: MarkdownDocument
       suppressAt = -1;
       const token = document.inlineAt(selection.head);
       if (!token) return;
-      const offset = Math.min(token.raw.length, Math.max(0, document.sourceOffset(selection.head) - token.sourceFrom));
+      if (enteringAfterInput && selection.head === token.from) {
+        // Typing immediately before a formatted word stays outside it. Opening
+        // its source here would move the next character past the opening mark.
+        enteringAfterInput = false;
+        return;
+      }
+      const body = inlineBody(token.raw);
+      const enteredByInput = enteringAfterInput;
+      // A newly typed character ends inside its marks, even though the source
+      // offset at that rendered boundary also covers the closing delimiters.
+      const offset = enteringAfterInput && body && selection.head === token.to
+        ? body.to : Math.min(token.raw.length, Math.max(0, document.sourceOffset(selection.head) - token.sourceFrom));
+      enteringAfterInput = false;
       const node = view.state.schema.nodes.deditor_inline_source.create({ sourceFrom: token.sourceFrom }, view.state.schema.text(token.raw));
-      active = { from: token.from, sourceFrom: token.sourceFrom, raw: token.raw, initialRaw: token.raw, original: view.state.doc.slice(token.from, token.to).content }; boundary();
+      active = { from: token.from, sourceFrom: token.sourceFrom, raw: token.raw, initialRaw: token.raw, emptyRaw: body ? token.raw.slice(0, body.from) + token.raw.slice(body.to) : null, original: view.state.doc.slice(token.from, token.to).content };
+      if (!enteredByInput) boundary();
       const tr = view.state.tr.replaceWith(token.from, token.to, node);
       tr.setSelection(TextSelection.create(tr.doc, token.from + 1 + offset));
       view.dispatch(tr.setMeta(inlineProjection, true));
@@ -124,14 +163,21 @@ export function installInlineSource(view: EditorView, document: MarkdownDocument
   view.dom.addEventListener("compositionend", update);
   return {
     get active() { return !!active; },
-    update, close, reset() { active = null; suppressAt = -1; },
+    update, close, reset() { active = null; suppressAt = -1; enteringAfterInput = false; },
     apply(tr: Transaction) {
       if (tr.getMeta(inlineProjection)) { document.project(view.state.doc); return true; }
-      if (!active) return false;
-      const current = find();
+      if (!active) { enteringAfterInput = tr.docChanged && tr.selection.empty; return false; }
+      let current = find();
       if (!current) { active = null; return false; }
       const old = document.doc.nodeAt(active.from);
       if (!old || old.type.name !== "deditor_inline_source") return false;
+      if (tr.docChanged && active.emptyRaw !== null && current.node.textContent === active.emptyRaw && current.node.textContent !== active.raw) {
+        // Deleting the last formatted text should delete its empty shell in
+        // the same user transaction, rather than leave visible **** or ``.
+        const empty = view.state.tr.delete(current.pos + 1, current.pos + 1 + current.node.content.size).setStoredMarks([]);
+        view.updateState(view.state.apply(empty.setMeta("addToHistory", false)));
+        current = find()!;
+      }
       // Direct source edits preserve surrounding punctuation and token spelling.
       const restored = view.state.tr.replaceWith(current.pos, current.pos + current.node.nodeSize, old).doc;
       if (!restored.eq(document.doc)) return false;

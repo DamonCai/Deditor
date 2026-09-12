@@ -29,6 +29,8 @@ import {
   setCurrentMatch,
 } from "../lib/previewSearch";
 
+import { PreviewScrollIndex, markerFloor } from "../lib/previewScrollIndex";
+
 interface TocItem {
   id: string;
   level: number;
@@ -83,11 +85,29 @@ export default function Preview({
   const documentTheme = useEditorStore(s => s.markdownSettings.documentTheme);
   const fontSize = useEditorStore(s => s.tabs.find(tab => tab.id === tabId)?.zoomFontSize ?? s.editorFontSize);
   const filePath = useTabFilePath(tabId);
-  const [cachedHtml, setHtml] = useState("");
-  const html = retainDom ? cachedHtml : "";
+  const [rendered, setRendered] = useState<{
+    html: string; source: string; filePath: string | null;
+    theme: "light" | "dark"; mathAutoNumber: boolean;
+  } | null>(null);
+  const html = retainDom ? rendered?.html ?? "" : "";
   const containerRef = useRef<HTMLDivElement>(null);
+  const scrollIndexRef = useRef<PreviewScrollIndex | null>(null);
+  useLayoutEffect(() => {
+    if (!containerRef.current) return;
+    const index = new PreviewScrollIndex(containerRef.current);
+    scrollIndexRef.current = index;
+    return () => { index.destroy(); scrollIndexRef.current = null; };
+  }, []);
+  useLayoutEffect(() => { scrollIndexRef.current?.reset(); }, [html]);
+  // Invalidate before layout effects restore a retained or newly rendered DOM.
+  useLayoutEffect(() => { scrollIndexRef.current?.invalidate(); }, [active, retainDom, theme, fontSize, documentTheme]);
   const isMd = isMarkdown(filePath);
   const imageRoot = isMd ? documentImageRoot(source, filePath) : null;
+  // Inactive Markdown slots keep their last result, but do no new parsing or
+  // diagram work until visible. Standalone previews default to being visible.
+  const renderEnabled = !isMd || (active !== false && retainDom);
+  const renderCurrent = rendered?.source === source && rendered.filePath === filePath &&
+    rendered.theme === theme && rendered.mathAutoNumber === mathAutoNumber;
   // Suppress outgoing scroll events for this many ms after a programmatic scroll
   // (set when applying incoming scrollLine from editor).
   const suppressOutgoingUntil = useRef(0);
@@ -101,25 +121,33 @@ export default function Preview({
   const lastTopLineRef = useRef(1);
 
   useEffect(() => {
+    if (!renderEnabled || renderCurrent) return;
     let cancelled = false;
     const id = setTimeout(async () => {
       const out = isMd
         ? await renderMarkdown(source, { theme, mathAutoNumber })
         : await renderCode(source, filePath, { theme });
-      if (!cancelled) setHtml(isMd ? markdownDisplayHtml(out) : out);
+      if (!cancelled) setRendered({
+        html: isMd ? markdownDisplayHtml(out) : out,
+        source, filePath, theme, mathAutoNumber,
+      });
     }, 80);
     return () => {
       cancelled = true;
       clearTimeout(id);
     };
-  }, [source, filePath, theme, isMd, mathAutoNumber]);
+  }, [source, filePath, theme, isMd, mathAutoNumber, renderEnabled, renderCurrent]);
 
-  // Shared diagram/image mounting; abort detached work when the HTML changes.
+  // Hydrate the committed result's theme. Hidden source/theme changes retain
+  // this result, so they neither start new diagram work nor abort in-flight
+  // hydration on the retained DOM. A newly rendered result keeps the existing
+  // replacement/unmount cleanup behavior.
+  const renderedTheme = rendered?.theme ?? theme;
   useEffect(() => {
-    if (!containerRef.current) return;
-    const display = hydrateMarkdownDisplay(containerRef.current, { theme, filePath, imageRoot });
+    if (!containerRef.current || !html) return;
+    const display = hydrateMarkdownDisplay(containerRef.current, { theme: renderedTheme, filePath, imageRoot });
     return () => display.abort();
-  }, [html, theme]);
+  }, [html, renderedTheme]);
 
   // Local images: rewrite `<img>` src to a Tauri asset:// URL so the WebView
   // can load files outside its own origin. Relative paths resolve against the
@@ -154,18 +182,9 @@ export default function Preview({
   const scrollContainerToLine = (targetLine: number): boolean => {
     const root = containerRef.current;
     if (!root) return false;
-    const els = root.querySelectorAll<HTMLElement>("[data-line]");
-    if (els.length === 0) return false;
-    const lines: number[] = [];
-    const tops: number[] = [];
-    els.forEach((el) => {
-      const ln = Number(el.dataset.line);
-      if (Number.isFinite(ln)) {
-        lines.push(ln);
-        tops.push(el.offsetTop);
-      }
-    });
-    if (lines.length === 0) return false;
+    const markers = scrollIndexRef.current?.read();
+    if (!markers || markers.lines.length === 0) return false;
+    const { lines, tops } = markers;
     const scrollMax = Math.max(0, root.scrollHeight - root.clientHeight);
     const totalLines = totalLinesRef.current;
     let top: number;
@@ -174,11 +193,7 @@ export default function Preview({
     } else if (targetLine <= lines[0]) {
       top = 0;
     } else {
-      let i = 0;
-      for (let k = 0; k < lines.length; k++) {
-        if (lines[k] <= targetLine) i = k;
-        else break;
-      }
+      const i = markerFloor(lines, targetLine, markers.linesOrdered);
       if (i < lines.length - 1) {
         const span = lines[i + 1] - lines[i];
         const t = span > 0 ? (targetLine - lines[i]) / span : 0;
@@ -374,18 +389,9 @@ export default function Preview({
       if (rafId) return;
       rafId = requestAnimationFrame(() => {
         rafId = 0;
-        const els = root.querySelectorAll<HTMLElement>("[data-line]");
-        if (els.length === 0) return;
-        const lines: number[] = [];
-        const tops: number[] = [];
-        els.forEach((el) => {
-          const ln = Number(el.dataset.line);
-          if (Number.isFinite(ln)) {
-            lines.push(ln);
-            tops.push(el.offsetTop);
-          }
-        });
-        if (lines.length === 0) return;
+        const markers = scrollIndexRef.current?.read();
+        if (!markers || markers.lines.length === 0) return;
+        const { lines, tops } = markers;
 
         const top = root.scrollTop;
         const scrollMax = Math.max(0, root.scrollHeight - root.clientHeight);
@@ -398,11 +404,7 @@ export default function Preview({
           fracLine = lines[0];
         } else {
           // Largest i such that tops[i] <= top.
-          let i = 0;
-          for (let k = 0; k < tops.length; k++) {
-            if (tops[k] <= top) i = k;
-            else break;
-          }
+          const i = markerFloor(tops, top, markers.topsOrdered);
           if (i < tops.length - 1) {
             const span = tops[i + 1] - tops[i];
             const t = span > 0 ? (top - tops[i]) / span : 0;

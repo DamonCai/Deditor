@@ -1,4 +1,5 @@
 import { orderFootnoteTree } from "./footnoteOrder";
+import { taskIndentTree } from "./taskIndent";
 import { editableBlockTree } from "./blockTree";
 import { sizedImages } from "./image";
 import { tableListTree } from "./tableLists";
@@ -12,6 +13,7 @@ export function rawRemark(mdx: boolean) {
   return $remark("deditorPreserve", () => () => (tree: unknown, file: { value: unknown }) => {
     editableBlockTree(tree as SourceNode, String(file.value));
     tableListTree(tree as SourceNode, String(file.value));
+    taskIndentTree(tree as SourceNode);
     inlineHtmlMarks(tree as SourceNode);
     referenceLinks(tree as SourceNode);
     sizedImages(tree as SourceNode);

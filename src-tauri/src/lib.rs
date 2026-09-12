@@ -2,6 +2,7 @@
 mod window_chrome;
 mod markdown_images;
 mod markdown_history;
+mod markdown_state;
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
@@ -88,18 +89,59 @@ fn read_binary_as_base64(path: String) -> Result<String, String> {
 #[tauri::command]
 fn write_text_file(app: tauri::AppHandle, path: String, content: String) -> Result<(), String> {
     log::debug!("write_text_file: {} ({} bytes)", path, content.len());
-    let markdown = is_markdown_history_path(&path);
     let root = app.path().app_data_dir().ok().map(|dir| dir.join("markdown-history"));
-    if markdown {
-        if let (Some(root), Ok(previous)) = (&root, fs::read_to_string(expand(&path))) {
+    write_text_with_history(&expand(&path), &path, &content, root.as_deref())
+}
+
+fn write_text_with_history(target: &std::path::Path, path: &str, content: &str, root: Option<&std::path::Path>) -> Result<(), String> {
+    let root = root.filter(|_| is_markdown_history_path(path));
+    if let Some(root) = root {
+        if let Ok(Some(previous)) = markdown_history::read_previous_for_history(target) {
             if let Err(error) = markdown_history::record(root, &path, &previous, false) { log::warn!("Markdown history: {error}"); }
         }
     }
-    fs::write(expand(&path), &content).map_err(|e| e.to_string())?;
-    if markdown {
-        if let Some(root) = root { if let Err(error) = markdown_history::record(&root, &path, &content, false) { log::warn!("Markdown history: {error}"); } }
+    fs::write(target, content).map_err(|e| e.to_string())?;
+    if let Some(root) = root {
+        if let Err(error) = markdown_history::record(root, path, content, false) { log::warn!("Markdown history: {error}"); }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod markdown_save_tests {
+    use super::*;
+    #[test]
+    fn saves_preserve_versions_and_main_write_error_semantics() {
+        let root = std::env::temp_dir().join(format!("deditor-save-test-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir_all(&root).unwrap();
+        let history = root.join("history");
+        let file = root.join("文档.md");
+        fs::write(&file, "original\n").unwrap();
+        write_text_with_history(&file, "文档.md", "changed 中文\n", Some(&history)).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), "changed 中文\n");
+        let versions = markdown_history::list(&history, Some("文档.md")).unwrap();
+        assert_eq!(versions.len(), 2);
+        assert_eq!(markdown_history::read(&history, &versions[0].id).unwrap(), "changed 中文\n");
+        assert_eq!(markdown_history::read(&history, &versions[1].id).unwrap(), "original\n");
+        write_text_with_history(&file, "文档.md", "changed 中文\n", Some(&history)).unwrap();
+        assert_eq!(markdown_history::list(&history, Some("文档.md")).unwrap().len(), 2);
+        // A failed primary write must not publish a successful new version.
+        let missing = root.join("missing").join("fail.md");
+        assert!(write_text_with_history(&missing, "fail.md", "not saved", Some(&history)).is_err());
+        assert!(markdown_history::list(&history, Some("fail.md")).unwrap().is_empty());
+        // History failure is still nonfatal to the actual document save.
+        let blocked_history = root.join("blocked");
+        fs::write(&blocked_history, "file, not directory").unwrap();
+        write_text_with_history(&file, "文档.md", "saved despite history error", Some(&blocked_history)).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), "saved despite history error");
+        // Oversized original files are skipped, but their small replacement is retained.
+        fs::write(&file, "x".repeat(3 * 1024 * 1024)).unwrap();
+        write_text_with_history(&file, "large.md", "small replacement", Some(&history)).unwrap();
+        let versions = markdown_history::list(&history, Some("large.md")).unwrap();
+        assert_eq!(versions.len(), 1);
+        assert_eq!(markdown_history::read(&history, &versions[0].id).unwrap(), "small replacement");
+        fs::remove_dir_all(root).unwrap();
+    }
 }
 
 #[tauri::command]
@@ -334,7 +376,7 @@ fn app_state_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 }
 
 fn is_markdown_history_path(path: &str) -> bool {
-    matches!(std::path::Path::new(path).extension().and_then(|s| s.to_str()).map(|s| s.to_ascii_lowercase()).as_deref(), Some("md" | "markdown" | "mdx"))
+    markdown_state::is_markdown_path(path)
 }
 #[tauri::command]
 fn list_markdown_history(app: tauri::AppHandle, path: Option<String>) -> Result<Vec<markdown_history::Entry>, String> {
@@ -365,44 +407,7 @@ fn read_app_state(app: tauri::AppHandle) -> Result<String, String> {
 #[tauri::command]
 fn write_app_state(app: tauri::AppHandle, content: String) -> Result<(), String> {
     let path = app_state_path(&app)?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| {
-            log::error!("write_app_state mkdir failed: {} -- {}", parent.display(), e);
-            e.to_string()
-        })?;
-    }
-    // Atomic write: stage to a sibling tmp file, then rename. Avoids leaving
-    // a half-written state.json behind if we crash mid-write.
-    let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, content.as_bytes()).map_err(|e| {
-        log::error!("write_app_state stage failed: {} -- {}", tmp.display(), e);
-        e.to_string()
-    })?;
-    fs::rename(&tmp, &path).map_err(|e| {
-        log::error!(
-            "write_app_state rename failed: {} -> {} -- {}",
-            tmp.display(),
-            path.display(),
-            e
-        );
-        e.to_string()
-    })?;
-    // Retain independent draft checkpoints before a tab can be closed or the process exits.
-    if let (Some(root), Ok(state)) = (path.parent().map(|dir| dir.join("markdown-history")), serde_json::from_str::<serde_json::Value>(&content)) {
-        if let Some(tabs) = state.get("tabs").and_then(|tabs| tabs.as_array()) {
-            for (index, tab) in tabs.iter().enumerate() {
-                let file = tab.get("filePath").and_then(|v| v.as_str());
-                if file.map_or(false, |path| !is_markdown_history_path(path)) { continue; }
-                let draft = tab.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                let saved = tab.get("savedContent").and_then(|v| v.as_str()).unwrap_or("");
-                if draft.is_empty() || draft == saved { continue; }
-                let key = file.map(String::from).unwrap_or_else(|| format!("untitled:{}", tab.get("recoveryId").and_then(|v|v.as_str()).map(String::from).unwrap_or_else(|| index.to_string())));
-                if let Err(error) = markdown_history::record(&root, &key, draft, true) { log::warn!("Markdown draft history: {error}"); }
-            }
-        }
-    }
-    log::debug!("write_app_state: {} ({} bytes)", path.display(), content.len());
-    Ok(())
+    markdown_state::write(&path, &content)
 }
 
 #[tauri::command]

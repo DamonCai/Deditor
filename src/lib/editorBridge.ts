@@ -3,6 +3,7 @@ import type { EditorView } from "@codemirror/view";
 import { EditorSelection, type EditorState } from "@codemirror/state";
 import { isolateHistory } from "@codemirror/commands";
 import { tStatic } from "./i18n";
+import { useEditorStore } from "../store/editor";
 
 let currentView: EditorView | null = null;
 let currentTabId: string | undefined;
@@ -304,15 +305,31 @@ export function insertLink(url: string, displayText?: string): void {
 
 /** A dialog must never apply its captured selection to a different/edited tab. */
 export function captureEditorTarget() {
-  const visual = getVisualEditor(); if (visual?.editable) return visual.capture();
+  // Store updates arrive before React synchronizes the editor. A still-equal
+  // view document alone cannot prove that its captured selection is current.
+  const origin = useEditorStore.getState();
+  const tab = origin.tabs.find(tab => tab.id === origin.activeId);
+  if (!tab) return null;
+  const stillCurrent = () => {
+    const state = useEditorStore.getState();
+    return state.activeId === tab.id && state.markdownMode === origin.markdownMode &&
+      state.tabs.find(current => current.id === tab.id)?.content === tab.content;
+  };
+  const visual = getVisualEditor();
+  if (visual?.editable) {
+    if (visual.tabId !== tab.id || (visual.source !== undefined && visual.source !== tab.content)) return null;
+    const target = visual.capture();
+    return { selected: target.selected, apply: (action: () => void) => stillCurrent() && target.apply(action) };
+  }
   const view = currentView;
   if (!view) return null;
+  if (currentTabId !== undefined && (currentTabId !== tab.id || view.state.doc.toString() !== tab.content)) return null;
   const { from, to } = view.state.selection.main;
   const doc = view.state.doc;
   return {
     selected: view.state.sliceDoc(from, to),
     apply(action: () => void): boolean {
-      if (currentView !== view || view.state.doc !== doc) return false;
+      if (!stillCurrent() || currentView !== view || view.state.doc !== doc) return false;
       view.dispatch({ selection: { anchor: from, head: to } });
       action();
       return true;

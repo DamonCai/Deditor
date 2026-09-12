@@ -1,4 +1,5 @@
 import { tableListTree } from "./tableTree";
+import { taskIndentTree } from "./taskIndent";
 import { decodeHTMLStrict } from "entities";
 import { orderFootnoteTree } from "./footnoteOrder";
 import { remarkMark } from "remark-mark-highlight";
@@ -18,7 +19,7 @@ export interface SourceNode {
 }
 const syntax = unified().use(remarkParse).use(remarkGfm, { singleTilde: false }).use(remarkMark).use(remarkShorthand).use(remarkMath).use(remarkFrontmatter, ["yaml", "toml"]);
 export function sourceTree(source: string): SourceNode { return syntax.parse(source) as SourceNode; }
-function editingTree(source: string): SourceNode { const tree = sourceTree(source); editableBlockTree(tree, source); tableListTree(tree, source); orderFootnoteTree(tree); return tree; }
+function editingTree(source: string): SourceNode { const tree = sourceTree(source); editableBlockTree(tree, source); tableListTree(tree, source); taskIndentTree(tree); orderFootnoteTree(tree); return tree; }
 const protectedTypes = new Set(["html", "definition", "linkReference", "imageReference", "yaml", "toml"]);
 export function protectedBlock(node: SourceNode): boolean {
   if (node.type === "paragraph" && /^\[(?:toc|\[toc\])\]$/i.test(node.children?.map(n => n.value ?? "").join("") ?? "")) return true;
@@ -87,6 +88,15 @@ function patchText(raw: string, ast: SourceNode, before: ProseNode, after: Prose
 }
 
 function patchTasks(raw: string, ast: SourceNode, before: ProseNode, after: ProseNode): string | null {
+  // A checkbox-only patch must not silently swallow indentation or other
+  // structural/attribute changes just because the task text stayed identical.
+  const checkboxOnly = (a: ProseNode, b: ProseNode): boolean => {
+    if (a.type !== b.type || a.childCount !== b.childCount) return false;
+    const compare = a.type.name === "list_item" ? a.type.create({ ...a.attrs, checked: b.attrs.checked }, a.content, a.marks) : a;
+    if (!compare.sameMarkup(b)) return false;
+    return a.isText ? a.text === b.text : children(a).every((child, index) => checkboxOnly(child, b.child(index)));
+  };
+  if (!checkboxOnly(before, after)) return null;
   if (before.textContent !== after.textContent) return null;
   const oldItems: ProseNode[] = [], newItems: ProseNode[] = [], items: SourceNode[] = [];
   before.descendants(n => { if (n.type.name === "list_item") oldItems.push(n); });
@@ -113,6 +123,7 @@ export class MarkdownDocument {
   doc: ProseNode;
   private ast: SourceNode[] = [];
   private positions = new WeakMap<ProseNode, { ast: SourceNode; start: number; ranges: { from: number; to: number; pos: number; end: number }[] }>();
+  private sourceOffsets: { doc: ProseNode; ast: SourceNode[]; source: string; values: Map<number, number> } | undefined;
   constructor(source: string, private parse: (source: string) => ProseNode, private serialize: (doc: ProseNode) => string, private mdx = false, initialDoc?: ProseNode) {
     this.source = source; this.doc = initialDoc ?? parse(source); this.index();
   }
@@ -478,6 +489,16 @@ export class MarkdownDocument {
     return ranges;
   }
   sourceOffset(position: number) {
+    // History asks for both ends of a collapsed selection, then publish asks
+    // for the same head again. Keep only a small cache for the current projection.
+    // Source/AST checks also cover reset/restore and inline source edits where
+    // an unchanged ProseMirror node may have a different original spelling.
+    let cache = this.sourceOffsets;
+    if (!cache || cache.doc !== this.doc || cache.ast !== this.ast || cache.source !== this.source) {
+      cache = this.sourceOffsets = { doc: this.doc, ast: this.ast, source: this.source, values: new Map() };
+    }
+    const cached = cache.values.get(position);
+    if (cached !== undefined) return cached;
     let found = this.source.length;
     this.doc.forEach((node, offset, index) => {
       if (position >= offset && position <= offset + node.nodeSize && this.ast[index]) {
@@ -492,6 +513,8 @@ export class MarkdownDocument {
         }
       }
     });
+    if (cache.values.size >= 32) cache.values.clear();
+    cache.values.set(position, found);
     return found;
   }
   positionAtSource(offset: number) {

@@ -10,12 +10,15 @@ import MarkdownIt from "markdown-it";
 import anchor from "markdown-it-anchor";
 import taskLists from "markdown-it-task-lists";
 import { markdownTableLists } from "./markdownTableLists";
+import { markdownTaskIndent } from "./markdownListIndent";
 import { ensureLanguage, getHighlighter } from "./highlight";
+import { MarkdownHighlightCache } from "./markdownHighlightCache";
 import { detectLang } from "./lang";
 import { tStatic } from "./i18n";
 
 const PLANTUML_LANGS = new Set(["plantuml", "puml", "uml"]);
 const MERMAID_LANGS = new Set(["mermaid"]);
+const fenceHighlightCache = new MarkdownHighlightCache();
 
 // Lazy loaders for the two heavy plugins:
 //   - katex (~628 KB minified) — only docs with `$...$` need this
@@ -114,6 +117,7 @@ const md = new MarkdownIt({
 md.use(anchor, { permalink: false });
 md.use(markdownTableLists);
 md.use(taskLists, { enabled: false });
+md.use(markdownTaskIndent);
 md.use(footnote);
 md.use(mark).use(sub).use(sup).use(markdownEmoji);
 md.use(markdownExtensions);
@@ -260,11 +264,15 @@ export async function renderMarkdown(
     // final body line from the closing fence; Shiki would count it as another
     // display line. Remove exactly one so intentional blank lines survive.
     const code = t.content.replace(/\n$/, "");
+    const cachedHtml = fenceHighlightCache.get(code, resolved, shikiTheme);
+    if (cachedHtml !== undefined) {
+      highlighted.set(i, cachedHtml);
+      continue;
+    }
     try {
-      highlighted.set(
-        i,
-        hl.codeToHtml(code, { lang: resolved, theme: shikiTheme }),
-      );
+      const html = hl.codeToHtml(code, { lang: resolved, theme: shikiTheme });
+      fenceHighlightCache.set(code, resolved, shikiTheme, html);
+      highlighted.set(i, html);
     } catch {
       highlighted.set(
         i,

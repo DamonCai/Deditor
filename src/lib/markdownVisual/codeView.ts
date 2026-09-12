@@ -1,9 +1,10 @@
+import { exitBlockSource } from "./blockExit";
 import { markdownMathContext } from "../markdownMath";
 import type { Node as ProseNode } from "@milkdown/kit/prose/model";
 import type { EditorView as ProseView, NodeView } from "@milkdown/kit/prose/view";
 import { NodeSelection, TextSelection } from "@milkdown/kit/prose/state";
 import { EditorView, keymap } from "@codemirror/view";
-import { EditorState, Prec, Compartment } from "@codemirror/state";
+import { EditorState, Prec, Compartment, type Extension } from "@codemirror/state";
 import { basicSetup } from "codemirror";
 import { indentWithTab } from "@codemirror/commands";
 import { useEditorStore } from "../../store/editor";
@@ -12,8 +13,7 @@ import { languages } from "@codemirror/language-data";
 import { LanguageDescription } from "@codemirror/language";
 import { markdownDisplayHtml, hydrateMarkdownDisplay } from "../markdownDisplay";
 import { renderMarkdown } from "../markdown";
-import { islandLight } from "../islandLightTheme";
-import { islandDark } from "../islandDarkTheme";
+import { codePresentation } from "./codePresentation";
 import { tStatic } from "../i18n";
 import { markdownHistory } from "../markdownHistory";
 import { logError } from "../logger";
@@ -33,14 +33,15 @@ export function codeView(tabId: string, theme: "light" | "dark") {
     bar.append(language, toggle, copy);
     const editor = document.createElement("div"), preview = document.createElement("div"); preview.className = "md-code-preview"; editor.className = "md-code-editor";
     dom.append(bar, editor, preview);
-    const languageCompartment = new Compartment(), editableCompartment = new Compartment();
+    const languageCompartment = new Compartment(), editableCompartment = new Compartment(), presentationCompartment = new Compartment();
+    let presentation: Extension = [], presentationGeneration = 0;
     const wrapping = new Compartment(), indentation = new Compartment();
     const settings = useEditorStore.getState().markdownSettings;
     let cm: EditorView | null = null;
     const ensureEditor = () => {
       if (cm) return cm;
       cm = new EditorView({ parent: editor, state: EditorState.create({ doc: node.textContent, extensions: [basicSetup, wrapping.of(settings.codeWrap ? EditorView.lineWrapping : []), indentation.of(indentUnit.of(" ".repeat(settings.codeIndent))),
-      theme === "dark" ? islandDark : islandLight, languageCompartment.of([]), editableCompartment.of([EditorView.editable.of(view.editable), EditorState.readOnly.of(!view.editable)]),
+      EditorView.theme({}, { dark: theme === "dark" }), presentationCompartment.of(presentation), languageCompartment.of([]), editableCompartment.of([EditorView.editable.of(view.editable), EditorState.readOnly.of(!view.editable)]),
       Prec.highest(keymap.of([
         indentWithTab,
         { key: "Mod-z", run: () => !view.editable || markdownHistory(false, tabId) }, { key: "Mod-Shift-z", run: () => !view.editable || markdownHistory(true, tabId) },
@@ -49,14 +50,11 @@ export function codeView(tabId: string, theme: "light" | "dark") {
           if (pos !== undefined) view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, pos)));
           expanded = false; render(); view.focus(); return true;
         } },
-        { key: "ArrowDown", run: () => {
-          if (!view.editable) return false;
-          if (cm!.state.selection.main.head !== cm!.state.doc.length) return false;
-          const pos = getPos(); if (pos === undefined) return false;
-          const after = pos + node.nodeSize, tr = view.state.tr;
-          if (after === tr.doc.content.size) tr.insert(after, view.state.schema.nodes.paragraph.create());
-          tr.setSelection(TextSelection.create(tr.doc, after + 1)); view.dispatch(tr.scrollIntoView()); view.focus(); return true;
-        } },
+        ...([-1, 1] as const).map(direction => ({ key: direction < 0 ? "ArrowUp" : "ArrowDown", run: () => {
+          const selection = cm!.state.selection.main;
+          if (!selection.empty || selection.head !== (direction < 0 ? 0 : cm!.state.doc.length)) return false;
+          return exitBlockSource(view, node, getPos(), direction);
+        } })),
       ])),
       EditorView.updateListener.of(update => {
         if (updating) return;
@@ -79,6 +77,14 @@ export function codeView(tabId: string, theme: "light" | "dark") {
       const match = LanguageDescription.matchLanguageName(languages, node.attrs.language ?? "", true);
       if (match) void match.load().then(extension => { if (!destroyed && token === languageGeneration) cm?.dispatch({ effects: languageCompartment.reconfigure(extension) }); }).catch(err => logError("Markdown code language failed", err));
       else cm?.dispatch({ effects: languageCompartment.reconfigure([]) });
+    };
+    const loadPresentation = () => {
+      const token = ++presentationGeneration;
+      void codePresentation(node.attrs.language ?? "", theme).then(extension => {
+        if (destroyed || token !== presentationGeneration) return;
+        presentation = extension;
+        cm?.dispatch({ effects: presentationCompartment.reconfigure(extension) });
+      }).catch(err => logError("Markdown code highlighting failed", err));
     };
     function render() {
       const lang = String(node.attrs.language ?? "").toLowerCase();
@@ -146,6 +152,10 @@ export function codeView(tabId: string, theme: "light" | "dark") {
       if (expanded) { expanded = false; render(); }
     };
     dom.addEventListener("focusout", collapse);
+    dom.oncontextmenu = event => {
+      if (dom.dataset.kind !== "code") return;
+      event.preventDefault(); language.focus();
+    };
     toggle.onclick = () => { if (!view.editable) return; expanded = !expanded; render(); if (expanded) ensureEditor().focus(); };
     language.onchange = () => {
       if (!view.editable) return;
@@ -163,13 +173,13 @@ export function codeView(tabId: string, theme: "light" | "dark") {
     const configure = () => {
       const settings = useEditorStore.getState().markdownSettings;
       dom.dataset.lineNumbers = String(settings.codeLineNumbers);
-      cm?.dispatch({effects:[wrapping.reconfigure(settings.codeWrap ? EditorView.lineWrapping : []), indentation.reconfigure(indentUnit.of(" ".repeat(settings.codeIndent)))]});
+      cm?.dispatch({effects:[wrapping.reconfigure(settings.codeWrap ? EditorView.lineWrapping : []), indentation.reconfigure([indentUnit.of(" ".repeat(settings.codeIndent)), EditorState.tabSize.of(settings.codeIndent)])]});
     };
     const settingsChanged = () => {configure(); render();};
     const documentChanged = () => {if (String(node.attrs.language).toLowerCase() === "latex") render();};
     view.dom.addEventListener("deditor-writing-change", settingsChanged);
     view.dom.addEventListener("deditor-document-change", documentChanged);
-    configure(); loadLanguage(); render();
+    configure(); loadLanguage(); loadPresentation(); render();
     return { dom, stopEvent: () => true, ignoreMutation: () => true,
       setSelection(anchor, head) {
         if (!view.editable) return;
@@ -187,7 +197,7 @@ export function codeView(tabId: string, theme: "light" | "dark") {
         if (cm && cm.state.doc.toString() !== node.textContent) cm.dispatch({ changes: { from: 0, to: cm.state.doc.length, insert: node.textContent } });
         cm?.dispatch({ effects: editableCompartment.reconfigure([EditorView.editable.of(view.editable), EditorState.readOnly.of(!view.editable)]) }); updating = false;
         language.value = node.attrs.language ?? "";
-        if (languageChanged) loadLanguage();
+        if (languageChanged) { loadLanguage(); loadPresentation(); }
         if (textChanged || languageChanged || language.readOnly === view.editable) render();
         return true;
       }, destroy() { view.dom.removeEventListener("deditor-writing-change", settingsChanged); view.dom.removeEventListener("deditor-document-change", documentChanged); view.dom.removeEventListener("deditor-editable-change", modeChanged); dom.removeEventListener("focusout", collapse); destroyed = true; generation++; controllers.forEach(controller => controller.abort()); cm?.destroy(); },

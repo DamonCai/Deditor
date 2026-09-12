@@ -87,9 +87,9 @@ try {
   const original='Before\n\n> > alpha\n\nAfter\n\n[ref]: https://example.com\n';await reset(original);await select('alpha',0);await key('Backspace');assert.equal(view.state.selection.$head.depth,1);assert.equal(view.state.selection.$head.parent.textContent,'Beforealpha');assert.ok(content().endsWith('\n\nAfter\n\n[ref]: https://example.com\n'));await exactHistory(original);
  });
 
- await test('E03 Shift Tab lifts first root item; first task Tab retains status and source',async()=>{
+ await test('E03 Shift Tab lifts first root item; first task Tab indents while retaining status',async()=>{
   await reset(baseline);await select('first');await key('Tab',{shiftKey:true});assert.equal(view.state.selection.$head.depth,1);assert.equal(view.state.selection.$head.parent.textContent,'first');await exactHistory(baseline);
-  const original='Before\n\n- [x] first\n- [ ] second\n\nAfter\n';await reset(original);await select('first');await key('Tab');assert.equal(content(),original);
+  const original='Before\n\n- [x] first\n- [ ] second\n\nAfter\n';await reset(original);await select('first');await key('Tab');assert.match(content(),/deditor-task-indent:1/);assert.equal(view.state.selection.$from.node(-1).attrs.checked,true);await exactHistory(original);
  });
  await test('E03 table-cell lists retain table Tab navigation',async()=>{
   const original='Before\n\n| A | B |\n| --- | --- |\n| - first<br>- second | other |\n\nAfter\n';await reset(original);await select('first');await key('Tab');assert.equal(view.state.selection.$head.parent.textContent,'other');assert.equal(content(),original);await key('Tab',{shiftKey:true});assert.equal(view.state.selection.$head.parent.textContent,'second');assert.equal(content(),original);

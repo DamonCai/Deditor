@@ -66,7 +66,7 @@ export const markdownInputAssist = $prose(() => {
         if (event.key === "Enter") {
           const { $from } = view.state.selection;
           const item = $from.depth > 1 ? $from.node(-1) : null;
-          if (item?.type.name === "list_item" && item.attrs.checked === true && $from.parent.content.size) {
+          if (item?.type.name === "list_item" && item.attrs.checked === true && $from.parent.content.size && !($from.parent.childCount === 1 && $from.parent.firstChild?.type.name === "hardbreak")) {
             // Split with the normal list command, then reset only the new task.
             // The command's optional attrs apply at the end but not mid-item.
             return splitListItem(item.type)(view.state, tr => {
