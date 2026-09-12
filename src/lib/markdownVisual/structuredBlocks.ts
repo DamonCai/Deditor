@@ -80,7 +80,7 @@ export const footnoteNodeView: NodeViewConstructor = (initial, view, getPos) => 
   list.className = "footnotes-list"; separator.className = "footnotes-sep"; separator.contentEditable = "false";
   link.className = "footnote-backref";
   const backlinks: HTMLAnchorElement[] = [];
-  if (contentDOM) { contentDOM.className = "md-footnote-content"; item.className = "footnote-item"; item.append(contentDOM, link); list.append(item); dom.append(separator, list); }
+  if (contentDOM) { contentDOM.className = "md-footnote-content"; item.className = "footnote-item"; item.append(contentDOM, document.createTextNode(" "), link); list.append(item); dom.append(separator, list); }
   else { dom.contentEditable = "false"; dom.append(link); }
   const update = () => {
     const info = footnoteContext(view.state.doc).get(key(node.attrs.identifier));

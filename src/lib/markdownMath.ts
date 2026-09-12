@@ -1,10 +1,11 @@
+import { orderFootnoteTree } from "./markdownVisual/footnoteOrder";
 import type { KatexOptions } from "katex";
 import { sourceTree, type SourceNode } from "./markdownVisual/document";
 type MathContext = { labels: Map<string, string>; blocks: {source: string; number: string; labels: string[]}[] };
 const contexts: {key: string; value: MathContext}[] = [];
 export function markdownMathContext(source: string): MathContext {
   // Prose edits do not invalidate mathematical numbering. Parse only when math changes.
-  const key = JSON.stringify([source.match(/\$\$[\s\S]*?\$\$/g), source.match(/^[ \t>]*(?:`{3,}|~{3,}).*$/gm)]);
+  const key = JSON.stringify([source.match(/^[^\n]*\$\$[\s\S]*?\$\$[^\n]*$|^[ \t>]*(?:`{3,}|~{3,}).*$/gm), source.match(/\[\^[^\]]+\]/g)]);
   const found = contexts.find(item => item.key === key); if (found) return found.value;
   const value: MathContext = {labels: new Map(), blocks: []};
   const visit = (node: SourceNode) => {
@@ -16,7 +17,7 @@ export function markdownMathContext(source: string): MathContext {
     }
     node.children?.forEach(visit);
   };
-  visit(sourceTree(source)); contexts.unshift({key,value}); if(contexts.length>4)contexts.pop(); return value;
+  const tree = sourceTree(source); orderFootnoteTree(tree); visit(tree); contexts.unshift({key,value}); if(contexts.length>4)contexts.pop(); return value;
 }
 const escapeHtml = (text: string) => text.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/"/g,"&quot;");
 let engine: typeof import("katex").default | undefined;

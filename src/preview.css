@@ -443,3 +443,9 @@
 .dark :is(.preview, .milkdown .ProseMirror.md-document) .legacy-diagram[data-legacy-kind="sequence"] svg { filter: invert(.88) hue-rotate(180deg); }
 
 :is(.preview, .milkdown .ProseMirror.md-document) iframe { max-width: 100%; border: 1px solid var(--border); }
+
+/* Shared fenced-code options apply to the preview and reading surface together. */
+.md-surface pre.shiki { tab-size: var(--md-code-indent, 2); }
+.md-surface[data-md-code-wrap="true"] pre.shiki { white-space: pre-wrap; overflow-wrap: anywhere; }
+.md-surface[data-md-code-lines="true"] pre.shiki code { counter-reset: md-code-line; }
+.md-surface[data-md-code-lines="true"] pre.shiki code > .line::before { counter-increment: md-code-line; content: counter(md-code-line); display: inline-block; min-width: 2em; padding-right: 1em; text-align: right; color: var(--preview-muted); opacity: 0.65; user-select: none; }

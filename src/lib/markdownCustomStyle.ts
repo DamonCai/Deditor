@@ -1,4 +1,4 @@
-const scope = ':is(.md-surface.md-document, .md-surface .md-document)';
+const scope = ':is(.md-surface[data-md-custom-style="true"].md-document, .md-surface[data-md-custom-style="true"] .md-document)';
 const properties = /^(?:color|background-color|line-height|letter-spacing|word-spacing|text-align|text-indent|text-decoration(?:-color|-line|-style|-thickness)?|white-space|overflow-wrap|word-break|margin(?:-(?:top|right|bottom|left))?|padding(?:-(?:top|right|bottom|left))?|border(?:-(?:top|right|bottom|left))?(?:-color|-style|-width|-radius)?|max-width|width)$/;
 /** Document-only appearance rules; no font replacement, external assets or global selectors. */
 export function markdownCustomStyle(source: string): string {

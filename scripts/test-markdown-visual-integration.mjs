@@ -549,7 +549,7 @@ await test('P2 syntax: YAML, TOC, alerts and contextual footnotes share preview 
  assert.equal(document.querySelector('.ProseMirror .md-callout-title').textContent,'WARNING');
  const refs=[...document.querySelectorAll('.ProseMirror .footnote-ref')].map(e=>e.textContent);assert.deepEqual(refs,['[1]','[2]']);
  assert.equal(document.querySelector('.ProseMirror [data-footnote-label="b"]').id,'fn1');assert.equal(document.querySelector('.ProseMirror [data-footnote-label="a"]').id,'fn2');
- const html=await app.renderMarkdown(original,{theme:'light'});assert.match(html,/class="md-frontmatter"/);assert.match(html,/md-callout-warning/);assert.match(html,/data-footnote-label="b" id="fn1"/);
+ const html=await app.renderMarkdown(original,{theme:'light'});assert.match(html,/class="md-frontmatter"/);assert.match(html,/md-callout-warning/);const footnoteMarkup=document.createElement("template");footnoteMarkup.innerHTML=html;assert.equal(footnoteMarkup.content.querySelector('[data-footnote-label="b"]').id,"fn1");
  assert.equal(content(),original);await act(async()=>app.saveFile());assert.equal(writes.at(-1).content,original);
  await render(true);await render(false);assert.equal(content(),original);
 });
@@ -1013,6 +1013,10 @@ await test('math: chemistry, document numbering and cross references share rende
  const clean=document.createElement('div');clean.innerHTML=app.markdownDisplayHtml(legacy);
  assert.equal(clean.querySelectorAll('.legacy-diagram').length,2);assert.equal(clean.querySelector('[data-legacy-kind="sequence"]').dataset.legacySource.trim(),'A->B: Hello');
 });
+await test('embedded HTML: iframe remains isolated and rejects local/script sources and srcdoc',async()=>{
+ const html=app.markdownDisplayHtml('<iframe src="https://example.com/embed" sandbox="allow-same-origin allow-top-navigation" srcdoc="<script>alert(1)</script>" allow="camera"></iframe><iframe src="file:///private/test"></iframe><iframe src="javascript:alert(1)"></iframe>');
+ const host=document.createElement('div');host.innerHTML=html;assert.equal(host.querySelectorAll('iframe').length,1);const frame=host.querySelector('iframe');assert.equal(frame.getAttribute('sandbox'),'allow-scripts');assert.equal(frame.getAttribute('srcdoc'),null);assert.equal(frame.getAttribute('allow'),null);assert.equal(frame.getAttribute('referrerpolicy'),'no-referrer');
+});
 await test('P3 typewriter: default off, explicit centering and composition exclusion',async()=>{
  const element=document.createElement('div'),scroller=document.createElement('div');document.body.append(scroller);scroller.append(element);
  Object.defineProperties(scroller,{clientHeight:{value:400},scrollHeight:{value:2000}});scroller.scrollTop=200;scroller.getBoundingClientRect=()=>({top:0,bottom:400});
@@ -1214,7 +1218,9 @@ await test('history UI: restore is undoable and opening a copy preserves the cur
   assert.equal(document.querySelector('.md-history-body textarea').value,'# Older\n');
   await act(async()=>[...document.querySelectorAll('.md-history-actions button')].find(button=>button.textContent==='Restore in editor (undoable)').click());
   assert.equal(content(),'# Older\n');await act(async()=>app.markdownHistory(false,'a'));assert.equal(content(),original);
- } finally {globalThis.mdInvoke=previous;await act(async()=>root.render(null));}
+  await act(async()=>[...document.querySelectorAll('.md-history-actions button')].find(button=>button.textContent==='Open as new document').click());
+  assert.equal(store.getState().tabs.find(tab=>tab.id===store.getState().activeId).content,'# Older\n');assert.equal(store.getState().tabs.find(tab=>tab.id==='a').content,original);assert.equal(store.getState().tabs.find(tab=>tab.id===store.getState().activeId).filePath,null);
+ } finally {globalThis.mdInvoke=previous;await act(async()=>{root.render(null);store.setState({activeId:'a'});});}
 });
 await test('shared surface: HTML preview and editable children switch safely with custom document CSS',async()=>{
  await act(async()=>root.render(null));const original=content(),settings=store.getState().markdownSettings;
@@ -1241,7 +1247,7 @@ await test('lifecycle: cancelled startup finishes before disposal and cannot cle
  const gate=new Promise(resolve=>release=resolve);
  MilkdownEditor.make=function(...args){
   const editor=make.apply(this,args);if(first){first=false;const create=editor.create,destroy=editor.destroy;
-   editor.create=async()=>{const result=await create();started=true;await gate;return result;};
+   editor.create=async()=>{const result=await create();assert.equal(document.querySelector('.ProseMirror')?.getAttribute('contenteditable'),'false');started=true;await gate;return result;};
    editor.destroy=async(...args)=>{destroys++;return destroy(...args);};
   }return editor;
  };

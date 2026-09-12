@@ -19,7 +19,7 @@ export function checkMarkdownPresentation() {
   for (let level = 1; level <= 6; level++) compare(`H${level}`, preview.querySelector(`h${level}`), visual.querySelector(`h${level}`));
   const paragraph = (root: Element, marker: string) => [...root.querySelectorAll('p')].find(p => p.textContent?.startsWith(marker)) ?? null;
   for (const marker of ['正文定位点', '引用定位点', '提示块定位点', '文末定位点']) compare(marker, paragraph(preview, marker), paragraph(visual, marker));
-  for (const selector of ['.md-callout', 'th', 'td', 'pre.shiki', 'pre.shiki code', '.md-frontmatter', '.md-toc', '.katex-display', '.mermaid-diagram']) compare(selector, preview.querySelector(selector), visual.querySelector(selector));
+  for (const selector of ['.md-callout', 'th', 'td', 'pre.shiki', 'pre.shiki code', '.md-frontmatter', '.md-toc', '.katex-display', '.mermaid-diagram', '.footnotes', '.footnotes-list', '.footnote-item']) compare(selector, preview.querySelector(selector), visual.querySelector(selector));
   compare('table', preview.querySelector('table'), visual.querySelector('table.children'));
   for (let row = 0; row < 3; row++) compare(`table body row ${row + 1}`, preview.querySelectorAll('tbody tr')[row]?.querySelector('td') ?? null, visual.querySelectorAll('table.children tr:not([data-is-header])')[row]?.querySelector('td') ?? null);
   for (const alt of ['自建图片定位点', '自建定宽图片']) {
@@ -43,5 +43,7 @@ export function checkMarkdownPresentation() {
     const delta = (a.getBoundingClientRect().top - originA) - (b.getBoundingClientRect().top - originB);
     checked++; if (Math.abs(delta) > 1) differences.push(`${leftSelector}.documentOffset: ${delta.toFixed(2)}px`);
   }
+  const notes = preview.querySelectorAll('[data-md-footnote-definition]');
+  notes.forEach((item, index) => compare(`footer ${index + 1}`, item, visual.querySelectorAll('[data-md-footnote-definition]')[index] ?? null));
   return { checked, differences };
 }

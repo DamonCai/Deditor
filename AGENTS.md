@@ -75,6 +75,8 @@ DEditor 项目的协作上下文。Codex 在这个目录工作时自动加载本
 
 - 2026-09-12 用户反馈行尾 `<kbd>Ctrl</kbd>` 无法把光标放到最右侧：已复现并补齐 HTML 格式内外的方向键、鼠标定位及原生光标显示。零宽装饰仅属于视图，不写入原文。见[行尾 HTML 光标记录](docs/markdown-terminal-html-caret-2026-09-12.md)。浏览器内外编辑、撤销与呈现对照通过；本次未新增原生包、Windows 或真实 IME 验收，未提交推送。
 
+- 2026-09-12 用户反馈 `Context "nodes" not found`：已在实际失败服务确认 Milkdown 核心 URL 身份冲突，开发服务改为独立临时缓存并预先准备入口；同时修复取消初始化清理顺序、增加失败重试，以及共享样式节点与 HTML 正文冲突造成的切换空白页。见[加载稳定性记录](docs/markdown-startup-stability-2026-09-12.md)。依赖双服务测试、5 项针对性集成、固定快照浏览器模式/标签/主题切换与构建通过；最终全量集成另有脚注 sup 对照失败，不能标全量通过。6303 行切换保真但仍慢，未新增原生/Windows/真实 IME 验收，未提交推送。
+
 ## 项目概览
 
 - 2026-09-12 最新 Typora 差距核对（排除导入导出和字体）见 [当前核对记录](docs/markdown-typora-audit-2026-09-12.md)。复杂文档 465 项呈现检查通过，但脚注整篇布局仍不同；本次实测正文 Cmd 点击文内链接未跳转、阅读正文括号/表情前缀无补全。阅读查找缺替换/正则、大纲缺折叠/章节高亮、历史版本与高级公式仍有缺口。表格拖拽已有上游实现、内嵌代码已有行号，不得误报缺失。真实 IME、Windows、长时压力及真实图床仍未验收。本次为核对与上下文记录，没有产品代码修改或提交推送。
@@ -754,11 +756,24 @@ SetFile -a C "$DMG"                        # 标记 "Has Custom Icon"
 | 普通按钮 | `src/components/ui/Button.tsx`。primary / secondary / ghost / danger；sm：11px 字号、3px 10px 内边距；md：12px、5px 12px；圆角 4px。弹窗确定/取消统一 md，不允许各弹窗覆写字号、padding。 |
 | 图标按钮 | Button 的 icon（24px）/ iconLg（28px），图标默认 14px。关闭统一 `FiX`；禁止以 `×`、`✕` 文本字形代替。标签关闭属于紧凑场景，允许 20px 点击框；保留未保存圆点。标签条的新建/列表入口允许 32px 整条高度，仍使用 icon 消除文字按钮 padding。 |
 | 分段控件 | `src/components/ui/SegmentedControl.tsx`。高度 24px、圆角 5px、12px/600 字体、左右内边距 10px。设置选项用 radio 语义，视图切换用 pressed 语义，共享视觉规则。Markdown/HTML 通过 `PreviewModeSwitch` 绑定 store。 |
-| 文件工具栏 | `.document-toolbar`；Markdown 外壳 `.md-toolbar-shell`。高度含底边框共 36px（`--toolbar-height`），左右内边距 8px，间距 4px。Markdown 内层高度为 35px，避免外壳边框额外增加 1px。 |
+| 文件工具栏 | `.document-toolbar` 高度含底边框共 36px（`--toolbar-height`），左右内边距 8px，间距 4px。Markdown 使用 `.md-toolbar-shell.md-toolbar-expanded` 自适应高度，`.md-toolbar-row` 最小高度为 35px、内边距 5px 8px、行列间距 6px；窄窗按现有规则换行，不得恢复成固定 35px 内层而裁切控件。 |
 | 文本输入框 | `.deditor-input`：32px 高、13px 字号、6px 10px 内边距、4px 圆角。紧凑路径/搜索框增加 `.deditor-input--compact`：24px 高、12px、3px 8px。命令/文件/符号快速导航沿用大搜索框，添加 `.deditor-palette-input`。 |
 | 焦点与禁用 | 输入框 focus 用 accent 边框及 1px 外环；按钮 focus-visible 用 2px accent 轮廓；分段控件使用内轮廓避免裁切，选中项用白色轮廓。禁止只设 outline:none 而无替代反馈。禁用控件透明度 0.5、not-allowed 光标，不能响应点击。 |
 | 错误提示 | 需要用户关闭的提示调用 `src/lib/feedback.ts` 的 `showError()`，复用排队的 ConfirmDialog；禁止新增 `window.alert()`。局部错误使用 `.deditor-notice` + `data-tone="error"` + `role="alert"`；普通状态使用同一类 + `role="status"`。超长错误正文在弹窗内部滚动（最高 50vh），保持关闭按钮可见。原始异常仍在 catch 中用 logError 记录，不吞掉。 |
 | 浮层与主题 | 弹窗遮罩使用 `--modal-backdrop`，弹窗/弹出层阴影分别使用 `--shadow-modal` / `--shadow-popup`。错误、危险按钮、成功、警告使用 `--error-text` / `--error-bg` / `--danger-fill` / `--success-text` / `--warning-bg`；拖拽指示使用 `--accent`。 |
+
+### 控件垂直对齐标准（2026-09-12）
+
+用户要求同一排控件保持在同一水平线上，并横向检查其他界面。后续新增或修改工具栏、按钮组、模式切换、搜索栏和弹窗操作区时，统一遵守：
+
+- **按垂直中心对齐**：横向容器使用 `display: flex` / `inline-flex` 和 `align-items: center`；按钮内部的图标与文字也居中。嵌套外层同样要检查，不能只给最外层设居中。普通块内的 inline / inline-block / inline-flex 控件可能因文字基线产生额外留白，需在控件包装层消除。
+- **复用尺寸与间距**：继续使用 Button、SegmentedControl 和工具栏专用类。Markdown 导出与写作设置统一用 `.md-toolbar-action`（24px 高、18px 行高、4px 图文间距）；`.md-writing-settings` 与 `.md-toolbar-views` 外层均采用 flex 居中。图标作为独立 flex 子项，不再用 `vertical-align: middle` 与文字混排来补偿位置。
+- **修布局原因，不写像素补丁**：不要用 `top`、`translateY`、负 margin 或添加空格修正整组错位。边框、字体和行高导致的尺寸差异需分辨：不同类型按钮可保留既有尺寸，但同排中心必须一致；上下标等有语义的字形位置不强行拉平。
+- **限制样式范围**：对齐类只用于应用控件，不通过全局 button / input / svg 规则改变 Markdown 正文、公式、HTML 内容或 XMind 画布。控件文字样式与正文展示样式分别遵守各自既有规范。
+- **实际浏览器测量并看图**：用 `getBoundingClientRect()` 的 `top + height / 2` 比较同排控件、图标及包装层的中心，同时检查截图；目标是无布局引入的中心偏移，不以“不到 1px”为理由忽略。换行后按各自所在行检查，不跨行比较。覆盖中英文、亮暗主题、宽窗同排与 720px 窄窗，以及 Tab / Enter / Esc、焦点、选中与禁用状态；保留正常换行和完整点击区域。
+- **验证与结论边界**：仅用自建样例；产品样式修改后运行下方规定的回归与构建，共用组件修改还需覆盖 XMind 相邻范围。浏览器结果不能代替 macOS / Windows 原生安装包验收；未检查的动态场景不得概括为全面通过。仅更新文档无需重复产品测试。
+
+已修复写作设置偏下 1.5px、模式切换偏下 0.75px，并统一导出图标对齐；横向检查范围、144 项回归及构建结果见 [控件对齐核对记录](docs/ui-alignment-audit-2026-09-12.md)。该记录属于当时快照的浏览器验证，未新增原生安装包结论；未提交推送。
 
 ### 实现边界
 
