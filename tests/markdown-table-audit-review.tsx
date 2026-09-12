@@ -8,6 +8,7 @@ import { getVisualEditor } from '../src/lib/markdownVisualBridge';
 import { markdownHistory } from '../src/lib/markdownHistory';
 import '../src/styles.css';
 const fixtures: Record<string,string> = {
+ '代码到表格': '```text\ncode sample\n```\n\n| A | B |\n| --- | --- |\n| first | second |\n\nTail\n',
  '正文': '前段保留。\n\nalpha beta\n\n后段保留。\n',
  '任务': '- [x] completed\n- [ ] pending\n\n后段保留。\n',
  '列表': '- alpha\n- beta\n- gamma\n\n后段保留。\n',

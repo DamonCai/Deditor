@@ -173,14 +173,14 @@ export default function MarkdownToolbar() {
           <div className="md-tool-group md-tool-group--leading">
             <Tool
               title={t("md.undo")}
-              disabled={!session?.canUndo}
+              disabled={disabled || !session?.canUndo}
               onClick={() => history(undo)}
             >
               <FiRotateCcw />
             </Tool>
             <Tool
               title={t("md.redo")}
-              disabled={!session?.canRedo}
+              disabled={disabled || !session?.canRedo}
               onClick={() => history(redo)}
             >
               <FiRotateCw />
@@ -290,11 +290,11 @@ export default function MarkdownToolbar() {
             </Tool>
           </div>
           <div className="md-tool-group">
-            <Button className="md-toolbar-action" variant="ghost" size="sm" title={t("export.title")} onClick={() => {
+            <Button className="md-toolbar-action" variant="ghost" size="icon" title={t("export.title")} onClick={() => {
               const current = useEditorStore.getState();
               const tab = current.tabs.find(tab => tab.id === current.activeId);
               if (tab) setExportSnapshot({ content: tab.content, filePath: tab.filePath, theme: current.theme, documentTheme: current.markdownSettings.documentTheme, exportTemplate: current.markdownSettings.exportTemplate });
-            }}><FiDownload />{t("export.button")}</Button>
+            }}><FiDownload size={14} aria-hidden="true" /></Button>
           </div>
           <MarkdownWritingSettings />
           <div className="md-toolbar-views">

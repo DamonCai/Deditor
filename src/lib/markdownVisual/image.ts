@@ -58,10 +58,14 @@ export function accessibleImageView(original: NodeViewConstructor, language: "zh
     const altInput = document.createElement("input"); altInput.type = "text"; altInput.setAttribute("aria-label", t("md.imageAltLabel", language));
     altLabel.append(document.createTextNode(t("md.imageAltLabel", language) + " "), altInput); label.append(widthLabel, altLabel);
     dom.append(label);
+    let displayedWidth = node.attrs.width, displayedAlt = node.attrs.alt;
     const update = () => {
       label.hidden = !view.editable;
-      if (document.activeElement !== input) input.value = node.attrs.width ? String(node.attrs.width) : "";
-      if (document.activeElement !== altInput) altInput.value = node.attrs.alt;
+      // An actual metadata change (including undo/redo) supersedes the field's
+      // last committed value. Unrelated renders still preserve a focused draft.
+      if (document.activeElement !== input || displayedWidth !== node.attrs.width) input.value = node.attrs.width ? String(node.attrs.width) : "";
+      if (document.activeElement !== altInput || displayedAlt !== node.attrs.alt) altInput.value = node.attrs.alt;
+      displayedWidth = node.attrs.width; displayedAlt = node.attrs.alt;
       dom.querySelectorAll("img").forEach(img => {
         if (img.alt !== node.attrs.alt) img.alt = node.attrs.alt;
         img.style.setProperty("width", node.attrs.width ? `${node.attrs.width}px` : "auto", "important");

@@ -102,5 +102,17 @@ try {
    await reset(original);const caption=document.querySelector('.caption-input');assert.ok(caption);await act(async()=>{caption.focus();caption.value='changed title & "';caption.dispatchEvent(new Event('input',{bubbles:true}));caption.blur();await pause(40);});view.state.doc.descendants(n=>{if(n.type.name==='image-block')image=n;});assert.equal(image.attrs.caption,'changed title & "');assert.equal(document.querySelector('.md-persisted-image img').alt,'old alt');assert.equal(image.attrs.alt,'old alt');assert.equal(image.attrs.width,original.includes('width')?320:null);await exactHistory(original);
   }
  });
+
+ await test('H01 focused metadata: undo/redo survive blur while unrelated changes preserve uncommitted drafts',async()=>{
+  for(const kind of ['alt','width']) for(const refocus of [false,true]) {
+   const original='<img src="assets/a.svg" alt="old alt" width="320" title="title">\n\nTail\n';await reset(original);const field=document.querySelector(kind==='alt'?'.md-image-alt input':'.md-image-width input');const previous=kind==='alt'?'old alt':'320',updated=kind==='alt'?'new alt':'640';
+   await act(async()=>{field.focus();field.value=updated;field.dispatchEvent(new Event('change',{bubbles:true}));await pause(30);});assert.equal(document.activeElement,field);const edited=content();assert.notEqual(edited,original);if(refocus)await act(async()=>{field.blur();field.focus();});
+   await act(async()=>{app.markdownHistory();await pause(40);});assert.equal(content(),original);assert.equal(field.value,previous,'undo must refresh focused '+kind);
+   await act(async()=>{app.markdownHistory(true);await pause(40);});assert.equal(content(),edited);assert.equal(field.value,updated,'redo must refresh focused '+kind);
+   await act(async()=>{app.markdownHistory();await pause(40);field.blur();await pause(30);});assert.equal(content(),original,'blur must not reapply undone '+kind);
+   await act(async()=>{field.focus();field.value=updated;let pos;view.state.doc.descendants((node,at)=>{if(node.type.name==='image-block')pos=at;});const image=view.state.doc.nodeAt(pos);view.dispatch(view.state.tr.setNodeMarkup(pos,undefined,{...image.attrs,caption:'another title'}));await pause(40);});assert.equal(field.value,updated,'unrelated caption update preserves '+kind+' draft');assert.ok(!content().includes(kind==='alt'?'new alt':'640'),'draft is not prematurely committed');
+   await act(async()=>{field.blur();await pause(40);});assert.ok(content().includes(kind==='alt'?'new alt':'640'));assert.ok(content().includes('another title'));
+  }
+ });
  assert.equal(runtimeErrors.length,0);console.log(`${passed} image audit groups passed`);
 } finally {MilkdownEditor.make=make;await act(async()=>root.render(null));window.close();}

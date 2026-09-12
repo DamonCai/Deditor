@@ -65,7 +65,7 @@
 .md-visual-shell .milkdown .md-document .milkdown-table-block table { margin: 0; }
 .md-visual-shell .milkdown .md-document :is(td, th) > p { margin: 0; }
 .md-visual-shell .milkdown .md-document .milkdown-list-item-block { margin: var(--md-list-item-space) 0; padding: 0; }
-.md-visual-shell .milkdown .md-document .list-item { position: relative; gap: 0; padding-left: var(--md-list-item-indent); margin: 0; }
+.md-visual-shell .milkdown .md-document .list-item { display: block; position: relative; gap: 0; padding-left: var(--md-list-item-indent); margin: 0; }
 .md-visual-shell .milkdown .md-document .list-item .label-wrapper { position: absolute; right: 100%; width: 1.5em; height: calc(var(--md-body-line-height) * 1em); padding: 0; color: var(--preview-muted); }
 .md-visual-shell .milkdown .md-document .list-item .label-wrapper .label { height: auto; width: auto; padding: 0; line-height: inherit; }
 .md-visual-shell .milkdown .md-document .list-item .label-wrapper svg { width: 14px; height: 14px; }
@@ -109,10 +109,16 @@
 .md-visual-shell .milkdown .md-document .md-code-preview,
 .md-visual-shell .milkdown .md-document .md-raw-preview { white-space: normal; }
 .md-visual-shell .milkdown .md-document .md-code-preview .katex-display { margin: 0; }
-.md-visual-shell .milkdown .md-document .list-item > .label-wrapper[role="checkbox"] { position: static; flex: 0 0 14px; margin-right: 0.8em; }
-.md-visual-shell .milkdown .md-document .list-item > .children > .content-dom > :is(ul,ol):last-child { margin-bottom: calc(var(--md-list-nested-space) - var(--md-list-item-space)); }
+.md-visual-shell .milkdown .md-document .list-item > .label-wrapper[role="checkbox"] {
+  position: static; float: left; display: block;
+  width: var(--md-task-size); height: var(--md-task-size);
+  margin: calc((var(--md-body-line-height) * 1em - var(--md-task-size)) / 2) var(--md-task-gap) 0 0;
+}
+.md-visual-shell .milkdown .md-document .list-item .label-wrapper :is(.checked, .unchecked) {
+  width: var(--md-task-size); height: var(--md-task-size);
+}
+.md-visual-shell .milkdown .md-document .list-item .label-wrapper :is(.checked, .unchecked) svg { display: none; }
 .md-visual-shell .milkdown .md-document .list-item .label-wrapper svg { fill: var(--preview-muted); }
-.md-visual-shell .milkdown .md-document .list-item .label-wrapper .checked svg { fill: var(--preview-link); }
 .md-visual-shell .milkdown .md-document .milkdown-image-block { margin: var(--md-image-space) 0; }
 .md-visual-shell .milkdown .md-document .milkdown-image-block > .image-wrapper { margin: 0; min-width: 0; max-width: 100%; }
 .md-visual-shell .milkdown .md-document .milkdown-image-block img { min-height: 0; height: auto !important; margin: 0; }
@@ -124,10 +130,12 @@
 
 .md-visual-shell .milkdown .md-code-block [hidden] { display: none !important; }
 
-.md-visual-shell .milkdown .md-document .label-wrapper:not([role="checkbox"]) .label:has(svg) svg { display: none; }
-.md-visual-shell .milkdown .md-document .label-wrapper:not([role="checkbox"]) .label:has(svg)::before { content: "•"; }
-.md-visual-shell .milkdown .md-document ul ul .label-wrapper:not([role="checkbox"]) .label:has(svg)::before { content: "◦"; }
-.md-visual-shell .milkdown .md-document ul ul ul .label-wrapper:not([role="checkbox"]) .label:has(svg)::before { content: "▪"; }
+/* Use the browser's real list marker, as Preview does, instead of a lookalike
+   text glyph. The wrapper remains owned by the editable node view. */
+.md-visual-shell .milkdown .md-document .list-item:has(> .label-wrapper > .bullet) {
+  display: list-item; list-style: var(--md-list-marker) outside;
+}
+.md-visual-shell .milkdown .md-document .list-item > .label-wrapper:has(> .bullet) { display: none; }
 
 /* Only the active inline fragment reveals source; resting typography stays shared. */
 .md-visual-shell .md-document .md-inline-source {

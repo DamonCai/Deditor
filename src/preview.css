@@ -11,6 +11,8 @@
   --md-list-item-space: 0.35em;
   --md-list-item-indent: 0.15em;
   --md-list-nested-space: 0.5em;
+  --md-task-size: 14px;
+  --md-task-gap: 0.8em;
   --md-table-font-scale: 0.9;
   --md-block-space: 1.4em;
   --md-diagram-space: 1.2em;
@@ -182,6 +184,7 @@
   margin: 0 0 1em;
 }
 :is(.preview, .milkdown .ProseMirror.md-document) ul {
+  --md-list-marker: disc;
   list-style: disc outside;
 }
 :is(.preview, .milkdown .ProseMirror.md-document) ol {
@@ -189,10 +192,12 @@
 }
 :is(.preview, .milkdown .ProseMirror.md-document) ul ul,
 :is(.preview, .milkdown .ProseMirror.md-document) ol ul {
+  --md-list-marker: circle;
   list-style: circle outside;
 }
 :is(.preview, .milkdown .ProseMirror.md-document) ul ul ul,
 :is(.preview, .milkdown .ProseMirror.md-document) ol ul ul {
+  --md-list-marker: square;
   list-style: square outside;
 }
 :is(.preview, .milkdown .ProseMirror.md-document) li {
@@ -217,12 +222,35 @@
   list-style: none;
   margin-left: -1.4em;
 }
+:is(.preview, .milkdown .ProseMirror.md-document) :is(li.task-list-item, li:has(> .label-wrapper[role="checkbox"])) {
+  min-height: calc(var(--md-body-line-height) * 1em);
+}
+/* One task-control presentation for native preview inputs and editable labels.
+   Explicit appearance keeps disabled inputs identical across browser engines. */
+:is(.preview, .milkdown .ProseMirror.md-document) :is(.task-list-item-checkbox, .label.checked, .label.unchecked) {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  display: block;
+  width: var(--md-task-size);
+  height: var(--md-task-size);
+  padding: 0;
+  border: 1px solid var(--preview-muted);
+  border-radius: 3px;
+  background-color: transparent;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 12px 12px;
+  opacity: 1;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) :is(.task-list-item-checkbox:checked, .label.checked) {
+  border-color: var(--preview-link);
+  background-color: var(--preview-link);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14'%3E%3Cpath d='m3 7 2.5 2.5L11 4' fill='none' stroke='white' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
 :is(.preview, .milkdown .ProseMirror.md-document) .task-list-item-checkbox {
-  width: 14px;
-  height: 14px;
-  margin: 0 0.5em 0 0;
-  vertical-align: -1px;
-  accent-color: var(--preview-link);
+  float: left;
+  margin: calc((var(--md-body-line-height) * 1em - var(--md-task-size)) / 2) var(--md-task-gap) 0 0;
 }
 /* Table: GitHub/Typora style — full border, zebra rows. Left-aligned with
    the rest of the reading column; if the table is wider than the preview pane

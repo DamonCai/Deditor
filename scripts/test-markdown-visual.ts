@@ -44,6 +44,23 @@ const test = (name: string, fn: () => void) => { fn(); passed++; console.log(`PA
 crepe.editor.action(ctx => {
  const parse = ctx.get(parserCtx), serialize = ctx.get(serializerCtx);
  const make = (source: string) => new MarkdownDocument(source, parse, serialize);
+ test("source projection: duplicated immutable blocks keep independent source locations", () => {
+   for (const eol of ["\n", "\r\n"]) {
+     const source = ["First.", "", "Second.[^n]", "", "[^n]: Note.", ""].join(eol);
+     const model = make(source), first = model.doc.firstChild!;
+     const state = EditorState.create({doc:model.doc});
+     model.apply(state.tr.insert(first.nodeSize, first).doc);
+     const duplicated = model.source;
+     assert.equal(duplicated.match(/First\./g)?.length, 2);
+     const changed = EditorState.create({doc:model.doc}).tr.insertText("X", 1).doc;
+     assert.equal(model.apply(changed), duplicated.replace("First.", "XFirst."));
+     const secondPos = model.doc.firstChild!.nodeSize + 1;
+     const secondSource = model.source.indexOf("First.", model.source.indexOf("XFirst.") + 7);
+     assert.equal(model.sourceOffset(secondPos), secondSource);
+     const editedSecond = EditorState.create({doc:model.doc}).tr.insertText("Y", secondPos).doc;
+     assert.equal(model.apply(editedSecond), duplicated.replace("First.", "XFirst.").replace(eol + eol + "First.", eol + eol + "YFirst."));
+   }
+ });
  test("inline navigation: mixed list positions never resolve to a token in another item", () => {
    for (const source of [arrowNavigationContextMarkdown, arrowNavigationMarkdown, '* 普通列表\n* [引用文字][guide] 和 <kbd>Ctrl</kbd>\n' + arrowNavigationMarkdown]) {
      const model = make(source);

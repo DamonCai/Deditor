@@ -1,3 +1,5 @@
+import { checkMarkdownListPresentation } from './markdown-list-presentation-check';
+
 /** Browser geometry contract for the self-created complex fixture. No application
  * state writes: invoke after images/diagrams settle, at matching pane widths. */
 export function checkMarkdownPresentation() {
@@ -45,5 +47,7 @@ export function checkMarkdownPresentation() {
   }
   const notes = preview.querySelectorAll('[data-md-footnote-definition]');
   notes.forEach((item, index) => compare(`footer ${index + 1}`, item, visual.querySelectorAll('[data-md-footnote-definition]')[index] ?? null));
+  const lists = checkMarkdownListPresentation(preview, visual);
+  checked += lists.checked; differences.push(...lists.differences);
   return { checked, differences };
 }

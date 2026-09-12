@@ -27,3 +27,18 @@
 - 产品文件：`src/lib/markdownVisual/image.ts`、`src/lib/markdownImagePaths.ts`；协调后修改 `MarkdownVisualEditor.tsx` 的 caption 文案一行、`i18n.ts` 中英文标题 key、`markdown-visual.css` 两条仅影响既有浮层的规则。
 - 浏览器最终固定源码清单及 SHA-256 在 `tests/artifacts/image-audit-snapshot.json`。中途更新独立副本时因遗漏并行新增 `paragraph.ts` 产生开发加载错误，补齐整个 src 后重新加载并完成最终操作；这段开发装配错误不计产品加载结论。
 - 本子任务浏览器标签已关闭，自己的 5199 服务已停；没有启动或控制原生 DEditor，没有停止主任务或其他 agent 服务。未提交推送。最后整合构建、完整回归及原生验收由主任务统一执行；上述局部通过不代表整套 H 操作在所有平台全部通过。
+
+
+## 交叉检查追加：聚焦元数据撤销后被失焦覆盖
+
+已独立复现：修改 alt 为 `new alt` 并提交，输入框聚焦时撤销，源码恢复 `old alt`，但输入框仍显示 `new alt`；随后失焦又把旧编辑重新提交，等于撤销失效。width 有同类逻辑。
+
+最小修复在 `accessibleImageView` 跟踪上次显示的 alt/width。属性真实变化时（包含撤销/重做），同步聚焦输入框；只有无关渲染或 caption 变化时，保留用户尚未提交的草稿。没有改原始 URL、图片标题或撤销分组。
+
+`test-markdown-image-audit.mjs` 新增 1 组，分别检查 alt/width，以及一直聚焦和提交后重新聚焦两种情况：撤销、重做、再次撤销后失焦均保持正确源码；另验证只改 caption 不抹掉 alt/width 尚未提交的草稿。8 组图片专项完整通过；追加重新聚焦变体后新组再次通过。旧实现稳定失败 `new alt !== old alt`。证据 `tests/artifacts/deditor-image-undo-before.log`、`deditor-image-undo-after.log`、`deditor-image-undo-refocus.log`。
+
+本子任务此时浏览器列表为空，没有新增本条修复的真实浏览器/原生结论。已经给主任务提供可重复原生步骤：编辑值→Tab提交→重新聚焦该输入框→Cmd Z→Tab，原文及输入框均应保持旧值；width 用 320→640→320 核对。主任务负责最终包补验。
+
+### 主任务真实浏览器补验（最终整合快照）
+
+5196 固定快照图例：Alt text 改 new alt→Tab 提交→重新聚焦该字段→Cmd Z→Tab，源码仍为原始自建图片替代文字；宽度设 320 提交，再改 640 提交→重新聚焦→Cmd Z→Tab，源码保持 width="320"，未恢复 640。两个正向失焦链通过，标签已关闭。

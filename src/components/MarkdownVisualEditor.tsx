@@ -1,3 +1,4 @@
+import { markdownListKeys } from "../lib/markdownVisual/listKeys";
 import { faithfulParagraph } from "../lib/markdownVisual/paragraph";
 import { $view } from "@milkdown/kit/utils";
 import { codeBlockView } from "@milkdown/kit/component/code-block";
@@ -162,7 +163,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
         return true;
       } },
     })));
-    crepe.editor.use(nativeMarkdownCursor).use(markdownInputAssist);
+    crepe.editor.use(nativeMarkdownCursor).use(markdownInputAssist).use(markdownListKeys);
     // A rendered ProseMirror may exist before asynchronous startup has installed
     // fidelity/history and restored the cursor. Accept input only after that boundary.
     crepe.setReadonly(true);
@@ -462,6 +463,17 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
       else tr.delete(match.from, match.to);
     }
     rt.view.dispatch(tr); rt.flush(); rt.session.breakGroup();
+    if (!all) {
+      // Skip the inserted text even when it still contains the query. Repeated
+      // Replace current should progress through the document, then wrap.
+      const after = tr.mapping.map(targets[0].to, 1);
+      const remaining = searchIndex.current.find(rt.view.state.doc, query, searchOptions);
+      const nextIndex = Math.max(0, remaining.findIndex(match => match.from >= after));
+      matches.current = remaining;
+      setMatchCount(remaining.length); setMatchIndex(nextIndex);
+      const next = remaining[nextIndex];
+      if (next) select(next.from, next.to);
+    }
   };
   return <MarkdownDocumentSurface editorHost fontSize={fontSize} documentTheme={writing.documentTheme} className="md-visual-shell" data-md-focus={writing.focusParagraph} data-readonly={readonly}
     onKeyDownCapture={event => {

@@ -45,12 +45,15 @@
     "test:markdown-visual:integration": "node scripts/test-markdown-visual-integration.mjs",
     "test:markdown-enter-history": "node scripts/test-markdown-enter-history.mjs",
     "test:markdown-basic": "node scripts/test-markdown-basic-operations.mjs",
-    "test:all": "npm run test:markdown-startup && npm run test:markdown-visual && npm run test:markdown-visual:integration && npm run test:markdown-basic && npm run test:markdown-enter-history && npm run test:markdown-input-clipboard && npm run test:markdown-table && npm run test:markdown-format-links && npm run test:markdown-images && npm run test:markdown-special-blocks && npm run test:regression && npm run test:xmind && npm run test:export && npm run test:syntax && npm run test:markdown-code-lines && npm run test:file-icons",
+    "test:all": "npm run test:markdown-startup && npm run test:markdown-visual && npm run test:markdown-visual:integration && npm run test:markdown-basic && npm run test:markdown-enter-history && npm run test:markdown-input-clipboard && npm run test:markdown-table && npm run test:markdown-format-links && npm run test:markdown-images && npm run test:markdown-special-blocks && npm run test:markdown-search && npm run test:markdown-session && npm run test:markdown-navigation && npm run test:regression && npm run test:xmind && npm run test:export && npm run test:syntax && npm run test:markdown-code-lines && npm run test:file-icons",
     "test:markdown-input-clipboard": "node scripts/test-markdown-input-clipboard-audit.mjs",
     "test:markdown-table": "node scripts/test-markdown-table-audit.mjs",
     "test:markdown-format-links": "node scripts/test-markdown-format-links-audit.mjs",
     "test:markdown-images": "node scripts/test-markdown-image-audit.mjs",
-    "test:markdown-special-blocks": "node scripts/test-markdown-special-blocks-audit.mjs"
+    "test:markdown-special-blocks": "node scripts/test-markdown-special-blocks-audit.mjs",
+    "test:markdown-search": "node scripts/test-markdown-search-audit.mjs",
+    "test:markdown-session": "node scripts/test-markdown-session-audit.mjs",
+    "test:markdown-navigation": "node scripts/test-markdown-navigation-audit.mjs"
   },
   "dependencies": {
     "@codemirror/commands": "^6.7.1",

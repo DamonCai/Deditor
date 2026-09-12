@@ -303,7 +303,9 @@ export class MarkdownDocument {
   private applyBlockProjection(next: ProseNode): string {
     const before = children(this.doc), after = children(next), eol = this.source.includes("\r\n") ? "\r\n" : "\n";
     type Edit = {from:number;to:number;insert:string};
-    const edits: Edit[] = [], assigned = new Map<ProseNode,{ast:SourceNode;edit?:Edit;relative?:number}>();
+    // ProseMirror may reuse one immutable node at multiple document positions.
+    // Source ranges belong to occurrences, never to node identity.
+    const edits: Edit[] = [], assigned = new Map<number,{ast:SourceNode;edit?:Edit;relative?:number}>();
     const definitions = this.ast.filter(node => node.type === "footnoteDefinition" || node.type === "definition").map(node=>this.source.slice(...range(node))).join("\n\n");
     const serialize = (node:ProseNode) => node.type.name === "deditor_raw" ? node.textContent : this.serialize(next.type.create(null,node)).replace(/\n$/,"").replace(/\r?\n/g,eol);
     const offsetTree = (node:SourceNode, amount:number):SourceNode => ({...node,position:node.position?{start:{offset:(node.position.start.offset??0)+amount},end:{offset:(node.position.end.offset??0)+amount}}:undefined,children:node.children?.map(child=>offsetTree(child,amount))});
@@ -332,9 +334,10 @@ export class MarkdownDocument {
         this.doc = next; return this.source;
       }
     }
-    const replace = (oldIndex:number|undefined, node:ProseNode|undefined, insertion:number) => {
+    const replace = (oldIndex:number|undefined, newIndex:number|undefined, insertion:number) => {
+      const node = newIndex === undefined ? undefined : after[newIndex];
       const old = oldIndex === undefined ? undefined : before[oldIndex], ast = oldIndex === undefined ? undefined : this.ast[oldIndex];
-      if(old && node && ast && sameSourceNode(old,node)){assigned.set(node,{ast});return;}
+      if(old && node && ast && sameSourceNode(old,node)){assigned.set(newIndex!,{ast});return;}
       const [from,to] = ast ? range(ast) : [insertion,insertion];
       let raw = node ? serialize(node) : "";
       if(ast && old && node && node.type.name !== "deditor_raw") {
@@ -352,32 +355,33 @@ export class MarkdownDocument {
       if(node) {
         const parsed=(editingTree(raw + (definitions ? "\n\n"+definitions : "")).children??[]).filter(node => range(node)[0] < raw.length);
         const local=parsed.length===1 ? parsed[0] : {type:"deditorRaw",position:{start:{offset:0},end:{offset:raw.length}}};
-        assigned.set(node,{ast:local,edit,relative:leading.length});
+        assigned.set(newIndex!,{ast:local,edit,relative:leading.length});
       }
     };
     const oldBody=before.flatMap((node,index)=>node.type.name === "footnote_definition"?[]:[index]);
-    const newBody=after.filter(node=>node.type.name !== "footnote_definition");
-    let first=0;while(first<oldBody.length && first<newBody.length && sameSourceNode(before[oldBody[first]],newBody[first])) {replace(oldBody[first],newBody[first],0);first++;}
+    const newBody=after.flatMap((node,index)=>node.type.name === "footnote_definition"?[]:[index]);
+    let first=0;while(first<oldBody.length && first<newBody.length && sameSourceNode(before[oldBody[first]],after[newBody[first]])) {replace(oldBody[first],newBody[first],0);first++;}
     let oldEnd=oldBody.length,newEnd=newBody.length;
-    while(oldEnd>first && newEnd>first && sameSourceNode(before[oldBody[oldEnd-1]],newBody[newEnd-1])) {replace(oldBody[oldEnd-1],newBody[newEnd-1],0);oldEnd--;newEnd--;}
+    while(oldEnd>first && newEnd>first && sameSourceNode(before[oldBody[oldEnd-1]],after[newBody[newEnd-1]])) {replace(oldBody[oldEnd-1],newBody[newEnd-1],0);oldEnd--;newEnd--;}
     if(oldEnd-first===newEnd-first) {
       for(let i=first;i<oldEnd;i++)replace(oldBody[i],newBody[i],0);
     } else {
       const at=first<oldBody.length ? range(this.ast[oldBody[first]])[0] : this.source.length;
-      const newNodes=newBody.slice(first,newEnd), raw=newNodes.map(serialize).join(eol+eol);
+      const newNodes=newBody.slice(first,newEnd), raw=newNodes.map(index=>serialize(after[index])).join(eol+eol);
       // Remove only body spans: definitions between them retain their exact original bytes.
       for(let i=first;i<oldEnd;i++)replace(oldBody[i],undefined,0);
       if(raw) {
         const leading=at>0&&!this.source.slice(0,at).endsWith(eol+eol)?eol+eol:"";
         const edit={from:at,to:at,insert:leading+raw+(at<this.source.length?eol+eol:"")};edits.push(edit);
         let offset=leading.length;
-        newNodes.forEach(node=>{const part=serialize(node), parsed=(editingTree(part + (definitions ? "\n\n"+definitions : "")).children??[]).filter(node => range(node)[0] < part.length);assigned.set(node,{ast:parsed[0]??{type:"deditorRaw",position:{start:{offset:0},end:{offset:part.length}}},edit,relative:offset});offset+=part.length+2*eol.length;});
+        newNodes.forEach(index=>{const part=serialize(after[index]), parsed=(editingTree(part + (definitions ? "\n\n"+definitions : "")).children??[]).filter(node => range(node)[0] < part.length);assigned.set(index,{ast:parsed[0]??{type:"deditorRaw",position:{start:{offset:0},end:{offset:part.length}}},edit,relative:offset});offset+=part.length+2*eol.length;});
       }
     }
     const unused = before.flatMap((node,index)=>node.type.name === "footnote_definition"?[index]:[]);
-    for(const node of after.filter(node=>node.type.name === "footnote_definition")) {
+    for(const newIndex of after.flatMap((node,index)=>node.type.name === "footnote_definition"?[index]:[])) {
+      const node = after[newIndex];
       const index=unused.findIndex(index=>before[index].attrs.identifier===node.attrs.identifier);
-      replace(index<0?undefined:unused.splice(index,1)[0],node,this.source.length);
+      replace(index<0?undefined:unused.splice(index,1)[0],newIndex,this.source.length);
     }
     unused.forEach(index=>replace(index,undefined,0));
     // Stable tie ordering puts an insertion before a deletion at the same source boundary.
@@ -390,8 +394,8 @@ export class MarkdownDocument {
         return delta + edit.insert.length - (edit.to - edit.from);
       }, 0);
     };
-    this.ast=after.map(node=>{
-      const entry=assigned.get(node);if(!entry)throw new Error("Missing Markdown footer source mapping");
+    this.ast=after.map((_node,index)=>{
+      const entry=assigned.get(index);if(!entry)throw new Error("Missing Markdown footer source mapping");
       if(entry.edit)return offsetTree(entry.ast,entry.edit.from+shift(entry.edit.from,entry.edit)+(entry.relative??0));
       return offsetTree(entry.ast,shift(range(entry.ast)[0]));
     });

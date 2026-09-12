@@ -12,7 +12,7 @@ export default function MarkdownHistoryDialog({tabId, onClose}: {tabId: string; 
   const [preview, setPreview] = useState<string | null>(null), [error, setError] = useState(""), [loading, setLoading] = useState(true);
   const ref = useModalFocus(true, onClose);
   useEffect(() => {
-    let cancelled = false; setLoading(true); setSelected(null); setPreview(null); setError("");
+    let cancelled = false; setLoading(true); setEntries([]); setSelected(null); setPreview(null); setError("");
     invoke<Entry[]>("list_markdown_history", {path: drafts ? null : tab?.filePath ?? `untitled:${tabId}`}).then(items => {if (!cancelled) setEntries(items ?? []);}, error => {if (!cancelled) setError(String(error));}).finally(()=>{if(!cancelled)setLoading(false);});
     return () => {cancelled = true;};
   }, [drafts, tab?.filePath, tabId]);
@@ -29,7 +29,7 @@ export default function MarkdownHistoryDialog({tabId, onClose}: {tabId: string; 
       {error && <p role="alert">{error}</p>}
       {loading && <p role="status">{zh ? "正在读取…" : "Loading…"}</p>}
       <div className="md-history-body"><div className="md-history-list">
-        {!loading && !entries.length && <p>{zh ? "暂无历史记录" : "No versions yet"}</p>}
+        {!loading && !error && !entries.length && <p>{zh ? "暂无历史记录" : "No versions yet"}</p>}
         {entries.map(entry=><Button key={entry.id} pressed={selected?.id===entry.id} onClick={()=>{setError("");setSelected(entry);}}>{new Date(entry.timestamp).toLocaleString(zh ? "zh-CN" : "en-US")} · {entry.draft ? (zh ? "草稿" : "Draft") : (zh ? "保存" : "Saved")}<br/>{entry.path}</Button>)}
       </div><textarea readOnly aria-label={zh ? "版本内容" : "Version content"} value={preview ?? ""} /></div>
       <div className="md-history-actions">
