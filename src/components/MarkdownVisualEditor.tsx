@@ -91,6 +91,8 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
   const lastSearch = useRef({ query: "", open: false });
   const matches = useRef<MarkdownMatch[]>([]);
   const searchIndex = useRef(new MarkdownSearch());
+  const openSearch = () => { setSearchOpen(true); searchInput.current?.focus(); };
+  const closeSearch = () => { setSearchOpen(false); runtime.current?.view.focus(); };
   const select = (from: number, to = from) => {
     const view = runtime.current?.view; if (!view) return;
     view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, from, to)).scrollIntoView());
@@ -190,7 +192,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
           bridge.color = (...args) => fresh().color(...args);
           bridge.link = (...args) => fresh().link(...args);
           bridge.capture = () => fresh().capture();
-          bridge.find = () => setSearchOpen(true);
+          bridge.find = openSearch;
           bridge.navigate = (line, column = 1) => {
             const lines = document.source.split("\n");
             const offset = lines.slice(0, Math.max(0, line - 1)).reduce((n, text) => n + text.length + 1, 0) + column - 1;
@@ -428,7 +430,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
     onKeyDownCapture={event => {
       if (event.nativeEvent.isComposing) return;
       const mod = event.metaKey || event.ctrlKey;
-      if (mod && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "f") { event.preventDefault(); event.stopPropagation(); setSearchOpen(true); }
+      if (mod && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "f") { event.preventDefault(); event.stopPropagation(); openSearch(); }
       const target = event.target as HTMLElement;
       if (mod && (event.key.toLowerCase() === "z" || event.key.toLowerCase() === "y") && target.closest(".ProseMirror")) {
         event.preventDefault(); event.stopPropagation();
@@ -436,12 +438,15 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
       }
     }}>
     <div className="md-visual-controls">
-      <Button size="icon" variant="ghost" title={t("preview.search.placeholder")} pressed={searchOpen} onClick={() => setSearchOpen(v => !v)}><FiSearch /></Button>
+      <Button size="icon" variant="ghost" title={t("preview.search.placeholder")} pressed={searchOpen} onClick={() => searchOpen ? closeSearch() : openSearch()}><FiSearch /></Button>
       <Button size="icon" variant="ghost" title={t("preview.toc")} pressed={tocOpen} onClick={() => setTocOpen(v => !v)}><FiList /></Button>
     </div>
-    {searchOpen && <div className="md-visual-search" role="search">
+    {searchOpen && <div className="md-visual-search" role="search" onKeyDown={event => {
+      if (event.nativeEvent.isComposing) return;
+      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeSearch(); }
+    }}>
       <input ref={searchInput} className="deditor-input deditor-input--compact" value={query} onChange={e => setQuery(e.target.value)} placeholder={t("preview.search.placeholder")}
-        onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); navigate(e.shiftKey ? -1 : 1); } if (e.key === "Escape") { setSearchOpen(false); runtime.current?.view.focus(); } }} />
+        onKeyDown={e => { if (!e.nativeEvent.isComposing && e.key === "Enter") { e.preventDefault(); navigate(e.shiftKey ? -1 : 1); } }} />
       {(["caseSensitive", "wholeWord", "regex"] as const).map(option => <Button key={option} size="sm" pressed={searchOptions[option]} onClick={() => setSearchOptions(value => ({...value, [option]: !value[option]}))}>{t(`md.search.${option}`)}</Button>)}
       {searchError && <span role="alert">{t("md.search.invalidRegex")}</span>}
       <span>{matchCount ? `${matchIndex + 1} / ${matchCount}` : t("preview.search.noMatch")}</span>
@@ -452,7 +457,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
         <Button size="sm" disabled={!matchCount || searchError} onClick={() => replaceMatches(false)}>{t("md.search.replace")}</Button>
         <Button size="sm" disabled={!matchCount || searchError} onClick={() => replaceMatches(true)}>{t("find.replaceAll")}</Button>
       </>}
-      <Button size="icon" title={t("preview.search.close")} onClick={() => setSearchOpen(false)}><FiX /></Button>
+      <Button size="icon" title={t("preview.search.close")} onClick={closeSearch}><FiX /></Button>
     </div>}
     {error && <div className="deditor-notice" data-tone="error" role="alert">{t("md.visualError")}<Button onClick={() => setLoadAttempt(attempt => attempt + 1)}>{t("md.visualRetry")}</Button><details><summary>{t("md.visualErrorDetails")}</summary>{error}</details><Button onClick={() => useEditorStore.setState({ markdownMode: "source" })}>{t("md.viewEdit")}</Button></div>}
     {!ready && !error && <div className="deditor-notice" role="status">{t("md.visualLoading")}</div>}

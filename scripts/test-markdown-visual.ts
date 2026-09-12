@@ -57,6 +57,22 @@ crepe.editor.action(ctx => {
    assert.match(document.source, /Added Last paragraph\[\^note\]/);
    assert.ok(document.source.includes("[^note]: Definition.\r\n\r\n"));
  });
+ test("source reset: an inline link edit parses only its block and preserves exact ranges", () => {
+   const source = '# Head\r\n\r\nBefore [**label**](https://example.test/a "title") after.\r\n\r\n' + 'Unchanged paragraph.\r\n\r\n'.repeat(500);
+   const inputs: string[] = [];
+   const model = new MarkdownDocument(source, raw => { inputs.push(raw); return parse(raw); }, serialize);
+   const untouched = model.doc.lastChild;
+   inputs.length = 0;
+   const next = source.replace('Before', 'Before中文');
+   const started = performance.now(); model.reset(next);
+   console.log(`LINK RESET ${JSON.stringify({milliseconds:performance.now()-started,sourceLength:next.length,parseLengths:inputs.map(s=>s.length)})}`);
+   assert.ok(model.doc.eq(parse(next))); assert.equal(model.source, next);
+   assert.ok(inputs.every(raw => raw.length < 200), 'ordinary inline links must not force a whole-document parse');
+   assert.equal(model.doc.lastChild, untouched);
+   const finalOffset = model.positionAtSource(model.source.lastIndexOf('Unchanged'));
+   const edited = EditorState.create({doc:model.doc}).tr.insertText('Tail ', finalOffset).doc;
+   assert.equal(model.apply(edited), next.slice(0,next.lastIndexOf('Unchanged')) + 'Tail ' + next.slice(next.lastIndexOf('Unchanged')));
+ });
  test("source reset: structural and contextual edits fall back to the complete document", () => {
    for (const [before, after] of [
      ["Body\n\nOther\n", "# Body\n\nOther\n"],
@@ -65,7 +81,38 @@ crepe.editor.action(ctx => {
      ["Before[^a].\n\n[^a]: Note.\n", "Before[^b].\n\n[^b]: Note.\n"],
      ["---\nfolder: assets\n---\n\nBody\n", "---\nfolder: media\n---\n\nBody\n"],
      ["| A |\n| --- |\n| cell |\n", "| A | B |\n| --- | --- |\n| cell | new |\n"],
+     ["```js\nconst a = 1\n```\n\nAfter\n", "````js\nconst a = 1\n```\n\nAfter\n"],
+     ["$$\nx=1\n$$\n\nAfter\n", "$$\nx=1\n$\n\nAfter\n"],
    ]) { const document = make(before); assert.ok(document.reset(after).eq(parse(after))); assert.equal(document.source, after); }
+ });
+ test("source reset: inline link changes match full parsing while contextual references stay global", () => {
+   const inline = 'Body [label](https://example.test/a "title") after.';
+   for (const changed of [
+     inline.replace('label', '**中文😀**'), inline.replace('/a', '/b?q=1&n=2'),
+     inline.replace('"title"', '"new title"'), inline.replace('[label]', '[label and `code`]'),
+     inline.replace('[label]', '![image]'), inline.replace('[label](https://example.test/a "title")', 'plain'),
+   ]) {
+     const source = `# Head\n\n${inline}\n\nTail\n`, model = make(source), next = source.replace(inline, changed);
+     assert.ok(model.reset(next).eq(parse(next)), changed); assert.equal(model.source,next);
+   }
+   for (const source of ['# [label](https://example.test)\n\nTail\n', '| A | B |\n| --- | --- |\n| [label](https://example.test) | cell |\n\nTail\n']) {
+     const model=make(source), next=source.replace('label','中文 label');
+     assert.ok(model.reset(next).eq(parse(next)));assert.equal(model.source,next);
+   }
+   for (const [body, changed, definitions] of [
+     [inline, inline + ' [ref]', '[ref]: https://reference.test'],
+     [inline, inline + ' [label][ref]', '[ref]: https://reference.test'],
+     [inline, inline + ' ![ref][]', '[ref]: image.png'],
+     [inline, inline + ' [^note]', '[^note]: Footnote.'],
+     [inline + ' [^note]', inline, '[^note]: Footnote.'],
+     [inline, inline.replace('Body', '<span>Body</span>'), ''],
+     [inline, inline.replace('Body', 'Body\\['), ''],
+   ]) {
+     const source = `${body}\n\n${definitions}\n\nTail\n`, calls:string[]=[];
+     const model = new MarkdownDocument(source, raw=>{calls.push(raw);return parse(raw);}, serialize);
+     calls.length=0;const next=source.replace(body,changed);
+     assert.ok(model.reset(next).eq(parse(next)), changed);assert.ok(calls.includes(next), 'context must use the full parser');
+   }
  });
 
  test("native caret: mark affinity keeps arrow behavior and yields to composition", () => {
@@ -388,6 +435,16 @@ crepe.editor.action(ctx => {
      model.apply(view.state.doc);
    }
  };
+ test("input assist: existing Markdown delimiters never swallow a repeated character", () => {
+   for (const character of ['=', '*', '_', '`', '$', '~', '^']) {
+     const model = make(`a\\${character}2\n`);
+     inputInto(model, 2, character);
+     assert.equal(view.state.doc.textContent, `a${character}${character}2`, character);
+   }
+   const model = make('Body\n'); inputInto(model, 5, '(');
+   assert.equal(view.state.doc.textContent, 'Body()');
+   inputInto(model, 6, ')'); assert.equal(view.state.doc.textContent, 'Body()');
+ });
  test("shorthand: character-by-character typing creates marks without multiplying delimiters", () => {
    for (const [source, type, text] of [["==high==", "deditor_mark", "high"],["~2~","deditor_subscript","2"],["^2^","deditor_superscript","2"],["~~gone~~","strike_through","gone"]]) {
      const model=make("");inputInto(model,1,source);

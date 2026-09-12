@@ -302,6 +302,46 @@ await test('search replace: capture groups, styles, undo/redo and invalid regex'
  await input(0,'[');assert.ok(document.querySelector('[role="search"] [role="alert"]'));assert.equal(button('Replace All').disabled,true);
  await act(async()=>document.querySelector('[role="search"] button:last-child').click());
 });
+await test('search keyboard: repeated Find focuses the existing query through shortcut and bridge',async()=>{
+ await act(async()=>{root.render(null);store.getState().setContent('Body target\n','a','command');});await render();
+ await act(async()=>app.getVisualEditor().find());
+ const input=document.querySelector('[role="search"] input');
+ for(const shortcut of ['metaKey','ctrlKey','bridge']) {
+  await act(async()=>app.getVisualEditor().focus());
+  await act(async()=>shortcut==='bridge' ? app.getVisualEditor().find() : document.activeElement.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'f',[shortcut]:true,bubbles:true,cancelable:true})));
+  assert.equal(document.activeElement,input,shortcut);
+ }
+ await act(async()=>document.querySelector('[role="search"] button:last-child').click());
+});
+await test('search keyboard: Escape from replacement and buttons, or close click, restores editing focus',async()=>{
+ const original='Body target\n';
+ await act(async()=>{root.render(null);store.getState().setContent(original,'a','command');});await render();
+ for(const target of ['replacement','button','close']) {
+  await act(async()=>app.getVisualEditor().find());
+  const element=target==='replacement' ? document.querySelectorAll('[role="search"] input')[1] : document.querySelector('[role="search"] button');
+  await act(async()=>{element.focus();if(target==='close')document.querySelector('[role="search"] button:last-child').click();else element.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));});
+  assert.equal(document.querySelector('[role="search"]'),null,target);
+  assert.equal(document.activeElement,document.querySelector('.ProseMirror'),target);
+  assert.equal(content(),original);
+ }
+});
+await test('search keyboard: candidate Enter and Escape do not navigate or close the search',async()=>{
+ await act(async()=>{root.render(null);store.getState().setContent('target target\n','a','command');});await render();
+ await act(async()=>app.getVisualEditor().find());
+ const input=document.querySelector('[role="search"] input');
+ await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'target');input.dispatchEvent(new Event('input',{bubbles:true}));});
+ for(const key of ['Enter','Escape']) {
+  const event=new dom.window.KeyboardEvent('keydown',{key,isComposing:true,bubbles:true,cancelable:true});
+  await act(async()=>input.dispatchEvent(event));
+  assert.equal(event.defaultPrevented,false,key);assert.ok(document.querySelector('[role="search"]'));
+  assert.match(document.querySelector('[role="search"]').textContent,/1 \/ 2/);
+ }
+ await act(async()=>input.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true})));
+ assert.match(document.querySelector('[role="search"]').textContent,/2 \/ 2/);
+ await act(async()=>input.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Enter',shiftKey:true,bubbles:true,cancelable:true})));
+ assert.match(document.querySelector('[role="search"]').textContent,/1 \/ 2/);
+ await act(async()=>document.querySelector('[role="search"] button:last-child').click());
+});
 await test('links: editable body follows modifier-click only, including malformed anchors',async()=>{
  await act(async()=>{root.render(null);store.getState().setContent('# Destination\n\n[Jump](#destination) [Malformed](#%broken)\n','a','command');});await render();
  let jumps=0;const heading=document.querySelector('.ProseMirror h1');heading.scrollIntoView=()=>jumps++;

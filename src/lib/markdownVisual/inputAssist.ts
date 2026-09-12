@@ -38,7 +38,9 @@ export const markdownInputAssist = $prose(() => {
         if (!prose(view) || !useEditorStore.getState().autoCloseBrackets || text.length !== 1) return false;
         const next = view.state.doc.textBetween(to, Math.min(view.state.doc.content.size, to + 1));
         const previous = view.state.doc.textBetween(Math.max(0, from - 1), from);
-        if (from === to && Object.values(pairs).includes(text) && next === text && !/[\w]/u.test(text)) {
+        // Only brackets/quotes are auto-inserted for a collapsed caret. Markdown
+        // delimiters must reach input rules even when the next character matches.
+        if (from === to && /[)\]}"']/.test(text) && next === text) {
           view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, to + 1))); return true;
         }
         const close = pairs[text]; if (!close) return false;
