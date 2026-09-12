@@ -1,3 +1,4 @@
+import { arrowNavigationMarkdown, arrowNavigationContextMarkdown } from "../tests/fixtures/markdown-arrow-navigation";
 import { footnoteOrder } from "../src/lib/markdownVisual/footnoteOrder";
 import { markdownInputAssist } from "../src/lib/markdownVisual/inputAssist";
 import { useEditorStore } from "../src/store/editor";
@@ -42,6 +43,17 @@ const test = (name: string, fn: () => void) => { fn(); passed++; console.log(`PA
 crepe.editor.action(ctx => {
  const parse = ctx.get(parserCtx), serialize = ctx.get(serializerCtx);
  const make = (source: string) => new MarkdownDocument(source, parse, serialize);
+ test("inline navigation: mixed list positions never resolve to a token in another item", () => {
+   for (const source of [arrowNavigationContextMarkdown, arrowNavigationMarkdown, '* 普通列表\n* [引用文字][guide] 和 <kbd>Ctrl</kbd>\n' + arrowNavigationMarkdown]) {
+     const model = make(source);
+     for (let pos = 1; pos < model.doc.content.size; pos++) {
+       if (!model.doc.resolve(pos).parent.isTextblock) continue;
+       const token = model.inlineAt(pos);
+       if (token) assert.ok(pos >= token.from && pos <= token.to, JSON.stringify({pos, token, parent:model.doc.resolve(pos).parent.textContent}));
+     }
+   }
+ });
+
  test("source reset: local edits match full parsing and retain interleaved source ranges", () => {
    const source = "# Head\r\n\r\nFirst **bold** paragraph.\r\n\r\n[^note]: Definition.\r\n\r\nLast paragraph[^note].\r\n";
    const document = make(source), untouched = document.doc.lastChild;

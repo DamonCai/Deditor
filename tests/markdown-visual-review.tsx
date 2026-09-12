@@ -1,3 +1,4 @@
+import { arrowNavigationMarkdown, arrowNavigationContextMarkdown, basicEditingMarkdown } from "./fixtures/markdown-arrow-navigation";
 import typoraFixture from "./fixtures/markdown-typora-complete.md?raw";
 import { checkMarkdownPresentation } from "./markdown-presentation-check";
 import complexMarkdown from "./fixtures/markdown-complex.md?raw";
@@ -60,7 +61,7 @@ const imageRootFixture = complexMarkdown.replaceAll('/tests/fixtures/', '/').rep
 const longReview = new URLSearchParams(location.search).has("long");
 const sectionCount = Math.max(1, Math.min(1000, Number(new URLSearchParams(location.search).get("sections")) || 100));
 const longFixture = complexMarkdown.replace('## 文末验收', Array.from({ length: sectionCount }, (_, i) => `## 性能第 ${i + 1} 节\n\n性能输入定位点 ${i + 1}：中文正文与 **强调内容**，${"长文光标、原文和页面位置核对。".repeat(12)}\n\n> 引用 **重点**\n>\n> - 嵌套项目\n\n| 名称 | 数量 |\n| --- | ---: |\n| **表格正文** | ${i + 1} |\n`).join('\n') + '\n## 文末验收');
-const fixture = new URLSearchParams(location.search).has("typora") ? typoraFixture : longReview ? longFixture : new URLSearchParams(location.search).has("image-root") ? imageRootFixture : new URLSearchParams(location.search).has("complex") ? complexMarkdown : ime ? imeMarkdown : new URLSearchParams(location.search).has("scroll") ? scrollMarkdown : new URLSearchParams(location.search).has("presentation") ? presentationMarkdown : new URLSearchParams(location.search).has("interaction") ? interactionMarkdown : sample;
+const fixture = new URLSearchParams(location.search).has("basic-editing") ? basicEditingMarkdown : new URLSearchParams(location.search).has("arrow-context") ? arrowNavigationContextMarkdown : new URLSearchParams(location.search).has("arrows") ? arrowNavigationMarkdown : new URLSearchParams(location.search).has("typora") ? typoraFixture : longReview ? longFixture : new URLSearchParams(location.search).has("image-root") ? imageRootFixture : new URLSearchParams(location.search).has("complex") ? complexMarkdown : ime ? imeMarkdown : new URLSearchParams(location.search).has("scroll") ? scrollMarkdown : new URLSearchParams(location.search).has("presentation") ? presentationMarkdown : new URLSearchParams(location.search).has("interaction") ? interactionMarkdown : sample;
 const docs = [ { id: "md-review", filePath: "/generated/visual-review.md", content: fixture, savedContent: fixture },
  { id: "md-other", filePath: "/generated/second.md", content: "# 第二个标签\n\n独立历史。\n", savedContent: "# 第二个标签\n\n独立历史。\n" },
  { id: "html-review", filePath: "/generated/isolated.html", content: "<h1>HTML 保持独立</h1><p>原有预览</p>", savedContent: "<h1>HTML 保持独立</h1><p>原有预览</p>" },

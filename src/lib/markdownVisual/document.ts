@@ -183,7 +183,11 @@ export class MarkdownDocument {
     const start = range(leaves[0])[0] + (leaves[0].type === "inlineCode" ? this.source.slice(...range(leaves[0])).indexOf(leaves[0].value ?? "") : 0);
     const end = range(leaves.at(-1)!)[1] - (leaves.at(-1)!.type === "inlineCode" ? this.source.slice(...range(leaves.at(-1)!)).length - this.source.slice(...range(leaves.at(-1)!)).indexOf(leaves.at(-1)!.value ?? "") - (leaves.at(-1)!.value?.length ?? 0) : 0);
     const from = this.positionAtSource(start), to = this.positionAtSource(end);
-    if (to <= from || !this.doc.resolve(from).sameParent(this.doc.resolve(to))) return null;
+    // Source offsets are approximate at non-text positions (for example before
+    // a hard break in a list). They may point into an earlier inline token.
+    // Only expand a token that actually contains the caret in the rendered doc.
+    if (to <= from || position < from || position > to ||
+        !this.doc.resolve(from).sameParent(this.doc.resolve(to))) return null;
     return { from, to, sourceFrom, raw };
   }
   reset(source: string) {

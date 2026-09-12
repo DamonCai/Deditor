@@ -36,6 +36,7 @@ const stubs={
  '@tauri-apps/plugin-opener':'export const openUrl=async()=>{}; export const openPath=async()=>{}; export const revealItemInDir=async()=>{};',
 };
 await build({stdin:{contents:`
+export {arrowNavigationContextMarkdown,basicEditingMarkdown} from './tests/fixtures/markdown-arrow-navigation';
 export {default as EditorHost} from './src/components/EditorHost';
 export {getActiveView} from './src/lib/editorBridge';
 export {default as Visual} from './src/components/MarkdownVisualEditor';
@@ -1376,5 +1377,38 @@ await test('lifecycle: StrictMode never creates the abandoned editor or duplicat
   await act(async()=>{root.render(null);await pause(80);});
   assert.equal(app.getVisualEditor(),null);assert.equal(document.querySelectorAll('.ProseMirror').length,0);
  } finally {MilkdownEditor.make=make;}
+});
+await test('inline navigation: mixed list hard-break destinations never reopen earlier code',async()=>{
+ await act(async()=>root.render(null));
+ const original=app.arrowNavigationContextMarkdown;
+ await act(async()=>{store.getState().setContent(original,'a','command');await pause(40);});
+ await render();
+ const editor=document.querySelector('.ProseMirror');
+ const target=[...editor.querySelectorAll('p')].find(p=>p.querySelector('br'));
+ assert.ok(target);
+ await act(async()=>{editor.focus();await pause(30);});
+ await act(async()=>{document.getSelection().collapse(target,0);document.dispatchEvent(new Event('selectionchange'));await pause(60);});
+ assert.ok(!document.querySelector('[data-md-inline-source]'),'hard-break caret must not open code in an earlier list item');
+ const node=document.getSelection().anchorNode;
+ assert.ok((node.nodeType===Node.ELEMENT_NODE?node.closest('p'):node.parentElement.closest('p'))===target,'caret must stay in the destination paragraph');
+ assert.equal(content(),original);
+ await act(async()=>{editor.blur();await pause(60);});
+});
+await test('basic editing: Backspace on an empty mixed-list item stays at the join',async()=>{
+ await act(async()=>root.render(null));
+ const {Editor:MilkdownEditor,editorViewCtx}=await import('@milkdown/kit/core');
+ const make=MilkdownEditor.make;let view;
+ MilkdownEditor.make=function(...args){const editor=make.apply(this,args),create=editor.create;editor.create=async()=>{const result=await create();editor.action(ctx=>{view=ctx.get(editorViewCtx);});return result;};return editor;};
+ try {
+  await act(async()=>store.getState().setContent(app.basicEditingMarkdown,'a','command'));
+  await render();
+  const {TextSelection}=await import('@milkdown/kit/prose/state');
+  let at;view.state.doc.descendants((node,pos)=>{if(node.type.name==='paragraph' && !node.content.size)at=pos+1;});
+  assert.ok(at);await act(async()=>{view.focus();view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc,at)));await pause(60);});
+  await act(async()=>{view.dom.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Backspace',bubbles:true,cancelable:true}));await pause(80);});
+  console.log('BASIC DELETE',JSON.stringify({selection:view.state.selection.toJSON(),parent:view.state.selection.$head.parent.textContent,source:content(),doc:view.state.doc.toJSON()}));
+  assert.equal(view.state.selection.$head.parent.textContent,'彩色列');
+  assert.ok(!document.querySelector('[data-md-inline-source]'),'deletion must not open an unrelated link');
+ } finally {MilkdownEditor.make=make;await act(async()=>root.render(null));}
 });
 await act(async()=>root.unmount());assert.deepEqual(runtimeErrors,[]);dom.window.close();console.log(`${passed} integration tests passed`);
