@@ -1,4 +1,7 @@
+import { installEditorSearch } from "../lib/editorSearch";
+import { outlineActiveIndex } from "../lib/markdownOutline";
 import { markdownCrossBlockInput } from "../lib/markdownVisual/crossBlockInput";
+import { installDocumentEnd, handleSelectedBlockExit } from "../lib/markdownVisual/documentEnd";
 import { imageClipboard } from "../lib/markdownVisual/imageClipboard";
 import { markdownListKeys } from "../lib/markdownVisual/listKeys";
 import { indentedTasks, taskIndentDecorations } from "../lib/markdownVisual/taskIndent";
@@ -53,7 +56,7 @@ import { handleTableKeys } from "../lib/markdownVisual/tableKeys";
 import { TextSelection, Selection } from "@milkdown/kit/prose/state";
 import type { EditorView } from "@milkdown/kit/prose/view";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { FiSearch, FiList, FiX, FiChevronLeft, FiChevronRight } from "react-icons/fi";
+import { FiX, FiChevronLeft, FiChevronRight } from "react-icons/fi";
 import { useEditorStore, useTabContent, useTabFilePath } from "../store/editor";
 import { useT, tStatic } from "../lib/i18n";
 import { MarkdownDocument } from "../lib/markdownVisual/document";
@@ -79,7 +82,8 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
   const language = useEditorStore(s => s.language);
   const writing = useEditorStore(s => s.markdownSettings);
   const fontSize = useEditorStore(s => s.tabs.find(tab => tab.id === tabId)?.zoomFontSize ?? s.editorFontSize);
-  const root = useRef<HTMLDivElement>(null), scroller = useRef<HTMLDivElement>(null), searchInput = useRef<HTMLInputElement>(null);
+  const root = useRef<HTMLDivElement>(null), scroller = useRef<HTMLDivElement>(null), searchInput = useRef<HTMLInputElement>(null), replaceInput = useRef<HTMLInputElement>(null);
+  const searchFocus = useRef(false);
   const runtime = useRef<Runtime | null>(null), readonlyRef = useRef(readonly), sourceRef = useRef(source), activeRef = useRef(active);
   readonlyRef.current = readonly; sourceRef.current = source; activeRef.current = active;
   const imageRoot = documentImageRoot(source, filePath);
@@ -90,15 +94,19 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
   const [searchOptions, setSearchOptions] = useState({ caseSensitive: false, wholeWord: false, regex: false });
   const [searchError, setSearchError] = useState(false);
   const searchKey = JSON.stringify([query, searchOptions]);
-  const [tocOpen, setTocOpen] = useState(false), [headings, setHeadings] = useState<{ pos: number; level: number; text: string }[]>([]);
+  const [headings, setHeadings] = useState<{ pos: number; level: number; text: string }[]>([]);
   const [activeHeading, setActiveHeading] = useState(-1);
   const headingPositions = useRef<{pos: number}[]>([]);
-  const tocOpenRef = useRef(tocOpen); tocOpenRef.current = tocOpen;
+  const clickedHeading = useRef<{pos: number; scrollTop: number} | null>(null);
   const [matchCount, setMatchCount] = useState(0), [matchIndex, setMatchIndex] = useState(0);
   const lastSearch = useRef({ query: "", open: false });
   const matches = useRef<MarkdownMatch[]>([]);
   const searchIndex = useRef(new MarkdownSearch());
-  const openSearch = () => { setSearchOpen(true); searchInput.current?.focus(); };
+  const openSearch = (replace = false) => {
+    searchFocus.current = replace; setSearchOpen(true);
+    const input = replace ? replaceInput.current : searchInput.current;
+    input?.focus(); input?.select();
+  };
   const closeSearch = () => { setSearchOpen(false); runtime.current?.view.focus(); };
   const select = (from: number, to = from) => {
     const view = runtime.current?.view; if (!view) return;
@@ -141,7 +149,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
       .addFeature(latex);
     crepe.editor.use(clipboardImages.plugin).use(shorthandRemark).use(highlightRemark).use(shorthandMarks.flat()).use(emojiSchema).use(shorthandInputRules).config(configureShorthand).use(editableBlockquote).use(footnoteReference).use(footnoteDefinition).use(footnoteUpdates).use(footnoteOrder).use(inlineSourceSchema).use(absoluteHeadingInputRule).use(activeBlockHint).use(sharedHeadingIds).use(faithfulParagraph).use(faithfulLink).use(faithfulInlineHtml).use(faithfulImage).use(extendedTableCells.flat()).config(configureTableEditing).use(inlineSchemas.flat()).config(configureInlineSerialization).use(frontmatter).use(rawRemark(mdx)).use(rawSchema);
     crepe.editor.config(ctx => ctx.update(editorViewOptionsCtx, prev => ({ ...prev, attributes: { class: "md-document", "aria-label": t("md.visualEditor"), spellcheck: "false" },
-      handleKeyDown: handleTableKeys,
+      handleKeyDown: (view, event) => handleSelectedBlockExit(view, event) || handleTableKeys(view, event),
       handlePaste: (view, event, slice) => clipboardImages.paste(view, event) || pasteTableClipboard(view, event) || pastePlainText(view, event, slice, ctx.get(parserCtx)),
       handleDOMEvents: { ...prev.handleDOMEvents,
       mousedown: (_view, event) => {
@@ -205,17 +213,13 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
             view.dispatch(view.state.tr.setSelection(Selection.near(view.state.doc.resolve(pos))).scrollIntoView()); view.focus();
           };
           setVisualEditor(bridge);
-          if (tocOpenRef.current) {
-            const current = [...headingPositions.current].reverse().find(heading => heading.pos <= view.state.selection.head);
-            setActiveHeading(current?.pos ?? -1);
-          }
           session.sourceCursor = document.sourceOffset(view.state.selection.head);
           const store = useEditorStore.getState();
           store.setTabPosition(tabId, { cursor: session.sourceCursor, scrollTopLine: store.tabPositions[tabId]?.scrollTopLine ?? 1 });
           useEditorStore.getState().setActiveSelectionLength(view.state.selection.to - view.state.selection.from);
         };
         const outline = () => {
-          if (!activeRef.current || !tocOpenRef.current) return;
+          if (!activeRef.current) return;
           const result: { pos: number; level: number; text: string }[] = [];
           view.state.doc.descendants((node, pos) => { if (node.type.name === "heading") result.push({ pos: pos + 1, level: node.attrs.level, text: node.textContent }); });
           headingPositions.current = result;
@@ -334,7 +338,8 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
         });
         view.dom.addEventListener("beforeinput", beforeInput, true);
         view.dom.addEventListener("keydown", enterKey, true);
-        cleanupInput = () => { composition.destroy(); view.dom.removeEventListener("beforeinput", beforeInput, true); view.dom.removeEventListener("keydown", enterKey, true); };
+        const cleanupEnd = installDocumentEnd(view, scroller.current!);
+        cleanupInput = () => { cleanupEnd(); composition.destroy(); view.dom.removeEventListener("beforeinput", beforeInput, true); view.dom.removeEventListener("keydown", enterKey, true); };
         const restoreCursor = () => {
           const position = Math.min(view.state.doc.content.size, session.sourceCursor === null ? session.visualSelection.head : document.positionAtSource(session.sourceCursor));
           view.dispatch(view.state.tr.setSelection(Selection.near(view.state.doc.resolve(position))));
@@ -388,25 +393,30 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
     };
   }, [tabId, filePath, language, theme, loadAttempt]);
   useEffect(() => { if (active) runtime.current?.sync(source); }, [source, active]);
-  useEffect(() => { if (tocOpen) runtime.current?.outline(); }, [tocOpen, ready]);
+  useEffect(() => { runtime.current?.outline(); }, [ready]);
   useEffect(() => {
-    const scroll = scroller.current, rt = runtime.current; if (!tocOpen || !ready || !scroll || !rt) return;
+    const scroll = scroller.current, rt = runtime.current; if (!active || !ready || !scroll || !rt) return;
     let frame = 0;
     const changed = () => {
       if (frame || !scroll.clientHeight) return;
       frame = requestAnimationFrame(() => {
-        frame = 0; const positions = headingPositions.current, top = scroll.getBoundingClientRect().top + 32;
-        let low = 0, high = positions.length - 1, current = -1;
-        while (low <= high) {
-          const mid = (low + high) >> 1, node = rt.view.nodeDOM(positions[mid].pos - 1);
-          if (node instanceof HTMLElement && node.getBoundingClientRect().top <= top) {current = positions[mid].pos; low = mid + 1;} else high = mid - 1;
-        }
-        setActiveHeading(current);
+        frame = 0;
+        const click = clickedHeading.current;
+        if (click && Math.abs(scroll.scrollTop - click.scrollTop) <= 3) { setActiveHeading(click.pos); return; }
+        clickedHeading.current = null;
+        const origin = scroll.getBoundingClientRect().top;
+        const positions = headingPositions.current.flatMap(({pos}) => {
+          const node = rt.view.nodeDOM(pos - 1);
+          return node instanceof HTMLElement ? [{pos, top: node.getBoundingClientRect().top - origin + scroll.scrollTop}] : [];
+        });
+        const index = outlineActiveIndex(positions.map(item => item.top), scroll.scrollTop, scroll.clientHeight, scroll.scrollHeight);
+        setActiveHeading(positions[index]?.pos ?? -1);
       });
     };
     scroll.addEventListener("scroll", changed); changed();
-    return () => {scroll.removeEventListener("scroll", changed); cancelAnimationFrame(frame);};
-  }, [tocOpen, ready]);
+    const resize = new ResizeObserver(changed); resize.observe(scroll); resize.observe(rt.view.dom);
+    return () => {resize.disconnect(); scroll.removeEventListener("scroll", changed); cancelAnimationFrame(frame);};
+  }, [active, ready, headings]);
   useEffect(() => { runtime.current?.view.dom.dispatchEvent(new Event("deditor-image-root-change")); }, [imageRoot, ready]);
   const wasActive = useRef(active);
   useLayoutEffect(() => {
@@ -439,7 +449,11 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
     wasActive.current = active;
   }, [active, readonly, ready, tabId]);
   useEffect(() => { if (runtime.current) {runtime.current.view.dom.spellcheck = writing.spellcheck; runtime.current.view.dom.dispatchEvent(new Event("deditor-writing-change"));} }, [writing, ready]);
-  useEffect(() => { if (searchOpen) searchInput.current?.focus(); }, [searchOpen]);
+  useEffect(() => { if (searchOpen) (searchFocus.current ? replaceInput.current : searchInput.current)?.focus(); }, [searchOpen]);
+  useEffect(() => {
+    if (!active || !ready) return;
+    return installEditorSearch(replace => openSearch(replace && !readonly));
+  }, [active, ready, readonly]);
   useEffect(() => {
     if (!searchOpen || !active) {
       lastSearch.current = { query: searchKey, open: false };
@@ -499,17 +513,13 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
     onKeyDownCapture={event => {
       if (event.nativeEvent.isComposing) return;
       const mod = event.metaKey || event.ctrlKey;
-      if (mod && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "f") { event.preventDefault(); event.stopPropagation(); openSearch(); }
+      if (mod && !event.shiftKey && event.key.toLowerCase() === "f") { event.preventDefault(); event.stopPropagation(); openSearch(event.altKey && !readonly); }
       const target = event.target as HTMLElement;
       if (mod && (event.key.toLowerCase() === "z" || event.key.toLowerCase() === "y") && target.closest(".ProseMirror")) {
         event.preventDefault(); event.stopPropagation();
         if (!readonly) markdownHistory(event.shiftKey || event.key.toLowerCase() === "y", tabId);
       }
     }}>
-    <div className="md-visual-controls">
-      <Button size="icon" variant="ghost" title={t("preview.search.placeholder")} pressed={searchOpen} onClick={() => searchOpen ? closeSearch() : openSearch()}><FiSearch /></Button>
-      <Button size="icon" variant="ghost" title={t("preview.toc")} pressed={tocOpen} onClick={() => setTocOpen(v => !v)}><FiList /></Button>
-    </div>
     {searchOpen && <div className="md-visual-search" role="search" onKeyDown={event => {
       if (event.nativeEvent.isComposing) return;
       if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeSearch(); }
@@ -522,7 +532,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
       <Button size="icon" title={t("preview.search.prev")} onClick={() => navigate(-1)}><FiChevronLeft /></Button>
       <Button size="icon" title={t("preview.search.next")} onClick={() => navigate(1)}><FiChevronRight /></Button>
       {!readonly && <>
-        <input className="deditor-input deditor-input--compact" aria-label={t("md.search.replacement")} placeholder={t("md.search.replacement")} value={replacement} onChange={e => setReplacement(e.target.value)} />
+        <input ref={replaceInput} className="deditor-input deditor-input--compact" aria-label={t("md.search.replacement")} placeholder={t("md.search.replacement")} value={replacement} onChange={e => setReplacement(e.target.value)} />
         <Button size="sm" disabled={!matchCount || searchError} onClick={() => replaceMatches(false)}>{t("md.search.replace")}</Button>
         <Button size="sm" disabled={!matchCount || searchError} onClick={() => replaceMatches(true)}>{t("find.replaceAll")}</Button>
       </>}
@@ -530,11 +540,18 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
     </div>}
     {error && <div className="deditor-notice" data-tone="error" role="alert">{t("md.visualError")}<Button onClick={() => setLoadAttempt(attempt => attempt + 1)}>{t("md.visualRetry")}</Button><details><summary>{t("md.visualErrorDetails")}</summary>{error}</details><Button onClick={() => useEditorStore.setState({ markdownMode: "source" })}>{t("md.viewEdit")}</Button></div>}
     {!ready && !error && <div className="deditor-notice" role="status">{t("md.visualLoading")}</div>}
-    <div className="md-visual-layout">
-      <div ref={scroller} className="md-visual-scroll" onScroll={() => { const rt = runtime.current; if (rt && activeRef.current) rt.session.visualScroll = scroller.current?.scrollTop ?? 0; }}>
+    <div className="md-visual-layout preview-reading-host preview-reading-host--reading">
+      <div ref={scroller} className="md-visual-scroll md-outline-canvas" onScroll={() => { const rt = runtime.current; if (rt && activeRef.current) rt.session.visualScroll = scroller.current?.scrollTop ?? 0; }}>
         <div ref={root} className="md-visual-content" />
       </div>
-      {tocOpen && <MarkdownOutline headings={headings} active={activeHeading} navigate={pos => {select(pos); runtime.current?.view.focus();}} />}
+      <MarkdownOutline items={headings.map(item => ({...item, id: String(item.pos)}))} current={String(activeHeading)} active={active} navigate={id => {
+        const pos = Number(id), rt = runtime.current, scroll = scroller.current;
+        if (!rt || !scroll) return;
+        select(pos); rt.view.focus();
+        const node = rt.view.nodeDOM(pos - 1);
+        if (node instanceof HTMLElement) scroll.scrollTo({top: Math.max(0, node.getBoundingClientRect().top - scroll.getBoundingClientRect().top + scroll.scrollTop - 16), behavior: "auto"});
+        clickedHeading.current = {pos, scrollTop: scroll.scrollTop}; setActiveHeading(pos);
+      }} />
     </div>
   </MarkdownDocumentSurface>;
 }

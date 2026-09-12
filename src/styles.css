@@ -192,7 +192,7 @@ body,
 }
 /* The rail and hover panel overlay the reading canvas. Only explicit pinning
    reserves a column; entering/leaving the outline never reflows the text. */
-.preview-reading-host--reading > .preview { margin-right: 40px; }
+.preview-reading-host--reading > :is(.preview, .md-outline-canvas) { margin-right: 40px; }
 .preview-toc {
   --toc-accent: #2864cf;
   position: absolute;
@@ -252,7 +252,7 @@ body,
   background: color-mix(in srgb, var(--bg-soft) 55%, var(--bg));
   box-shadow: none;
 }
-.preview-reading-host--reading:has(> .preview-toc[data-pinned="true"]) > .preview { margin-right: 0; }
+.preview-reading-host--reading:has(> .preview-toc[data-pinned="true"]) > :is(.preview, .md-outline-canvas) { margin-right: 0; }
 .preview-toc-header {
   display: flex;
   align-items: center;
@@ -337,7 +337,7 @@ body,
 }
 /* Pinned outlines also float on small panes instead of squeezing the text. */
 @container (max-width: 680px) {
-  .preview-reading-host--reading:has(> .preview-toc[data-pinned="true"]) > .preview { margin-right: 40px; }
+  .preview-reading-host--reading:has(> .preview-toc[data-pinned="true"]) > :is(.preview, .md-outline-canvas) { margin-right: 40px; }
   .preview-toc[data-pinned="true"] { position: absolute; width: min(260px, 85%); max-height: calc(100% - 64px); }
   .preview-toc[data-pinned="true"] .preview-toc-panel {
     height: auto;

@@ -1,3 +1,4 @@
+import { openEditorSearch } from "./lib/editorSearch";
 import { useEffect, useRef, useState } from "react";
 // @tauri-apps/api/webview transitively imports the full Window class (~62 KB).
 // We only need to listen for the file-drop event; subscribe to its raw Tauri
@@ -280,12 +281,14 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey, true);
   }, []);
 
-  // Bridge native File menu clicks to the existing fileio handlers.
+  // Bridge native File and Edit menu clicks to the existing fileio handlers.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     listen<string>("menu-action", (e) => {
       switch (e.payload) {
+        case "edit_find": openEditorSearch(); break;
+        case "edit_replace": openEditorSearch(true); break;
         case "file_new": newFile(); break;
         case "file_open": openFile(); break;
         case "file_open_folder": openFolder(); break;

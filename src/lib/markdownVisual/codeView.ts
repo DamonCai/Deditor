@@ -24,6 +24,16 @@ export function codeView(tabId: string, theme: "light" | "dark") {
     let controllers: AbortController[] = [];
     let renderedSource: string | null = null, pendingSource: string | null = null;
     const dom = document.createElement("section"); dom.className = "md-code-block"; dom.contentEditable = "false";
+    const selectBlock = document.createElement("button"); selectBlock.className = "md-code-select"; selectBlock.type = "button";
+    selectBlock.textContent = "⋮⋮"; selectBlock.title = tStatic("md.selectCodeBlock"); selectBlock.setAttribute("aria-label", tStatic("md.selectCodeBlock"));
+    const selectNode = () => {
+      if (!view.editable) return false;
+      const pos = getPos(); if (pos === undefined) return false;
+      expanded = false; render();
+      view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, pos))); view.focus(); return true;
+    };
+    selectBlock.onmousedown = event => event.preventDefault();
+    selectBlock.onclick = selectNode;
     const bar = document.createElement("div"); bar.className = "md-code-bar";
     const language = document.createElement("input"); language.className = "deditor-input deditor-input--compact";
     language.setAttribute("aria-label", tStatic("md.codeLanguage")); language.value = node.attrs.language ?? "";
@@ -32,7 +42,7 @@ export function codeView(tabId: string, theme: "light" | "dark") {
     copy.onclick = () => { void navigator.clipboard.writeText(node.textContent).catch(err => logError("Markdown code copy failed", err)); };
     bar.append(language, toggle, copy);
     const editor = document.createElement("div"), preview = document.createElement("div"); preview.className = "md-code-preview"; editor.className = "md-code-editor";
-    dom.append(bar, editor, preview);
+    dom.append(selectBlock, bar, editor, preview);
     const languageCompartment = new Compartment(), editableCompartment = new Compartment(), presentationCompartment = new Compartment();
     let presentation: Extension = [], presentationGeneration = 0;
     const wrapping = new Compartment(), indentation = new Compartment();
@@ -44,6 +54,7 @@ export function codeView(tabId: string, theme: "light" | "dark") {
       EditorView.theme({}, { dark: theme === "dark" }), presentationCompartment.of(presentation), languageCompartment.of([]), editableCompartment.of([EditorView.editable.of(view.editable), EditorState.readOnly.of(!view.editable)]),
       Prec.highest(keymap.of([
         indentWithTab,
+        { key: "Mod-Enter", run: () => exitBlockSource(view, node, getPos(), 1) },
         { key: "Mod-z", run: () => !view.editable || markdownHistory(false, tabId) }, { key: "Mod-Shift-z", run: () => !view.editable || markdownHistory(true, tabId) },
         { key: "Escape", run: () => {
           const pos = getPos();
@@ -52,7 +63,13 @@ export function codeView(tabId: string, theme: "light" | "dark") {
         } },
         ...([-1, 1] as const).map(direction => ({ key: direction < 0 ? "ArrowUp" : "ArrowDown", run: () => {
           const selection = cm!.state.selection.main;
-          if (!selection.empty || selection.head !== (direction < 0 ? 0 : cm!.state.doc.length)) return false;
+          if (!selection.empty) return false;
+          const edge = direction < 0 ? 0 : cm!.state.doc.length;
+          // Compare visual lines, so wrapped code still navigates within the block.
+          if (selection.head !== edge) {
+            const caret = cm!.coordsAtPos(selection.head), boundary = cm!.coordsAtPos(edge);
+            if (!caret || !boundary || Math.abs(caret.top - boundary.top) > 1) return false;
+          }
           return exitBlockSource(view, node, getPos(), direction);
         } })),
       ])),
@@ -97,6 +114,7 @@ export function codeView(tabId: string, theme: "light" | "dark") {
       toggle.hidden = !diagram || !view.editable;
       toggle.textContent = tStatic(expanded ? "md.hideSource" : "md.editSourceBlock");
       language.readOnly = !view.editable;
+      selectBlock.hidden = !view.editable;
       const code = node.textContent;
       const fence = "`".repeat(Math.max(3, ...Array.from(code.matchAll(/`+/g), m => m[0].length + 1)));
       const source = lang === "latex" ? `$$\n${code}\n$$` : `${fence}${lang}\n${code}\n${fence}`;

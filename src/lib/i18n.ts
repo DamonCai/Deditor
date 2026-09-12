@@ -18,6 +18,7 @@ const ZH: Record<string, string> = {
   "md.visualErrorDetails": "错误详情",
   "md.editSourceBlock": "编辑此块源码",
   "md.hideSource": "收起源码",
+  "md.selectCodeBlock": "选中整个代码块",
   "md.uploadImage": "上传图片",
 
   "xmind.canvas": "思维导图画布",
@@ -650,6 +651,7 @@ const EN: Record<string, string> = {
   "md.visualErrorDetails": "Error details",
   "md.editSourceBlock": "Edit block source",
   "md.hideSource": "Hide source",
+  "md.selectCodeBlock": "Select entire code block",
   "md.uploadImage": "Upload image",
 
   "xmind.canvas": "Mind map canvas",

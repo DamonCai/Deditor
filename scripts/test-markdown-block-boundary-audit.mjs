@@ -97,5 +97,53 @@ try {
  await test('A07/I06 Escape selects special block; delete and undo restore source, further editing works',async()=>{
   for(const name of ['code','math','html','yaml','details']){const original=samples[name]+'\n';await reset(original);const cm=await enterBlock(['html','yaml','details'].includes(name)?'deditor_raw':'code_block',true);await cmKey(cm,'Escape');assert.ok(view.state.selection instanceof NodeSelection);await key('Delete');assert.notEqual(content(),original);await act(async()=>{app.markdownHistory();await pause(50);});assert.equal(content(),original);const restored=await enterBlock(['html','yaml','details'].includes(name)?'deditor_raw':'code_block',true);await act(async()=>{const at=restored.state.doc.length;restored.dispatch({changes:{from:at,insert:'z'},selection:{anchor:at+1}});await pause(40);});assert.ok(content().includes('z'));await exactHistory(original);}
  });
+
+ await test('Document end blank-space click appends prose after terminal blocks; save/undo/reopen preserve source',async()=>{
+  for(const ending of [samples.code,'```\n\n```',samples.math,samples.html,samples.image,'| A |\n| --- |\n| B |','- last item']){
+   const original='Before\n\n'+ending+'\n';await reset(original);
+   const scroller=document.querySelector('.md-visual-scroll');
+   const event=new dom.window.MouseEvent('mousedown',{button:0,clientX:0,clientY:50,bubbles:true,cancelable:true});
+   await act(async()=>{scroller.dispatchEvent(event);await pause(20);});
+   assert.equal(event.defaultPrevented,true);assert.equal(view.state.doc.lastChild.type.name,'paragraph');
+   assert.equal(view.state.selection.head,view.state.doc.content.size-1);
+   await input('after');assert.ok(content().endsWith('after'));
+   assert.ok(content().indexOf('after')>content().indexOf(ending.split('\n')[0]));await exactHistory(original);
+  }
+ });
+ await test('Document end prose click moves caret without adding content; read-only and secondary clicks do nothing',async()=>{
+  await reset('Before\n\nLast paragraph\n');const original=content();const count=view.state.doc.childCount;
+  const scroller=document.querySelector('.md-visual-scroll');
+  await act(async()=>scroller.dispatchEvent(new dom.window.MouseEvent('mousedown',{button:0,clientX:0,clientY:50,bubbles:true,cancelable:true})));
+  assert.equal(content(),original);assert.equal(view.state.doc.childCount,count);assert.equal(view.state.selection.head,view.state.doc.content.size-1);
+  await reset(samples.code+'\n');
+  for(const readonly of [false,true]){
+   await render(readonly);const before=content();
+   const event=new dom.window.MouseEvent('mousedown',{button:readonly?0:2,clientX:0,clientY:50,bubbles:true,cancelable:true});
+   await act(async()=>document.querySelector('.md-visual-scroll').dispatchEvent(event));assert.equal(event.defaultPrevented,false);assert.equal(content(),before);
+  }
+ });
+ await test('Document end code handle selects whole node; Backspace/Delete and undo restore fence and language',async()=>{
+  for(const prefix of ['','Before\n\n'])for(const text of [samples.code,'```typescript\n\n```'])for(const keyName of ['Backspace','Delete']){
+   const original=prefix+text+'\n';await reset(original);
+   await act(async()=>{document.querySelector('.md-code-select').click();await pause(20);});
+   assert.ok(view.state.selection instanceof NodeSelection);assert.equal(document.activeElement,view.dom);
+   assert.equal(content(),original);await key(keyName);assert.ok(!content().includes('```'));if(prefix)assert.ok(content().includes('Before'));
+   await exactHistory(original);
+  }
+ });
+ await test('Document end selected code Enter and last visual line Down reach outside without altering code',async()=>{
+  const original='Before\n\n'+samples.code+'\n';await reset(original);
+  await act(async()=>document.querySelector('.md-code-select').click());await key('Enter');
+  assert.equal(view.state.selection.$head.parent.type.name,'paragraph');const afterEnter=content();await input('outside');await exactHistory(afterEnter);
+  await act(async()=>app.markdownHistory());await act(async()=>app.markdownHistory());assert.equal(content(),original);
+  await reset(original);const cm=await enterBlock('code_block',false);
+  await act(async()=>cm.dispatch({selection:{anchor:3}}));
+  // Model a wrapped first row: Down must stay in CodeMirror until the final visual row.
+  const coords=cm.coordsAtPos;cm.coordsAtPos=pos=>({top:pos===cm.state.doc.length?20:0,bottom:30,left:0,right:0});
+  await cmKey(cm,'ArrowDown');assert.equal(view.state.doc.childCount,2);
+  cm.coordsAtPos=()=>({top:20,bottom:30,left:0,right:0});await cmKey(cm,'ArrowDown');cm.coordsAtPos=coords;
+  assert.equal(view.state.selection.$head.parent.type.name,'paragraph');assert.equal(document.activeElement,view.dom);
+  await input('outside');await exactHistory(original);
+ });
  assert.equal(runtimeErrors.length,0);console.log(`${passed} block boundary audit groups passed`);
 } finally {MilkdownEditor.make=make;await act(async()=>root.render(null));window.close();}

@@ -38,7 +38,8 @@ const stubs={
 await build({stdin:{contents:`
 export {arrowNavigationContextMarkdown,basicEditingMarkdown} from './tests/fixtures/markdown-arrow-navigation';
 export {default as EditorHost} from './src/components/EditorHost';
-export {getActiveView} from './src/lib/editorBridge';
+export {getActiveView,setActiveView} from './src/lib/editorBridge';
+export {openEditorSearch} from './src/lib/editorSearch';
 export {default as Visual} from './src/components/MarkdownVisualEditor';
 export {default as Preview} from './src/components/Preview';
 export {markdownDisplayHtml,hydrateMarkdownDisplay} from './src/lib/markdownDisplay';
@@ -386,27 +387,45 @@ await test('accessibility: local mutations never rescan the document and nested 
   assert.equal(host.lastElementChild.firstElementChild.tabIndex,0);
  } finally {dispose();host.remove();}
 });
-await test('outline: opening after edits reads current headings and positions',async()=>{
+await test('outline: preview rail reads live headings and jumps to current positions',async()=>{
  await act(async()=>store.getState().setContent('# First\n\nbody\n\n## Second\n','a','command'));
  await act(async()=>{app.getVisualEditor().navigate(1,3);app.getVisualEditor().insert('New',false);});
- const toggle=()=>[...document.querySelectorAll('.md-visual-controls button')].at(-1).click();
- await act(async()=>toggle());assert.match(document.querySelector('.md-visual-toc').textContent,/NewFirst/);
- await act(async()=>toggle());
+ await act(async()=>document.querySelector('.preview-toc-rail').click());assert.match(document.querySelector('.preview-toc').textContent,/NewFirst/);
  await act(async()=>store.getState().setContent('# Replacement\n\n### Third\n','a','command'));
- await act(async()=>toggle());assert.equal(document.querySelectorAll('.md-outline-row button[data-size="sm"]').length,2);assert.match(document.querySelector('.md-visual-toc').textContent,/Replacement.*Third/);
- await act(async()=>document.querySelectorAll('.md-outline-row button[data-size="sm"]')[1].click());
+ assert.equal(document.querySelectorAll('.preview-toc-item').length,2);assert.match(document.querySelector('.preview-toc').textContent,/Replacement.*Third/);
+ await act(async()=>document.querySelectorAll('.preview-toc-item')[1].click());
  assert.equal(app.getVisualEditor().heading,3);
- await act(async()=>toggle());
+ assert.equal(document.querySelector('.preview-toc-item[aria-current="location"]').textContent,'Third');
 });
-await test('outline: collapse, filter and selection highlight keep document unchanged',async()=>{
- const original='# Parent\n\n## Child\n\n# Other\n';await act(async()=>store.getState().setContent(original,'a','command'));
- await act(async()=>document.querySelector('.md-visual-controls button:last-child').click());
- await act(async()=>document.querySelector('.md-visual-toc [aria-expanded]').click());
- assert.equal([...document.querySelectorAll('.md-outline-row')].some(row=>row.textContent==='Child'),false);
- await act(async()=>{const input=document.querySelector('.md-visual-toc input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'Child');input.dispatchEvent(new Event('input',{bubbles:true}));});
- assert.match(document.querySelector('.md-visual-toc').textContent,/Child/);
- await act(async()=>document.querySelector('.md-outline-row button').click());assert.ok(document.querySelector('.md-visual-toc [aria-current="location"]'));
- assert.equal(content(),original);await act(async()=>document.querySelector('.md-visual-controls button:last-child').click());
+await test('outline: shared preview presentation, pin and Escape keep document unchanged',async()=>{
+ const original='# Parent\n\n## Child\n\n# Parent\n';await act(async()=>store.getState().setContent(original,'a','command'));
+ await act(async()=>document.querySelector('.preview-toc-rail').click());
+ assert.deepEqual([...document.querySelectorAll('.preview-toc-item')].map(item=>[item.dataset.lvl,item.textContent]),[['1','Parent'],['2','Child'],['1','Parent']]);
+ assert.equal(document.querySelector('.md-visual-controls'),null);assert.equal(document.querySelector('.md-visual-toc'),null);
+ await act(async()=>document.querySelector('.preview-toc-toggle').click());assert.equal(store.getState().tocVisible,true);
+ assert.equal(document.querySelector('.preview-toc').dataset.pinned,'true');
+ await act(async()=>document.querySelector('.preview-toc-toggle').click());
+ await act(async()=>{document.querySelector('.preview-toc').dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await pause(30);});
+ assert.equal(document.querySelector('.preview-toc').dataset.expanded,'false');
+ assert.equal(content(),original);
+ // The actual Preview uses exactly the same rows, pin control and collapsed rail.
+ const host=document.createElement('div');document.body.append(host);const previewRoot=createRoot(host);
+ await act(async()=>{store.setState({previewMaximized:true});previewRoot.render(React.createElement(app.Preview,{tabId:'a',theme:'light',active:false}));await pause(150);});
+ assert.deepEqual([...host.querySelectorAll('.preview-toc-item')].map(item=>[item.dataset.lvl,item.textContent]),[...document.querySelector('.md-visual-shell').querySelectorAll('.preview-toc-item')].map(item=>[item.dataset.lvl,item.textContent]));
+ await act(async()=>{previewRoot.unmount();store.setState({previewMaximized:false});});host.remove();
+});
+await test('menu search: find and replace focus the visible editor, close and preserve history',async()=>{
+ const original='Before target after\n';await act(async()=>store.getState().setContent(original,'a','command'));
+ await act(async()=>app.openEditorSearch());assert.equal(document.activeElement,document.querySelector('.md-visual-search input'));
+ await act(async()=>app.openEditorSearch(true));assert.equal(document.activeElement.getAttribute('aria-label'),'Replace with…');
+ await act(async()=>{document.activeElement.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));await pause(20);});
+ assert.equal(document.querySelector('.md-visual-search'),null);assert.equal(content(),original);
+ await act(async()=>root.render(null));
+ const {EditorView}=await import('@codemirror/view');const {EditorState}=await import('@codemirror/state');const host=document.createElement('div');document.body.append(host);
+ const cm=new EditorView({parent:host,state:EditorState.create({doc:original})});app.setActiveView(cm,'a');
+ await act(async()=>app.openEditorSearch(true));assert.equal(document.activeElement.getAttribute('name'),'replace');
+ await act(async()=>app.openEditorSearch());assert.equal(document.activeElement.getAttribute('name'),'search');assert.equal(cm.state.doc.toString(),original);
+ app.setActiveView(cm,'b');assert.equal(app.openEditorSearch(),false);app.setActiveView(null);cm.destroy();host.remove();await render();
 });
 await test('local links: Unicode, duplicates and escaped filename delimiters',async()=>{
  assert.deepEqual(app.localMarkdownTarget('next%23part.md#中文','/generated/a.md'),{path:'/generated/next#part.md',anchor:'中文'});

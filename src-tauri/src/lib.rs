@@ -964,6 +964,8 @@ struct MenuLabels {
     copy: &'static str,
     paste: &'static str,
     select_all: &'static str,
+    find: &'static str,
+    replace: &'static str,
     // Window submenu (predefined items)
     minimize: &'static str,
     maximize: &'static str,
@@ -994,6 +996,8 @@ fn labels_for(lang: &str) -> MenuLabels {
             copy: "复制",
             paste: "粘贴",
             select_all: "全选",
+            find: "查找…",
+            replace: "替换…",
             minimize: "最小化",
             maximize: "最大化",
             fullscreen: "进入全屏",
@@ -1020,6 +1024,8 @@ fn labels_for(lang: &str) -> MenuLabels {
             copy: "Copy",
             paste: "Paste",
             select_all: "Select All",
+            find: "Find…",
+            replace: "Replace…",
             minimize: "Minimize",
             maximize: "Zoom",
             fullscreen: "Enter Full Screen",
@@ -1116,6 +1122,8 @@ fn build_and_set_menu<R: tauri::Runtime>(
     let paste_item = PredefinedMenuItem::paste(app, Some(l.paste))?;
     let select_all_item = PredefinedMenuItem::select_all(app, Some(l.select_all))?;
 
+    let find_item = build_file_item("edit_find", l.find, "CmdOrCtrl+F")?;
+    let replace_item = build_file_item("edit_replace", l.replace, "CmdOrCtrl+Alt+F")?;
     let edit_menu = SubmenuBuilder::new(app, l.edit)
         .item(&undo_item)
         .item(&redo_item)
@@ -1124,6 +1132,9 @@ fn build_and_set_menu<R: tauri::Runtime>(
         .item(&copy_item)
         .item(&paste_item)
         .item(&select_all_item)
+        .separator()
+        .item(&find_item)
+        .item(&replace_item)
         .build()?;
 
     let minimize_item = PredefinedMenuItem::minimize(app, Some(l.minimize))?;
@@ -1148,7 +1159,7 @@ fn build_and_set_menu<R: tauri::Runtime>(
     // keys NSDisabledDictationMenuItem / NSDisabledCharacterPaletteMenuItem
     // only cover the first two and aren't honored on every macOS version, so
     // we walk the live NSMenu after AppKit has injected and remove anything
-    // whose action isn't one of our six known selectors.
+    // whose action is not a standard edit selector or our custom dispatcher.
     #[cfg(target_os = "macos")]
     strip_macos_edit_menu_extras(l.edit);
 
@@ -1203,6 +1214,8 @@ fn strip_macos_edit_menu_extras(edit_title: &str) {
         sel!(copy:),
         sel!(paste:),
         sel!(selectAll:),
+        // Custom Tauri items (Find / Replace) use muda's action dispatcher.
+        sel!(fireMenuItemAction:),
     ];
 
     // Walk back-to-front so removing items doesn't shift indices ahead of us.
@@ -1280,7 +1293,7 @@ fn install_app_menu(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
     // start with `file_`; predefined items (quit, copy, …) handle themselves.
     app.on_menu_event(|app_handle, event| {
         let id = event.id().0.as_str().to_string();
-        if id.starts_with("file_") {
+        if id.starts_with("file_") || matches!(id.as_str(), "edit_find" | "edit_replace") {
             let _ = app_handle.emit("menu-action", id);
         }
     });
