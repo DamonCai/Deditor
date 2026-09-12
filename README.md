@@ -20,6 +20,8 @@ DEditor 是基于 Tauri 2、React 和 TypeScript 的桌面 Markdown / 多语言�
 
 光标进入粗体、斜体、删除线、行内代码或链接时，当前片段展开为原始 Markdown，可直接修改标记和链接地址。展开片段沿用正文的字体类型和字号，不切换为等宽小字。移出片段、失焦或按 Esc 后恢复排版；展开与收起不产生文档修改或撤销记录，未闭合标记与多行粘贴仍按原文保存。
 
+阅读编辑使用系统原生光标，保留格式边界的方向键导航。查找支持中文、表情及特殊字符的原文定位；关闭查找后，继续输入不会重复执行全文查找。未变化文本块和标题位置会复用计算结果，以减少长文中的重复处理。
+
 代码块内嵌 CodeMirror，支持高亮与语言设置。公式、Mermaid 和 PlantUML 显示渲染结果，并提供块源码编辑入口。Mermaid 与 KaTeX 在本地渲染，PlantUML 使用联网服务。
 
 普通代码块与实时预览使用相同的 Shiki 高亮；点击代码或聚焦后按 Enter 进入 CodeMirror 编辑，Esc 或离开代码块后恢复呈现。公式和图表沿用同一渲染链路，源码控件在悬停或聚焦时出现。进入块源码编辑时保留原呈现高度，避免高图表突然收缩带动正文；输入时直接更新原文，退出后再更新图表，未修改的预览直接复用。
@@ -173,6 +175,8 @@ npm run perf:all
 自动化测试不能代替真实输入法、原生保存对话框、重启恢复及双平台交互。中文组词期间已加入可视区保护，修复后的真实 IME、部分原生交互和复杂语法兼容性仍有待验收项，见 [Markdown 实施记录](docs/markdown-visual-editing-verification-2026-09-11.md)及[本次提交验证记录](docs/markdown-release-verification-2026-09-11.md)。P0–P3 的当前范围和验收状态见[执行清单](docs/markdown-typora-roadmap-2026-09-11.md)及[本次扩展验证](docs/markdown-p1p3-verification-2026-09-12.md)。字体调整后的非导出差距、图片路径修复和行内收起性能测量见[非导出检查记录](docs/markdown-non-export-audit-2026-09-12.md)。直接编辑、简写、按文档图片目录、原生图片整理和后续长文优化见[非导出扩展实施记录](docs/markdown-extended-editing-2026-09-12.md)。最新组词历史修复与未完成的原生验收见 [P0 输入验证](docs/markdown-p0-input-verification-2026-09-11.md)。XMind 状态见[独立验收矩阵](docs/xmind-acceptance-matrix-2026-09-11.md)。
 
 ## 架构与持久化
+
+长文输入和原生光标的最新结果见[验证记录](docs/markdown-native-caret-long-document-2026-09-12.md)。测试页 `?long&sections=500` 可生成 6303 行复杂样例；普通连续输入、跨模式撤销和共享样式已有操作证据，真实中文候选、Windows 以及长时间大文档压力测试仍未完成。
 
 | 层次 | 主要位置与职责 |
 | --- | --- |

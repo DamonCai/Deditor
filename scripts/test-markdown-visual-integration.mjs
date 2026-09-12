@@ -1077,4 +1077,17 @@ await test('view selector: three Markdown modes leave HTML preview flags indepen
  await act(async()=>root.render(React.createElement(app.ModeSwitch)));
  assert.deepEqual([...document.querySelectorAll('button')].map(b=>b.textContent),['编辑','实时预览','阅读']);
 });
+await test('lifecycle: StrictMode never creates the abandoned editor or duplicates live views',async()=>{
+ const {Editor:MilkdownEditor}=await import('@milkdown/kit/core');
+ await act(async()=>root.render(null));
+ const make=MilkdownEditor.make;let creates=0;
+ MilkdownEditor.make=function(...args){const editor=make.apply(this,args),create=editor.create;editor.create=async()=>{creates++;return create();};return editor;};
+ try {
+  await act(async()=>{root.render(React.createElement(React.StrictMode,null,React.createElement(app.Visual,{tabId:'a',theme:'light'})));await pause(150);});
+  assert.equal(creates,1,'StrictMode cleanup must cancel parsing before a detached editor is created');
+  assert.equal(document.querySelectorAll('.ProseMirror').length,1);
+  await act(async()=>{root.render(null);await pause(80);});
+  assert.equal(app.getVisualEditor(),null);assert.equal(document.querySelectorAll('.ProseMirror').length,0);
+ } finally {MilkdownEditor.make=make;}
+});
 await act(async()=>root.unmount());assert.deepEqual(runtimeErrors,[]);dom.window.close();console.log(`${passed} integration tests passed`);
