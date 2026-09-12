@@ -1024,8 +1024,8 @@ await test('removed read mode: legacy restore opens editable visual mode, preser
  assert.equal(current(),draft);
  await act(async()=>{root.render(React.createElement(app.Visual,{tabId:id,theme:'light'}));await pause(120);});
  assert.equal(document.querySelector('.ProseMirror').getAttribute('contenteditable'),'true');
- await act(async()=>{app.getVisualEditor().navigate(3,1);app.getVisualEditor().insert('edited ',false);});
- assert.equal(current(),draft.replace('Keep','edited Keep'));
+ await act(async()=>{app.getVisualEditor().navigate(3,1);app.getVisualEditor().insert('EDIT',false);});
+ assert.equal(current(),draft.replace('Keep','EDITKeep'));
  await act(async()=>app.markdownHistory(false,id));assert.equal(current(),draft);
  app.schedulePersist({sidebarPx:230,previewPct:50});await pause(750);
  assert.equal(JSON.parse(persistedState).markdownMode,'visual');assert.equal(JSON.parse(persistedState).tabs[0].content,draft);
