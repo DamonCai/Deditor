@@ -205,15 +205,22 @@ body,
   box-sizing: border-box;
 }
 .dark .preview-toc { --toc-accent: #8ab4ff; }
-.preview-toc[data-expanded="true"] { width: min(260px, 85%); }
+.preview-toc[data-expanded="true"] {
+  top: 0;
+  width: min(240px, 85%);
+  height: 100%;
+  max-height: 100%;
+}
 .preview-toc-panel {
   display: flex;
   flex-direction: column;
-  max-height: calc(100cqh - 64px);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: var(--shadow-popup);
+  height: 100%;
+  max-height: 100%;
+  background: color-mix(in srgb, var(--bg-soft) 55%, var(--bg));
+  border: none;
+  border-left: 1px solid var(--border);
+  border-radius: 0;
+  box-shadow: none;
   overflow: hidden;
 }
 .preview-toc-panel[hidden], .preview-toc-rail[hidden] { display: none; }
@@ -242,15 +249,6 @@ body,
   width: 240px;
   max-height: none;
   flex-shrink: 0;
-}
-.preview-toc[data-pinned="true"] .preview-toc-panel {
-  height: 100%;
-  max-height: 100%;
-  border: none;
-  border-left: 1px solid var(--border);
-  border-radius: 0;
-  background: color-mix(in srgb, var(--bg-soft) 55%, var(--bg));
-  box-shadow: none;
 }
 .preview-reading-host--reading:has(> .preview-toc[data-pinned="true"]) > :is(.preview, .md-outline-canvas) { margin-right: 0; }
 .preview-toc-header {
@@ -338,15 +336,7 @@ body,
 /* Pinned outlines also float on small panes instead of squeezing the text. */
 @container (max-width: 680px) {
   .preview-reading-host--reading:has(> .preview-toc[data-pinned="true"]) > :is(.preview, .md-outline-canvas) { margin-right: 40px; }
-  .preview-toc[data-pinned="true"] { position: absolute; width: min(260px, 85%); max-height: calc(100% - 64px); }
-  .preview-toc[data-pinned="true"] .preview-toc-panel {
-    height: auto;
-    max-height: calc(100cqh - 64px);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--bg);
-    box-shadow: var(--shadow-popup);
-  }
+  .preview-toc[data-pinned="true"] { position: absolute; width: min(240px, 85%); }
 }
 
 /* Reading-mode in-pane search */

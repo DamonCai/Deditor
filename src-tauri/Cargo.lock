@@ -860,7 +860,7 @@ dependencies = [
 
 [[package]]
 name = "deditor"
-version = "0.9.0"
+version = "1.0.0"
 dependencies = [
  "base64 0.22.1",
  "log",
