@@ -140,6 +140,8 @@
 .md-image-width { position:absolute; right:0; top:0; z-index:2; display: none; align-items: center; gap: 6px; margin-top: 0; background:var(--bg); padding:4px; border-radius:4px; font-size: 11px; color: var(--preview-muted); }
 .milkdown-image-block:hover .md-image-width, .milkdown-image-block:focus-within .md-image-width { display: flex; }
 .md-image-width input { width: 70px; border: 1px solid var(--preview-rule); background: var(--preview-code-bg); color: inherit; border-radius: 3px; padding: 2px 5px; }
+.md-image-width { flex-wrap: wrap; max-width: 100%; }
+.md-image-width .md-image-alt input { width: 160px; max-width: 35vw; }
 .md-visual-shell[data-readonly="true"] .md-image-width { display: none; }
 
 .md-persisted-image .image-resize-handle { display:none !important; }
@@ -164,3 +166,14 @@
 .md-outline-row .deditor-btn[data-size="sm"] { overflow: hidden; text-overflow: ellipsis; text-align: left; }
 
 .md-code-block[data-line-numbers="false"] .cm-lineNumbers { display: none; }
+
+/* Table menus stay inside the reading surface, including a table at the top. */
+.md-visual-shell .milkdown .milkdown-table-block .cell-handle .button-group {
+  top: calc(100% + 8px); left: 0; transform: none;
+}
+.md-visual-shell .milkdown .milkdown-table-block .cell-handle .button-group::after {
+  top: -8px; bottom: auto;
+}
+.md-visual-shell .milkdown .milkdown-table-block .cell-handle .button-group[data-placement="above"]::after {
+  top: auto; bottom: -8px;
+}

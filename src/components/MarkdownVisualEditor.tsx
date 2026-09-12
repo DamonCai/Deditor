@@ -1,3 +1,4 @@
+import { faithfulParagraph } from "../lib/markdownVisual/paragraph";
 import { $view } from "@milkdown/kit/utils";
 import { codeBlockView } from "@milkdown/kit/component/code-block";
 import { footnoteOrder } from "../lib/markdownVisual/footnoteOrder";
@@ -17,6 +18,7 @@ import { editableBlockquote, footnoteReference, footnoteDefinition, footnoteUpda
 import { sharedHeadingIds } from "../lib/markdownVisual/headingIds";
 import { installTypewriter } from "../lib/markdownVisual/typewriter";
 import { pasteTableClipboard } from "../lib/markdownVisual/tablePaste";
+import { pastePlainText } from "../lib/markdownVisual/plainTextPaste";
 import { inlineSourceSchema, installInlineSource, inlineProjection } from "../lib/markdownVisual/inlineSource";
 import { installCompositionViewport } from "../lib/markdownVisual/compositionViewport";
 import { installMarkdownComposition } from "../lib/markdownComposition";
@@ -26,7 +28,7 @@ import { activeBlockHint } from "../lib/markdownVisual/blockHint";
 import { faithfulImage, accessibleImageView, rootAwareImageView } from "../lib/markdownVisual/image";
 import { installMarkdownAccessibility, tableIcon } from "../lib/markdownVisual/accessibility";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { extendedTableCells } from "../lib/markdownVisual/tableLists";
+import { extendedTableCells, configureTableEditing } from "../lib/markdownVisual/tableLists";
 import { inlineSchemas, faithfulInlineHtml, configureInlineSerialization } from "../lib/markdownVisual/inline";
 import { codeView } from "../lib/markdownVisual/codeView";
 import { codeBlockSchema, remarkInlineLinkPlugin, remarkPreserveEmptyLinePlugin, syncHeadingIdPlugin, wrapInHeadingInputRule } from "@milkdown/kit/preset/commonmark";
@@ -129,9 +131,9 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
           return path === null ? url : convertFileSrc(path);
         },
         inlineUploadButton: t("md.uploadImage"), blockUploadButton: t("md.uploadImage"), blockConfirmButton: t("common.confirm"),
-        inlineUploadPlaceholderText: t("md.imageUrlLabel"), blockUploadPlaceholderText: t("md.imageUrlLabel"), blockCaptionPlaceholderText: t("md.imageAltLabel") })
+        inlineUploadPlaceholderText: t("md.imageUrlLabel"), blockUploadPlaceholderText: t("md.imageUrlLabel"), blockCaptionPlaceholderText: t("md.imageTitleLabel") })
       .addFeature(latex);
-    crepe.editor.use(shorthandRemark).use(highlightRemark).use(shorthandMarks.flat()).use(emojiSchema).use(shorthandInputRules).config(configureShorthand).use(editableBlockquote).use(footnoteReference).use(footnoteDefinition).use(footnoteUpdates).use(footnoteOrder).use(inlineSourceSchema).use(absoluteHeadingInputRule).use(activeBlockHint).use(sharedHeadingIds).use(faithfulLink).use(faithfulInlineHtml).use(faithfulImage).use(extendedTableCells.flat()).use(inlineSchemas.flat()).config(configureInlineSerialization).use(frontmatter).use(rawRemark(mdx)).use(rawSchema);
+    crepe.editor.use(shorthandRemark).use(highlightRemark).use(shorthandMarks.flat()).use(emojiSchema).use(shorthandInputRules).config(configureShorthand).use(editableBlockquote).use(footnoteReference).use(footnoteDefinition).use(footnoteUpdates).use(footnoteOrder).use(inlineSourceSchema).use(absoluteHeadingInputRule).use(activeBlockHint).use(sharedHeadingIds).use(faithfulParagraph).use(faithfulLink).use(faithfulInlineHtml).use(faithfulImage).use(extendedTableCells.flat()).config(configureTableEditing).use(inlineSchemas.flat()).config(configureInlineSerialization).use(frontmatter).use(rawRemark(mdx)).use(rawSchema);
     crepe.editor.config(ctx => ctx.update(editorViewOptionsCtx, prev => ({ ...prev, attributes: { class: "md-document", "aria-label": t("md.visualEditor"), spellcheck: "false" },
       handleKeyDown: (view, event) => {
         if (event.key !== "Tab" || !view.editable || !isInTable(view.state)) return false;
@@ -140,7 +142,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
         if (!event.shiftKey && addRowAfter(view.state, view.dispatch)) goToNextCell(1)(view.state, view.dispatch);
         return true;
       },
-      handlePaste: pasteTableClipboard,
+      handlePaste: (view, event, slice) => pasteTableClipboard(view, event) || pastePlainText(view, event, slice, ctx.get(parserCtx)),
       handleDOMEvents: { ...prev.handleDOMEvents,
       mousedown: (_view, event) => {
         if ((event.metaKey || event.ctrlKey) && (event.target as HTMLElement).closest("a")) { event.preventDefault(); return true; }
@@ -182,6 +184,8 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
         const view = ctx.get(editorViewCtx), parse = ctx.get(parserCtx), serialize = ctx.get(serializerCtx);
         const document = new MarkdownDocument(initialSource, parse, serialize, mdx, view.state.doc);
         let inlineEditing: ReturnType<typeof installInlineSource> | undefined;
+        let enterOperation = false;
+        const historyState = () => ({ document: document.snapshot(), selection: { anchor: view.state.selection.anchor, head: view.state.selection.head }, sourceSelection: { anchor: document.sourceOffset(view.state.selection.anchor), head: document.sourceOffset(view.state.selection.head) } });
         const publish = () => {
           if (cancelled || !activeRef.current) return;
           const bridge = visualCommands(view, tabId, parse, () => session.breakGroup());
@@ -232,6 +236,11 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
           handleScrollToSelection: () => compositionViewport.handleScroll(),
           dispatchTransaction: tr => {
             if (cancelled) return;
+            const changed = tr.docChanged && !tr.getMeta(inlineProjection);
+            const before = changed && !inlineEditing?.active ? historyState() : null;
+            const version = session.version;
+            const enter = changed && enterOperation;
+            if (enter) { enterOperation = false; session.breakGroup(); }
             const result = view.state.applyTransaction(tr);
             view.updateState(result.state);
             const projected = tr.getMeta(inlineProjection);
@@ -241,7 +250,10 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
             } else if (result.transactions.some(transaction => transaction.docChanged)) flush();
             if (result.transactions.some(transaction => transaction.docChanged)) { outline(); view.dom.dispatchEvent(new Event("deditor-document-change")); }
             session.visualSelection = { anchor: view.state.selection.anchor, head: view.state.selection.head };
-            publish(); inlineEditing?.update();
+            publish();
+            if (changed && session.version !== version) session.recordVisual(before, inlineEditing?.active ? null : historyState());
+            inlineEditing?.update();
+            if (enter) session.breakGroup();
             if (!projected && (tr.docChanged || tr.selectionSet)) typewriter.update();
           },
         });
@@ -250,8 +262,10 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
         const sync = (content: string) => {
           if (document.source === content) return;
           if (view.composing || composition.composing) return;
+          const hadFocus = view.dom.contains(view.dom.ownerDocument.activeElement);
           inlineEditing?.reset();
-          const next = document.reset(content), selection = view.state.selection;
+          const history = session.takeHistoryVisual();
+          const next = history ? document.restore(content, history.document) : document.reset(content), selection = view.state.selection;
           const current = view.state.doc;
           let first = 0, from = 0, oldLast = current.childCount, newLast = next.childCount;
           while (first < oldLast && first < newLast && current.child(first).eq(next.child(first))) from += current.child(first++).nodeSize;
@@ -261,12 +275,34 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
           }
           const tr = view.state.tr;
           if (oldLast !== first || newLast !== first) tr.replaceWith(from, oldEnd, next.content.cut(from, newEnd));
-          tr.setSelection(Selection.near(tr.doc.resolve(Math.min(selection.head, tr.doc.content.size))));
+          const changedFrom = current.content.findDiffStart(next.content), changedEnd = current.content.findDiffEnd(next.content);
+          const mapPosition = (pos: number) => {
+            if (changedFrom === null || pos <= changedFrom) return pos;
+            if (changedEnd && changedEnd.a < current.content.size && pos >= changedEnd.a) return pos + changedEnd.b - changedEnd.a;
+            return Math.min(pos, changedEnd?.b ?? pos);
+          };
+          const head = tr.doc.resolve(Math.min(history ? history.selection.head : mapPosition(selection.head), tr.doc.content.size));
+          tr.setSelection(history || selection instanceof TextSelection
+            ? TextSelection.between(tr.doc.resolve(Math.min(history ? history.selection.anchor : mapPosition(selection.anchor), tr.doc.content.size)), head)
+            : Selection.near(head));
           view.updateState(view.state.apply(tr.setMeta("addToHistory", false))); outline(); publish();
+          // Undo can remove the focused CodeMirror node view. Restore the DOM
+          // selection as well as the model selection before the next keystroke.
+          if (history && hadFocus && !view.dom.contains(view.dom.ownerDocument.activeElement)) view.focus();
           view.dom.dispatchEvent(new Event("deditor-document-change"));
+        };
+        const beginEnter = () => {
+          if (readonlyRef.current || view.composing || composition.composing) return;
+          session.breakGroup();
+          enterOperation = true;
+        };
+        const enterKey = (event: KeyboardEvent) => {
+          enterOperation = false;
+          if (event.key === "Enter" && !event.isComposing && event.keyCode !== 229) beginEnter();
         };
         const beforeInput = (event: Event) => {
           const type = (event as InputEvent).inputType;
+          if (["insertParagraph", "insertLineBreak"].includes(type) && !(event as InputEvent).isComposing && !enterOperation) beginEnter();
           if (type === "historyUndo" || type === "historyRedo") {
             event.preventDefault(); event.stopPropagation();
             if (!readonlyRef.current) markdownHistory(type === "historyRedo", tabId);
@@ -281,7 +317,8 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
           },
         });
         view.dom.addEventListener("beforeinput", beforeInput, true);
-        cleanupInput = () => { composition.destroy(); view.dom.removeEventListener("beforeinput", beforeInput, true); };
+        view.dom.addEventListener("keydown", enterKey, true);
+        cleanupInput = () => { composition.destroy(); view.dom.removeEventListener("beforeinput", beforeInput, true); view.dom.removeEventListener("keydown", enterKey, true); };
         const restoreCursor = () => {
           const position = Math.min(view.state.doc.content.size, session.sourceCursor === null ? session.visualSelection.head : document.positionAtSource(session.sourceCursor));
           view.dispatch(view.state.tr.setSelection(Selection.near(view.state.doc.resolve(position))));

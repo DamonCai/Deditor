@@ -1,34 +1,13 @@
+import { tableMenuPlacement } from "./tableMenu";
+import type { Ctx } from "@milkdown/kit/ctx";
+import { hardbreakFilterNodes } from "@milkdown/kit/preset/commonmark";
 import type { Node as ProseNode } from "@milkdown/kit/prose/model";
 import { SerializerState } from "@milkdown/kit/transformer";
 import { remarkCtx } from "@milkdown/kit/core";
 import { tableCellSchema, tableHeaderSchema } from "@milkdown/kit/preset/gfm";
-import type { SourceNode } from "./document";
-import { sourceTree, range } from "./document";
+export { tableListTree } from "./tableTree";
 
-/** Existing DEditor extension: list items inside pipe-table cells use <br>. */
-export function tableListTree(tree: SourceNode, source: string) {
-  if (tree.type === "tableCell") {
-    const [from, to] = range(tree);
-    let text = source.slice(from, to);
-    const breaks = tree.children?.filter(n => n.type === "html" && /^<br\s*\/?>$/i.test(n.value ?? "")) ?? [];
-    for (const node of [...breaks].reverse()) {
-      const [start, end] = range(node);
-      text = text.slice(0, start - from) + "\n" + text.slice(end - from);
-    }
-    if (!text.split("\n").some(line => /^\s*(?:[-+*]|\d+[.)])\s+/.test(line))) {
-      if (breaks.length) tree.children = tree.children?.map(child => breaks.includes(child) ? { type: "break" } : child);
-      return;
-    }
-    const blocks = sourceTree(text).children ?? [];
-    if (blocks.some(n => n.type === "list") && blocks.every(n => n.type === "list" || n.type === "paragraph")) {
-      tree.children = blocks;
-      (tree as SourceNode & { deditorBlocks: boolean }).deditorBlocks = true;
-    }
-    return;
-  }
-  tree.children?.forEach(child => tableListTree(child, source));
-}
-export const extendedTableCells = [tableCellSchema, tableHeaderSchema].map(schema => schema.extendSchema(previous => ctx => {
+const tableCellExtensions = [tableCellSchema, tableHeaderSchema].map(schema => schema.extendSchema(previous => ctx => {
   const base = previous(ctx);
   return { ...base, content: "(paragraph | bullet_list | ordered_list)+",
     parseMarkdown: { ...base.parseMarkdown, runner: (state, node, type) => {
@@ -39,7 +18,7 @@ export const extendedTableCells = [tableCellSchema, tableHeaderSchema].map(schem
       if (node.childCount === 1 && node.firstChild?.type.name === "paragraph") {
         if (!node.firstChild.content.size) { state.openNode("tableCell").closeNode(); return; }
         let hasBreak = false; node.firstChild.forEach(child => { if (child.type.name === "hardbreak") hasBreak = true; });
-        if (!hasBreak) { base.toMarkdown.runner(state, node); return; }
+        if (!hasBreak && !/^[ \t]|[ \t]$/.test(node.firstChild.textContent)) { base.toMarkdown.runner(state, node); return; }
       }
       const chunks: string[] = [];
       const serializeCellBlock = SerializerState.create(node.type.schema, ctx.get(remarkCtx));
@@ -51,7 +30,17 @@ export const extendedTableCells = [tableCellSchema, tableHeaderSchema].map(schem
         } else chunks.push(serializeCellBlock(node.type.schema.nodes.doc.create(null, child)).trimEnd());
       });
       const content = chunks.join("\n\n").replace(/\\?\r?\n/g, "<br>").replace(/(?<!\\)\|/g, "\\|");
-      state.openNode("tableCell").addNode("html", undefined, content).closeNode();
+      // GFM strips padding around cells before parsing inline content. Encode
+      // actual boundary whitespace so save/reopen does not turn it into padding.
+      const faithful = content.replace(/^[ \t]+|[ \t]+$/g, spaces => [...spaces].map(char => char === " " ? "&#32;" : "&#9;").join(""));
+      state.openNode("tableCell").addNode("html", undefined, faithful).closeNode();
     } },
   };
 }));
+
+/** Pipe cells support durable <br> breaks, so do not reject Shift+Enter. */
+export function configureTableEditing(ctx: Ctx) {
+  ctx.update(hardbreakFilterNodes.key, nodes => nodes.filter(name => name !== "table"));
+}
+
+export const extendedTableCells = [...tableCellExtensions, tableMenuPlacement];

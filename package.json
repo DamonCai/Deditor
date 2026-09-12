@@ -33,6 +33,7 @@
     "test:file-icons": "tsx scripts/test-file-icons.ts",
     "generate:file-icons": "node scripts/generate-file-icons.mjs",
     "test:syntax": "tsx scripts/test-syntax.ts",
+    "test:markdown-code-lines": "tsx scripts/test-markdown-code-lines.ts",
     "perf:document": "tsx scripts/perf-document.ts",
     "perf:markdown-controls": "tsx scripts/perf-markdown-controls.ts",
     "test:xmind": "tsx scripts/test-xmind.ts",
@@ -42,7 +43,14 @@
     "test:markdown-visual": "tsx scripts/test-markdown-visual.ts",
     "test:markdown-startup": "node scripts/test-markdown-startup.mjs",
     "test:markdown-visual:integration": "node scripts/test-markdown-visual-integration.mjs",
-    "test:all": "npm run test:markdown-startup && npm run test:markdown-visual && npm run test:markdown-visual:integration && npm run test:regression && npm run test:xmind && npm run test:export && npm run test:syntax && npm run test:file-icons"
+    "test:markdown-enter-history": "node scripts/test-markdown-enter-history.mjs",
+    "test:markdown-basic": "node scripts/test-markdown-basic-operations.mjs",
+    "test:all": "npm run test:markdown-startup && npm run test:markdown-visual && npm run test:markdown-visual:integration && npm run test:markdown-basic && npm run test:markdown-enter-history && npm run test:markdown-input-clipboard && npm run test:markdown-table && npm run test:markdown-format-links && npm run test:markdown-images && npm run test:markdown-special-blocks && npm run test:regression && npm run test:xmind && npm run test:export && npm run test:syntax && npm run test:markdown-code-lines && npm run test:file-icons",
+    "test:markdown-input-clipboard": "node scripts/test-markdown-input-clipboard-audit.mjs",
+    "test:markdown-table": "node scripts/test-markdown-table-audit.mjs",
+    "test:markdown-format-links": "node scripts/test-markdown-format-links-audit.mjs",
+    "test:markdown-images": "node scripts/test-markdown-image-audit.mjs",
+    "test:markdown-special-blocks": "node scripts/test-markdown-special-blocks-audit.mjs"
   },
   "dependencies": {
     "@codemirror/commands": "^6.7.1",

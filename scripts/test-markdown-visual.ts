@@ -1,3 +1,4 @@
+import { faithfulParagraph } from "../src/lib/markdownVisual/paragraph";
 import { arrowNavigationMarkdown, arrowNavigationContextMarkdown } from "../tests/fixtures/markdown-arrow-navigation";
 import { footnoteOrder } from "../src/lib/markdownVisual/footnoteOrder";
 import { markdownInputAssist } from "../src/lib/markdownVisual/inputAssist";
@@ -33,7 +34,7 @@ const { EditorState, TextSelection } = await import("@milkdown/kit/prose/state")
 const { history } = await import("@milkdown/kit/plugin/history");
 const { trailing } = await import("@milkdown/kit/plugin/trailing");
 const crepe = new CrepeBuilder({ root: document.querySelector("#editor") }).addFeature(codeMirror).addFeature(latex).addFeature(imageBlock);
-crepe.editor.use(shorthandRemark).use(highlightRemark).use(shorthandMarks.flat()).use(emojiSchema).use(shorthandInputRules).config(configureShorthand).use(editableBlockquote).use(footnoteReference).use(footnoteDefinition).use(footnoteUpdates).use(footnoteOrder).use(absoluteHeadingInputRule).use(faithfulLink).use(faithfulInlineHtml).use(faithfulImage).use(extendedTableCells.flat()).use(inlineSchemas.flat()).config(configureInlineSerialization).use(frontmatter).use(rawRemark(false)).use(rawSchema);
+crepe.editor.use(shorthandRemark).use(highlightRemark).use(shorthandMarks.flat()).use(emojiSchema).use(shorthandInputRules).config(configureShorthand).use(editableBlockquote).use(footnoteReference).use(footnoteDefinition).use(footnoteUpdates).use(footnoteOrder).use(absoluteHeadingInputRule).use(faithfulParagraph).use(faithfulLink).use(faithfulInlineHtml).use(faithfulImage).use(extendedTableCells.flat()).use(inlineSchemas.flat()).config(configureInlineSerialization).use(frontmatter).use(rawRemark(false)).use(rawSchema);
 await crepe.editor.remove(remarkInlineLinkPlugin.plugin); await crepe.editor.remove(remarkPreserveEmptyLinePlugin.plugin);
 await crepe.editor.remove(wrapInHeadingInputRule); await crepe.editor.remove(strikethroughInputRule);
 crepe.editor.use(nativeMarkdownCursor).use(markdownInputAssist);
@@ -54,6 +55,39 @@ crepe.editor.action(ctx => {
    }
  });
 
+ test("caret mapping: an empty mixed-list item maps to its own source line", () => {
+   const source='* [引用](https://example.com)\n* `code`\n* <span>彩色</span>\n* \n',model=make(source);
+   let empty=0;model.doc.descendants((node,pos)=>{if(node.type.name==='paragraph'&&!node.content.size)empty=pos+1;});
+   assert.ok(empty);assert.equal(model.sourceOffset(empty),source.lastIndexOf('* ')+2);
+   assert.equal(model.positionAtSource(source.lastIndexOf('* ')+2),empty);
+   assert.equal(model.inlineAt(empty),null);
+ });
+ test("caret mapping: HTML marks, breaks, escapes and entities retain exact positions", () => {
+   for (const source of [
+     '* [引用](https://example.com)\n* <span style="color:red">彩色</span>后续\n* 换行\\\n  末尾\n',
+     '* [引用](https://example.com)\n* 前&amp;后 **加粗**\n* 末尾\n',
+     '* 前\\*后 **加粗**\n* &#x1f600;末尾\n',
+   ]) {
+     const model=make(source);
+     model.doc.descendants((node,pos)=>{if(!node.isText)return;for(const word of ['彩色','后续','末尾','加粗']) {
+       const at=node.text!.indexOf(word);if(at<0)continue;
+       const sourceAt=source.indexOf(word);
+       assert.equal(model.sourceOffset(pos+at),sourceAt,source+' '+word);
+       assert.equal(model.positionAtSource(sourceAt),pos+at,source+' '+word);
+     }});
+   }
+   for (const entity of ['&amp;', '&#x1f600;', '&NotEqualTilde;']) {
+     const source='* **'+entity+'**\n* tail\n',model=make(source);
+     assert.equal(model.inlineAt(model.positionAtSource(source.indexOf(entity)))?.raw,'**'+entity+'**');
+   }
+   const source='* abcdef **bold**\n* tail\n', model=make(source);
+   const before=model.positionAtSource(source.indexOf('tail'));
+   const at=model.positionAtSource(source.indexOf('abcdef'));
+   const tr=EditorState.create({doc:model.doc}).tr.addMark(at+1,at+3,model.doc.type.schema.marks.emphasis.create());
+   model.project(tr.doc);
+   assert.equal(model.positionAtSource(source.indexOf('tail')),before,'mark splitting must not invalidate the whole list');
+   assert.equal(model.sourceOffset(before),source.indexOf('tail'));
+ });
  test("source reset: local edits match full parsing and retain interleaved source ranges", () => {
    const source = "# Head\r\n\r\nFirst **bold** paragraph.\r\n\r\n[^note]: Definition.\r\n\r\nLast paragraph[^note].\r\n";
    const document = make(source), untouched = document.doc.lastChild;

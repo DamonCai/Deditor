@@ -420,9 +420,15 @@ await test('local links: Unicode, duplicates and escaped filename delimiters',as
 await test('lazy code: long documents create code editors only when a block is edited',async()=>{
  const original=Array.from({length:100},(_,i)=>'```js\nconst value = '+i+';\n```\n').join('\n');
  await act(async()=>store.getState().setContent(original,'a','command'));
- assert.ok(document.querySelectorAll('.md-code-editor .cm-editor').length<=1,'only an actively restored code caret may instantiate an editor');
+ const restoredEditors=document.querySelectorAll('.md-code-editor .cm-editor').length;
+ assert.ok(restoredEditors<=1,'only an actively restored code caret may instantiate an editor');
  await act(async()=>document.querySelector('.md-code-preview').dispatchEvent(new dom.window.MouseEvent('mousedown',{button:0,bubbles:true})));
- assert.equal(document.querySelectorAll('.md-code-editor .cm-editor').length,1);assert.equal(content(),original);
+ // A previously activated editor is retained when hidden. The restored caret
+ // may be in another block, so clicking here can create exactly one more.
+ assert.ok(document.querySelectorAll('.md-code-editor .cm-editor').length<=restoredEditors+1);
+ assert.equal(document.querySelectorAll('.md-code-editor:not([hidden]) .cm-editor').length,1);
+ assert.equal(document.querySelector('.md-code-block .md-code-editor .cm-editor')!==null,true);
+ assert.equal(content(),original);
 });
 await test('reported editing bug: lower reference list text is directly editable',async()=>{
  const original='# Top\n\n+ plain\n+ [label][r] <kbd>key</kbd><br>next\n+ lower\n\n[r]: https://example.com\n';
@@ -919,6 +925,7 @@ await test('P1 inline source: entering, editing, exiting and undo preserve surro
 await test('terminal inline HTML: outside caret, input, save and undo never leak its view-only anchor',async()=>{
  const original='* [引用文字][guide] 和 <kbd>Ctrl</kbd>\n\n[guide]: https://example.com\n';
  await act(async()=>store.getState().setContent(original,'a','command'));
+ await act(async()=>{app.getVisualEditor().focus();await pause(40);});
  await act(async()=>{app.getVisualEditor().navigate(1,original.indexOf('Ctrl')+5);await pause(30);});
  const key=name=>document.querySelector('.ProseMirror').dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:name,bubbles:true,cancelable:true}));
  await act(async()=>key('ArrowRight'));
@@ -1394,21 +1401,98 @@ await test('inline navigation: mixed list hard-break destinations never reopen e
  assert.equal(content(),original);
  await act(async()=>{editor.blur();await pause(60);});
 });
-await test('basic editing: Backspace on an empty mixed-list item stays at the join',async()=>{
- await act(async()=>root.render(null));
+await test('basic editing: mixed-list deletion, Enter and selection survive DOM reparsing',async()=>{
  const {Editor:MilkdownEditor,editorViewCtx}=await import('@milkdown/kit/core');
+ const {TextSelection}=await import('@milkdown/kit/prose/state');
+ const {DOMParser}=await import('@milkdown/kit/prose/model');
+ const make=MilkdownEditor.make;let view;
+ MilkdownEditor.make=function(...args){const editor=make.apply(this,args),create=editor.create;editor.create=async()=>{const result=await create();editor.action(ctx=>{view=ctx.get(editorViewCtx);});return result;};return editor;};
+ let cases=0;
+ try {
+  const variants=[app.basicEditingMarkdown,'# 前置标题\n\n上方正文。\n\n'+app.basicEditingMarkdown,app.basicEditingMarkdown.replace(/^\* /gm,'1. ')];
+  for(const original of variants)for(const reparse of [false,true])for(const key of ['Backspace','Delete','Enter']) {
+   await act(async()=>{root.render(null);await pause(80);});
+   await act(async()=>store.getState().setContent(original,'a','command'));await render();
+   const blocks=()=>{const result=[];view.state.doc.descendants((node,pos)=>{if(node.isTextblock)result.push({node,pos});});return result;};
+   let blank=blocks().find(entry=>entry.node.type.name==='paragraph'&&!entry.node.content.size);
+   await act(async()=>{view.focus();await pause(40);});
+   await act(async()=>{view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc,blank.pos+1)));await pause(60);});
+   assert.equal(view.state.selection.head,blank.pos+1,'setup caret must stay in empty item '+JSON.stringify({original,content:content()}));
+   if(reparse)await act(async()=>{
+    const clone=view.dom.cloneNode(true);clone.querySelectorAll('.ProseMirror-trailingBreak, .label-wrapper, [data-md-mark-boundary]').forEach(br=>br.remove());
+    const parsed=DOMParser.fromSchema(view.state.schema).parse(clone,{preserveWhitespace:true});
+    let from,listIndex;view.state.doc.forEach((node,pos,index)=>{if(['bullet_list','ordered_list'].includes(node.type.name)){from=pos;listIndex=index;}});
+    const tr=view.state.tr.replaceWith(from,from+view.state.doc.child(listIndex).nodeSize,parsed.child(listIndex));
+    let after;tr.doc.descendants((node,pos)=>{if(node.type.name==='paragraph'&&!node.content.size)after=pos+1;});assert.ok(after);
+    tr.setSelection(TextSelection.create(tr.doc,after));view.dispatch(tr);await pause(60);
+   });
+   await act(async()=>{view.dom.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key,bubbles:true,cancelable:true}));await pause(60);});
+   const lastColor=blocks().find(entry=>entry.node.textContent==='彩色列');assert.ok(lastColor);
+   assert.ok(view.state.selection.head>=lastColor.pos+1,'selection must not jump before the preceding item: '+JSON.stringify({key,reparse,original,blank:blank.pos,selection:view.state.selection.toJSON(),doc:view.state.doc.toJSON()}));
+   assert.ok(!document.querySelector('[data-md-inline-source]'),'empty-item operation must not open the earlier link');
+   if(key==='Backspace') {
+    await act(async()=>{view.dom.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key,bubbles:true,cancelable:true}));await pause(60);});
+    assert.equal(view.state.selection.$head.parent.textContent,'彩色列');
+   }
+   await act(async()=>app.saveFile());assert.equal(writes.at(-1).content,content());
+   if(!reparse && key==='Backspace') {
+    const edited=content();
+    await act(async()=>{app.markdownHistory(false,'a');await pause(80);});
+    assert.equal(content(),original);
+    assert.notEqual(view.state.selection.$head.parent.type.name,'deditor_raw','undo must not enter an unrelated reference definition');
+    await act(async()=>{app.markdownHistory(true,'a');await pause(80);});assert.equal(content(),edited);
+   }
+   cases++;
+  }
+  console.log('BASIC MATRIX '+cases+' structural cases');
+ } finally {MilkdownEditor.make=make;await act(async()=>root.render(null));}
+});
+await test('basic editing: leaving inline source preserves empty destinations and cross-token selections',async()=>{
+ const {Editor:MilkdownEditor,editorViewCtx}=await import('@milkdown/kit/core');
+ const {TextSelection}=await import('@milkdown/kit/prose/state');
  const make=MilkdownEditor.make;let view;
  MilkdownEditor.make=function(...args){const editor=make.apply(this,args),create=editor.create;editor.create=async()=>{const result=await create();editor.action(ctx=>{view=ctx.get(editorViewCtx);});return result;};return editor;};
  try {
-  await act(async()=>store.getState().setContent(app.basicEditingMarkdown,'a','command'));
-  await render();
-  const {TextSelection}=await import('@milkdown/kit/prose/state');
-  let at;view.state.doc.descendants((node,pos)=>{if(node.type.name==='paragraph' && !node.content.size)at=pos+1;});
-  assert.ok(at);await act(async()=>{view.focus();view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc,at)));await pause(60);});
-  await act(async()=>{view.dom.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Backspace',bubbles:true,cancelable:true}));await pause(80);});
-  console.log('BASIC DELETE',JSON.stringify({selection:view.state.selection.toJSON(),parent:view.state.selection.$head.parent.textContent,source:content(),doc:view.state.doc.toJSON()}));
-  assert.equal(view.state.selection.$head.parent.textContent,'彩色列');
-  assert.ok(!document.querySelector('[data-md-inline-source]'),'deletion must not open an unrelated link');
+  for(const edited of [false,true])for(const range of [false,true]) {
+   await act(async()=>root.render(null));await act(async()=>store.getState().setContent(app.basicEditingMarkdown,'a','command'));await render();
+   await act(async()=>{view.focus();await pause(40);});
+   let code;view.state.doc.descendants((node,pos)=>{if(node.isText&&node.text.includes('水电'))code=pos+1;});
+   // The restored caret can start in a raw CodeMirror block. Focus the new
+   // selection, otherwise focus() before selecting leaves that input active.
+   await act(async()=>{view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc,code)));view.focus();await pause(60);});
+   assert.ok(view.dom.querySelector('[data-md-inline-source]'),JSON.stringify({edited,range,code,selection:view.state.selection.toJSON(),focused:view.hasFocus(),connected:view.dom.isConnected,doc:view.state.doc.toJSON()}));
+   if(edited)await act(async()=>{view.dispatch(view.state.tr.insertText('改'));await pause(60);});
+   let blank,anchor;view.state.doc.descendants((node,pos)=>{if(node.type.name==='paragraph'&&!node.content.size)blank=pos+1;if(node.type.name==='deditor_inline_source')anchor=pos+2;});
+   await act(async()=>{view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc,range?anchor:blank,blank)));await pause(60);});
+   assert.equal(view.state.selection.$head.parent.type.name,'paragraph');
+   assert.equal(view.state.selection.$head.parent.content.size,0,'destination must remain the empty paragraph '+JSON.stringify({edited,range,selection:view.state.selection.toJSON(),parent:view.state.selection.$head.parent.toJSON()}));
+   assert.equal(view.state.selection.empty,!range);
+   assert.ok(!view.dom.querySelector('[data-md-inline-source]'));
+   const expected=app.basicEditingMarkdown.replace('` 水电`',edited?'` 改水电`':'` 水电`');
+   assert.equal(content(),expected);
+   if(edited) {
+    await act(async()=>{app.markdownHistory(false,'a');await pause(60);});assert.equal(content(),app.basicEditingMarkdown);
+    await act(async()=>{app.markdownHistory(true,'a');await pause(60);});assert.equal(content(),expected);
+   }
+  }
  } finally {MilkdownEditor.make=make;await act(async()=>root.render(null));}
+});
+await test('basic editing: source sync and undo keep a selection after a resized earlier block',async()=>{
+ const {Editor:MilkdownEditor,editorViewCtx}=await import('@milkdown/kit/core');
+ const {TextSelection}=await import('@milkdown/kit/prose/state');
+ const make=MilkdownEditor.make;let view;
+ MilkdownEditor.make=function(...args){const editor=make.apply(this,args),create=editor.create;editor.create=async()=>{const result=await create();editor.action(ctx=>{view=ctx.get(editorViewCtx);});return result;};return editor;};
+ try {
+  await act(async()=>root.render(null));
+  const prefix='长段落'.repeat(40),original='# 标题\n\n'+prefix+'\n\n目标正文\n\n[guide]: https://example.com\n';
+  await act(async()=>store.getState().setContent(original,'a','command'));await render();
+  await act(async()=>{view.focus();await pause(40);});
+  let target;view.state.doc.descendants((node,pos)=>{if(node.isText&&node.text==='目标正文')target=pos;});
+  await act(async()=>{view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc,target+1,target+3)));await pause(40);});
+  const check=()=>{assert.equal(view.state.selection.$head.parent.textContent,'目标正文');assert.equal(view.state.selection.$anchor.parentOffset,1);assert.equal(view.state.selection.$head.parentOffset,3);};
+  await act(async()=>{store.getState().setContent(original.replace(prefix,'短'),'a','command');await pause(80);});check();
+  await act(async()=>{app.markdownHistory(false,'a');await pause(80);});assert.equal(content(),original);check();
+  await act(async()=>{app.markdownHistory(true,'a');await pause(80);});assert.equal(content(),original.replace(prefix,'短'));check();
+ }finally{MilkdownEditor.make=make;await act(async()=>root.render(null));}
 });
 await act(async()=>root.unmount());assert.deepEqual(runtimeErrors,[]);dom.window.close();console.log(`${passed} integration tests passed`);

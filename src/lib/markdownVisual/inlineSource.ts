@@ -29,8 +29,10 @@ export function installInlineSource(view: EditorView, document: MarkdownDocument
     const current = find();
     const offset = sourceOffset ?? (current ? active.sourceFrom + Math.max(0, Math.min(current.node.content.size, view.state.selection.head - current.pos - 1)) : active.sourceFrom);
     const previous = active; active = null; boundary();
+    const selection = view.state.selection;
     const tr = view.state.tr;
-    if (current && current.node.textContent === previous.initialRaw) {
+    const restoreFragment = current && current.node.textContent === previous.initialRaw;
+    if (restoreFragment) {
       // Caret-only navigation restores this fragment without reparsing the document.
       tr.replaceWith(current.pos, current.pos + current.node.nodeSize, previous.original);
       document.project(tr.doc);
@@ -44,8 +46,25 @@ export function installInlineSource(view: EditorView, document: MarkdownDocument
         tr.replaceWith(0, view.state.doc.content.size, next.content);
       }
     }
-    const pos = document.positionAtSource(offset);
-    tr.setSelection(sourceAnchor === undefined ? Selection.near(tr.doc.resolve(pos)) : TextSelection.between(tr.doc.resolve(document.positionAtSource(sourceAnchor)), tr.doc.resolve(pos)));
+    const changedFrom = view.state.doc.content.findDiffStart(tr.doc.content);
+    const changedEnd = view.state.doc.content.findDiffEnd(tr.doc.content);
+    const mapEndpoint = (pos: number, source: number) => {
+      // Navigation already supplied an exact document position. Preserve it
+      // through the local replacement instead of round-tripping via Markdown.
+      if (changedFrom === null || pos <= changedFrom) return pos;
+      if (changedEnd && pos >= changedEnd.a) return pos + changedEnd.b - changedEnd.a;
+      return document.positionAtSource(source);
+    };
+    const pos = mapEndpoint(selection.head, offset);
+    tr.setSelection(sourceAnchor === undefined ? Selection.near(tr.doc.resolve(pos)) : TextSelection.between(tr.doc.resolve(mapEndpoint(selection.anchor, sourceAnchor)), tr.doc.resolve(pos)));
+    // Closing source while the caret is inside its delimiters must retain
+    // non-inclusive marks (notably inline code). Otherwise a toolbar click at
+    // the text end enables that mark again instead of switching it off.
+    if (current && selection.empty && selection.head > current.pos + 1 && selection.head < current.pos + 1 + current.node.content.size) {
+      const at = tr.selection.$head;
+      const marks = at.marks().length ? at.marks() : at.nodeBefore?.marks ?? at.nodeAfter?.marks;
+      if (marks?.length) tr.setStoredMarks(marks);
+    }
     suppressAt = tr.selection.head;
     view.dispatch(tr.setMeta(inlineProjection, true));
   };
@@ -104,6 +123,7 @@ export function installInlineSource(view: EditorView, document: MarkdownDocument
   view.dom.addEventListener("click", click);
   view.dom.addEventListener("compositionend", update);
   return {
+    get active() { return !!active; },
     update, close, reset() { active = null; suppressAt = -1; },
     apply(tr: Transaction) {
       if (tr.getMeta(inlineProjection)) { document.project(view.state.doc); return true; }

@@ -34,6 +34,19 @@ function destinationToken(raw: string) {
   }
   return raw.slice(0, i);
 }
+
+function destinationStart(raw: string, image: boolean) {
+  // A label can contain escaped closing brackets or nested brackets. Looking
+  // for the first "](" can mistake label text for the authored destination.
+  const start = image ? 2 : 1;
+  let depth = 1;
+  for (let i = start; i < raw.length; i++) {
+    if (raw[i] === "\\") { i++; continue; }
+    if (raw[i] === "[") depth++;
+    if (raw[i] === "]" && --depth === 0) return raw[i + 1] === (image ? "(" : ":") ? i + 2 : -1;
+  }
+  return -1;
+}
 /** Patch only parsed image destinations, never code examples or unrelated links. */
 export function rewriteMarkdownImageUrls(source: string, replace: (url: string) => string) {
   type Link = SourceNode & { url?: string; identifier?: string };
@@ -53,7 +66,7 @@ export function rewriteMarkdownImageUrls(source: string, replace: (url: string) 
     if (node.type !== "image" && !(node.type === "definition" && references.has(node.identifier ?? ""))) return;
     if (!node.url) return;
     // Locate the authored destination after the label, retaining title, delimiters and spacing.
-    const opener = node.type === "image" ? raw.indexOf("](") + 2 : raw.indexOf("]:") + 2;
+    const opener = destinationStart(raw, node.type === "image");
     if (opener < 2) return;
     const rest = raw.slice(opener), leading = rest.match(/^\s*/)?.[0].length ?? 0;
     const at = opener + leading, angle = raw[at] === "<";

@@ -256,15 +256,19 @@ export async function renderMarkdown(
       continue;
     }
     const resolved = await ensureLanguage(hl, lang);
+    // markdown-it terminates fence content with a newline. It separates the
+    // final body line from the closing fence; Shiki would count it as another
+    // display line. Remove exactly one so intentional blank lines survive.
+    const code = t.content.replace(/\n$/, "");
     try {
       highlighted.set(
         i,
-        hl.codeToHtml(t.content, { lang: resolved, theme: shikiTheme }),
+        hl.codeToHtml(code, { lang: resolved, theme: shikiTheme }),
       );
     } catch {
       highlighted.set(
         i,
-        hl.codeToHtml(t.content, { lang: "text", theme: shikiTheme }),
+        hl.codeToHtml(code, { lang: "text", theme: shikiTheme }),
       );
     }
   }

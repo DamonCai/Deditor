@@ -1,3 +1,5 @@
+import { tableListTree } from "./tableTree";
+import { decodeHTMLStrict } from "entities";
 import { orderFootnoteTree } from "./footnoteOrder";
 import { remarkMark } from "remark-mark-highlight";
 import { remarkShorthand } from "../markdownShorthand";
@@ -16,7 +18,7 @@ export interface SourceNode {
 }
 const syntax = unified().use(remarkParse).use(remarkGfm, { singleTilde: false }).use(remarkMark).use(remarkShorthand).use(remarkMath).use(remarkFrontmatter, ["yaml", "toml"]);
 export function sourceTree(source: string): SourceNode { return syntax.parse(source) as SourceNode; }
-function editingTree(source: string): SourceNode { const tree = sourceTree(source); editableBlockTree(tree, source); orderFootnoteTree(tree); return tree; }
+function editingTree(source: string): SourceNode { const tree = sourceTree(source); editableBlockTree(tree, source); tableListTree(tree, source); orderFootnoteTree(tree); return tree; }
 const protectedTypes = new Set(["html", "definition", "linkReference", "imageReference", "yaml", "toml"]);
 export function protectedBlock(node: SourceNode): boolean {
   if (node.type === "paragraph" && /^\[(?:toc|\[toc\])\]$/i.test(node.children?.map(n => n.value ?? "").join("") ?? "")) return true;
@@ -103,11 +105,14 @@ function patchTasks(raw: string, ast: SourceNode, before: ProseNode, after: Pros
   return raw;
 }
 
+export interface MarkdownDocumentSnapshot { doc: ProseNode; ast: SourceNode[] }
+
 /** Keeps original source ranges; only the transaction's changed blocks are serialized. */
 export class MarkdownDocument {
   source: string;
   doc: ProseNode;
   private ast: SourceNode[] = [];
+  private positions = new WeakMap<ProseNode, { ast: SourceNode; start: number; ranges: { from: number; to: number; pos: number; end: number }[] }>();
   constructor(source: string, private parse: (source: string) => ProseNode, private serialize: (doc: ProseNode) => string, private mdx = false, initialDoc?: ProseNode) {
     this.source = source; this.doc = initialDoc ?? parse(source); this.index();
   }
@@ -116,6 +121,13 @@ export class MarkdownDocument {
     if (this.ast.length > this.doc.childCount) throw new Error("Markdown source ranges do not match the editable document");
     // Crepe may append an empty paragraph for a terminal table/code/atom.
     while (this.ast.length < this.doc.childCount) this.ast.push({ type: "paragraph", position: { start: { offset: this.source.length }, end: { offset: this.source.length } } });
+  }
+  snapshot(): MarkdownDocumentSnapshot { return { doc: this.doc, ast: this.ast }; }
+  restore(source: string, snapshot: MarkdownDocumentSnapshot) {
+    this.source = source;
+    this.doc = snapshot.doc.type.schema === this.doc.type.schema ? snapshot.doc : this.doc.type.schema.nodeFromJSON(snapshot.doc.toJSON());
+    this.ast = snapshot.ast;
+    return this.doc;
   }
   project(next: ProseNode) { this.doc = next; }
   /** Reparse only a changed top-level prose block when its source boundaries remain stable. */
@@ -182,7 +194,16 @@ export class MarkdownDocument {
     const [sourceFrom, sourceTo] = range(token), raw = this.source.slice(sourceFrom, sourceTo);
     const start = range(leaves[0])[0] + (leaves[0].type === "inlineCode" ? this.source.slice(...range(leaves[0])).indexOf(leaves[0].value ?? "") : 0);
     const end = range(leaves.at(-1)!)[1] - (leaves.at(-1)!.type === "inlineCode" ? this.source.slice(...range(leaves.at(-1)!)).length - this.source.slice(...range(leaves.at(-1)!)).indexOf(leaves.at(-1)!.value ?? "") - (leaves.at(-1)!.value?.length ?? 0) : 0);
-    const from = this.positionAtSource(start), to = this.positionAtSource(end);
+    let from: number | undefined, to: number | undefined;
+    this.doc.forEach((node, offset, index) => {
+      if (position < offset || position > offset + node.nodeSize) return;
+      const ranges = this.textRanges(node, index, offset);
+      const first = ranges.find(r => start >= r.from && start < r.to);
+      const last = ranges.find(r => end > r.from && end <= r.to);
+      if (first) from = first.pos + Math.min(start - first.from, first.end - first.pos);
+      if (last) to = end === last.to ? last.end : last.pos + Math.min(end - last.from, last.end - last.pos);
+    });
+    if (from === undefined || to === undefined) return null;
     // Source offsets are approximate at non-text positions (for example before
     // a hard break in a list). They may point into an earlier inline token.
     // Only expand a token that actually contains the caret in the rendered doc.
@@ -225,12 +246,15 @@ export class MarkdownDocument {
   }
   apply(next: ProseNode): string {
     if (sameSourceNode(next, this.doc)) { this.doc = next; return this.source; }
-    if (this.doc.content.content.some(node => node.type.name === "footnote_definition") || next.content.content.some(node => node.type.name === "footnote_definition")) return this.applyFootnoteProjection(next);
+    if (this.doc.content.content.some(node => node.type.name === "footnote_definition") || next.content.content.some(node => node.type.name === "footnote_definition")) return this.applyBlockProjection(next);
     const before = children(this.doc), after = children(next);
     let first = 0;
     while (first < before.length && first < after.length && sameSourceNode(before[first], after[first])) first++;
     let oldEnd = before.length, newEnd = after.length;
     while (oldEnd > first && newEnd > first && sameSourceNode(before[oldEnd - 1], after[newEnd - 1])) { oldEnd--; newEnd--; }
+    // A replace-all or multi-block format transaction can change distant blocks.
+    // Reuse the disjoint projection so untouched blocks and their gaps stay exact.
+    if (before.length === after.length && newEnd - first > 1) return this.applyBlockProjection(next);
     const from = first < this.ast.length ? range(this.ast[first])[0] : this.source.length;
     const to = oldEnd > first ? range(this.ast[oldEnd - 1])[1] : from;
     const eol = this.source.includes("\r\n") ? "\r\n" : "\n";
@@ -251,8 +275,8 @@ export class MarkdownDocument {
       }
     }
     let replacement = parts.join(eol + eol), leading = "", trailing = "";
-    if (oldEnd === first && replacement) {
-      if (from > 0 && !this.source.slice(0, from).endsWith(eol + eol)) leading = eol + eol;
+    if (oldEnd === first && changed.length) {
+      if (from > 0 && (!replacement || !this.source.slice(0, from).endsWith(eol + eol))) leading = eol + eol;
       if (from < this.source.length) trailing = eol + eol;
     }
     replacement = leading + replacement + trailing;
@@ -275,12 +299,12 @@ export class MarkdownDocument {
     this.doc = next;
     return this.source;
   }
-  /** A footer is a display projection: patch disjoint source blocks independently. */
-  private applyFootnoteProjection(next: ProseNode): string {
+  /** Patch disjoint source blocks independently, including reordered footnote footers. */
+  private applyBlockProjection(next: ProseNode): string {
     const before = children(this.doc), after = children(next), eol = this.source.includes("\r\n") ? "\r\n" : "\n";
     type Edit = {from:number;to:number;insert:string};
     const edits: Edit[] = [], assigned = new Map<ProseNode,{ast:SourceNode;edit?:Edit;relative?:number}>();
-    const definitions = this.ast.filter(node => node.type === "footnoteDefinition").map(node=>this.source.slice(...range(node))).join("\n\n");
+    const definitions = this.ast.filter(node => node.type === "footnoteDefinition" || node.type === "definition").map(node=>this.source.slice(...range(node))).join("\n\n");
     const serialize = (node:ProseNode) => node.type.name === "deditor_raw" ? node.textContent : this.serialize(next.type.create(null,node)).replace(/\n$/,"").replace(/\r?\n/g,eol);
     const offsetTree = (node:SourceNode, amount:number):SourceNode => ({...node,position:node.position?{start:{offset:(node.position.start.offset??0)+amount},end:{offset:(node.position.end.offset??0)+amount}}:undefined,children:node.children?.map(child=>offsetTree(child,amount))});
     // The usual keystroke changes one block. Avoid building a complete projection
@@ -375,11 +399,21 @@ export class MarkdownDocument {
     this.doc=next;return this.source;
   }
   private textRanges(node: ProseNode, index: number, start: number) {
-    const ast = this.ast[index], leaves: SourceNode[] = [];
+    const ast = this.ast[index];
     if (!ast) return [];
-    const walk = (n: SourceNode) => { if (["text", "inlineCode", "code", "math"].includes(n.type)) leaves.push(n); else n.children?.forEach(walk); }; walk(ast);
-    const prose: { text: string; pos: number }[] = [];
+    const cached = this.positions.get(node);
+    if (cached?.ast === ast && cached.start === start) return cached.ranges;
+    const leaves: SourceNode[] = [], prose: { text: string; pos: number }[] = [];
+    const emptySource: number[] = [], emptyProse: number[] = [];
+    const walk = (n: SourceNode) => {
+      if (["paragraph", "listItem"].includes(n.type) && !n.children?.length) emptySource.push(range(n)[1]);
+      if (["text", "inlineCode", "code", "math", "break"].includes(n.type)) leaves.push(n);
+      else if (n.type === "html" && /^<br\s*\/?>$/i.test(n.value ?? "")) leaves.push({ ...n, type: "break" });
+      else n.children?.forEach(walk);
+    };
+    walk(ast);
     node.descendants((child, pos) => {
+      if (child.type.name === "paragraph" && !child.content.size) emptyProse.push(start + pos + 2);
       if (child.type.name === "deditor_inline_source") {
         const from = Number(child.attrs.sourceFrom), to = from + child.textContent.length;
         const first = leaves.findIndex(leaf => range(leaf)[0] >= from && range(leaf)[1] <= to);
@@ -390,14 +424,54 @@ export class MarkdownDocument {
         prose.push({ text: child.textContent, pos: start + pos + 2 }); return false;
       }
       if (child.isText) prose.push({ text: child.text!, pos: start + pos + 1 });
+      else if (child.type.name === "hardbreak") prose.push({ text: "\n", pos: start + pos + 1 });
     });
-    if (leaves.length !== prose.length) return [];
-    return leaves.flatMap((leaf, i) => {
-      const [from, to] = range(leaf), text = prose[i];
-      if (leaf.value !== text.text) return [];
-      const at = this.source.slice(from, to).indexOf(text.text);
-      return at < 0 ? [] : [{ from: from + at, to: from + at + text.text.length, pos: text.pos }];
-    });
+    const ranges: { from: number; to: number; pos: number; end: number }[] = [];
+    // Marks split/merge ProseMirror text nodes independently of Markdown leaves.
+    // Align the actual text stream instead of requiring equal leaf counts.
+    const value = (leaf: SourceNode) => leaf.type === "break" ? "\n" : leaf.value ?? "";
+    if (leaves.map(value).join("") === prose.map(run => run.text).join("")) {
+      let run = 0, inner = 0;
+      for (const leaf of leaves) {
+        const text = value(leaf), [from, to] = range(leaf), raw = this.source.slice(from, to);
+        const at = raw === text ? 0 : leaf.type === "text" ? -1 : raw.indexOf(text);
+        const leafRanges: typeof ranges = [];
+        let valid = true;
+        for (let i = 0, rawAt = at < 0 ? 0 : at; i < text.length; i++) {
+          while (run < prose.length && inner >= prose[run].text.length) { inner -= prose[run].text.length; run++; }
+          if (!prose[run]) break;
+          const pos = prose[run].pos + inner++;
+          let length = 1, decoded = raw[rawAt];
+          if (leaf.type === "break") { rawAt = 0; length = raw.length; decoded = "\n"; }
+          else if (at < 0) {
+            const rest = raw.slice(rawAt), entity = rest.match(/^&(?:#x[\da-f]+|#\d+|[a-z][\da-z]*);/i)?.[0];
+            if (entity) { decoded = decodeHTMLStrict(entity); length = entity.length; }
+            else if (/^\\[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]/.test(rest)) { decoded = rest[1]; length = 2; }
+            else if (rest.startsWith("\r\n")) { decoded = "\n"; length = 2; }
+          }
+          if (decoded && decoded.length > 1 && text.slice(i, i + decoded.length) === decoded) {
+            const width = decoded.length;
+            // Character references can decode to a surrogate pair (or multiple
+            // code points). Keep their complete source spelling as one span.
+            if (inner + width - 1 <= prose[run].text.length) {
+              leafRanges.push({ from: from + rawAt, to: from + rawAt + length, pos, end: pos + width });
+            } else valid = false;
+            inner += width - 1; i += width - 1;
+          } else if (decoded === text[i]) {
+            const previous = leafRanges.at(-1), stop = from + rawAt + length;
+            if (length === 1 && previous && previous.to === from + rawAt && previous.end === pos && previous.to - previous.from === previous.end - previous.pos) { previous.to = stop; previous.end++; }
+            else leafRanges.push({ from: from + rawAt, to: stop, pos, end: pos + 1 });
+          } else valid = false;
+          rawAt += length;
+        }
+        // Unsupported normalization must not leave partially guessed offsets.
+        if (valid) ranges.push(...leafRanges);
+      }
+    }
+    if (emptySource.length === emptyProse.length) emptySource.forEach((from, i) => ranges.push({ from, to: from, pos: emptyProse[i], end: emptyProse[i] }));
+    ranges.sort((a, b) => a.pos - b.pos);
+    this.positions.set(node, { ast, start, ranges });
+    return ranges;
   }
   sourceOffset(position: number) {
     let found = this.source.length;
@@ -405,8 +479,13 @@ export class MarkdownDocument {
       if (position >= offset && position <= offset + node.nodeSize && this.ast[index]) {
         const [from, to] = range(this.ast[index]);
         found = Math.min(to, from + Math.max(0, position - offset - 1));
-        const segment = this.textRanges(node, index, offset).find(r => position >= r.pos && position <= r.pos + r.to - r.from);
-        if (segment) found = segment.from + position - segment.pos;
+        const ranges = this.textRanges(node, index, offset);
+        const segment = ranges.find(r => position === r.pos) ?? ranges.find(r => position > r.pos && position <= r.end);
+        if (segment) found = position === segment.end ? segment.to : segment.from + Math.min(position - segment.pos, segment.to - segment.from);
+        else if (ranges.length) {
+          const nearest = ranges.reduce((best, r) => Math.min(Math.abs(position-r.pos), Math.abs(position-r.end)) < Math.min(Math.abs(position-best.pos), Math.abs(position-best.end)) ? r : best);
+          found = position < nearest.pos ? nearest.from : nearest.to;
+        }
       }
     });
     return found;
@@ -420,7 +499,7 @@ export class MarkdownDocument {
         matched=true;
         pos = start + Math.min(node.nodeSize - 1, Math.max(1, offset - from + 1));
         const segment = this.textRanges(node, index, start).find(r => offset >= r.from && offset <= r.to);
-        if (segment) pos = segment.pos + offset - segment.from;
+        if (segment) pos = offset === segment.to ? segment.end : segment.pos + Math.min(offset - segment.from, segment.end - segment.pos);
       }
     });
     return Math.min(this.doc.content.size, Math.max(0, pos));

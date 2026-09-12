@@ -5,6 +5,7 @@ import { NodeSelection, TextSelection } from "@milkdown/kit/prose/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { EditorState, Prec, Compartment } from "@codemirror/state";
 import { basicSetup } from "codemirror";
+import { indentWithTab } from "@codemirror/commands";
 import { useEditorStore } from "../../store/editor";
 import { indentUnit } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
@@ -41,6 +42,7 @@ export function codeView(tabId: string, theme: "light" | "dark") {
       cm = new EditorView({ parent: editor, state: EditorState.create({ doc: node.textContent, extensions: [basicSetup, wrapping.of(settings.codeWrap ? EditorView.lineWrapping : []), indentation.of(indentUnit.of(" ".repeat(settings.codeIndent))),
       theme === "dark" ? islandDark : islandLight, languageCompartment.of([]), editableCompartment.of([EditorView.editable.of(view.editable), EditorState.readOnly.of(!view.editable)]),
       Prec.highest(keymap.of([
+        indentWithTab,
         { key: "Mod-z", run: () => !view.editable || markdownHistory(false, tabId) }, { key: "Mod-Shift-z", run: () => !view.editable || markdownHistory(true, tabId) },
         { key: "Escape", run: () => {
           const pos = getPos();

@@ -1,3 +1,4 @@
+import { MarkdownDocument } from "./document";
 import { setBlockType, toggleMark, wrapIn, lift } from "@milkdown/kit/prose/commands";
 import { wrapInList, liftListItem } from "@milkdown/kit/prose/schema-list";
 import { Slice } from "@milkdown/kit/prose/model";
@@ -10,6 +11,19 @@ const names: Record<string, string> = { "**": "strong", "*": "emphasis", "~~": "
 export function visualCommands(view: EditorView, tabId: string, parse: (s: string) => ProseNode, boundary: () => void): VisualEditorBridge {
   const { from, to, $from } = view.state.selection;
   const selected = view.state.doc.textBetween(from, to, "\n");
+  let projectedMarks: readonly import("@milkdown/kit/prose/model").Mark[] | undefined;
+  const currentMarks = () => {
+    if ($from.parent.type.name !== "deditor_inline_source") return view.state.storedMarks ?? $from.marks();
+    if (projectedMarks) return projectedMarks;
+    // Source projections intentionally have no marks. Read the small inline
+    // fragment at its source caret so toolbar state still describes its format.
+    const raw = $from.parent.textContent, parsed = parse(raw);
+    const mapped = new MarkdownDocument(raw, parse, () => raw, false, parsed);
+    const at = parsed.resolve(mapped.positionAtSource($from.parentOffset));
+    projectedMarks = at.marks();
+    if (!projectedMarks.length && $from.parentOffset > 0 && $from.parentOffset < raw.length) projectedMarks = at.nodeBefore?.marks ?? at.nodeAfter?.marks ?? projectedMarks;
+    return projectedMarks;
+  };
   const focus = () => view.focus();
   const insert = (markdown: string, block: boolean) => {
     boundary();
@@ -29,7 +43,7 @@ export function visualCommands(view: EditorView, tabId: string, parse: (s: strin
     focus, insert,
     marked: marker => {
       const mark = view.state.schema.marks[names[marker]];
-      return !!mark && (from === to ? !!mark.isInSet(view.state.storedMarks ?? $from.marks()) : view.state.doc.rangeHasMark(from, to, mark));
+      return !!mark && (from === to ? !!mark.isInSet(currentMarks()) : view.state.doc.rangeHasMark(from, to, mark));
     },
     wrap(prefix, suffix) {
       const mark = view.state.schema.marks[names[prefix]];
@@ -41,6 +55,7 @@ export function visualCommands(view: EditorView, tabId: string, parse: (s: strin
     prefix(prefix) {
       boundary();
       const { nodes } = view.state.schema;
+      const { $from } = view.state.selection;
       if (/^#{1,6} $/.test(prefix)) setBlockType(nodes.heading, { level: prefix.trim().length })(view.state, view.dispatch);
       else if (!prefix) setBlockType(nodes.paragraph)(view.state, view.dispatch);
       else if (prefix === "> ") {
@@ -48,15 +63,38 @@ export function visualCommands(view: EditorView, tabId: string, parse: (s: strin
         else wrapIn(nodes.blockquote)(view.state, view.dispatch);
       } else {
         const type = prefix === "1. " ? nodes.ordered_list : nodes.bullet_list;
+        const selectedItems = () => {
+          const { doc, selection } = view.state, items = new Set<number>();
+          // Include the owner of each selected textblock, not its list ancestors.
+          doc.nodesBetween(selection.from, selection.to, (node, pos) => {
+            if (!node.isTextblock) return;
+            const at = doc.resolve(pos + 1);
+            for (let depth = at.depth; depth > 0; depth--) {
+              if (at.node(depth).type === nodes.list_item) { items.add(at.before(depth)); break; }
+            }
+          });
+          return [...items];
+        };
+        const taskItems = prefix === "- [ ] " ? selectedItems() : [];
+        const removeTasks = taskItems.length > 0 && taskItems.every(pos => typeof view.state.doc.nodeAt(pos)?.attrs.checked === "boolean");
         let listDepth = $from.depth;
         while (listDepth > 0 && ![nodes.bullet_list, nodes.ordered_list].includes($from.node(listDepth).type)) listDepth--;
-        if (listDepth && prefix !== "- [ ] " && $from.node(listDepth).type === type) liftListItem(nodes.list_item)(view.state, view.dispatch);
+        if (removeTasks) {
+          const tr = view.state.tr;
+          for (const pos of taskItems) tr.setNodeMarkup(pos, undefined, { ...tr.doc.nodeAt(pos)!.attrs, checked: null });
+          view.dispatch(tr);
+          liftListItem(nodes.list_item)(view.state, view.dispatch);
+        }
+        else if (listDepth && prefix !== "- [ ] " && $from.node(listDepth).type === type) liftListItem(nodes.list_item)(view.state, view.dispatch);
         else if (listDepth && $from.node(listDepth).type !== type) view.dispatch(view.state.tr.setNodeMarkup($from.before(listDepth), type));
         else if (!listDepth && type) wrapInList(type)(view.state, view.dispatch);
-        if (prefix === "- [ ] ") {
+        if (prefix === "- [ ] " && !removeTasks) {
           const tr = view.state.tr;
-          tr.doc.nodesBetween(tr.selection.from, tr.selection.to, (n, pos) => { if (n.type.name === "list_item") tr.setNodeMarkup(pos, undefined, { ...n.attrs, checked: false }); });
-          view.dispatch(tr);
+          for (const pos of selectedItems()) {
+            const item = tr.doc.nodeAt(pos)!;
+            if (item.attrs.checked == null) tr.setNodeMarkup(pos, undefined, { ...item.attrs, checked: false });
+          }
+          if (tr.docChanged) view.dispatch(tr);
         }
       }
       focus();

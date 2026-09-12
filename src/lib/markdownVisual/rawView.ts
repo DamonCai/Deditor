@@ -10,6 +10,7 @@ import type { EditorView as ProseView, NodeView } from "@milkdown/kit/prose/view
 import { EditorView, keymap } from "@codemirror/view";
 import { EditorState, Prec } from "@codemirror/state";
 import { basicSetup } from "codemirror";
+import { indentWithTab } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
 import { renderMarkdownFragment } from "../markdownFragments";
 import { hydrateLocalImages } from "../localImgHydrate";
@@ -67,7 +68,7 @@ export function rawView(filePath: string | null, tabId: string) {
       button.textContent = tStatic("common.confirm");
       cm = new EditorView({ parent: editor, state: EditorState.create({ doc: node.textContent, selection: { anchor, head }, extensions: [
         basicSetup, markdown(), EditorView.lineWrapping,
-        Prec.highest(keymap.of([{ key: "Escape", run: () => close() }, { key: "Mod-z", run: () => markdownHistory(false, tabId) }, { key: "Mod-Shift-z", run: () => markdownHistory(true, tabId) }])),
+        Prec.highest(keymap.of([indentWithTab, { key: "Escape", run: () => close() }, { key: "Mod-z", run: () => markdownHistory(false, tabId) }, { key: "Mod-Shift-z", run: () => markdownHistory(true, tabId) }])),
         EditorView.updateListener.of(update => {
           if (updating || !(update.docChanged || update.view.hasFocus && (update.selectionSet || update.focusChanged))) return;
           const pos = getPos(); if (pos === undefined) return;

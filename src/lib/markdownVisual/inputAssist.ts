@@ -1,6 +1,8 @@
 import { $prose } from "@milkdown/kit/utils";
 import { Plugin, TextSelection } from "@milkdown/kit/prose/state";
+import { splitListItem } from "@milkdown/kit/prose/schema-list";
 import type { EditorView } from "@milkdown/kit/prose/view";
+import type { Node as ProseNode } from "@milkdown/kit/prose/model";
 import { useEditorStore } from "../../store/editor";
 import { emojiSuggestions } from "../markdownShorthand";
 
@@ -15,6 +17,7 @@ function prose(view: EditorView) {
 /** Input helpers stay outside composition and never rebuild the article. */
 export const markdownInputAssist = $prose(() => {
   let choices: string[] = [], index = 0, from = 0, to = 0, hiddenAt = "";
+  let hiddenDocument: ProseNode | null = null;
   let popup: HTMLElement | null = null;
   const choose = (view: EditorView) => {
     const name = choices[index], type = view.state.schema.nodes.deditor_emoji;
@@ -51,13 +54,26 @@ export const markdownInputAssist = $prose(() => {
         view.dispatch(tr.setSelection(TextSelection.create(tr.doc, from + 1, to + 1))); return true;
       },
       handleKeyDown(view, event) {
-        if (!prose(view) || event.isComposing) return false;
+        if (!prose(view) || event.isComposing || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return false;
         if (choices.length) {
-          if (event.key === "Escape") { hiddenAt = `${from}:${to}`; choices = []; popup?.replaceChildren(); return true; }
+          if (event.key === "Escape") { hiddenAt = `${from}:${to}`; hiddenDocument = view.state.doc; choices = []; popup?.replaceChildren(); return true; }
           if (event.key === "Enter" || event.key === "Tab") return choose(view);
           if (event.key === "ArrowDown" || event.key === "ArrowUp") {
             index = (index + (event.key === "ArrowDown" ? 1 : -1) + choices.length) % choices.length;
             popup?.querySelectorAll("button").forEach((button, i) => button.setAttribute("aria-selected", String(i === index))); return true;
+          }
+        }
+        if (event.key === "Enter") {
+          const { $from } = view.state.selection;
+          const item = $from.depth > 1 ? $from.node(-1) : null;
+          if (item?.type.name === "list_item" && item.attrs.checked === true && $from.parent.content.size) {
+            // Split with the normal list command, then reset only the new task.
+            // The command's optional attrs apply at the end but not mid-item.
+            return splitListItem(item.type)(view.state, tr => {
+              const next = tr.selection.$from;
+              tr.setNodeMarkup(next.before(-1), undefined, { ...next.node(-1).attrs, checked: false });
+              view.dispatch(tr);
+            });
           }
         }
         if (event.key !== "Backspace" || !view.state.selection.empty || !useEditorStore.getState().autoCloseBrackets) return false;
@@ -73,6 +89,9 @@ export const markdownInputAssist = $prose(() => {
       view.dom.parentElement!.append(popup);
       const clear = () => {choices = []; popup?.replaceChildren();};
       const update = () => {
+        // Escape dismisses the current query until text changes. Position alone
+        // would keep an equally long replacement (or a retyped query) hidden.
+        if (hiddenDocument !== view.state.doc) { hiddenAt = ""; hiddenDocument = null; }
         if (!prose(view) || !view.hasFocus() || !view.state.selection.empty) { clear(); return; }
         const {$from} = view.state.selection;
         const text = $from.parent.textBetween(Math.max(0, $from.parentOffset - 80), $from.parentOffset, "", "\ufffc");

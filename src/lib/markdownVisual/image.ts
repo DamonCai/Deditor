@@ -2,6 +2,7 @@ import { imageBlockSchema } from "@milkdown/kit/component/image-block";
 import type { NodeViewConstructor } from "@milkdown/kit/prose/view";
 import type { SourceNode } from "./document";
 import { markdownLabels } from "../markdownPreferences";
+import { t } from "../i18n";
 const escapeAttribute = (s: string) => s.replace(/[&<>"\n\r]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "\n": "&#10;", "\r": "&#13;" })[c]!);
 
 /** A metadata change need not change the image node or its authored URL. */
@@ -48,14 +49,19 @@ export function accessibleImageView(original: NodeViewConstructor, language: "zh
     let node = initial;
     const result = original(initial, view, getPos, decorations, innerDecorations);
     const dom = result.dom as HTMLElement;
-    const label = document.createElement("label"); label.className = "md-image-width"; label.contentEditable = "false";
+    const label = document.createElement("div"); label.className = "md-image-width"; label.contentEditable = "false";
     const input = document.createElement("input"); input.type = "number"; input.min = "1"; input.max = "10000"; input.step = "1";
     const labels = markdownLabels[language];
-    label.append(document.createTextNode(labels.width + " "), input); input.setAttribute("aria-label", labels.width); input.placeholder = labels.auto;
+    const widthLabel = document.createElement("label"); widthLabel.append(document.createTextNode(labels.width + " "), input);
+    input.setAttribute("aria-label", labels.width); input.placeholder = labels.auto;
+    const altLabel = document.createElement("label"); altLabel.className = "md-image-alt";
+    const altInput = document.createElement("input"); altInput.type = "text"; altInput.setAttribute("aria-label", t("md.imageAltLabel", language));
+    altLabel.append(document.createTextNode(t("md.imageAltLabel", language) + " "), altInput); label.append(widthLabel, altLabel);
     dom.append(label);
     const update = () => {
       label.hidden = !view.editable;
       if (document.activeElement !== input) input.value = node.attrs.width ? String(node.attrs.width) : "";
+      if (document.activeElement !== altInput) altInput.value = node.attrs.alt;
       dom.querySelectorAll("img").forEach(img => {
         if (img.alt !== node.attrs.alt) img.alt = node.attrs.alt;
         img.style.setProperty("width", node.attrs.width ? `${node.attrs.width}px` : "auto", "important");
@@ -66,12 +72,20 @@ export function accessibleImageView(original: NodeViewConstructor, language: "zh
       const pos = getPos(); if (!view.editable || pos === undefined) return;
       const width = input.value === "" ? null : Math.max(1, Math.min(10000, Math.round(Number(input.value))));
       if (width !== null && !Number.isFinite(width)) { input.value = node.attrs.width ?? ""; return; }
+      input.value = width === null ? "" : String(width);
       if (width !== node.attrs.width) view.dispatch(view.state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, width }));
     };
     input.onchange = commitWidth; input.onblur = commitWidth;
+    const commitAlt = () => {
+      const pos = getPos(); if (!view.editable || pos === undefined) return;
+      if (altInput.value !== node.attrs.alt) view.dispatch(view.state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, alt: altInput.value }));
+    };
+    altInput.onchange = commitAlt; altInput.onblur = commitAlt;
     // Resizing is explicit and persisted. Hide upstream ratio-only drag handles.
     dom.classList.add("md-persisted-image");
-    const observer = new MutationObserver(update); observer.observe(dom, { childList: true, subtree: true });
+    // The upstream caption view also writes img.alt after its asynchronous
+    // render. Restore the independently authored alt when that attribute changes.
+    const observer = new MutationObserver(update); observer.observe(dom, { childList: true, subtree: true, attributes: true, attributeFilter: ["alt"] });
     const modeChanged = () => { result.update?.(node, decorations, innerDecorations); update(); };
     view.dom.addEventListener("deditor-editable-change", modeChanged); update();
     view.dom.addEventListener("deditor-image-root-change", modeChanged);
