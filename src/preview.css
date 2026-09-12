@@ -422,7 +422,11 @@
 /* Directly editable alert/footnote content shares the preview spacing. */
 :is(.preview, .milkdown .ProseMirror.md-document) .md-callout-content > :first-child { margin-top: 0; }
 :is(.preview, .milkdown .ProseMirror.md-document) .md-callout-content > :last-child { margin-bottom: 0; }
-.milkdown .md-document .md-footnote-content { display: contents; }
+:is(.preview, .milkdown .ProseMirror.md-document) .md-footnote-content { display: contents; }
+:is(.preview, .milkdown .ProseMirror.md-document) .footnotes-list { margin: 0; }
+:is(.preview, .milkdown .ProseMirror.md-document) .md-footnote-content > p:last-child { display: inline; }
+:is(.preview, .milkdown .ProseMirror.md-document) .footnote-backref { margin-left: 0.25em; }
+:is(.preview, .milkdown .ProseMirror.md-document) .footnotes { margin-bottom: 0.8em; }
 .milkdown .md-document sup.footnote-ref { cursor: pointer; }
 
 :is(.preview, .milkdown .ProseMirror.md-document) mark { background: #f6d54a70; color: inherit; }
@@ -433,3 +437,9 @@
 .preview.md-footnote-preview .md-footnote-preview-content > :first-child { margin-top: 0; }
 .preview.md-footnote-preview .md-footnote-preview-content > :last-child { margin-bottom: 0; }
 .preview.md-footnote-preview .md-footnote-preview-jump { display: block; margin-top: 12px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 4px; color: var(--preview-link); font: inherit; background: var(--bg); cursor: pointer; }
+
+:is(.preview, .milkdown .ProseMirror.md-document) .legacy-diagram { text-align: center; overflow: auto; margin: 1em 0; }
+:is(.preview, .milkdown .ProseMirror.md-document) .legacy-diagram svg { max-width: 100%; height: auto; }
+.dark :is(.preview, .milkdown .ProseMirror.md-document) .legacy-diagram[data-legacy-kind="sequence"] svg { filter: invert(.88) hue-rotate(180deg); }
+
+:is(.preview, .milkdown .ProseMirror.md-document) iframe { max-width: 100%; border: 1px solid var(--border); }

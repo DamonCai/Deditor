@@ -1,3 +1,4 @@
+import { hydrateLegacyDiagrams } from "./legacyDiagramHydrate";
 import DOMPurify from "dompurify";
 import { hydrateMermaid } from "./mermaidHydrate";
 import { hydratePlantuml } from "./plantumlHydrate";
@@ -7,8 +8,8 @@ import { hydrateLocalImages } from "./localImgHydrate";
  * metadata: restore it after sanitization, which can reject arrows in attributes. */
 export function markdownDisplayHtml(html: string): string {
   const original = document.createElement("template"); original.innerHTML = html;
-  const clean = document.createElement("template"); clean.innerHTML = DOMPurify.sanitize(html);
-  for (const kind of ["mermaid", "plantuml"]) {
+  const clean = document.createElement("template"); clean.innerHTML = DOMPurify.sanitize(html, {ADD_TAGS:["iframe"], FORBID_ATTR:["srcdoc"]});
+  for (const kind of ["mermaid", "plantuml", "legacy"]) {
     const sources = original.content.querySelectorAll(`.${kind}-diagram`);
     clean.content.querySelectorAll(`.${kind}-diagram`).forEach((element, index) => {
       for (const suffix of ["source", "encoded"]) {
@@ -16,6 +17,14 @@ export function markdownDisplayHtml(html: string): string {
         if (value != null) element.setAttribute(name, value);
       }
     });
+  }
+  for (const frame of clean.content.querySelectorAll("iframe")) {
+    const src = frame.getAttribute("src") ?? "";
+    if (!/^https?:\/\//i.test(src)) {frame.remove();continue;}
+    frame.setAttribute("sandbox", "allow-scripts");
+    frame.setAttribute("referrerpolicy", "no-referrer");
+    frame.setAttribute("loading", "lazy");
+    frame.removeAttribute("allow");frame.removeAttribute("allowfullscreen");
   }
   return clean.innerHTML;
 }
@@ -30,7 +39,7 @@ export interface MarkdownDisplayOptions {
  * Hosts retain their own stale-result checks and editing-height reservations. */
 export function hydrateMarkdownDisplay(root: HTMLElement, options: MarkdownDisplayOptions) {
   hydrateLocalImages(root, options.filePath ?? null, options.imageRoot ?? null);
-  const children = [hydrateMermaid(root, options.theme), hydratePlantuml(root)];
+  const children = [hydrateMermaid(root, options.theme), hydratePlantuml(root), hydrateLegacyDiagrams(root, options.theme)];
   const controller = new AbortController();
   controller.signal.addEventListener("abort", () => children.forEach(child => child.abort()), { once: true });
   return Object.assign(controller, { done: Promise.all(children.map(child => child.done)).then(() => {}) });

@@ -1,3 +1,4 @@
+import MarkdownHistoryDialog from "./MarkdownHistoryDialog";
 import { open as chooseDirectory } from "@tauri-apps/plugin-dialog";
 import { getVisualEditor } from "../lib/markdownVisualBridge";
 import { getActiveView, getActiveViewTabId } from "../lib/editorBridge";
@@ -9,6 +10,7 @@ import { Button } from "./ui/Button";
 import { collectMarkdownImages, type ImageTransfer } from "../lib/markdownImageCollect";
 import { documentImageDirectory } from "../lib/markdownImageSettings";
 export default function MarkdownWritingSettings() {
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [open, setOpen] = useState(false), [position, setPosition] = useState({ left: 12, top: 100 });
   const host = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -45,11 +47,24 @@ export default function MarkdownWritingSettings() {
   const set = (patch: Partial<MarkdownPreferences>) => useEditorStore.setState(s => ({ markdownSettings: { ...s.markdownSettings, ...patch } }));
   return <div className="md-writing-settings" ref={host}>
     <Button variant="ghost" size="sm" aria-expanded={open} onClick={event => { const rect = event.currentTarget.getBoundingClientRect(); setPosition({ left: Math.max(12, Math.min(window.innerWidth - 312, rect.left)), top: rect.bottom + 4 }); setFolder(settings.imageDirectory); setEndpoint(settings.picgoEndpoint); setOpen(!open); }}>{t.settings}</Button>
+    {historyOpen && tab && <MarkdownHistoryDialog tabId={tab.id} onClose={()=>setHistoryOpen(false)} />}
     {open && <div className="md-writing-panel" style={{ ...position, maxHeight: `calc(100vh - ${position.top + 12}px)` }} role="dialog" aria-label={t.settings} onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeAndFocus(); } }}>
       <label>{t.theme}<select aria-label={t.theme} value={settings.documentTheme} onChange={e => set({ documentTheme: e.target.value as MarkdownPreferences["documentTheme"] })}>{(["default", "compact"] as const).map(value => <option key={value} value={value}>{t[value]}</option>)}</select></label>
       <label><input type="checkbox" checked={settings.focusParagraph} onChange={e => set({ focusParagraph: e.target.checked })} />{t.focus}</label>
       <label><input type="checkbox" checked={settings.typewriter} onChange={e => set({ typewriter: e.target.checked })} />{t.typewriter}</label>
       <small>{t.typewriterHelp}</small>
+      <Button onClick={()=>{setOpen(false);setHistoryOpen(true);}}>{language === "zh" ? "历史版本与草稿…" : "Versions and drafts…"}</Button>
+      <label><input type="checkbox" checked={settings.mathAutoNumber} onChange={e => set({mathAutoNumber:e.target.checked})} />{language === "zh" ? "公式自动编号" : "Automatically number equations"}</label>
+      <label><input type="checkbox" checked={settings.spellcheck} onChange={e => set({spellcheck:e.target.checked})} />{language === "zh" ? "系统拼写检查" : "System spellcheck"}</label>
+      <label><input type="checkbox" checked={settings.codeLineNumbers} onChange={e => set({codeLineNumbers:e.target.checked})} />{language === "zh" ? "代码块行号" : "Code block line numbers"}</label>
+      <label><input type="checkbox" checked={settings.codeWrap} onChange={e => set({codeWrap:e.target.checked})} />{language === "zh" ? "代码块自动换行" : "Wrap code blocks"}</label>
+      <label>{language === "zh" ? "代码缩进" : "Code indentation"}<select value={settings.codeIndent} onChange={e => set({codeIndent:Number(e.target.value)})}>{[2,4,8].map(n=><option key={n} value={n}>{n}</option>)}</select></label>
+      <label>{language === "zh" ? "新代码块默认语言" : "Default language for new code blocks"}<input value={settings.defaultCodeLanguage} maxLength={40} onChange={e => {if (/^[a-zA-Z0-9_+#.-]*$/.test(e.target.value)) set({defaultCodeLanguage:e.target.value});}} /></label>
+      <details><summary>{language === "zh" ? "自定义文章样式（CSS）" : "Custom document styles (CSS)"}</summary>
+        <textarea aria-label={language === "zh" ? "文章样式" : "Document CSS"} rows={5} maxLength={32768} value={settings.customCss} onChange={e=>set({customCss:e.target.value})} />
+        <small>{language === "zh" ? "支持文章颜色、间距、边框和对齐。两种视图共用，不改变字体类型。" : "Document colors, spacing, borders and alignment apply to both views. Font families stay unchanged."}</small>
+        <Button onClick={()=>set({customCss:""})}>{language === "zh" ? "恢复默认文章样式" : "Reset document styles"}</Button>
+      </details>
       <label>{t.images}<input aria-label={t.images} value={folder} placeholder="assets" onChange={e => setFolder(e.target.value)} onBlur={() => { const next = imageDirectory(folder); setFolder(next); set({ imageDirectory: next }); }} /></label>
       <Button disabled={collecting} onClick={async () => {
         try { const selected = await chooseDirectory({ directory: true, multiple: false }); if (typeof selected === "string") { const value = imageDirectory(selected); setFolder(value); set({ imageDirectory: value }); } }

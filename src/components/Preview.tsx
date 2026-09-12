@@ -1,3 +1,4 @@
+import { openMarkdownFileLink } from "../lib/markdownLinks";
 import MarkdownDocumentSurface from "./MarkdownDocumentSurface";
 import { markdownDisplayHtml, hydrateMarkdownDisplay } from "../lib/markdownDisplay";
 import { installFootnotePreview } from "../lib/markdownFootnotePreview";
@@ -18,11 +19,8 @@ import {
   useTabFilePath,
 } from "../store/editor";
 import {
-  dirname,
   isExternalUrl,
   isLocalRef,
-  resolveAgainst,
-  stripFileScheme,
 } from "../lib/pathUtil";
 import { useT } from "../lib/i18n";
 import {
@@ -81,6 +79,7 @@ export default function Preview({
   const source = useTabContent(tabId);
   const footnoteLanguage = useEditorStore(s => s.language);
   useEffect(() => { if (containerRef.current) return installFootnotePreview(containerRef.current, footnoteLanguage); }, [footnoteLanguage]);
+  const mathAutoNumber = useEditorStore(s => s.markdownSettings.mathAutoNumber);
   const documentTheme = useEditorStore(s => s.markdownSettings.documentTheme);
   const fontSize = useEditorStore(s => s.tabs.find(tab => tab.id === tabId)?.zoomFontSize ?? s.editorFontSize);
   const filePath = useTabFilePath(tabId);
@@ -105,7 +104,7 @@ export default function Preview({
     let cancelled = false;
     const id = setTimeout(async () => {
       const out = isMd
-        ? await renderMarkdown(source, { theme })
+        ? await renderMarkdown(source, { theme, mathAutoNumber })
         : await renderCode(source, filePath, { theme });
       if (!cancelled) setHtml(isMd ? markdownDisplayHtml(out) : out);
     }, 80);
@@ -113,7 +112,7 @@ export default function Preview({
       cancelled = true;
       clearTimeout(id);
     };
-  }, [source, filePath, theme, isMd]);
+  }, [source, filePath, theme, isMd, mathAutoNumber]);
 
   // Shared diagram/image mounting; abort detached work when the HTML changes.
   useEffect(() => {
@@ -285,7 +284,6 @@ export default function Preview({
   useEffect(() => {
     const root = containerRef.current;
     if (!root) return;
-    const baseDir = filePath ? dirname(filePath) : "";
     const handler = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
       if (!target) return;
@@ -339,13 +337,7 @@ export default function Preview({
         }
         if (isLocalRef(raw)) {
           e.preventDefault();
-          const stripped = stripFileScheme(raw);
-          const cleanIdx = stripped.search(/[#?]/);
-          const ref = cleanIdx >= 0 ? stripped.slice(0, cleanIdx) : stripped;
-          const resolved = resolveAgainst(baseDir, ref);
-          openFileByPath(resolved).catch((err) =>
-            logError(`open local link failed: ${resolved}`, err),
-          );
+          openMarkdownFileLink(raw, filePath).catch(err => logError("Markdown local link open failed", err));
           return;
         }
         return;
@@ -769,7 +761,7 @@ export default function Preview({
       <div className={`preview-reading-host${readingMode ? " preview-reading-host--reading" : ""}`}>
         <MarkdownDocumentSurface
           ref={containerRef}
-          fontSize={fontSize} documentTheme={isMd ? documentTheme : "default"}
+          fontSize={fontSize} customStyleEnabled={isMd} documentTheme={isMd ? documentTheme : "default"}
           className={`preview${readingMode ? " preview-fullwidth" : ""}`}
           style={{ flex: 1 }}
           dangerouslySetInnerHTML={{ __html: html }}

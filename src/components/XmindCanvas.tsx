@@ -39,6 +39,7 @@ import {
 } from "../lib/xmind/scene";
 import { useT } from "../lib/i18n";
 import { Button } from "./ui/Button";
+import { XMIND_CLIPBOARD, copyTopicPayload, prepareTopicPaste } from '../lib/xmind/clipboard';
 
 export interface Camera {
   x: number;
@@ -58,6 +59,9 @@ interface Props {
   onUndo: () => void;
   onRedo: () => void;
   resources: Record<string, string>;
+  resourceFiles?: Record<string, Uint8Array>;
+  documentId?: string;
+  onClipboardError?: (error: unknown) => void;
   query: string;
   camera?: Camera;
   onCamera: (camera: Camera) => void;
@@ -151,6 +155,9 @@ export default function XmindCanvas({
   onUndo,
   onRedo,
   resources,
+  resourceFiles,
+  documentId,
+  onClipboardError,
   query,
   camera: saved,
   onCamera,
@@ -972,6 +979,10 @@ export default function XmindCanvas({
         if (editing || (e.target as Element).closest("input,textarea,[contenteditable=true]")) return;
         const chosen = selectedTopicRoots(sheet.rootTopic, selected);
         if (chosen.length) {
+          e.preventDefault();
+          try {
+            e.clipboardData.setData(XMIND_CLIPBOARD, copyTopicPayload(chosen, sheet, resourceFiles ?? {}, documentId ?? ''));
+          } catch (err) { logError('xmind resource copy failed', err); onClipboardError?.(err); return; }
           e.clipboardData.setData(
             "text/plain",
             chosen.map((n) => n.title).join("\n"),
@@ -986,18 +997,19 @@ export default function XmindCanvas({
       onPaste={(e) => {
         if (readonly || editing || (e.target as Element).closest("input,textarea,[contenteditable=true]")) return;
         const raw = e.clipboardData.getData("application/x-deditor-topics");
+        const complete = e.clipboardData.getData(XMIND_CLIPBOARD);
         const text = e.clipboardData.getData("text/plain");
-        if (!raw && !text) return;
+        if (!complete && !raw && !text) return;
         e.preventDefault();
         try {
-          const topics: Topic[] = raw
+          const topics: Topic[] = complete ? [] : raw
             ? JSON.parse(raw)
             : text.split("\n").filter(Boolean).map(newTopic);
-          if (!Array.isArray(topics) || !topics.length) return;
+          if (!complete && (!Array.isArray(topics) || !topics.length)) return;
           // Validate/duplicate the whole clipboard before publishing one transaction.
-          const incoming = topics.map(duplicateTopic);
+          const incoming = complete ? prepareTopicPaste(complete, resourceFiles ?? {}, documentId ?? '') : {topics:topics.map(duplicateTopic)};
           const parent = selected[0] ?? sheet.rootTopic.id;
-          onCommand({ type: "paste", parent, topics: incoming });
+          onCommand({ type: "paste", parent, ...incoming });
           setFoldOverrides((old) => {
             const next = new Map(old);
             next.delete(parent);
@@ -1005,6 +1017,7 @@ export default function XmindCanvas({
           });
         } catch (err) {
           logError("xmind paste failed", err);
+          onClipboardError?.(err);
         }
       }}
       onContextMenu={(e) => {

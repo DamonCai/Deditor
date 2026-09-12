@@ -1,5 +1,51 @@
 import { zipSync } from "fflate";
 
+/** Append new members without recompressing the destination's attachments. */
+export function appendArchiveEntries(original: Uint8Array, files: Record<string, Uint8Array>): Uint8Array {
+  if (!Object.keys(files).length) return original;
+  const directory = (bytes: Uint8Array) => {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    let end = bytes.length - 22;
+    for (; end >= Math.max(0, bytes.length - 65557); end--)
+      if (view.getUint32(end, true) === 0x06054b50 && end + 22 + view.getUint16(end + 20, true) === bytes.length) break;
+    if (end < Math.max(0, bytes.length - 65557)) throw new Error('Invalid ZIP directory');
+    const count = view.getUint16(end + 10, true), offset = view.getUint32(end + 16, true);
+    if (count === 65535 || offset === 0xffffffff || view.getUint16(end + 4, true) || view.getUint16(end + 6, true))
+      throw new Error('ZIP64 or split archives are not editable');
+    let at = offset;
+    const records: Uint8Array[] = [], names = new Set<string>();
+    for (let i = 0; i < count; i++) {
+      if (view.getUint32(at, true) !== 0x02014b50) throw new Error('Invalid ZIP entry');
+      if (view.getUint16(at + 8, true) & 1) throw new Error('Encrypted archives are not editable');
+      const nameLength = view.getUint16(at + 28, true);
+      const length = 46 + nameLength + view.getUint16(at + 30, true) + view.getUint16(at + 32, true);
+      names.add(new TextDecoder().decode(bytes.subarray(at + 46, at + 46 + nameLength)));
+      records.push(bytes.slice(at, at + length)); at += length;
+    }
+    if (at > end) throw new Error('Invalid ZIP directory');
+    return { end, offset, records, names, count };
+  };
+  const before = directory(original);
+  if (Object.keys(files).some(name => before.names.has(name))) throw new Error('Archive member already exists');
+  if (before.count + Object.keys(files).length >= 65535) throw new Error('ZIP64 is not editable');
+  const extra = zipSync(files, { level: 1 }), added = directory(extra);
+  for (const record of added.records) {
+    const view = new DataView(record.buffer, record.byteOffset, record.byteLength);
+    view.setUint32(42, view.getUint32(42, true) + before.offset, true);
+  }
+  const records = [...before.records, ...added.records];
+  const offset = before.offset + added.offset, size = records.reduce((n, record) => n + record.length, 0);
+  const trailer = original.slice(before.end), view = new DataView(trailer.buffer, trailer.byteOffset, trailer.byteLength);
+  view.setUint16(8, before.count + added.count, true); view.setUint16(10, before.count + added.count, true);
+  view.setUint32(12, size, true); view.setUint32(16, offset, true);
+  const result = new Uint8Array(offset + size + trailer.length);
+  result.set(original.subarray(0, before.offset)); result.set(extra.subarray(0, added.offset), before.offset);
+  let at = offset;
+  for (const record of records) { result.set(record, at); at += record.length; }
+  result.set(trailer, at);
+  return result;
+}
+
 /** Replace one ZIP member while retaining the other compressed byte streams.
  * This avoids inflating/deflating every attachment on each editing transaction.
  * ZIP64/encrypted variants are rejected, never silently rewritten. */

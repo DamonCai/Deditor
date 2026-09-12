@@ -26,3 +26,7 @@ declare module "markdown-it-sup" {
   const plugin: PluginSimple;
   export default plugin;
 }
+
+declare module "katex/contrib/mhchem";
+
+declare module "flowchart.js" { const flowchart: {parse(source: string): {drawSVG(id: string, options: Record<string, unknown>): void}}; export default flowchart; }

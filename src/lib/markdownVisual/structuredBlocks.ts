@@ -45,7 +45,7 @@ export const footnoteDefinition = footnoteDefinitionSchema.extendSchema(() => ()
 type FootnoteInfo = { number: number; text: string; definition?: number; references: number[] };
 const contexts = new WeakMap<ProseNode, Map<string, FootnoteInfo>>();
 const key = (label: string) => label.trim().replace(/\s+/g, " ").toLowerCase();
-function context(doc: ProseNode) {
+export function footnoteContext(doc: ProseNode) {
   const cached = contexts.get(doc); if (cached) return cached;
   const result = new Map<string, FootnoteInfo>(); let number = 0;
   const get = (label: string) => { const id = key(label); if (!result.has(id)) result.set(id, { number: 0, text: "", references: [] }); return result.get(id)!; };
@@ -76,22 +76,25 @@ export const footnoteNodeView: NodeViewConstructor = (initial, view, getPos) => 
   const dom = document.createElement(definition ? "section" : "sup"); dom.className = definition ? "footnotes" : "footnote-ref";
   const link = document.createElement("a"); link.contentEditable = "false";
   const contentDOM = definition ? document.createElement("div") : undefined;
-  const list = document.createElement("ol"), item = document.createElement("li");
+  const list = document.createElement("ol"), item = document.createElement("li"), separator = document.createElement("hr");
+  list.className = "footnotes-list"; separator.className = "footnotes-sep"; separator.contentEditable = "false";
+  link.className = "footnote-backref";
   const backlinks: HTMLAnchorElement[] = [];
-  if (contentDOM) { contentDOM.className = "md-footnote-content"; item.className = "footnote-item"; item.append(contentDOM, link); list.append(item); dom.append(list); }
+  if (contentDOM) { contentDOM.className = "md-footnote-content"; item.className = "footnote-item"; item.append(contentDOM, link); list.append(item); dom.append(separator, list); }
   else { dom.contentEditable = "false"; dom.append(link); }
   const update = () => {
-    const info = context(view.state.doc).get(key(node.attrs.identifier));
+    const info = footnoteContext(view.state.doc).get(key(node.attrs.identifier));
     const n = info?.number || 0, occurrence = Math.max(0, info?.references.indexOf(getPos() ?? -1) ?? 0);
     if (definition) {
       dom.dataset.mdFootnoteDefinition = node.attrs.label; item.dataset.footnoteLabel = node.attrs.label;
+      separator.hidden = n !== 1;
       list.start = n || 1; item.id = n ? `fn${n}` : `fn-${encodeURIComponent(node.attrs.identifier)}`;
       link.href = `#fnref${n}`; link.textContent = "↩︎"; link.hidden = !n;
       const extra = Math.max(0, (info?.references.length ?? 0) - 1);
       while (backlinks.length > extra) backlinks.pop()!.remove();
       while (backlinks.length < extra) {
         const back = document.createElement("a"), occurrence = backlinks.length + 1;
-        back.contentEditable = "false"; back.dataset.mdFootnoteBack = String(occurrence);
+        back.className = "footnote-backref"; back.contentEditable = "false"; back.dataset.mdFootnoteBack = String(occurrence);
         back.onclick = event => jump(event, occurrence); item.append(back); backlinks.push(back);
       }
       backlinks.forEach((back, index) => { back.href = `#fnref${n}:${index + 1}`; back.textContent = " ↩︎"; back.setAttribute("aria-label", `[${n}:${index + 1}] ↩︎`); });
@@ -103,7 +106,7 @@ export const footnoteNodeView: NodeViewConstructor = (initial, view, getPos) => 
   };
   const jump = (event: MouseEvent, occurrence = 0) => {
     event.preventDefault(); event.stopPropagation();
-    const info = context(view.state.doc).get(key(node.attrs.identifier));
+    const info = footnoteContext(view.state.doc).get(key(node.attrs.identifier));
     const pos = definition ? info?.references[occurrence] : info?.definition;
     if (pos === undefined) return;
     const target = view.nodeDOM(pos); if (target instanceof HTMLElement) target.scrollIntoView({ block: "nearest" });

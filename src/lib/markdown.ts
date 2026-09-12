@@ -1,3 +1,4 @@
+import { loadMarkdownMath, markdownMathHtml } from "./markdownMath";
 import type { PluginSimple } from "markdown-it";
 import mark from "markdown-it-mark";
 import sub from "markdown-it-sub";
@@ -24,7 +25,7 @@ const MERMAID_LANGS = new Set(["mermaid"]);
 // Cache: once loaded, the promise is reused (returns instantly).
 let katexLoaded = false;
 let katexLoading: Promise<void> | null = null;
-async function loadKatex(): Promise<void> {
+export async function loadKatex(): Promise<void> {
   if (katexLoaded) return;
   if (!katexLoading) {
     katexLoading = (async () => {
@@ -33,9 +34,13 @@ async function loadKatex(): Promise<void> {
         // The CSS provides the math glyph layout — must be present before
         // KaTeX HTML is mounted into the preview.
         import("katex/dist/katex.min.css"),
+        loadMarkdownMath(),
       ]);
       // Node/CJS packages can expose the plugin under a second default wrapper.
       md.use(typeof katex === "function" ? katex : (katex as { default: PluginSimple }).default);
+      for (const kind of ["math_inline", "math_inline_block", "math_inline_bare_block", "math_block"]) {
+        md.renderer.rules[kind] = (tokens, index, _options, env) => markdownMathHtml(tokens[index].content, kind !== "math_inline", env.__mathSource ?? "", env.__mathAutoNumber === true, kind === "math_inline" ? undefined : env.__mathBlockIndex++);
+      }
       katexLoaded = true;
     })();
   }
@@ -112,11 +117,22 @@ md.use(taskLists, { enabled: false });
 md.use(footnote);
 md.use(mark).use(sub).use(sup).use(markdownEmoji);
 md.use(markdownExtensions);
-const footnoteOpen = md.renderer.rules.footnote_open!;
-md.renderer.rules.footnote_open = (tokens, i, options, env, renderer) => {
+// Both hosts use separate editable-sized footer items. Backlinks live outside
+// the content boundary, so changing footnote prose never mutates view-owned links.
+md.renderer.rules.footnote_block_open = () => "";
+md.renderer.rules.footnote_block_close = () => "";
+md.renderer.rules.footnote_open = (tokens, i, _options, env) => {
+  const n = tokens[i].meta.id + 1;
   const label = env.footnotes?.list?.[tokens[i].meta.id]?.label ?? "";
-  return footnoteOpen(tokens, i, options, env, renderer).replace("<li", `<li data-footnote-label="${escapeAttr(label)}"`);
+  env.__footnoteBacklinks = "";
+  return `<section class="footnotes" data-md-footnote-definition="${escapeAttr(label)}">${n === 1 ? '<hr class="footnotes-sep">' : ''}<ol class="footnotes-list" start="${n}"><li class="footnote-item" id="fn${n}" data-footnote-label="${escapeAttr(label)}"><div class="md-footnote-content">`;
 };
+const footnoteAnchor = md.renderer.rules.footnote_anchor!;
+md.renderer.rules.footnote_anchor = (tokens, i, options, env, renderer) => {
+  env.__footnoteBacklinks += footnoteAnchor(tokens, i, options, env, renderer);
+  return "";
+};
+md.renderer.rules.footnote_close = (_tokens, _i, _options, env) => `</div>${env.__footnoteBacklinks}</li></ol></section>\n`;
 // KaTeX is registered lazily by renderMarkdown() when the source actually
 // contains math — see loadKatex().
 
@@ -169,6 +185,9 @@ md.renderer.rules.image = (tokens, idx, options, env, self) => {
 
 export interface RenderOptions {
   theme: "light" | "dark";
+  documentSource?: string;
+  mathAutoNumber?: boolean;
+  mathOrdinal?: number;
 }
 
 export async function renderMarkdown(
@@ -183,7 +202,7 @@ export async function renderMarkdown(
     await loadKatex();
   }
   const hl = await getHighlighter();
-  const env: Record<string, unknown> = {};
+  const env: Record<string, unknown> = {__mathSource:opts.documentSource ?? source, __mathAutoNumber:opts.mathAutoNumber, __mathBlockIndex:opts.mathOrdinal ?? 0};
   const tokens = md.parse(source, env);
   // Pre-scan for plantuml — if any fence is plantuml, load the encoder once
   // before the synchronous render pass below.
@@ -218,6 +237,10 @@ export async function renderMarkdown(
         continue;
       }
       highlighted.set(i, renderPlantumlPlaceholder(t.content, line, encoded));
+      continue;
+    }
+    if (lang === "flow" || lang === "sequence") {
+      highlighted.set(i, `<div class="legacy-diagram" data-line="${t.map ? t.map[0] + 1 : 0}" data-legacy-kind="${lang}" data-legacy-source="${escapeAttr(t.content)}">${tStatic("md.diagramLoading")}</div>`);
       continue;
     }
     if (MERMAID_LANGS.has(lang)) {

@@ -1,6 +1,7 @@
 #[cfg(target_os = "macos")]
 mod window_chrome;
 mod markdown_images;
+mod markdown_history;
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
@@ -85,12 +86,20 @@ fn read_binary_as_base64(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn write_text_file(path: String, content: String) -> Result<(), String> {
+fn write_text_file(app: tauri::AppHandle, path: String, content: String) -> Result<(), String> {
     log::debug!("write_text_file: {} ({} bytes)", path, content.len());
-    fs::write(expand(&path), content).map_err(|e| {
-        log::error!("write_text_file failed: {} -- {}", path, e);
-        e.to_string()
-    })
+    let markdown = is_markdown_history_path(&path);
+    let root = app.path().app_data_dir().ok().map(|dir| dir.join("markdown-history"));
+    if markdown {
+        if let (Some(root), Ok(previous)) = (&root, fs::read_to_string(expand(&path))) {
+            if let Err(error) = markdown_history::record(root, &path, &previous, false) { log::warn!("Markdown history: {error}"); }
+        }
+    }
+    fs::write(expand(&path), &content).map_err(|e| e.to_string())?;
+    if markdown {
+        if let Some(root) = root { if let Err(error) = markdown_history::record(&root, &path, &content, false) { log::warn!("Markdown history: {error}"); } }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -324,6 +333,23 @@ fn app_state_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .map_err(|e| e.to_string())
 }
 
+fn is_markdown_history_path(path: &str) -> bool {
+    matches!(std::path::Path::new(path).extension().and_then(|s| s.to_str()).map(|s| s.to_ascii_lowercase()).as_deref(), Some("md" | "markdown" | "mdx"))
+}
+#[tauri::command]
+fn list_markdown_history(app: tauri::AppHandle, path: Option<String>) -> Result<Vec<markdown_history::Entry>, String> {
+    markdown_history::list(&app.path().app_data_dir().map_err(|e| e.to_string())?.join("markdown-history"), path.as_deref())
+}
+#[tauri::command]
+fn record_markdown_draft(app: tauri::AppHandle, path: String, content: String) -> Result<(), String> {
+    if !path.starts_with("untitled:") && !is_markdown_history_path(&path) { return Ok(()); }
+    markdown_history::record(&app.path().app_data_dir().map_err(|e| e.to_string())?.join("markdown-history"), &path, &content, true)
+}
+#[tauri::command]
+fn read_markdown_history(app: tauri::AppHandle, id: String) -> Result<String, String> {
+    markdown_history::read(&app.path().app_data_dir().map_err(|e| e.to_string())?.join("markdown-history"), &id)
+}
+
 #[tauri::command]
 fn read_app_state(app: tauri::AppHandle) -> Result<String, String> {
     let path = app_state_path(&app)?;
@@ -361,6 +387,20 @@ fn write_app_state(app: tauri::AppHandle, content: String) -> Result<(), String>
         );
         e.to_string()
     })?;
+    // Retain independent draft checkpoints before a tab can be closed or the process exits.
+    if let (Some(root), Ok(state)) = (path.parent().map(|dir| dir.join("markdown-history")), serde_json::from_str::<serde_json::Value>(&content)) {
+        if let Some(tabs) = state.get("tabs").and_then(|tabs| tabs.as_array()) {
+            for (index, tab) in tabs.iter().enumerate() {
+                let file = tab.get("filePath").and_then(|v| v.as_str());
+                if file.map_or(false, |path| !is_markdown_history_path(path)) { continue; }
+                let draft = tab.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                let saved = tab.get("savedContent").and_then(|v| v.as_str()).unwrap_or("");
+                if draft.is_empty() || draft == saved { continue; }
+                let key = file.map(String::from).unwrap_or_else(|| format!("untitled:{}", tab.get("recoveryId").and_then(|v|v.as_str()).map(String::from).unwrap_or_else(|| index.to_string())));
+                if let Err(error) = markdown_history::record(&root, &key, draft, true) { log::warn!("Markdown draft history: {error}"); }
+            }
+        }
+    }
     log::debug!("write_app_state: {} ({} bytes)", path.display(), content.len());
     Ok(())
 }
@@ -1393,6 +1433,9 @@ pub fn run() {
             find_in_files,
             replace_in_files,
             add_recent_document,
+            record_markdown_draft,
+            list_markdown_history,
+            read_markdown_history,
             read_app_state,
             write_app_state,
             drain_pending_open_files

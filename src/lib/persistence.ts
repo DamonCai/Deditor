@@ -20,6 +20,7 @@ const KEY_V2 = "deditor:state:v2";
 const KEY_V1 = "deditor:state:v1";
 
 interface PersistedTab {
+  recoveryId?: string;
   filePath: string | null;
   content: string;
   savedContent: string;
@@ -199,8 +200,8 @@ export async function loadPersisted(): Promise<UiExtras | null> {
     const t = data.tabs[i];
     const disk = settled[i];
     if (!t.filePath) {
-      // Untitled tab: just restore its content as-is.
-      const id = newId();
+      // Preserve recovery identity across restarts, without trusting duplicate ids.
+      const id = t.recoveryId && /^[a-zA-Z0-9-]{1,80}$/.test(t.recoveryId) && !restored.some(tab => tab.id === t.recoveryId) ? t.recoveryId : newId();
       restored.push({
         id,
         filePath: null,
@@ -369,6 +370,7 @@ function doSave(extras: UiExtras): void {
       const dirty = t.content !== t.savedContent;
       const skipContent = binary || (t.filePath != null && !dirty);
       return {
+        recoveryId: t.id,
         filePath: t.filePath,
         content: skipContent ? "" : t.content,
         savedContent: skipContent ? "" : t.savedContent,

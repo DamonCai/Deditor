@@ -3175,6 +3175,61 @@ test(5,'Fishbone cause folding controls stay on diagonal ribs above and below th
     }
   }
 });
+test(21, 'XMind cross-file clipboard saves images and relations and restores the exact archive on undo', async()=>{
+  const source={id:'s',title:'Source',rootTopic:{id:'r',title:'Root',children:{attached:[{id:'a',title:'A',image:{src:'xap:resources/picture.svg',width:80,height:40},href:'#b'},{id:'b',title:'B'}]}},relationships:[{id:'ab',end1Id:'a',end2Id:'b',title:'Copied link'}]};
+  const picture=strToU8('<svg xmlns="http://www.w3.org/2000/svg" width="80" height="40"><rect width="80" height="40" fill="red"/></svg>');
+  await mountXmind(true,zipSync({'content.json':strToU8(JSON.stringify([source])),'resources/picture.svg':picture}));
+  await selectR3('a');await selectR3('b',true);
+  const copied={},copy=new window.Event('copy',{bubbles:true,cancelable:true});
+  Object.defineProperty(copy,'clipboardData',{value:{setData:(key,value)=>{copied[key]=value;}}});
+  await act(async()=>document.querySelector('.xm-canvas').dispatchEvent(copy));
+  assert.ok(copied['application/x-deditor-xmind']);
+  for(const collision of [false,true]) {
+    const target={id:'target',title:'Target',rootTopic:{id:'tr',title:'Target'}};
+    const bytes=zipSync({'content.json':strToU8(JSON.stringify([target])),...(collision?{'resources/picture.svg':strToU8('<svg>blue</svg>')}:{})});
+    await mountXmind(true,bytes);const original=store.getState().tabs[0].content;
+    const paste=new window.Event('paste',{bubbles:true,cancelable:true});
+    Object.defineProperty(paste,'clipboardData',{value:{getData:key=>copied[key]??''}});
+    await act(async()=>document.querySelector('.xm-canvas').dispatchEvent(paste));
+    const pasted=xmindSheets()[0], [a,b]=pasted.rootTopic.children.attached;
+    assert.equal(pasted.relationships[0].end1Id,a.id);assert.equal(pasted.relationships[0].end2Id,b.id);assert.equal(a.href,'#'+b.id);
+    assert.ok(document.querySelector(`[data-topic="${a.id}"] image`).getAttribute('href').startsWith('blob:'));
+    await act(async()=>app.saveFile());
+    const saved=new Uint8Array(Buffer.from(writes.at(-1).data,'base64'));
+    const doc=app.openXmindDocument(saved),name=a.image.src.slice(4);
+    assert.deepEqual(doc.files[name],picture);
+    if(collision)assert.equal(Buffer.from(doc.files['resources/picture.svg']).toString(),'<svg>blue</svg>');
+    await click('Undo');assert.equal(store.getState().tabs[0].content,original);
+    await click('Redo');assert.equal(store.getState().tabs[0].content,xmindUrl(saved));
+    await mountXmind(true,saved);
+    assert.deepEqual(xmindSheets()[0],pasted);
+    assert.ok(document.querySelector(`[data-topic="${a.id}"] image`).getAttribute('href').startsWith('blob:'));
+  }
+});
+test(21, 'XMind consecutive drafts preserve the editor and save the latest text with undo', async()=>{
+  const sheet={id:'perf',title:'Draft regression',rootTopic:{id:'root',title:'Original',children:{attached:Array.from({length:300},(_,i)=>({id:'p'+i,title:'Topic '+i}))}}};
+  await mountXmind(true,zipSync({'content.json':strToU8(JSON.stringify([sheet]))}));
+  const sibling=document.querySelector('[data-topic="p299"]');
+  const transform=sibling.getAttribute('transform');
+  await act(async()=>document.querySelector('[data-topic="root"]').dispatchEvent(new window.MouseEvent('dblclick',{bubbles:true})));
+  const input=document.querySelector('textarea[aria-label="Edit topic text"]');
+  for(const text of ['N','New','New title','New title 中文','New title 中文\nsecond line']) {
+    await act(async()=>setInput(input,text));
+    assert.equal(document.querySelector('textarea[aria-label="Edit topic text"]'),input);
+    assert.equal(input.value,text);
+    assert.equal(document.querySelector('[data-topic="p299"]'),sibling);
+    assert.equal(sibling.getAttribute('transform'),transform);
+  }
+  await act(async()=>app.saveFile());
+  assert.equal(app.openXmindDocument(new Uint8Array(Buffer.from(writes.at(-1).data,'base64'))).sheets[0].rootTopic.title,'New title 中文\nsecond line');
+  await click('Undo');assert.equal(xmindSheets()[0].rootTopic.title,'Original');
+  await click('Redo');assert.equal(xmindSheets()[0].rootTopic.title,'New title 中文\nsecond line');
+  await act(async()=>document.querySelector('[data-topic="root"]').dispatchEvent(new window.MouseEvent('dblclick',{bubbles:true})));
+  const again=document.querySelector('textarea[aria-label="Edit topic text"]');
+  await act(async()=>setInput(again,'Cancelled'));
+  await act(async()=>again.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+  assert.equal(xmindSheets()[0].rootTopic.title,'New title 中文\nsecond line');
+});
 let failed = 0,
   passed = 0;
 const round = process.argv.find((a) => a.startsWith("--round="))?.split("=")[1];

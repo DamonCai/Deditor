@@ -1,3 +1,4 @@
+import { orderFootnoteTree } from "./footnoteOrder";
 import { editableBlockTree } from "./blockTree";
 import { sizedImages } from "./image";
 import { tableListTree } from "./tableLists";
@@ -15,6 +16,7 @@ export function rawRemark(mdx: boolean) {
     referenceLinks(tree as SourceNode);
     sizedImages(tree as SourceNode);
     protectedTree(tree as SourceNode, String(file.value), mdx);
+    if(!mdx)orderFootnoteTree(tree as SourceNode);
   });
 }
 export const rawSchema = $nodeSchema("deditor_raw", () => ({

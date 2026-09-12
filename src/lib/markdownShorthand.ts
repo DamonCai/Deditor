@@ -17,6 +17,9 @@ declare module "mdast" {
   interface Emoji { type: "deditorEmoji"; name: string; value: string }
 }
 
+const emojiNames = Object.keys(emoji).sort();
+export const emojiSuggestions = (prefix: string) => emojiNames.filter(name => name.startsWith(prefix.toLowerCase())).slice(0, 8);
+
 const scripts = new MarkdownIt().use(sub).use(sup);
 export function emojiValue(name: string): string | undefined {
   return Object.prototype.hasOwnProperty.call(emoji, name) ? emoji[name] : undefined;

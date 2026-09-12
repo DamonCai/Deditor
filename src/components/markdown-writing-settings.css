@@ -7,3 +7,11 @@
 .md-image-host[open] { display: grid; gap: 10px; }
 .md-image-host summary { cursor: pointer; font-size: 12px; }
 .md-writing-panel input[aria-invalid="true"] { border-color: var(--danger, #c33); }
+
+.md-history-overlay { position: fixed; inset: 0; z-index: 200; background: #0005; display: grid; place-items: center; }
+.md-history-dialog { width: min(960px, 92vw); height: min(700px, 90vh); padding: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); display: flex; flex-direction: column; gap: 12px; }
+.md-history-actions { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+.md-history-body { display: flex; flex: 1; min-height: 0; gap: 12px; }
+.md-history-list { width: 35%; overflow: auto; }
+.md-history-list .deditor-btn { width: 100%; display: block; white-space: normal; overflow-wrap: anywhere; text-align: left; margin-bottom: 6px; }
+.md-history-body textarea { flex: 1; min-width: 0; resize: none; padding: 12px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-family: monospace; }

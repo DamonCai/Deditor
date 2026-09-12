@@ -49,6 +49,8 @@ export {saveFile,saveFileAs,saveAllDirty,renamePath} from './src/lib/fileio';
 export {renderMarkdown} from './src/lib/markdown';
 export {installCompositionViewport} from './src/lib/markdownVisual/compositionViewport';
 export {loadPersisted,schedulePersist} from './src/lib/persistence';
+export {default as HistoryDialog} from './src/components/MarkdownHistoryDialog';
+export {localMarkdownTarget,headingSourcePosition} from './src/lib/markdownLinks';
 export {default as WritingSettings} from './src/components/MarkdownWritingSettings';
 export {default as ModeSwitch} from './src/components/PreviewModeSwitch';
 export {collectMarkdownImages} from './src/lib/markdownImageCollect';
@@ -71,7 +73,8 @@ const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const render=async(readonly=false)=>{await act(async()=>{root.render(React.createElement(app.Visual,{tabId:'a',readonly,theme:'light'}));await pause(120);});};
 const content=()=>store.getState().tabs.find(t=>t.id==='a').content;
 let passed=0;
-async function test(name,fn){await fn();passed++;console.log('PASS '+name);}
+const testFilter=process.env.DEDITOR_TEST_FILTER ? new RegExp(process.env.DEDITOR_TEST_FILTER) : null;
+async function test(name,fn){if(testFilter && !testFilter.test(name))return;await fn();passed++;console.log('PASS '+name);}
 await render();
 await test('round 1: initial render and readonly transitions are exact no-ops',async()=>{assert.equal(content(),source);await render(true);assert.equal(document.querySelector('.ProseMirror').getAttribute('contenteditable'),'false');await render(false);assert.equal(content(),source);});
 await test('heading hints: only the caret heading is decorated across H1–H6, without changing source or history',async()=>{
@@ -183,7 +186,8 @@ await test('round 5: visual toolbar toggles and converts lists through shared hi
 });
 await test('round 5: readonly empty code block cannot insert a paragraph with ArrowDown',async()=>{
  const codeSource='# Code\n\n```\n\n```\n';
- await act(async()=>store.getState().setContent(codeSource,'a','command'));await render(true);
+ await act(async()=>store.getState().setContent(codeSource,'a','command'));
+ await act(async()=>document.querySelector('.md-code-preview').dispatchEvent(new dom.window.MouseEvent('mousedown',{button:0,bubbles:true})));await render(true);
  await act(async()=>{document.querySelector('.md-code-block .cm-content').dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}));});
  assert.equal(content(),codeSource);await render(false);
 });
@@ -284,6 +288,28 @@ await test('search: Unicode offsets and reopening after long-document edits use 
  await act(async()=>app.markdownHistory(false,'a'));assert.equal(content(),original);
  await act(async()=>document.querySelector('[role="search"] button:last-child').click());
 });
+await test('search replace: capture groups, styles, undo/redo and invalid regex',async()=>{
+ const original='# Search\n\n**item12** item34 scatter cat Cat\n';
+ await act(async()=>{root.render(null);store.getState().setContent(original,'a','command');});await render();
+ await act(async()=>app.getVisualEditor().find());
+ const input=async(index,value)=>act(async()=>{const element=document.querySelectorAll('[role="search"] input')[index];Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(element,value);element.dispatchEvent(new Event('input',{bubbles:true}));});
+ const button=label=>[...document.querySelectorAll('[role="search"] button')].find(button=>button.textContent===label);
+ await input(0,'item(\\d+)');await act(async()=>button('Regex').click());await input(1,'value$1');
+ await act(async()=>button('Replace All').click());
+ assert.match(content(),/\*\*value12\*\* value34/);
+ await act(async()=>app.markdownHistory(false,'a'));assert.equal(content(),original);
+ await act(async()=>app.markdownHistory(true,'a'));assert.match(content(),/value34/);
+ await input(0,'[');assert.ok(document.querySelector('[role="search"] [role="alert"]'));assert.equal(button('Replace All').disabled,true);
+ await act(async()=>document.querySelector('[role="search"] button:last-child').click());
+});
+await test('links: editable body follows modifier-click only, including malformed anchors',async()=>{
+ await act(async()=>{root.render(null);store.getState().setContent('# Destination\n\n[Jump](#destination) [Malformed](#%broken)\n','a','command');});await render();
+ let jumps=0;const heading=document.querySelector('.ProseMirror h1');heading.scrollIntoView=()=>jumps++;
+ const link=document.querySelector('.ProseMirror a');
+ await act(async()=>link.dispatchEvent(new dom.window.MouseEvent('click',{bubbles:true,cancelable:true})));assert.equal(jumps,0);
+ await act(async()=>link.dispatchEvent(new dom.window.MouseEvent('click',{bubbles:true,cancelable:true,metaKey:true})));assert.equal(jumps,1);
+ await act(async()=>document.querySelectorAll('.ProseMirror a')[1].dispatchEvent(new dom.window.MouseEvent('click',{bubbles:true,cancelable:true,ctrlKey:true})));
+});
 await test('accessibility: unchanged controls produce no repeated attribute mutations',async()=>{
  const host=document.createElement('div');host.innerHTML='<div class="handle" data-show="false"></div><div class="milkdown-list-item-block"><div class="label-wrapper"><span class="unchecked"></span></div><div data-content-dom>Task text</div></div>';
  document.body.append(host);const fake={dom:host,editable:true};const dispose=app.installMarkdownAccessibility(fake);
@@ -326,10 +352,32 @@ await test('outline: opening after edits reads current headings and positions',a
  await act(async()=>toggle());assert.match(document.querySelector('.md-visual-toc').textContent,/NewFirst/);
  await act(async()=>toggle());
  await act(async()=>store.getState().setContent('# Replacement\n\n### Third\n','a','command'));
- await act(async()=>toggle());assert.equal(document.querySelectorAll('.md-visual-toc button').length,2);assert.match(document.querySelector('.md-visual-toc').textContent,/Replacement.*Third/);
- await act(async()=>document.querySelectorAll('.md-visual-toc button')[1].click());
+ await act(async()=>toggle());assert.equal(document.querySelectorAll('.md-outline-row button[data-size="sm"]').length,2);assert.match(document.querySelector('.md-visual-toc').textContent,/Replacement.*Third/);
+ await act(async()=>document.querySelectorAll('.md-outline-row button[data-size="sm"]')[1].click());
  assert.equal(app.getVisualEditor().heading,3);
  await act(async()=>toggle());
+});
+await test('outline: collapse, filter and selection highlight keep document unchanged',async()=>{
+ const original='# Parent\n\n## Child\n\n# Other\n';await act(async()=>store.getState().setContent(original,'a','command'));
+ await act(async()=>document.querySelector('.md-visual-controls button:last-child').click());
+ await act(async()=>document.querySelector('.md-visual-toc [aria-expanded]').click());
+ assert.equal([...document.querySelectorAll('.md-outline-row')].some(row=>row.textContent==='Child'),false);
+ await act(async()=>{const input=document.querySelector('.md-visual-toc input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'Child');input.dispatchEvent(new Event('input',{bubbles:true}));});
+ assert.match(document.querySelector('.md-visual-toc').textContent,/Child/);
+ await act(async()=>document.querySelector('.md-outline-row button').click());assert.ok(document.querySelector('.md-visual-toc [aria-current="location"]'));
+ assert.equal(content(),original);await act(async()=>document.querySelector('.md-visual-controls button:last-child').click());
+});
+await test('local links: Unicode, duplicates and escaped filename delimiters',async()=>{
+ assert.deepEqual(app.localMarkdownTarget('next%23part.md#中文','/generated/a.md'),{path:'/generated/next#part.md',anchor:'中文'});
+ assert.equal(app.localMarkdownTarget('literal%2520.md','/generated/a.md').path,'/generated/literal%20.md');
+ assert.equal(app.headingSourcePosition('# 中文\n\n## 中文\n','%E4%B8%AD%E6%96%87-1').line,3);
+});
+await test('lazy code: long documents create code editors only when a block is edited',async()=>{
+ const original=Array.from({length:100},(_,i)=>'```js\nconst value = '+i+';\n```\n').join('\n');
+ await act(async()=>store.getState().setContent(original,'a','command'));
+ assert.ok(document.querySelectorAll('.md-code-editor .cm-editor').length<=1,'only an actively restored code caret may instantiate an editor');
+ await act(async()=>document.querySelector('.md-code-preview').dispatchEvent(new dom.window.MouseEvent('mousedown',{button:0,bubbles:true})));
+ assert.equal(document.querySelectorAll('.md-code-editor .cm-editor').length,1);assert.equal(content(),original);
 });
 await test('reported editing bug: lower reference list text is directly editable',async()=>{
  const original='# Top\n\n+ plain\n+ [label][r] <kbd>key</kbd><br>next\n+ lower\n\n[r]: https://example.com\n';
@@ -359,6 +407,7 @@ await test('reported editing bug: code caret stays in its block and readonly his
  const original='# Top\n\n```js\nconst value = 1;\n```\n\nBottom\n';
  await act(async()=>store.getState().setContent(original,'a','command'));
  const {EditorView}=await import('@codemirror/view');
+ await act(async()=>document.querySelector('.md-code-preview').dispatchEvent(new dom.window.MouseEvent('mousedown',{button:0,bubbles:true})));
  const cm=EditorView.findFromDOM(document.querySelector('.md-code-block .cm-editor'));
  await act(async()=>{cm.focus();cm.dispatch({selection:{anchor:6,head:11}});});assert.equal(app.getVisualEditor().selected,'value');
  await act(async()=>cm.dispatch({changes:{from:6,to:11,insert:'count'},selection:{anchor:11}}));
@@ -822,6 +871,22 @@ await test('P1 inline source: entering, editing, exiting and undo preserve surro
   await act(async()=>app.markdownHistory());assert.equal(content(),original);
  }
 });
+await test('terminal inline HTML: outside caret, input, save and undo never leak its view-only anchor',async()=>{
+ const original='* [引用文字][guide] 和 <kbd>Ctrl</kbd>\n\n[guide]: https://example.com\n';
+ await act(async()=>store.getState().setContent(original,'a','command'));
+ await act(async()=>{app.getVisualEditor().navigate(1,original.indexOf('Ctrl')+5);await pause(30);});
+ const key=name=>document.querySelector('.ProseMirror').dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:name,bubbles:true,cancelable:true}));
+ await act(async()=>key('ArrowRight'));
+ const boundary=document.querySelector('[data-md-mark-boundary]');assert.ok(boundary);
+ assert.equal(content(),original);await act(async()=>app.saveFile());assert.equal(writes.at(-1).content,original);
+ await act(async()=>{
+  const text=document.createTextNode('Z');boundary.after(text);document.getSelection().collapse(text,1);
+  document.querySelector('.ProseMirror').dispatchEvent(new Event('input',{bubbles:true}));await pause(40);
+ });
+ assert.match(content(),/<kbd>Ctrl<\/kbd>Z/);assert.ok(!content().includes('\u200b'));
+ await act(async()=>app.saveFile());assert.equal(writes.at(-1).content,content());
+ await act(async()=>app.markdownHistory());assert.equal(content(),original);
+});
 await test('P1 inline source: cross-block selection, readonly and formatting leave a coherent projection',async()=>{
  const original='Before **word** after.\n\nEnd paragraph.\n';
  await act(async()=>store.getState().setContent(original,'a','command'));
@@ -937,6 +1002,16 @@ await test('P1 enclosing block parse: multiline, quote and table preserve refere
   await act(async()=>root.render(null));await render();assert.deepEqual(shape(),closed);
   await act(async()=>app.markdownHistory());assert.equal(content(),original);
  }
+});
+await test('math: chemistry, document numbering and cross references share renderer output',async()=>{
+ const source='$$\nE=mc^2 \\label{energy}\n$$\n\nChemistry $\\ce{H2O}$ and reference $\\eqref{energy}$\n'.replaceAll('\\n','\n');
+ const html=await app.renderMarkdown(source,{theme:'light',mathAutoNumber:true});
+ const host=document.createElement('div');host.innerHTML=html;
+ assert.equal(host.querySelector('.katex-error'),null,html);
+ assert.ok(host.querySelector('#md-equation-energy'));assert.ok(host.querySelector('a[href="#md-equation-energy"]'));assert.ok(host.querySelector('.tag'));
+ const legacy=await app.renderMarkdown('```flow\nst=>start: Start\n```\n\n```sequence\nA->B: Hello\n```\n'.replaceAll('\\n','\n'),{theme:'light'});
+ const clean=document.createElement('div');clean.innerHTML=app.markdownDisplayHtml(legacy);
+ assert.equal(clean.querySelectorAll('.legacy-diagram').length,2);assert.equal(clean.querySelector('[data-legacy-kind="sequence"]').dataset.legacySource.trim(),'A->B: Hello');
 });
 await test('P3 typewriter: default off, explicit centering and composition exclusion',async()=>{
  const element=document.createElement('div'),scroller=document.createElement('div');document.body.append(scroller);scroller.append(element);
@@ -1127,6 +1202,82 @@ await test('view selector: three Markdown modes leave HTML preview flags indepen
  }
  await act(async()=>root.render(React.createElement(app.ModeSwitch)));
  assert.deepEqual([...document.querySelectorAll('button')].map(b=>b.textContent),['编辑','实时预览','阅读']);
+});
+await test('history UI: restore is undoable and opening a copy preserves the current document',async()=>{
+ const original='# Current version\n';
+ await act(async()=>{root.render(null);store.setState({tabs:[{id:'a',filePath:'/generated/history.md',content:original,savedContent:original}],activeId:'a',language:'en'});});
+ const previous=globalThis.mdInvoke;
+ globalThis.mdInvoke=async(command,args)=>command==='list_markdown_history'?[{id:'123-1',path:store.getState().tabs.find(tab=>tab.id==='a').filePath,timestamp:1000,draft:false,bytes:7}]:command==='read_markdown_history'?'# Older\n':previous(command,args);
+ try {
+  await act(async()=>{root.render(React.createElement(app.HistoryDialog,{tabId:'a',onClose:()=>{}}));await pause(30);});
+  await act(async()=>{document.querySelector('.md-history-list button').click();await pause(30);});
+  assert.equal(document.querySelector('.md-history-body textarea').value,'# Older\n');
+  await act(async()=>[...document.querySelectorAll('.md-history-actions button')].find(button=>button.textContent==='Restore in editor (undoable)').click());
+  assert.equal(content(),'# Older\n');await act(async()=>app.markdownHistory(false,'a'));assert.equal(content(),original);
+ } finally {globalThis.mdInvoke=previous;await act(async()=>root.render(null));}
+});
+await test('shared surface: HTML preview and editable children switch safely with custom document CSS',async()=>{
+ await act(async()=>root.render(null));const original=content(),settings=store.getState().markdownSettings;
+ const Sheet=globalThis.CSSStyleSheet,Rule=globalThis.CSSRule;
+ globalThis.CSSRule=dom.window.CSSRule;
+ globalThis.CSSStyleSheet=class {replaceSync(text){const style=document.createElement('style');style.textContent=text;document.head.append(style);this.cssRules=style.sheet.cssRules;style.remove();}};
+ try {
+  for(const css of ['', 'p { color: #123456; }']) {
+   await act(async()=>store.setState({markdownSettings:{...settings,customCss:css}}));
+   for(const component of [app.Preview,app.Visual,app.Preview]) {
+    await act(async()=>{root.render(React.createElement(component,{tabId:'a',theme:'light'}));await pause(160);});
+    await act(async()=>pause(120));
+    const surface=document.querySelector('.md-surface');assert.ok(surface);assert.equal(surface.querySelector('style'),null);
+    if(css) assert.equal(surface.previousElementSibling.tagName,'STYLE');
+    assert.equal(content(),original);
+   }
+  }
+ } finally {globalThis.CSSStyleSheet=Sheet;globalThis.CSSRule=Rule;await act(async()=>{root.render(null);store.setState({markdownSettings:settings});});}
+});
+await test('lifecycle: cancelled startup finishes before disposal and cannot clear the replacement editor',async()=>{
+ const {Editor:MilkdownEditor}=await import('@milkdown/kit/core');
+ await act(async()=>root.render(null));
+ const make=MilkdownEditor.make;let release,started=false,destroys=0,first=true;
+ const gate=new Promise(resolve=>release=resolve);
+ MilkdownEditor.make=function(...args){
+  const editor=make.apply(this,args);if(first){first=false;const create=editor.create,destroy=editor.destroy;
+   editor.create=async()=>{const result=await create();started=true;await gate;return result;};
+   editor.destroy=async(...args)=>{destroys++;return destroy(...args);};
+  }return editor;
+ };
+ try {
+  await render();assert.equal(started,true);
+  await act(async()=>root.render(null));assert.equal(destroys,0,'never destroy while create is outstanding');
+  await render();const replacement=app.getVisualEditor();assert.ok(replacement);
+  await act(async()=>{release();await pause(70);});
+  assert.equal(destroys,1);assert.equal(app.getVisualEditor(),replacement);assert.equal(document.querySelectorAll('.ProseMirror').length,1);
+ } finally {release();MilkdownEditor.make=make;await act(async()=>root.render(null));}
+});
+await test('lifecycle: missing context failure can retry without losing source or polling destroy forever',async()=>{
+ const {Editor:MilkdownEditor,EditorStatus}=await import('@milkdown/kit/core');
+ const {createSlice}=await import('@milkdown/kit/ctx');
+ await act(async()=>root.render(null));const original=content();
+ const make=MilkdownEditor.make;let first=true,broken,destroys=0;
+ MilkdownEditor.make=function(...args){
+  const editor=make.apply(this,args);
+  if(first){first=false;broken=editor;const destroy=editor.destroy;
+   editor.destroy=async(...args)=>{destroys++;return destroy(...args);};
+   // Same display name, different identity: reproduce a second core module.
+   const otherNodes=createSlice([], 'nodes');
+   editor.use(ctx=>async()=>{assert.ok(ctx.get('nodes'));ctx.get(otherNodes);});
+  }return editor;
+ };
+ try {
+  await render();assert.equal(broken.status,EditorStatus.OnCreate);
+  assert.match(document.querySelector('[role=alert]').textContent,/Context "nodes" not found/);
+  assert.equal(content(),original);assert.equal(app.getVisualEditor(),null);assert.equal(destroys,0);
+  await act(async()=>{[...document.querySelectorAll('button')].find(button=>button.textContent==='Reload editor').click();await pause(150);});
+  assert.equal(document.querySelector('[role=alert]'),null);assert.ok(app.getVisualEditor());
+  assert.equal(content(),original);assert.equal(document.querySelectorAll('.ProseMirror').length,1);assert.equal(destroys,0);
+  await act(async()=>{app.getVisualEditor().navigate(1,1);app.getVisualEditor().insert('RECOVERED ',false);});
+  await act(async()=>app.saveFile());assert.equal(writes.at(-1).content,content());
+  await act(async()=>app.markdownHistory());assert.equal(content(),original);
+ } finally {MilkdownEditor.make=make;await act(async()=>root.render(null));}
 });
 await test('lifecycle: StrictMode never creates the abandoned editor or duplicates live views',async()=>{
  const {Editor:MilkdownEditor}=await import('@milkdown/kit/core');

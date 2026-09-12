@@ -1,3 +1,4 @@
+import { orderFootnoteTree } from "./footnoteOrder";
 import { remarkMark } from "remark-mark-highlight";
 import { remarkShorthand } from "../markdownShorthand";
 import { editableBlockTree } from "./blockTree";
@@ -15,7 +16,7 @@ export interface SourceNode {
 }
 const syntax = unified().use(remarkParse).use(remarkGfm, { singleTilde: false }).use(remarkMark).use(remarkShorthand).use(remarkMath).use(remarkFrontmatter, ["yaml", "toml"]);
 export function sourceTree(source: string): SourceNode { return syntax.parse(source) as SourceNode; }
-function editingTree(source: string): SourceNode { const tree = sourceTree(source); editableBlockTree(tree, source); return tree; }
+function editingTree(source: string): SourceNode { const tree = sourceTree(source); editableBlockTree(tree, source); orderFootnoteTree(tree); return tree; }
 const protectedTypes = new Set(["html", "definition", "linkReference", "imageReference", "yaml", "toml"]);
 export function protectedBlock(node: SourceNode): boolean {
   if (node.type === "paragraph" && /^\[(?:toc|\[toc\])\]$/i.test(node.children?.map(n => n.value ?? "").join("") ?? "")) return true;
@@ -181,6 +182,7 @@ export class MarkdownDocument {
   reset(source: string) { this.source = source; this.doc = this.parse(source); this.index(); return this.doc; }
   apply(next: ProseNode): string {
     if (sameSourceNode(next, this.doc)) { this.doc = next; return this.source; }
+    if (this.doc.content.content.some(node => node.type.name === "footnote_definition") || next.content.content.some(node => node.type.name === "footnote_definition")) return this.applyFootnoteProjection(next);
     const before = children(this.doc), after = children(next);
     let first = 0;
     while (first < before.length && first < after.length && sameSourceNode(before[first], after[first])) first++;
@@ -230,6 +232,80 @@ export class MarkdownDocument {
     this.doc = next;
     return this.source;
   }
+  /** A footer is a display projection: patch disjoint source blocks independently. */
+  private applyFootnoteProjection(next: ProseNode): string {
+    const before = children(this.doc), after = children(next), eol = this.source.includes("\r\n") ? "\r\n" : "\n";
+    type Edit = {from:number;to:number;insert:string};
+    const edits: Edit[] = [], assigned = new Map<ProseNode,{ast:SourceNode;edit?:Edit;relative?:number}>();
+    const definitions = this.ast.filter(node => node.type === "footnoteDefinition").map(node=>this.source.slice(...range(node))).join("\n\n");
+    const serialize = (node:ProseNode) => node.type.name === "deditor_raw" ? node.textContent : this.serialize(next.type.create(null,node)).replace(/\n$/,"").replace(/\r?\n/g,eol);
+    const offsetTree = (node:SourceNode, amount:number):SourceNode => ({...node,position:node.position?{start:{offset:(node.position.start.offset??0)+amount},end:{offset:(node.position.end.offset??0)+amount}}:undefined,children:node.children?.map(child=>offsetTree(child,amount))});
+    const replace = (oldIndex:number|undefined, node:ProseNode|undefined, insertion:number) => {
+      const old = oldIndex === undefined ? undefined : before[oldIndex], ast = oldIndex === undefined ? undefined : this.ast[oldIndex];
+      if(old && node && ast && sameSourceNode(old,node)){assigned.set(node,{ast});return;}
+      const [from,to] = ast ? range(ast) : [insertion,insertion];
+      let raw = node ? serialize(node) : "";
+      if(ast && old && node && node.type.name !== "deditor_raw") {
+        const patch = patchText(this.source.slice(from,to),ast,old,node) ?? patchTasks(this.source.slice(from,to),ast,old,node);
+        if(patch !== null) {
+          const parsed=this.parse(patch + (definitions ? "\n\n"+definitions : ""));
+          const candidate=children(parsed).find(child=>child.type===node.type && (node.type.name!=="footnote_definition" || child.attrs.identifier===node.attrs.identifier));
+          if(candidate && this.serialize(parsed.type.create(null,candidate))===this.serialize(next.type.create(null,node)))raw=patch;
+        }
+      }
+      const priorInsertion = edits.some(edit => edit.from === from && edit.to === from && edit.insert);
+      const leading = !ast && (priorInsertion || from>0 && !this.source.slice(0,from).endsWith(eol+eol)) ? eol+eol : "";
+      const trailing = !ast && from<this.source.length ? eol+eol : "";
+      const edit={from,to,insert:leading+raw+trailing};edits.push(edit);
+      if(node) {
+        const parsed=(editingTree(raw + (definitions ? "\n\n"+definitions : "")).children??[]).filter(node => range(node)[0] < raw.length);
+        const local=parsed.length===1 ? parsed[0] : {type:"deditorRaw",position:{start:{offset:0},end:{offset:raw.length}}};
+        assigned.set(node,{ast:local,edit,relative:leading.length});
+      }
+    };
+    const oldBody=before.flatMap((node,index)=>node.type.name === "footnote_definition"?[]:[index]);
+    const newBody=after.filter(node=>node.type.name !== "footnote_definition");
+    let first=0;while(first<oldBody.length && first<newBody.length && sameSourceNode(before[oldBody[first]],newBody[first])) {replace(oldBody[first],newBody[first],0);first++;}
+    let oldEnd=oldBody.length,newEnd=newBody.length;
+    while(oldEnd>first && newEnd>first && sameSourceNode(before[oldBody[oldEnd-1]],newBody[newEnd-1])) {replace(oldBody[oldEnd-1],newBody[newEnd-1],0);oldEnd--;newEnd--;}
+    if(oldEnd-first===newEnd-first) {
+      for(let i=first;i<oldEnd;i++)replace(oldBody[i],newBody[i],0);
+    } else {
+      const at=first<oldBody.length ? range(this.ast[oldBody[first]])[0] : this.source.length;
+      const newNodes=newBody.slice(first,newEnd), raw=newNodes.map(serialize).join(eol+eol);
+      // Remove only body spans: definitions between them retain their exact original bytes.
+      for(let i=first;i<oldEnd;i++)replace(oldBody[i],undefined,0);
+      if(raw) {
+        const leading=at>0&&!this.source.slice(0,at).endsWith(eol+eol)?eol+eol:"";
+        const edit={from:at,to:at,insert:leading+raw+(at<this.source.length?eol+eol:"")};edits.push(edit);
+        let offset=leading.length;
+        newNodes.forEach(node=>{const part=serialize(node), parsed=(editingTree(part + (definitions ? "\n\n"+definitions : "")).children??[]).filter(node => range(node)[0] < part.length);assigned.set(node,{ast:parsed[0]??{type:"deditorRaw",position:{start:{offset:0},end:{offset:part.length}}},edit,relative:offset});offset+=part.length+2*eol.length;});
+      }
+    }
+    const unused = before.flatMap((node,index)=>node.type.name === "footnote_definition"?[index]:[]);
+    for(const node of after.filter(node=>node.type.name === "footnote_definition")) {
+      const index=unused.findIndex(index=>before[index].attrs.identifier===node.attrs.identifier);
+      replace(index<0?undefined:unused.splice(index,1)[0],node,this.source.length);
+    }
+    unused.forEach(index=>replace(index,undefined,0));
+    // Stable tie ordering puts an insertion before a deletion at the same source boundary.
+    edits.sort((a,b)=>a.from-b.from || a.to-b.to);
+    const shift = (position:number, own?:Edit) => {
+      const ownIndex = own ? edits.indexOf(own) : edits.length;
+      return edits.reduce((delta, edit, index) => {
+        if (edit === own || edit.to > position) return delta;
+        if (edit.from === position && index >= ownIndex) return delta;
+        return delta + edit.insert.length - (edit.to - edit.from);
+      }, 0);
+    };
+    this.ast=after.map(node=>{
+      const entry=assigned.get(node);if(!entry)throw new Error("Missing Markdown footer source mapping");
+      if(entry.edit)return offsetTree(entry.ast,entry.edit.from+shift(entry.edit.from,entry.edit)+(entry.relative??0));
+      return offsetTree(entry.ast,shift(range(entry.ast)[0]));
+    });
+    for(const edit of [...edits].reverse())this.source=this.source.slice(0,edit.from)+edit.insert+this.source.slice(edit.to);
+    this.doc=next;return this.source;
+  }
   private textRanges(node: ProseNode, index: number, start: number) {
     const ast = this.ast[index], leaves: SourceNode[] = [];
     if (!ast) return [];
@@ -268,10 +344,12 @@ export class MarkdownDocument {
     return found;
   }
   positionAtSource(offset: number) {
-    let pos = 1;
+    let pos = 1, closestEnd = -1, matched = false;
     this.doc.forEach((node, start, index) => {
       const [from, to] = this.ast[index] ? range(this.ast[index]) : [0, 0];
-      if (offset >= from && (offset <= to || index === this.doc.childCount - 1)) {
+      if (!matched && offset > to && to > closestEnd) {closestEnd=to;pos=start+node.nodeSize-1;}
+      if (offset >= from && offset <= to) {
+        matched=true;
         pos = start + Math.min(node.nodeSize - 1, Math.max(1, offset - from + 1));
         const segment = this.textRanges(node, index, start).find(r => offset >= r.from && offset <= r.to);
         if (segment) pos = segment.pos + offset - segment.from;

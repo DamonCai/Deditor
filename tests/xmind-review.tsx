@@ -1,4 +1,5 @@
 import { richNestedSheet } from "./fixtures/xmind-rich-nested";
+import { clipboardArchive } from './fixtures/xmind-clipboard';
 import { foldableTopicIds, walkTopics } from "../src/lib/xmind/document";
 // Isolated manual review: only generated fixture data, no native IO or saved state.
 import React from "react";
@@ -32,7 +33,10 @@ const richNested = ['leftHeaded','rightHeaded'].map((side, i) => {
   walkTopics(sheet.rootTopic,topic=>{if(ids.includes(topic.id))topic.branch='folded';topic.id=`nested-${i}-${topic.id}`;topic.boundaries?.forEach(group=>{group.id=`nested-${i}-${group.id}`;});});
   return sheet;
 });
-const archive = probe === 'unicode-labels' ? sampleArchive([{id:'unicode-labels',title:'Unicode labels',rootTopic:{id:'unicode-root',title:'Labels',children:{attached:['👨‍👩‍👧‍👦','👍🏽','🇨🇳','e\u0301'].map((cluster,i)=>({id:`unicode-${i}`,title:`Label ${i+1}`,labels:[cluster.repeat(30)]}))}}}])
+const clipboardProbe = ({'clipboard-source':'source','clipboard-missing':'missing','clipboard-collision':'collision'} as const)[probe as 'clipboard-source'|'clipboard-missing'|'clipboard-collision'];
+const archive = clipboardProbe ? clipboardArchive(clipboardProbe)
+  : probe === 'performance' ? sampleArchive([{id:'performance',title:'性能验证 · 1001 节点',rootTopic:{id:'perf-root',title:'性能验证',children:{attached:Array.from({length:20},(_,i)=>({id:`perf-${i}`,title:`分支 ${i+1}`,children:{attached:Array.from({length:49},(_,j)=>({id:`perf-${i}-${j}`,title:`自建主题 ${i+1} / ${j+1}`}))}}))}}}])
+  : probe === 'unicode-labels' ? sampleArchive([{id:'unicode-labels',title:'Unicode labels',rootTopic:{id:'unicode-root',title:'Labels',children:{attached:['👨‍👩‍👧‍👦','👍🏽','🇨🇳','e\u0301'].map((cluster,i)=>({id:`unicode-${i}`,title:`Label ${i+1}`,labels:[cluster.repeat(30)]}))}}}])
   : probe === "native-title-width" ? sampleArchive([{id:'native-width',title:'Default title width',rootTopic:{id:'width-root',title:'标签省略与超出三行',children:{attached:[{id:'width-main',title:'Native Review20 symmetric up',children:{attached:[{id:'width-detail',title:'中文标题宽度检查'.repeat(2)}]}},{id:'width-words',title:'alpha bravo charlie delta echo',style:{properties:{'fo:max-width':'130'}}},{id:'width-explicit',title:'标签省略与超出三行',style:{properties:{'fo:max-width':'130'}}}]}}}])
   : probe === "rich-nested" ? sampleArchive(richNested)
   : probe === "content-combinations" ? sampleArchive(contentCombinationSheets())
@@ -60,8 +64,8 @@ const archive = probe === 'unicode-labels' ? sampleArchive([{id:'unicode-labels'
   ? new Uint8Array(await (await fetch(`/tests/artifacts/xmind-native-round2/${probe}.xmind`)).arrayBuffer())
   : sampleArchive(sheets);
 const content = bytesToXmindDataUrl(archive);
-useEditorStore.setState({ tabs: [{ id: "review", filePath: "/generated/interaction-review.xmind", content, savedContent: content }],
-  activeId: "review", language: "zh", theme: dark ? "dark" : "light" });
+useEditorStore.setState({ tabs: [{ id: probe??"review", filePath: "/generated/interaction-review.xmind", content, savedContent: content }],
+  activeId: probe??"review", language: "zh", theme: dark ? "dark" : "light" });
 function Review() {
   const tab = useEditorStore((state) => state.tabs[0]);
   return <main style={{ height: "100vh" }}><XmindView tabId={tab.id} dataUrl={tab.content} filePath={tab.filePath} /></main>;

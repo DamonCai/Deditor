@@ -14,6 +14,7 @@ import {
 } from "react";
 import { dataUrlToBytes } from "../lib/xmind/parse";
 import { bytesToXmindDataUrl } from "../lib/xmind/edit";
+import { withPastedResources } from '../lib/xmind/clipboard';
 import {
   openDocument,
   writeDocument,
@@ -45,12 +46,15 @@ interface Props {
   filePath: string | null;
   tabId?: string;
 }
-interface Session {
+interface DocumentRevision {
   doc: XmindDocument;
   sheets: Sheet[];
-  past: Sheet[][];
-  future: Sheet[][];
 }
+interface Session extends DocumentRevision {
+  past: DocumentRevision[];
+  future: DocumentRevision[];
+}
+const revision = ({doc, sheets}: DocumentRevision): DocumentRevision => ({doc, sheets});
 interface CachedSession {
   content: string;
   session: Session;
@@ -213,11 +217,13 @@ export default function XmindView({ dataUrl, tabId }: Props) {
       if (!s || !s.doc.editable || !tabId) return;
       try {
         const sheets = editDocument(s.sheets, sheetId, command);
+        const doc = command.type==='paste' && command.resources ? withPastedResources(s.doc, sheets, command.resources) : s.doc;
         if (sheets !== s.sheets)
           publish({
             ...s,
+            doc,
             sheets,
-            past: [...s.past.slice(-49), s.sheets],
+            past: [...s.past.slice(-49), revision(s)],
             future: [],
           });
       } catch (err) {
@@ -245,12 +251,12 @@ export default function XmindView({ dataUrl, tabId }: Props) {
     const s = current.current;
     if (!s?.past.length) return;
     try {
-      restoreSelection(s.past[s.past.length - 1],s.sheets);
+      restoreSelection(s.past[s.past.length - 1].sheets,s.sheets);
       publish({
         ...s,
-        sheets: s.past[s.past.length - 1],
+        ...s.past[s.past.length - 1],
         past: s.past.slice(0, -1),
-        future: [s.sheets, ...s.future],
+        future: [revision(s), ...s.future],
       });
     } catch (err) {
       logError("xmind undo failed", err);
@@ -261,11 +267,11 @@ export default function XmindView({ dataUrl, tabId }: Props) {
     const s = current.current;
     if (!s?.future.length) return;
     try {
-      restoreSelection(s.future[0],s.sheets);
+      restoreSelection(s.future[0].sheets,s.sheets);
       publish({
         ...s,
-        sheets: s.future[0],
-        past: [...s.past, s.sheets],
+        ...s.future[0],
+        past: [...s.past, revision(s)],
         future: s.future.slice(1),
       });
     } catch (err) {
@@ -571,6 +577,9 @@ export default function XmindView({ dataUrl, tabId }: Props) {
           onUndo={undo}
           onRedo={redo}
           resources={resources}
+          resourceFiles={session.doc.files}
+          documentId={tabId}
+          onClipboardError={(err)=>setError(String(err))}
           query={query}
           camera={cameras.current.get(sheet.id)}
           onCamera={saveCamera}
@@ -839,7 +848,7 @@ export default function XmindView({ dataUrl, tabId }: Props) {
                 publish({
                   ...s,
                   sheets: [...s.sheets, next],
-                  past: [...s.past, s.sheets],
+                  past: [...s.past.slice(-49), revision(s)],
                   future: [],
                 });
                 changeSheet(next.id);

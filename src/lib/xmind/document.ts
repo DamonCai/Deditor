@@ -193,7 +193,7 @@ export type Command =
     }
   | { type: "parent"; id: string; topic: Topic }
   | { type: "delete"; ids: string[] }
-  | { type: "paste"; parent: string; topics: Topic[] }
+  | { type: "paste"; parent: string; topics: Topic[]; relationships?: Relationship[]; resources?: Record<string, Uint8Array> }
   | { type: "move-many"; ids: string[]; parent: string; before?: string; after?: string;
       positions?: Record<string, { x: number; y: number }> }
   | {
@@ -470,6 +470,14 @@ export function editDocument(
         0,
         ...structuredClone(incoming),
       );
+      if(command.type==='paste' && command.relationships?.length) {
+        const relationIds=new Set((sheet.relationships??[]).map(relation=>relation.id));
+        for(const relation of command.relationships) {
+          if(!relation.id||relationIds.has(relation.id)||!ids.has(relation.end1Id)||!ids.has(relation.end2Id))throw new Error('Invalid pasted relationship');
+          relationIds.add(relation.id);
+        }
+        sheet.relationships=[...sheet.relationships??[],...structuredClone(command.relationships)];
+      }
       break;
     }
     case "delete":

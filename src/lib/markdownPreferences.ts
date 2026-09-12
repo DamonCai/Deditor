@@ -1,5 +1,12 @@
 export interface MarkdownPreferences {
   documentTheme: "default" | "compact";
+  customCss: string;
+  mathAutoNumber: boolean;
+  spellcheck: boolean;
+  codeLineNumbers: boolean;
+  codeWrap: boolean;
+  codeIndent: number;
+  defaultCodeLanguage: string;
   focusParagraph: boolean;
   typewriter: boolean;
   imageDirectory: string;
@@ -7,7 +14,7 @@ export interface MarkdownPreferences {
   preserveImageTargets: boolean;
   exportTemplate: "default" | "report" | "compact";
 }
-export const defaultMarkdownPreferences: MarkdownPreferences = { documentTheme: "default", focusParagraph: false, typewriter: false, imageDirectory: "assets", picgoEndpoint: "http://127.0.0.1:36677/upload", preserveImageTargets: true, exportTemplate: "default" };
+export const defaultMarkdownPreferences: MarkdownPreferences = { documentTheme: "default", customCss: "", mathAutoNumber: false, spellcheck: false, codeLineNumbers: true, codeWrap: true, codeIndent: 2, defaultCodeLanguage: "", focusParagraph: false, typewriter: false, imageDirectory: "assets", picgoEndpoint: "http://127.0.0.1:36677/upload", preserveImageTargets: true, exportTemplate: "default" };
 export function imageDirectory(value: string) {
   const normalized = value.trim().replace(/\\/g, "/").replace(/\/$/, "");
   const prefix = normalized.match(/^(?:[a-z]:\/|\/\/|\/)/i)?.[0] ?? "";
@@ -24,6 +31,13 @@ export function picgoEndpoint(value: string): string | null {
 }
 export function normalizeMarkdownPreferences(input: Partial<MarkdownPreferences> | null | undefined): MarkdownPreferences {
   return { documentTheme: ["default", "compact"].includes(input?.documentTheme ?? "") ? input!.documentTheme! : "default",
+    customCss: typeof input?.customCss === "string" ? input.customCss.slice(0,32768) : "",
+    mathAutoNumber: input?.mathAutoNumber === true,
+    spellcheck: input?.spellcheck === true,
+    codeLineNumbers: input?.codeLineNumbers !== false,
+    codeWrap: input?.codeWrap !== false,
+    codeIndent: [2, 4, 8].includes(input?.codeIndent ?? 2) ? input?.codeIndent ?? 2 : 2,
+    defaultCodeLanguage: typeof input?.defaultCodeLanguage === "string" && /^[a-zA-Z0-9_+#.-]{0,40}$/.test(input.defaultCodeLanguage) ? input.defaultCodeLanguage : "",
     focusParagraph: input?.focusParagraph === true, typewriter: input?.typewriter === true,
     imageDirectory: imageDirectory(typeof input?.imageDirectory === "string" ? input.imageDirectory : "assets"),
     picgoEndpoint: picgoEndpoint(typeof input?.picgoEndpoint === "string" ? input.picgoEndpoint : "") ?? defaultMarkdownPreferences.picgoEndpoint,

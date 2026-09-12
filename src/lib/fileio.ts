@@ -393,6 +393,11 @@ export function closeTabById(id: string): Promise<boolean> {
         tStatic("fileio.unsavedClose", { name: displayName(tab.filePath) }),
       );
       if (choice === "cancel") return false;
+      if (choice === "discard" && isMarkdown(tab.filePath)) {
+        // Keep a recoverable checkpoint even if the last persistence debounce has not run.
+        const latest = useEditorStore.getState().tabs.find(t => t.id === id);
+        if (latest) await invoke("record_markdown_draft", {path: latest.filePath ?? `untitled:${id}`, content: latest.content}).catch(error => logWarn(`Markdown draft history: ${error}`));
+      }
       if (choice === "save") {
         try { if (!await saveTab(id)) return false; }
         catch { return false; }

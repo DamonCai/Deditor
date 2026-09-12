@@ -1,5 +1,7 @@
 import { richNestedSheet } from "../tests/fixtures/xmind-rich-nested";
 import { bytesToXmindDataUrl } from '../src/lib/xmind/edit';
+import { copyTopicPayload, prepareTopicPaste, withPastedResources } from '../src/lib/xmind/clipboard';
+import { appendArchiveEntries } from '../src/lib/xmind/archive';
 import { createSceneBuilder } from '../src/lib/xmind/scene';
 import { moveOrthogonalSegment } from '../src/lib/xmind/flexibleRelationship';
 import { smartColorSheets } from '../tests/fixtures/xmind-smart-colors';
@@ -2097,5 +2099,58 @@ test(21, 'layout reuse invalidates on geometry, folds, external documents and fo
   const otherMeasure = (text: string, size: number) => { calls++; return text.length * size; };
   calls = 0; const resized = builder(next[0], folds, otherMeasure); assert.ok(calls > 0);
   assert.deepEqual(resized, buildScene(next[0], folds, otherMeasure));
+});
+test(21, 'clipboard carries shared image bytes, relationships and links across files without overwriting resources',()=>{
+  const source:Sheet={id:'source',title:'Source',rootTopic:{id:'r',title:'Root',children:{attached:[
+    {id:'a',title:'A',image:{src:'xap:resources/picture.svg'},href:'#b',boundaries:[{id:'g',range:'(0,0)'}],children:{attached:[{id:'child',title:'Child',href:'xmind:#outside'}]}},
+    {id:'b',title:'B',image:{src:'xap:resources/picture.svg'},href:'https://example.test/'},
+    {id:'outside',title:'Outside'}]}},relationships:[{id:'rel',end1Id:'a',end2Id:'b',title:'A to B',style:{properties:{'line-color':'#123456'}}},{id:'external',end1Id:'a',end2Id:'outside'}]};
+  const selected=source.rootTopic.children!.attached!.slice(0,2), picture=strToU8('<svg>source</svg>');
+  const raw=copyTopicPayload(selected,source,{'resources/picture.svg':picture},'source');
+  for(const existing of [undefined,strToU8('<svg>destination</svg>'),picture]) {
+    const files={'content.json':strToU8(JSON.stringify([{id:'target',title:'Target',rootTopic:{id:'target-root',title:'Target'}}])),
+      'metadata.json':strToU8('{"keep":true}'),...(existing?{'resources/picture.svg':existing}:{})};
+    const doc=openDocument(zipSync(files)), pasted=prepareTopicPaste(raw,doc.files,'target');
+    const [a,b]=pasted.topics;
+    assert.notEqual(a.id,'a');assert.notEqual(b.id,'b');assert.equal(a.href,'#'+b.id);
+    assert.equal(a.children!.attached![0].href,undefined);assert.equal(b.href,'https://example.test/');
+    assert.equal(pasted.relationships.length,1);assert.equal(pasted.relationships[0].end1Id,a.id);assert.equal(pasted.relationships[0].end2Id,b.id);
+    assert.notEqual(a.boundaries![0].id,'g');assert.equal(a.image!.src,b.image!.src);
+    const sheets=editDocument(doc.sheets,'target',{type:'paste',parent:'target-root',...pasted});
+    const changed=withPastedResources(doc,sheets,pasted.resources), saved=writeDocument(changed,sheets), reopened=openDocument(saved);
+    assert.deepEqual(reopened.sheets,sheets);
+    const name=a.image!.src!.slice(4);assert.deepEqual(reopened.files[name],picture);
+    if(existing)assert.deepEqual(reopened.files['resources/picture.svg'],existing);
+    assert.deepEqual(reopened.files['metadata.json'],doc.files['metadata.json']);
+    if(existing===picture){assert.equal(Object.keys(pasted.resources).length,0);assert.equal(changed,doc);}
+    else assert.ok(JSON.parse(strFromU8(reopened.files['manifest.json']))['file-entries'][name]);
+    assert.deepEqual(writeDocument(doc,doc.sheets),doc.original);
+    assert.deepEqual(writeDocument(changed,sheets),saved);
+  }
+  assert.equal(prepareTopicPaste(raw,{},'source').topics[0].children!.attached![0].href,'xmind:#outside');
+});
+test(21, 'clipboard rejects malformed resources, duplicate IDs and foreign relationship endpoints atomically',()=>{
+  const sheet:Sheet={id:'s',title:'S',rootTopic:{id:'r',title:'R',image:{src:'xap:resources/a.png'}}};
+  const raw=copyTopicPayload([sheet.rootTopic],sheet,{'resources/a.png':new Uint8Array([0,127,128,255])},'s');
+  for(const corrupt of [
+    (p:any)=>{p.resources={};}, (p:any)=>{p.resources['resources/a.png']='not base64!';},
+    (p:any)=>{p.topics.push(p.topics[0]);}, (p:any)=>{p.relationships=[{id:'bad',end1Id:'r',end2Id:'missing'}];},
+    (p:any)=>{p.topics[0].image.src='xap:resources/../content.json';p.resources['resources/../content.json']='AA==';},
+  ]) {const payload=JSON.parse(raw);corrupt(payload);assert.throws(()=>prepareTopicPaste(JSON.stringify(payload),{},'target'));}
+  assert.throws(()=>copyTopicPayload([sheet.rootTopic],sheet,{},'s'),/resource/);
+});
+test(21, 'archive appending retains existing compressed data and comments and refuses overwrites',()=>{
+  const original=zipSync({'content.json':strToU8('[]'),'resources/old.bin':new Uint8Array(10000).fill(23)});
+  const before=new DataView(original.buffer,original.byteOffset,original.byteLength);
+  const localEnd=before.getUint32(original.length-6,true);
+  const result=appendArchiveEntries(original,{'resources/中文.svg':strToU8('<svg>new</svg>')});
+  assert.deepEqual(result.subarray(0,localEnd),original.subarray(0,localEnd));
+  assert.deepEqual(unzipSync(result)['resources/old.bin'],unzipSync(original)['resources/old.bin']);
+  assert.equal(strFromU8(unzipSync(result)['resources/中文.svg']),'<svg>new</svg>');
+  assert.throws(()=>appendArchiveEntries(original,{'content.json':strToU8('bad')}),/already exists/);
+  const comment=strToU8('archive comment'), commented=new Uint8Array(original.length+comment.length);
+  commented.set(original);commented.set(comment,original.length);new DataView(commented.buffer).setUint16(original.length-2,comment.length,true);
+  const appended=appendArchiveEntries(commented,{'resources/new.bin':new Uint8Array([2])});
+  assert.deepEqual(appended.subarray(appended.length-comment.length),comment);
 });
 console.log(`${passed} XMind tests passed`);

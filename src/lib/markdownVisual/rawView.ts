@@ -1,5 +1,6 @@
 import { markdownDisplayHtml, hydrateMarkdownDisplay } from "../markdownDisplay";
 import { useEditorStore } from "../../store/editor";
+import { orderFootnoteTree } from "./footnoteOrder";
 import { sourceTree, range } from "./document";
 import type { Node as ProseNode } from "@milkdown/kit/prose/model";
 import type { EditorView as ProseView, NodeView } from "@milkdown/kit/prose/view";
@@ -33,7 +34,8 @@ export function rawView(filePath: string | null, tabId: string) {
       preview.title = view.editable ? tStatic("md.editSourceBlock") : "";
       if (cm) return;
       const source = useEditorStore.getState().tabs.find(t => t.id === tabId)?.content ?? "";
-      const ast = sourceTree(source).children ?? [];
+      const tree = sourceTree(source); orderFootnoteTree(tree);
+      const ast = tree.children ?? [];
       const definitions = ast.filter(n => n.type === "definition").map(n => source.slice(...range(n))).join("\n");
       let index = 0; view.state.doc.forEach((_node, offset, i) => { if (offset === getPos()) index = i; });
       const start = ast[index] ? range(ast[index])[0] : 0;

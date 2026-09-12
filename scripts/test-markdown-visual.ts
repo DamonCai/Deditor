@@ -1,3 +1,6 @@
+import { footnoteOrder } from "../src/lib/markdownVisual/footnoteOrder";
+import { markdownInputAssist } from "../src/lib/markdownVisual/inputAssist";
+import { useEditorStore } from "../src/store/editor";
 import { readFileSync } from "node:fs";
 import { shorthandRemark, highlightRemark, shorthandMarks, emojiSchema, shorthandInputRules, configureShorthand } from "../src/lib/markdownVisual/shorthand";
 import { strikethroughInputRule } from "@milkdown/kit/preset/gfm";
@@ -5,7 +8,7 @@ import { editableBlockquote, footnoteReference, footnoteDefinition, footnoteUpda
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { MarkdownSession } from "../src/lib/markdownSession";
-import { MarkdownSearch } from "../src/lib/markdownVisual/search";
+import { MarkdownSearch, markdownReplacement } from "../src/lib/markdownVisual/search";
 import { nativeMarkdownCursor } from "../src/lib/markdownVisual/cursor";
 const dom = new JSDOM('<!doctype html><html><body><div id="editor"></div></body></html>', { url: "http://localhost", pretendToBeVisual: true });
 for (const name of ["window", "document", "Node", "HTMLElement", "Element", "MutationObserver", "DOMParser", "DOMRect", "Text", "SVGElement", "HTMLInputElement", "HTMLDivElement", "HTMLButtonElement", "CustomEvent", "Event"] as const) Object.defineProperty(globalThis, name, { value: dom.window[name], configurable: true });
@@ -29,10 +32,10 @@ const { EditorState, TextSelection } = await import("@milkdown/kit/prose/state")
 const { history } = await import("@milkdown/kit/plugin/history");
 const { trailing } = await import("@milkdown/kit/plugin/trailing");
 const crepe = new CrepeBuilder({ root: document.querySelector("#editor") }).addFeature(codeMirror).addFeature(latex).addFeature(imageBlock);
-crepe.editor.use(shorthandRemark).use(highlightRemark).use(shorthandMarks.flat()).use(emojiSchema).use(shorthandInputRules).config(configureShorthand).use(editableBlockquote).use(footnoteReference).use(footnoteDefinition).use(footnoteUpdates).use(absoluteHeadingInputRule).use(faithfulLink).use(faithfulInlineHtml).use(faithfulImage).use(extendedTableCells.flat()).use(inlineSchemas.flat()).config(configureInlineSerialization).use(frontmatter).use(rawRemark(false)).use(rawSchema);
+crepe.editor.use(shorthandRemark).use(highlightRemark).use(shorthandMarks.flat()).use(emojiSchema).use(shorthandInputRules).config(configureShorthand).use(editableBlockquote).use(footnoteReference).use(footnoteDefinition).use(footnoteUpdates).use(footnoteOrder).use(absoluteHeadingInputRule).use(faithfulLink).use(faithfulInlineHtml).use(faithfulImage).use(extendedTableCells.flat()).use(inlineSchemas.flat()).config(configureInlineSerialization).use(frontmatter).use(rawRemark(false)).use(rawSchema);
 await crepe.editor.remove(remarkInlineLinkPlugin.plugin); await crepe.editor.remove(remarkPreserveEmptyLinePlugin.plugin);
 await crepe.editor.remove(wrapInHeadingInputRule); await crepe.editor.remove(strikethroughInputRule);
-crepe.editor.use(nativeMarkdownCursor);
+crepe.editor.use(nativeMarkdownCursor).use(markdownInputAssist);
 await crepe.editor.remove(history); await crepe.editor.remove(trailing); await crepe.create();
 let passed = 0;
 const test = (name: string, fn: () => void) => { fn(); passed++; console.log(`PASS ${name}`); };
@@ -53,6 +56,50 @@ crepe.editor.action(ctx => {
    assert.equal(view.dom.querySelector('.prosemirror-virtual-cursor'),null);
    view.updateState(previous);
  });
+ test("native caret: right arrow exits terminal inline HTML before leaving its paragraph", () => {
+   const view = ctx.get(editorViewCtx), previous = view.state;
+   for (const source of ['* [引用文字][guide] 和 <kbd>Ctrl</kbd>\n\n[guide]: https://example.com\n', '<kbd>Ctrl</kbd>', '> <span style="color:#ff0000">彩色</span>', '| A |\n| --- |\n| <kbd>Ctrl</kbd> |']) {
+     const doc = parse(source); let end = 0;
+     doc.descendants((node, pos) => { if (node.isText && node.marks.some(mark => mark.type.name.startsWith('deditor_'))) end = pos + node.nodeSize; });
+     view.updateState(EditorState.create({doc, plugins: previous.plugins, selection: TextSelection.create(doc, end)}));
+     const key = (name: string, composing = false) => view.someProp('handleKeyDown', handler => handler(view, new dom.window.KeyboardEvent('keydown', {key:name, isComposing:composing})));
+     key('ArrowRight', true); assert.equal(view.state.storedMarks, null);
+     assert.equal(key('ArrowRight'), true, source);
+     assert.equal(view.state.selection.head, end); assert.deepEqual(view.state.storedMarks, [], source);
+     assert.equal(view.state.tr.insertText('Z').doc.textBetween(end, end + 1), 'Z');
+     assert.equal(view.state.tr.insertText('Z').doc.nodeAt(end)!.marks.length, 0);
+     key('ArrowLeft'); assert.equal(view.state.selection.head, end); assert.ok(view.state.storedMarks?.length);
+     assert.equal(view.dom.querySelector('[data-md-mark-boundary]'), null);
+     view.focus();
+     const block = view.nodeDOM(view.state.selection.$head.before()) as HTMLElement;
+     const html = block.lastChild as HTMLElement;
+     html.getBoundingClientRect = () => ({left:10, right:50, top:10, bottom:30, width:40, height:20, x:10, y:10, toJSON(){}});
+     const click = (x: number) => view.someProp('handleClick', handler => handler(view, end, new dom.window.MouseEvent('click', {clientX:x, clientY:20})));
+     assert.equal(click(30), undefined); assert.ok(view.state.storedMarks?.length);
+     assert.equal(click(60), true); assert.deepEqual(view.state.storedMarks, []);
+     assert.ok(view.dom.querySelector('[data-md-mark-boundary]'));
+     assert.equal(make(source).apply(view.state.doc), source, 'navigation cannot insert a source spacer');
+     const outside = make(source).apply(view.state.tr.insertText('Z').doc);
+     assert.ok(!outside.includes('\u200b')); assert.match(outside, /<\/(?:kbd|span)>Z/);
+
+   }
+   view.updateState(previous);
+ });
+ test("input assist: paired brackets, selection wrapping, backspace, disabled setting and IME", () => {
+   const view = ctx.get(editorViewCtx), old = view.state;
+   const set = (text: string, from: number, to = from) => view.updateState(EditorState.create({doc: parse(text), plugins: old.plugins, selection: TextSelection.create(parse(text), from, to)}));
+   const type = (text: string) => view.someProp('handleTextInput', fn => fn(view, view.state.selection.from, view.state.selection.to, text, () => view.state.tr.insertText(text)));
+   useEditorStore.setState({autoCloseBrackets:true}); set('text',5);
+   assert.equal(type('('),true); assert.equal(view.state.doc.textContent,'text()');
+   view.someProp('handleKeyDown', fn => fn(view, new dom.window.KeyboardEvent('keydown',{key:'Backspace'})));
+   assert.equal(view.state.doc.textContent,'text');
+   set('word',1,5);assert.equal(type('['),true);assert.equal(view.state.doc.textContent,'[word]');
+   set('word',5);useEditorStore.setState({autoCloseBrackets:false});assert.notEqual(type('('),true);
+   useEditorStore.setState({autoCloseBrackets:true});
+   view.dom.dispatchEvent(new dom.window.CompositionEvent('compositionstart',{bubbles:true}));assert.notEqual(type('('),true);
+   view.dom.dispatchEvent(new dom.window.CompositionEvent('compositionend',{bubbles:true}));
+   view.updateState(old);
+ });
  test("search: Unicode case matching and inline atoms preserve exact selection offsets", () => {
    const doc = parse("İ 😀 **Target** [link](https://example.test) target [x]\\n".replace('\\n', '\n'));
    const search = new MarkdownSearch();
@@ -62,6 +109,19 @@ crepe.editor.action(ctx => {
      for (const match of results) assert.equal(doc.textBetween(match.from, match.to).toLowerCase(), query.toLowerCase());
    }
    assert.deepEqual(search.find(doc, ''), []);
+ });
+ test("search: options, invalid and zero-width regex, Unicode boundaries and capture replacement", () => {
+   const doc = parse("Cat cat scatter 中文词 中文 😀 **item12** item34");
+   const search = new MarkdownSearch();
+   assert.equal(search.find(doc, 'cat').length, 3);
+   assert.equal(search.find(doc, 'cat', {caseSensitive:true, wholeWord:true}).length, 1);
+   assert.equal(search.find(doc, '中文', {wholeWord:true}).length, 1);
+   const matches = search.find(doc, 'item(\\d+)', {regex:true});
+   assert.equal(matches.length, 2);
+   assert.equal(markdownReplacement(matches[0], '$1-$$-$&', true), '12-$-item12');
+   assert.equal(markdownReplacement(matches[0], '$1', false), '$1');
+   assert.equal(search.find(doc, '[', {regex:true}).length, 0); assert.equal(search.error,true);
+   assert.equal(search.find(doc, '(?=cat)', {regex:true}).length, 0); assert.equal(search.error,false);
  });
  test("search: cached blocks follow insertions, deletions and undo across a long document", () => {
    const source = Array.from({length: 500}, (_, i) => `## Section ${i}\n\nİ **target ${i}** 中文\n\n> target quote ${i}\n`).join('\n');
@@ -116,6 +176,53 @@ crepe.editor.action(ctx => {
    assert.equal(editText(model, "后文", "更多"), source.replace("后文", "更多"));
    assert.equal(editText(model, "提示", "注意"), source.replace("后文", "更多").replace("提示", "注意"));
    assert.equal(editText(model, "脚注解释", "新的解释"), source.replace("后文", "更多").replace("提示", "注意").replace("脚注解释", "新的解释"));
+ });
+ test("footer: reference-order display preserves interleaved source and repeated edits", () => {
+   for (const eol of ["\n", "\r\n"]) {
+     const source = ["[^a]: Alpha **bold**", "", "Intro[^b] then[^a].", "", "[^b]: Beta", "", "Tail *word*", ""].join(eol);
+     const model = make(source);
+     assert.deepEqual(Array.from({length:model.doc.childCount},(_,i)=>model.doc.child(i).type.name),["paragraph","paragraph","footnote_definition","footnote_definition"]);
+     assert.equal(model.doc.child(2).attrs.identifier,"b");
+     let expected=source;
+     for (const [from,to] of [["Alpha","中文解释"],["Tail","Later"],["Beta","第二条"],["Intro","Start"],["中文解释","Alpha again"],["word","new word"]]) {
+       expected=expected.replace(from,to); assert.equal(editText(model,from,to),expected);
+       const fresh=make(expected); assert.equal(model.doc.eq(fresh.doc),true);
+       model.doc.descendants((node,pos)=>{if(node.isText)for(const point of [pos,pos+node.nodeSize])assert.equal(model.sourceOffset(point),fresh.sourceOffset(point),`offset ${point}`);});
+       for(const token of ["Start","Later","Alpha again","第二条"]) if(expected.includes(token)) assert.equal(model.positionAtSource(expected.indexOf(token)),fresh.positionAtSource(expected.indexOf(token)));
+     }
+   }
+ });
+ test("footer: split, join, insert and remove prose cannot consume definitions between source blocks", () => {
+   const source="Start[^a]\n\n[^a]: Keep **exact**\n\nMiddle text\n\n[^b]: Unused \n\nTail\n";
+   const model=make(source);
+   const compare=()=>{const fresh=make(model.source);assert.equal(model.doc.eq(fresh.doc),true,JSON.stringify({source:model.source,actual:model.doc.toJSON(),expected:fresh.doc.toJSON()}));model.doc.descendants((node,pos)=>{if(node.isText)assert.equal(model.sourceOffset(pos),fresh.sourceOffset(pos));});assert.ok(model.source.includes("[^a]: Keep **exact**"));assert.ok(model.source.includes("[^b]: Unused "))};
+   let state=EditorState.create({doc:model.doc});let point=model.positionAtSource(source.indexOf("Middle")+3);model.apply(state.tr.split(point).doc);compare();
+   editText(model,"text","changed");compare();
+   state=EditorState.create({doc:model.doc});const inserted=parse("New block").firstChild!;model.apply(state.tr.insert(model.doc.firstChild!.nodeSize,inserted).doc);compare();
+   state=EditorState.create({doc:model.doc});model.apply(state.tr.delete(model.doc.firstChild!.nodeSize,model.doc.firstChild!.nodeSize+inserted.nodeSize).doc);compare();
+   // Joining across the original definition location keeps that definition intact.
+   state=EditorState.create({doc:model.doc});model.apply(state.tr.join(model.doc.firstChild!.nodeSize).doc);compare();
+ });
+ test("footer: adding multiple definitions at EOF retains separators and correct source mappings", () => {
+   for(const ending of ["", "\n", "\n\n"]) {
+     const model=make("Body"+ending), additions=parse("[^a]: First\n\n[^b]: Second");
+     model.apply(EditorState.create({doc:model.doc}).tr.insert(model.doc.content.size,additions.content).doc);
+     assert.equal(make(model.source).doc.eq(model.doc),true,model.source);
+     editText(model,"Second","第二");editText(model,"First","第一");
+     const fresh=make(model.source);assert.equal(fresh.doc.eq(model.doc),true);
+     model.doc.descendants((node,pos)=>{if(node.isText)assert.equal(model.sourceOffset(pos),fresh.sourceOffset(pos));});
+   }
+ });
+ test("footer: changing reference order moves display definitions while keeping source and selection", () => {
+   const view=ctx.get(editorViewCtx), previous=view.state;
+   const source="Body[^a] then[^b]\n\n[^a]: Alpha\n\n[^b]: Beta\n";
+   view.updateState(EditorState.create({doc:parse(source),plugins:previous.plugins}));
+   const model=new MarkdownDocument(source,parse,serialize,false,view.state.doc);
+   let first=0;view.state.doc.descendants((node,pos)=>{if(node.type.name==="footnote_reference"&&!first)first=pos;});
+   view.dispatch(view.state.tr.delete(first,first+1));
+   assert.equal(view.state.doc.child(1).attrs.identifier,"b");
+   assert.equal(model.apply(view.state.doc),source.replace("[^a] then"," then"));
+   view.updateState(previous);
  });
  test("structured: alerts preserve CRLF, nesting and marker spelling during repeated edits", () => {
    for (const source of ["> [!tip]\r\n> message **bold**\r\n\r\ntail\r\n", "> > [!WARNING]\n> > message\n> >\n> > - nested\n\nend\n", "> [!NOTE]\n>\n> ## message\n>\n> - nested\n\nend\n"]) {
