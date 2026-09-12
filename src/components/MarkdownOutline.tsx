@@ -18,6 +18,13 @@ export default function MarkdownOutline({ items: tocItems, current: activeTocId,
   const tocTriggerRef = useRef<HTMLButtonElement>(null);
   const tocPinRef = useRef<HTMLButtonElement>(null);
   const tocLeaveTimer = useRef<ReturnType<typeof setTimeout>>();
+  // Opening on hover replaces the rail with a panel. A heading can occupy the
+  // same coordinates before the pending mouse click is delivered.
+  const openingRailRect = useRef<DOMRect | null>(null);
+  const isOpeningRailClick = (x: number, y: number) => {
+    const rect = openingRailRect.current;
+    return !!rect && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+  };
   const cancelTocClose = () => clearTimeout(tocLeaveTimer.current);
   const openTocPeek = () => { cancelTocClose(); setTocPeek(true); };
   const closeTocPeek = () => {
@@ -34,8 +41,23 @@ export default function MarkdownOutline({ items: tocItems, current: activeTocId,
             data-expanded={tocExpanded}
             data-pinned={tocVisible}
             aria-label={t("preview.toc")}
-            onMouseEnter={openTocPeek}
+            onMouseEnter={() => {
+              if (!tocExpanded) openingRailRect.current = tocTriggerRef.current?.getBoundingClientRect() ?? null;
+              openTocPeek();
+            }}
+            onMouseMove={(e) => { if (!isOpeningRailClick(e.clientX, e.clientY)) openingRailRect.current = null; }}
+            onMouseDownCapture={(e) => {
+              if (e.button === 0 && isOpeningRailClick(e.clientX, e.clientY)) e.preventDefault();
+            }}
+            onClickCapture={(e) => {
+              if (e.detail > 0 && isOpeningRailClick(e.clientX, e.clientY)) {
+                e.preventDefault();
+                e.stopPropagation();
+                openingRailRect.current = null;
+              }
+            }}
             onMouseLeave={() => {
+              openingRailRect.current = null;
               if (!tocPinRef.current?.closest("aside")?.querySelector(":focus-visible")) closeTocPeek();
             }}
             onFocus={cancelTocClose}
@@ -54,6 +76,7 @@ export default function MarkdownOutline({ items: tocItems, current: activeTocId,
               type="button"
               className="preview-toc-rail"
               hidden={tocExpanded}
+              onMouseDown={(e) => { if (e.button === 0) e.preventDefault(); }}
               onClick={(e) => {
                 openTocPeek();
                 if (e.detail === 0) requestAnimationFrame(() => tocPinRef.current?.focus());
@@ -78,6 +101,7 @@ export default function MarkdownOutline({ items: tocItems, current: activeTocId,
                   variant="ghost"
                   size="iconLg"
                   className="preview-toc-toggle"
+                  onMouseDown={(e) => { if (e.button === 0) e.preventDefault(); }}
                   onClick={toggleTocVisible}
                   pressed={tocVisible}
                   title={tocVisible ? t("preview.tocUnpin") : t("preview.tocPin")}

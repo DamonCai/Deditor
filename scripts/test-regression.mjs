@@ -239,6 +239,15 @@ async function click(name) {
     await flush();
   });
 }
+async function dismissSaveError(pattern) {
+  const host = document.createElement('div'); document.body.append(host);
+  const dialogRoot = createRoot(host);
+  try {
+    await act(async () => {dialogRoot.render(React.createElement(app.ConfirmDialog)); await flush();});
+    assert.match(host.textContent, pattern);
+    await act(async () => {host.querySelector('button').click(); await flush();});
+  } finally {await act(async () => dialogRoot.unmount()); host.remove();}
+}
 function setInput(input, value) {
   Object.getOwnPropertyDescriptor(
     input instanceof window.HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype,
@@ -1170,6 +1179,7 @@ test(4, "failed write preserves dirty state and aborts closing", async () => {
   assert.equal(await app.closeActiveTab(), false);
   assert.equal(store.getState().tabs[0].id, "a");
   assert.equal(store.getState().tabs[0].savedContent, "old");
+  await dismissSaveError(/disk full/);
 });
 test(
   4,
@@ -1194,7 +1204,8 @@ test(4, "cancel close-others preserves remaining dirty tabs", async () => {
 test(4, "save-as rejects an already-open destination", async () => {
   reset();
   globalThis.__save = async () => "/test/b.txt";
-  await assert.rejects(app.saveFileAs(), /already open/);
+  assert.equal(await app.saveFileAs(), false);
+  await dismissSaveError(/already open/);
   assert.equal(writes.length, 0);
 });
 test(
@@ -1519,6 +1530,28 @@ test(5, "navigation and settings dialogs restore keyboard focus", async () => {
   }
 });
 
+test(5, "closing a dialog restores a collapsed embedded editor without reviving a removed target", async () => {
+  for (const removed of [false, true]) {
+    reset();
+    const outer = document.createElement('div');
+    outer.setAttribute('contenteditable', 'true'); outer.tabIndex = 0;
+    const collapsed = document.createElement('div');
+    const input = document.createElement('input');
+    collapsed.append(input); outer.append(collapsed); document.body.append(outer);
+    const focus = input.focus.bind(input);
+    // jsdom does not implement the browser's refusal to focus hidden inputs.
+    input.focus = () => { if (!collapsed.hidden) focus(); };
+    input.focus();
+    await render(React.createElement(app.SettingsDialog, {open: true, onClose() {}}));
+    collapsed.hidden = true;
+    if (removed) outer.remove();
+    await act(async () => {root.unmount(); await flush();}); root = undefined;
+    if (removed) assert.notEqual(document.activeElement, outer);
+    else assert.equal(document.activeElement, outer, 'outer editor must regain focus when its inner input is hidden');
+    outer.remove();
+  }
+});
+
 
 function xmindUrl(bytes) {return `data:application/vnd.xmind.workbook;base64,${Buffer.from(bytes).toString('base64')}`;}
 function xmindSheets() {return app.openXmindDocument(new Uint8Array(Buffer.from(store.getState().tabs[0].content.split(',')[1], 'base64'))).sheets;}
@@ -1735,7 +1768,8 @@ test(2, 'XMind inspector preserves multiline title on an unchanged blur', async(
 test(4,'XMind failed save leaves edited archive dirty and visible',async()=>{
   await mountXmind();await click('Subtopic');
   globalThis.__invoke=async(cmd)=>{if(cmd==='write_binary_file')throw new Error('disk full');};
-  await assert.rejects(()=>app.saveFile(),/disk full/);
+  assert.equal(await app.saveFile(),false);
+  await dismissSaveError(/disk full/);
   assert.notEqual(store.getState().tabs[0].content,store.getState().tabs[0].savedContent);
   assert.ok(document.querySelector('[data-topic="root"]'));
 });

@@ -23,7 +23,8 @@ export function rawRemark(mdx: boolean) {
 }
 export const rawSchema = $nodeSchema("deditor_raw", () => ({
   group: "block", content: "text*", code: true, defining: true, isolating: true, marks: "",
-  parseDOM: [{ tag: "pre[data-deditor-raw]", preserveWhitespace: "full" }],
+  // Clipboard HTML must match this tagged block before the generic code <pre> rule.
+  parseDOM: [{ tag: "pre[data-deditor-raw]", priority: 100, preserveWhitespace: "full" }],
   toDOM: () => ["pre", { "data-deditor-raw": "true" }, 0],
   parseMarkdown: {
     match: n => n.type === "deditorRaw",

@@ -1,0 +1,31 @@
+import assert from 'node:assert/strict';
+import { build } from 'esbuild';
+import { JSDOM } from 'jsdom';
+import fs from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import React, { act } from 'react';
+const dom = new JSDOM('<!doctype html><body><div id="root"></div></body>', {url:'http://localhost',pretendToBeVisual:true});
+for(const key of ['window','document','Node','HTMLElement','Element','Event','CustomEvent','localStorage'])Object.defineProperty(globalThis,key,{value:dom.window[key],configurable:true});
+Object.defineProperty(globalThis,'navigator',{value:dom.window.navigator,configurable:true});
+for(const key of ['getComputedStyle','requestAnimationFrame','cancelAnimationFrame'])globalThis[key]=dom.window[key].bind(dom.window);
+window.matchMedia=()=>({matches:false,addEventListener(){},removeEventListener(){}});
+globalThis.IS_REACT_ACT_ENVIRONMENT=true;
+const {createRoot}=await import('react-dom/client');
+const output=path.resolve('node_modules/.cache/deditor-markdown-mouse-audit.mjs');fs.mkdirSync(path.dirname(output),{recursive:true});
+await build({stdin:{contents:"export {default as Outline} from './src/components/MarkdownOutline'; export {useEditorStore} from './src/store/editor';",resolveDir:process.cwd()},outfile:output,bundle:true,format:'esm',platform:'node',packages:'external',logLevel:'silent'});
+const app=await import(pathToFileURL(output));app.useEditorStore.setState({language:'en',tocVisible:false});
+const root=createRoot(document.getElementById('root'));let navigated=[],passed=0;
+const render=async()=>{await act(async()=>root.render(null));app.useEditorStore.setState({tocVisible:false});navigated=[];await act(async()=>root.render(React.createElement(app.Outline,{items:[{id:'one',level:1,text:'First'},{id:'two',level:2,text:'Second'}],current:'one',navigate:id=>navigated.push(id)})));document.querySelector('.preview-toc-rail').getBoundingClientRect=()=>({left:1240,right:1280,top:121,bottom:164,width:40,height:43});};
+const event=async(target,type,props={})=>{const ev=new dom.window.MouseEvent(type,{bubbles:true,cancelable:true,clientX:1260,clientY:143,button:0,...props});await act(async()=>target.dispatchEvent(ev));return ev;};
+const enter=()=>event(document.querySelector('.preview-toc-rail'),'mouseover',{relatedTarget:document.body});
+const test=async(name,fn)=>{await render();await fn();passed++;console.log('PASS '+name);};
+try {
+await test('hover replacement cannot turn the rail click into heading navigation',async()=>{await enter();assert.equal(document.querySelector('.preview-toc').dataset.expanded,'true');const row=document.querySelector('.preview-toc-item');const down=await event(row,'mousedown');assert.equal(down.defaultPrevented,true);await event(row,'click',{detail:1});assert.deepEqual(navigated,[]);assert.equal(document.querySelector('.preview-toc').dataset.expanded,'true');await event(row,'click',{detail:1});assert.deepEqual(navigated,['one']);});
+await test('moving within the old rail rectangle keeps the opening click guarded',async()=>{await enter();const row=document.querySelector('.preview-toc-item');await event(row,'mousemove',{clientX:1270,clientY:151});await event(row,'click',{detail:1,clientX:1270,clientY:151});assert.deepEqual(navigated,[]);});
+await test('moving into the panel permits deliberate heading navigation',async()=>{await enter();const row=document.querySelector('.preview-toc-item');await event(row,'mousemove',{clientX:1140,clientY:143});await event(row,'click',{detail:1,clientX:1140,clientY:143});assert.deepEqual(navigated,['one']);});
+await test('keyboard activation remains valid after pointer hover',async()=>{await enter();await event(document.querySelector('.preview-toc-item'),'click',{detail:0,clientX:0,clientY:0});assert.deepEqual(navigated,['one']);});
+await test('mouse pin preserves focus while changing only the layout preference',async()=>{await enter();const pin=document.querySelector('.preview-toc-toggle');const down=await event(pin,'mousedown',{clientX:1260,clientY:111});assert.equal(down.defaultPrevented,true);await event(pin,'click',{detail:1,clientX:1260,clientY:111});assert.equal(app.useEditorStore.getState().tocVisible,true);assert.deepEqual(navigated,[]);});
+await test('leave and re-enter resets rail protection for the next opening',async()=>{await enter();const aside=document.querySelector('.preview-toc');await event(aside,'mouseout',{relatedTarget:document.body});await act(async()=>new Promise(r=>setTimeout(r,210)));assert.equal(aside.dataset.expanded,'false');await enter();await event(document.querySelector('.preview-toc-item'),'click',{detail:1});assert.deepEqual(navigated,[]);});
+console.log(`${passed} mouse/outline event regression groups passed. Browser mouse-selection evidence is recorded separately; these events do not count as real mouse tests.`);
+}finally{await act(async()=>root.unmount());dom.window.close();fs.rmSync(output,{force:true});}

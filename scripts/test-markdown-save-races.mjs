@@ -104,7 +104,7 @@ try {
   });
   await test('write failure permits a subsequent save, and already-started writes retain newer input',async()=>{
     interceptWrite=()=>Promise.reject(Error('self-created failure'));
-    await assert.rejects(app.saveFile(),/self-created failure/);assert.equal(store.getState().tabs[0].savedContent,tab.savedContent);
+    assert.equal(await app.saveFile(),false);assert.equal(store.getState().tabs[0].savedContent,tab.savedContent);
     const gate=deferred();interceptWrite=()=>gate.promise;
     const saving=app.saveFile();await tick();change({content:'# Typed during IPC\n'});gate.resolve();
     assert.equal(await saving,false);assert.equal(disk,tab.content);

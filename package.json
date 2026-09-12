@@ -34,6 +34,7 @@
     "generate:file-icons": "node scripts/generate-file-icons.mjs",
     "test:syntax": "tsx scripts/test-syntax.ts",
     "test:markdown-code-lines": "tsx scripts/test-markdown-code-lines.ts",
+    "test:markdown-diagram-modes": "node scripts/test-markdown-diagram-modes.mjs",
     "test:markdown-code-focus": "tsx scripts/test-markdown-code-focus.ts",
     "perf:document": "tsx scripts/perf-document.ts",
     "perf:markdown-controls": "tsx scripts/perf-markdown-controls.ts",
@@ -46,7 +47,7 @@
     "test:markdown-visual:integration": "node scripts/test-markdown-visual-integration.mjs",
     "test:markdown-enter-history": "node scripts/test-markdown-enter-history.mjs",
     "test:markdown-basic": "node scripts/test-markdown-basic-operations.mjs",
-    "test:all": "npm run test:markdown-startup && npm run test:markdown-visual && npm run test:markdown-visual:integration && npm run test:markdown-basic && npm run test:markdown-enter-history && npm run test:markdown-input-clipboard && npm run test:markdown-table && npm run test:markdown-format-links && npm run test:markdown-images && npm run test:markdown-special-blocks && npm run test:markdown-search && npm run test:markdown-session && npm run test:markdown-navigation && npm run test:markdown-tasks && npm run test:markdown-image-clipboard && npm run test:close-persistence && npm run test:markdown-save-races && npm run test:markdown-cross-block && npm run test:markdown-block-boundary && npm run test:markdown-insert-lifecycle && npm run test:regression && npm run test:xmind && npm run test:export && npm run test:syntax && npm run test:markdown-code-lines && npm run test:markdown-code-focus && npm run test:file-icons && npm run test:markdown-sequences",
+    "test:all": "npm run test:markdown-startup && npm run test:markdown-visual && npm run test:markdown-visual:integration && npm run test:markdown-basic && npm run test:markdown-enter-history && npm run test:markdown-input-clipboard && npm run test:markdown-table && npm run test:markdown-format-links && npm run test:markdown-images && npm run test:markdown-special-blocks && npm run test:markdown-diagram-modes && npm run test:markdown-search && npm run test:markdown-session && npm run test:markdown-navigation && npm run test:markdown-tasks && npm run test:markdown-image-clipboard && npm run test:close-persistence && npm run test:markdown-save-races && npm run test:markdown-cross-block && npm run test:markdown-block-boundary && npm run test:markdown-insert-lifecycle && npm run test:regression && npm run test:xmind && npm run test:export && npm run test:syntax && npm run test:markdown-code-lines && npm run test:markdown-code-focus && npm run test:file-icons && npm run test:markdown-sequences && npm run test:markdown-operation-gaps",
     "test:markdown-input-clipboard": "node scripts/test-markdown-input-clipboard-audit.mjs",
     "test:markdown-table": "node scripts/test-markdown-table-audit.mjs",
     "test:markdown-format-links": "node scripts/test-markdown-format-links-audit.mjs",
@@ -58,7 +59,7 @@
     "test:markdown-tasks": "node scripts/test-markdown-task-interaction.mjs",
     "test:markdown-image-clipboard": "node scripts/test-markdown-image-clipboard-audit.mjs",
     "test:close-persistence": "node scripts/test-close-persistence-audit.mjs",
-    "test:markdown-operations": "npm run test:markdown-startup && npm run test:markdown-visual && npm run test:markdown-visual:integration && npm run test:markdown-basic && npm run test:markdown-enter-history && npm run test:markdown-input-clipboard && npm run test:markdown-table && npm run test:markdown-format-links && npm run test:markdown-images && npm run test:markdown-special-blocks && npm run test:markdown-search && npm run test:markdown-session && npm run test:markdown-navigation && npm run test:markdown-tasks && npm run test:markdown-image-clipboard && npm run test:close-persistence && npm run test:markdown-save-races && npm run test:markdown-cross-block && npm run test:markdown-block-boundary && npm run test:markdown-insert-lifecycle && npm run test:markdown-sequences",
+    "test:markdown-operations": "npm run test:markdown-startup && npm run test:markdown-visual && npm run test:markdown-visual:integration && npm run test:markdown-basic && npm run test:markdown-enter-history && npm run test:markdown-input-clipboard && npm run test:markdown-table && npm run test:markdown-format-links && npm run test:markdown-images && npm run test:markdown-special-blocks && npm run test:markdown-diagram-modes && npm run test:markdown-search && npm run test:markdown-session && npm run test:markdown-navigation && npm run test:markdown-tasks && npm run test:markdown-image-clipboard && npm run test:close-persistence && npm run test:markdown-save-races && npm run test:markdown-cross-block && npm run test:markdown-block-boundary && npm run test:markdown-insert-lifecycle && npm run test:markdown-sequences && npm run test:markdown-operation-gaps",
     "test:markdown-save-races": "node scripts/test-markdown-save-races.mjs",
     "test:markdown-cross-block": "node scripts/test-markdown-cross-block-audit.mjs",
     "test:markdown-block-boundary": "node scripts/test-markdown-block-boundary-audit.mjs",
@@ -69,7 +70,8 @@
     "test:markdown-sequence-table": "node scripts/test-markdown-round3-table.mjs",
     "test:markdown-sequence-block": "node scripts/test-markdown-round3-block.mjs",
     "test:markdown-sequence-session": "node scripts/test-markdown-sequence-session.mjs && node scripts/test-markdown-mode-focus.mjs",
-    "test:markdown-sequences": "npm run test:markdown-sequence-inline && npm run test:markdown-sequence-table && npm run test:markdown-sequence-block && npm run test:markdown-sequence-session"
+    "test:markdown-sequences": "npm run test:markdown-sequence-inline && npm run test:markdown-sequence-table && npm run test:markdown-sequence-block && npm run test:markdown-sequence-session",
+    "test:markdown-operation-gaps": "node scripts/test-markdown-boundary-audit.mjs && node scripts/test-markdown-selection-audit.mjs && node scripts/test-markdown-mouse-audit.mjs && node scripts/test-markdown-recovery-audit.mjs"
   },
   "dependencies": {
     "@codemirror/commands": "^6.7.1",

@@ -1,3 +1,4 @@
+import { accurateTableDrop } from "./tableDrag";
 import { tableMenuPlacement } from "./tableMenu";
 import type { Ctx } from "@milkdown/kit/ctx";
 import { hardbreakFilterNodes } from "@milkdown/kit/preset/commonmark";
@@ -49,4 +50,4 @@ export function configureTableEditing(ctx: Ctx) {
 const nonemptyTableHeader = tableHeaderRowSchema.extendSchema(previous => ctx => ({
   ...previous(ctx), content: "table_header+",
 }));
-export const extendedTableCells = [...tableCellExtensions, nonemptyTableHeader, tableMenuPlacement];
+export const extendedTableCells = [...tableCellExtensions, nonemptyTableHeader, tableMenuPlacement, accurateTableDrop];

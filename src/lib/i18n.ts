@@ -18,6 +18,10 @@ const ZH: Record<string, string> = {
   "md.visualErrorDetails": "错误详情",
   "md.editSourceBlock": "编辑此块源码",
   "md.hideSource": "收起源码",
+  "md.diagramEmpty": "输入代码以预览图表",
+  "md.diagramMode": "图表模式",
+  "md.diagramResize": "调整代码与预览宽度",
+  "md.diagramPreview": "图表预览，按 Enter 编辑",
   "md.selectCodeBlock": "选中整个代码块",
   "md.uploadImage": "上传图片",
 
@@ -216,6 +220,7 @@ const ZH: Record<string, string> = {
   "find.replaceDone": "已替换 {count} 处，修改 {files} 个文件。",
 
   "fileio.targetAlreadyOpen": "目标文件已在另一标签打开，请先关闭该标签或选择其他路径。",
+  "fileio.saveFailed": "无法保存「{name}」。更改仍保留在编辑器中，请重试。\n{err}",
   // common
   "common.cancel": "取消",
   "common.confirm": "确定",
@@ -651,6 +656,10 @@ const EN: Record<string, string> = {
   "md.visualErrorDetails": "Error details",
   "md.editSourceBlock": "Edit block source",
   "md.hideSource": "Hide source",
+  "md.diagramEmpty": "Enter code to preview the diagram",
+  "md.diagramMode": "Diagram mode",
+  "md.diagramResize": "Resize code and preview panes",
+  "md.diagramPreview": "Diagram preview, press Enter to edit",
   "md.selectCodeBlock": "Select entire code block",
   "md.uploadImage": "Upload image",
 
@@ -849,6 +858,7 @@ const EN: Record<string, string> = {
   "find.replaceDone": "Replaced {count} occurrence(s) in {files} file(s).",
 
   "fileio.targetAlreadyOpen": "This file is already open in another tab. Close it or choose another path.",
+  "fileio.saveFailed": "Could not save “{name}”. Your changes remain in the editor. Please try again.\n{err}",
   // common
   "common.cancel": "Cancel",
   "common.confirm": "OK",

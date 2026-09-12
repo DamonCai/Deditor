@@ -368,14 +368,30 @@ export async function saveAllDirty(): Promise<void> {
   }
 }
 
+async function saveManually(id: string, saveAs = false): Promise<boolean> {
+  const tab = useEditorStore.getState().tabs.find(t => t.id === id);
+  try {
+    return await saveTab(id, saveAs);
+  } catch (err) {
+    // Menu and palette actions intentionally do not await saves. Handle the
+    // failure here, including errors raised by the native Save As dialog.
+    logError(`manual save failed for tab ${id}`, err);
+    void showError(tStatic("fileio.saveFailed", {
+      name: displayName(tab?.filePath ?? null),
+      err: err instanceof Error ? err.message : String(err),
+    }));
+    return false;
+  }
+}
+
 export async function saveFile(): Promise<boolean> {
   const id = useEditorStore.getState().activeId;
-  return id ? saveTab(id) : false;
+  return id ? saveManually(id) : false;
 }
 
 export async function saveFileAs(): Promise<boolean> {
   const id = useEditorStore.getState().activeId;
-  return id ? saveTab(id, true) : false;
+  return id ? saveManually(id, true) : false;
 }
 
 export function newFile() {
@@ -407,8 +423,7 @@ export function closeTabById(id: string): Promise<boolean> {
         if (latest) await invoke("record_markdown_draft", {path: latest.filePath ?? `untitled:${id}`, content: latest.content}).catch(error => logWarn(`Markdown draft history: ${error}`));
       }
       if (choice === "save") {
-        try { if (!await saveTab(id)) return false; }
-        catch { return false; }
+        if (!await saveManually(id)) return false;
       }
     }
     if (useEditorStore.getState().tabs.some((t) => t.id === id)) {

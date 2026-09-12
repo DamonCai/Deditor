@@ -47,6 +47,34 @@
 .md-code-bar .deditor-btn { padding: 3px 8px !important; }
 .md-code-preview { overflow: auto; }
 .md-code-preview svg { max-width: 100%; height: auto; }
+.md-code-body { min-width: 0; }
+.md-diagram-family { color: var(--text-soft); font-size: 11px; margin-right: auto; }
+.md-diagram-block .md-code-bar {
+  position: relative; inset: auto; width: 100%; max-width: 100%; flex-wrap: wrap;
+  opacity: 1; pointer-events: auto; margin-bottom: 8px;
+}
+.md-diagram-block .md-diagram-modes .deditor-segment { min-width: 72px; padding: 0 18px !important; }
+.md-diagram-block .md-code-body {
+  display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr);
+  height: var(--md-diagram-height, auto); min-height: 180px; max-height: 60vh; overflow: hidden;
+}
+.md-diagram-block .md-code-body > * { min-width: 0; min-height: 0; }
+
+.md-code-block[data-diagram-mode="split"] .md-code-body { display: grid; grid-template-columns: minmax(0, var(--md-diagram-source-width, 50fr)) 1px minmax(0, var(--md-diagram-preview-width, 50fr)); align-items: stretch; min-height: 180px; }
+.md-code-block[data-diagram-mode="split"] .md-code-body > * { min-width: 0; }
+.md-code-block:is([data-diagram-mode="edit"], [data-diagram-mode="split"]) .cm-scroller { max-height: 60vh; overflow: auto; }
+.md-code-block .md-diagram-modes .deditor-segment:focus-visible { outline-offset: -2px; }
+.md-code-block .md-diagram-modes .deditor-segment[data-selected="true"]:focus-visible { outline-color: var(--on-accent); }
+.md-diagram-divider { position: relative; background: var(--border); cursor: col-resize; touch-action: none; z-index: 1; }
+/* The visible rule is one pixel; its larger hit area makes dragging easy. */
+.md-diagram-divider::after { content: ""; position: absolute; inset: 0 -5px; }
+.md-diagram-divider:hover, .md-diagram-divider:focus-visible, .md-diagram-resizing > .md-diagram-divider { background: var(--accent); }
+.md-diagram-divider:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.md-diagram-resizing, .md-diagram-resizing * { cursor: col-resize !important; user-select: none; }
+.md-diagram-block .md-code-editor { display: flex; background: var(--preview-code-bg); }
+.md-visual-shell .milkdown .md-diagram-block .md-code-editor .cm-editor { flex: 1; min-width: 0; min-height: 0; border: 0; border-radius: 0; }
+.md-visual-shell .milkdown .md-diagram-block .md-code-preview { max-height: 60vh; background: var(--bg); }
+.md-visual-shell .milkdown .md-diagram-block .md-code-preview > :is(.mermaid-diagram, .plantuml-diagram) { border: 0; border-radius: 0; min-height: 100%; }
 .md-visual-shell[data-readonly="true"] .md-code-toggle { display: none; }
 
 /* Markdown has no standard persisted resize ratio. Keep image alt text semantic. */

@@ -176,7 +176,7 @@ await test('round 3: save-all writes Markdown and HTML separately',async()=>{
 });
 await test('round 4: failed save retains the unsaved Markdown buffer',async()=>{
  await act(async()=>{store.getState().setContent(content()+'\nUnsaved','a','source');});const expected=content();failed=true;
- await act(async()=>{await assert.rejects(app.saveFile(), /generated disk failure/);});failed=false;assert.equal(content(),expected);assert.notEqual(store.getState().tabs[0].savedContent,expected);
+ await act(async()=>{assert.equal(await app.saveFile(), false);});failed=false;assert.equal(content(),expected);assert.notEqual(store.getState().tabs[0].savedContent,expected);
 });
 await test('round 5: visual toolbar toggles and converts lists through shared history',async()=>{
  await act(async()=>store.getState().setContent('plain\n','a','command'));

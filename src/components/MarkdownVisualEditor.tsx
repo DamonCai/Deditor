@@ -194,6 +194,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
         const document = new MarkdownDocument(initialSource, parse, serialize, mdx, view.state.doc);
         let inlineEditing: ReturnType<typeof installInlineSource> | undefined;
         let enterOperation = false;
+        let selectionDeleteOperation = false;
         const historyState = () => ({ document: document.snapshot(), selection: { anchor: view.state.selection.anchor, head: view.state.selection.head }, selectionJSON: view.state.selection.toJSON(), sourceSelection: { anchor: document.sourceOffset(view.state.selection.anchor), head: document.sourceOffset(view.state.selection.head) } });
         const publish = () => {
           if (cancelled || !activeRef.current) return;
@@ -247,8 +248,8 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
             const before = changed && !inlineEditing?.active ? historyState() : null;
             const version = session.version;
             const enter = changed && enterOperation;
-            const operation = enter || changed && tr.getMeta("deditor-list-operation");
-            if (operation) { enterOperation = false; session.breakGroup(); }
+            const operation = enter || changed && (selectionDeleteOperation || tr.getMeta("deditor-list-operation"));
+            if (operation) { enterOperation = false; selectionDeleteOperation = false; session.breakGroup(); }
             const result = view.state.applyTransaction(tr);
             view.updateState(result.state);
             const projected = tr.getMeta(inlineProjection);
@@ -319,10 +320,18 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
         };
         const enterKey = (event: KeyboardEvent) => {
           enterOperation = false;
+          selectionDeleteOperation = !readonlyRef.current && !view.composing && !composition.composing
+            && !event.isComposing && event.keyCode !== 229
+            && (event.key === "Backspace" || event.key === "Delete")
+            && event.target === view.dom && !view.state.selection.empty;
           if (event.key === "Enter" && !event.isComposing && event.keyCode !== 229) beginEnter();
         };
         const beforeInput = (event: Event) => {
           const type = (event as InputEvent).inputType;
+          // Removing a selected block/range is a complete action. Keep the next
+          // typing group separate so undo can return to the empty document.
+          if (type?.startsWith("delete") && event.target === view.dom && !view.state.selection.empty
+            && !readonlyRef.current && !view.composing && !composition.composing && !(event as InputEvent).isComposing) selectionDeleteOperation = true;
           if (["insertParagraph", "insertLineBreak"].includes(type) && !(event as InputEvent).isComposing && !enterOperation) beginEnter();
           if (type === "historyUndo" || type === "historyRedo") {
             event.preventDefault(); event.stopPropagation();

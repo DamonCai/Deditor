@@ -1,5 +1,6 @@
 import { $shortcut } from "@milkdown/kit/utils";
 import { TextSelection, type Command } from "@milkdown/kit/prose/state";
+import { lift } from "@milkdown/kit/prose/commands";
 import { sinkListItem, liftListItem } from "@milkdown/kit/prose/schema-list";
 import { isInTable } from "@milkdown/kit/prose/tables";
 import { taskIndent } from "../markdownListIndent";
@@ -44,17 +45,28 @@ const joinTaskForward: Command = (state, dispatch, view) => {
   return true;
 };
 
-/** A rendered <br> in an otherwise empty task is a placeholder, not task text. */
+/** Hard-break-only paragraphs are empty placeholders when leaving a list or quote. */
 const leaveTask: Command = (state, dispatch, view) => {
   const { selection } = state;
   if (view?.editable === false || view?.composing || !(selection instanceof TextSelection) || !selection.empty) return false;
   const { $from } = selection;
   if ($from.depth < 2 || $from.parent.type.name !== "paragraph") return false;
   const item = $from.node(-1);
-  if (item.type.name !== "list_item" || typeof item.attrs.checked !== "boolean" || $from.index(-1) !== 0) return false;
+  if (!["list_item", "blockquote"].includes(item.type.name) || item.type.name === "list_item" && $from.index(-1) !== 0) return false;
   let empty = true;
   $from.parent.forEach(child => { if (child.type.name !== "hardbreak") empty = false; });
-  if (!empty && $from.parentOffset !== 0) return false;
+  // Preserve native list/quote handling (and its history) for genuinely empty
+  // paragraphs; this extension only supplies their missing hard-break exit.
+  if (empty && !$from.parent.childCount && typeof item.attrs.checked !== "boolean") return false;
+  if (!empty && (typeof item.attrs.checked !== "boolean" || $from.parentOffset !== 0)) return false;
+  if (item.type.name === "blockquote") {
+    if (!empty) return false;
+    return lift(state, dispatch && (tr => {
+      const caret = tr.selection.$from;
+      if (caret.parent.type.name === "paragraph") tr.delete(caret.start(), caret.end());
+      dispatch(tr.setMeta("deditor-list-operation", true).scrollIntoView());
+    }), view);
+  }
   if (taskIndent(item.attrs.taskIndent)) {
     dispatch?.(state.tr.setNodeMarkup($from.before(-1), undefined, { ...item.attrs, taskIndent: taskIndent(item.attrs.taskIndent) - 1 }).setMeta("deditor-list-operation", true).scrollIntoView());
     return true;
@@ -102,7 +114,9 @@ export const markdownListKeys = $shortcut(() => ({
   Delete: { key: "Delete", priority: 120, onRun: () => joinTaskForward },
   Backspace: { key: "Backspace", priority: 120, onRun: () => leaveTask },
   Enter: { key: "Enter", priority: 120, onRun: () => (state, dispatch, view) => {
-    if (state.selection.$from.parent.textContent.replace(/\n/g, "") || state.selection.$from.parent.childCount > 1) return false;
+    let onlyBreaks = true;
+    state.selection.$from.parent.forEach(child => { if (child.type.name !== "hardbreak") onlyBreaks = false; });
+    if (!onlyBreaks) return false;
     return leaveTask(state, dispatch, view);
   } },
   Tab: { key: "Tab", priority: 110, onRun: () => indentList(false) },

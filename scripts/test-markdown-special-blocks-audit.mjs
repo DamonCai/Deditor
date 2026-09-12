@@ -91,7 +91,7 @@ await test('I05 callout body: direct edits, nested formats and undo preserve ale
 });
 await test('I03-I04 block math and Mermaid: enter source, edit, Escape and exact history',async()=>{
  for(const original of ['Before\n\n$$\nx^2\n$$\n\nTail\n','Before\n\n```mermaid\ngraph LR\n A-->B\n```\n\nTail\n']){
-  await reset(original);const preview=document.querySelector('.md-code-preview');assert.ok(preview);await run(()=>document.querySelector(".md-code-toggle").click());const cm=CMView.findFromDOM(document.querySelector('.md-code-editor .cm-editor'));assert.ok(cm);const old=cm.state.doc.toString();await run(()=>cm.dispatch({changes:{from:old.length,insert:'\n'},selection:{anchor:old.length+1}}));await run(()=>runScopeHandlers(cm,new window.KeyboardEvent('keydown',{key:'Escape'}),'editor'));assert.ok(content().endsWith('Tail\n'));assert.ok(content().includes(old+'\n'));await exactHistory(original);
+  await reset(original);const preview=document.querySelector('.md-code-preview');assert.ok(preview);await run(()=>document.querySelector(original.includes("```mermaid") ? ".md-diagram-modes [data-mode=edit]" : ".md-code-toggle").click());const cm=CMView.findFromDOM(document.querySelector('.md-code-editor .cm-editor'));assert.ok(cm);const old=cm.state.doc.toString();await run(()=>cm.dispatch({changes:{from:old.length,insert:'\n'},selection:{anchor:old.length+1}}));await run(()=>runScopeHandlers(cm,new window.KeyboardEvent('keydown',{key:'Escape'}),'editor'));assert.ok(content().endsWith('Tail\n'));assert.ok(content().includes(old+'\n'));await exactHistory(original);
  }
 });
 } finally {await act(async()=>root.unmount());}

@@ -1,4 +1,5 @@
 import { exitBlockSource } from "./blockExit";
+import { diagramSplit } from "./diagramSplit";
 import { markdownMathContext } from "../markdownMath";
 import type { Node as ProseNode } from "@milkdown/kit/prose/model";
 import type { EditorView as ProseView, NodeView } from "@milkdown/kit/prose/view";
@@ -21,6 +22,10 @@ import { logError } from "../logger";
 export function codeView(tabId: string, theme: "light" | "dark") {
   return (initial: ProseNode, view: ProseView, getPos: () => number | undefined): NodeView => {
     let node = initial, updating = false, generation = 0, languageGeneration = 0, destroyed = false, expanded = false;
+    type DiagramMode = "edit" | "split" | "preview";
+    let diagramMode: DiagramMode = "preview";
+    let renderTimer: ReturnType<typeof setTimeout> | undefined;
+    const hasDiagramModes = () => ["mermaid", "plantuml", "puml", "uml"].includes(String(node.attrs.language ?? "").toLowerCase());
     let controllers: AbortController[] = [];
     let renderedSource: string | null = null, pendingSource: string | null = null;
     const dom = document.createElement("section"); dom.className = "md-code-block"; dom.contentEditable = "false";
@@ -29,7 +34,7 @@ export function codeView(tabId: string, theme: "light" | "dark") {
     const selectNode = () => {
       if (!view.editable) return false;
       const pos = getPos(); if (pos === undefined) return false;
-      expanded = false; render();
+      if (!hasDiagramModes()) expanded = false; render();
       view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, pos))); view.focus(); return true;
     };
     selectBlock.onmousedown = event => event.preventDefault();
@@ -40,9 +45,36 @@ export function codeView(tabId: string, theme: "light" | "dark") {
     const toggle = document.createElement("button"); toggle.className = "deditor-btn md-code-toggle"; toggle.dataset.variant = "ghost";
     const copy = document.createElement("button"); copy.className = "deditor-btn"; copy.dataset.variant = "ghost"; copy.textContent = tStatic("editor.copy");
     copy.onclick = () => { void navigator.clipboard.writeText(node.textContent).catch(err => logError("Markdown code copy failed", err)); };
-    bar.append(language, toggle, copy);
+    const family = document.createElement("span"); family.className = "md-diagram-family";
+    const modes = document.createElement("div"); modes.className = "deditor-segments md-diagram-modes";
+    modes.setAttribute("role", "group"); modes.setAttribute("aria-label", tStatic("md.diagramMode"));
+    const modeButtons = (["edit", "split", "preview"] as const).map(mode => {
+      const button = document.createElement("button"); button.type = "button"; button.className = "deditor-segment";
+      button.dataset.mode = mode; button.textContent = tStatic({ edit: "md.viewEdit", split: "md.viewSplit", preview: "md.viewPreview" }[mode]);
+      button.onclick = () => setDiagramMode(mode);
+      modes.append(button); return button;
+    });
+    bar.append(language, family, toggle, modes, copy);
     const editor = document.createElement("div"), preview = document.createElement("div"); preview.className = "md-code-preview"; editor.className = "md-code-editor";
-    dom.append(selectBlock, bar, editor, preview);
+    const body = document.createElement("div"); body.className = "md-code-body";
+    const split = diagramSplit(body); body.append(editor, split.separator, preview);
+    dom.append(selectBlock, bar, body);
+    function setDiagramMode(mode: DiagramMode) {
+      if (!view.editable || !hasDiagramModes()) return;
+      const pos = getPos();
+      if (mode === "preview" && pos !== undefined && view.state.selection instanceof NodeSelection
+        && view.state.selection.from === pos) {
+        modeButtons.find(button => button.dataset.mode === mode)?.focus({ preventScroll: true });
+        view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, pos + 1)));
+      }
+      diagramMode = mode; expanded = mode !== "preview"; render();
+      if (expanded) ensureEditor().focus();
+      else {
+        // Switching the display is not a request to select the entire block.
+        // Keep focus on the mode control instead of creating a blue node outline.
+        modeButtons.find(button => button.dataset.mode === mode)?.focus({ preventScroll: true });
+      }
+    }
     const languageCompartment = new Compartment(), editableCompartment = new Compartment(), presentationCompartment = new Compartment();
     let presentation: Extension = [], presentationGeneration = 0;
     const wrapping = new Compartment(), indentation = new Compartment();
@@ -59,7 +91,7 @@ export function codeView(tabId: string, theme: "light" | "dark") {
         { key: "Escape", run: () => {
           const pos = getPos();
           if (pos !== undefined) view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, pos)));
-          expanded = false; render(); view.focus(); return true;
+          diagramMode = "preview"; expanded = false; render(); view.focus(); return true;
         } },
         ...([-1, 1] as const).map(direction => ({ key: direction < 0 ? "ArrowUp" : "ArrowDown", run: () => {
           const selection = cm!.state.selection.main;
@@ -103,15 +135,41 @@ export function codeView(tabId: string, theme: "light" | "dark") {
         cm?.dispatch({ effects: presentationCompartment.reconfigure(extension) });
       }).catch(err => logError("Markdown code highlighting failed", err));
     };
-    function render() {
+    function render(debounce = false) {
       const lang = String(node.attrs.language ?? "").toLowerCase();
       const diagram = ["mermaid", "plantuml", "puml", "uml", "latex", "flow", "sequence"].includes(lang);
       dom.dataset.kind = lang === "latex" ? "math" : diagram ? "diagram" : "code";
+      const threeModes = hasDiagramModes();
+      // Keep the viewport chosen on the first switch. Source wrapping and SVG
+      // aspect ratios must not move the following paragraph between modes.
+      if (threeModes && dom.dataset.diagramMode && dom.dataset.diagramMode !== diagramMode
+        && !body.style.getPropertyValue("--md-diagram-height")) {
+        const height = body.getBoundingClientRect().height;
+        if (height > 0) body.style.setProperty("--md-diagram-height", `${height}px`);
+      }
+      dom.classList.toggle("md-diagram-block", threeModes);
+      if (!threeModes) body.style.removeProperty("--md-diagram-height");
+      split.setEnabled(threeModes && diagramMode === "split" && view.editable);
+      dom.dataset.diagramMode = threeModes ? diagramMode : "";
+      if (threeModes) expanded = diagramMode !== "preview";
+      modes.hidden = !threeModes || !view.editable;
+      family.hidden = !threeModes;
+      family.textContent = lang === "mermaid" ? "Mermaid" : "PlantUML";
+      language.hidden = threeModes;
+      preview.tabIndex = threeModes && view.editable ? 0 : -1;
+      if (threeModes) preview.setAttribute("aria-label", tStatic("md.diagramPreview"));
+      else preview.removeAttribute("aria-label");
+      modeButtons.forEach(button => {
+        const selected = button.dataset.mode === diagramMode;
+        button.dataset.selected = String(selected); button.setAttribute("aria-pressed", String(selected));
+        button.disabled = !view.editable;
+      });
       // Keep the surrounding article still when a tall diagram becomes a short source block.
-      if (expanded && editor.hidden) editor.style.minHeight = `${dom.getBoundingClientRect().height}px`;
-      editor.hidden = !expanded; preview.hidden = expanded;
+      if (!threeModes && expanded && editor.hidden) editor.style.minHeight = `${dom.getBoundingClientRect().height}px`;
+      if (threeModes) editor.style.minHeight = "";
+      editor.hidden = !expanded; preview.hidden = expanded && (!threeModes || diagramMode === "edit");
       if (expanded) ensureEditor();
-      toggle.hidden = !diagram || !view.editable;
+      toggle.hidden = threeModes || !diagram || !view.editable;
       toggle.textContent = tStatic(expanded ? "md.hideSource" : "md.editSourceBlock");
       language.readOnly = !view.editable;
       selectBlock.hidden = !view.editable;
@@ -131,7 +189,16 @@ export function codeView(tabId: string, theme: "light" | "dark") {
         generation++; pendingSource = null;
         controllers.forEach(controller => controller.abort()); controllers = [];
       }
-      if (expanded || renderKey === renderedSource || renderKey === pendingSource) return;
+      if (renderTimer) { clearTimeout(renderTimer); renderTimer = undefined; }
+      if (preview.hidden || renderKey === renderedSource || renderKey === pendingSource) return;
+      if (threeModes && !code.trim()) {
+        const empty = document.createElement("div"); empty.className = "deditor-notice";
+        empty.setAttribute("role", "status"); empty.textContent = tStatic("md.diagramEmpty");
+        preview.replaceChildren(empty); renderedSource = renderKey; return;
+      }
+      if (debounce && threeModes && diagramMode === "split") {
+        renderTimer = setTimeout(() => { renderTimer = undefined; render(); }, 250); return;
+      }
       const token = ++generation;
       pendingSource = renderKey;
       controllers.forEach(controller => controller.abort()); controllers = [];
@@ -155,7 +222,9 @@ export function codeView(tabId: string, theme: "light" | "dark") {
     }
     preview.onmousedown = event => {
       if (!view.editable || event.button !== 0) return;
-      event.preventDefault(); expanded = true; render();
+      event.preventDefault();
+      if (hasDiagramModes()) { selectNode(); return; }
+      expanded = true; render();
       const active = ensureEditor();
       const pos = active.posAtCoords({ x: event.clientX, y: event.clientY });
       if (pos !== null) active.dispatch({ selection: { anchor: pos } });
@@ -163,9 +232,16 @@ export function codeView(tabId: string, theme: "light" | "dark") {
     };
     preview.onkeydown = event => {
       if (!view.editable || event.key !== "Enter") return;
-      event.preventDefault(); event.stopPropagation(); expanded = true; render(); ensureEditor().focus();
+      event.preventDefault(); event.stopPropagation();
+      if (hasDiagramModes()) { setDiagramMode("split"); return; }
+      expanded = true; render(); ensureEditor().focus();
+    };
+    preview.ondblclick = event => {
+      if (!view.editable || !hasDiagramModes()) return;
+      event.preventDefault(); setDiagramMode("split");
     };
     const collapse = (event: FocusEvent) => {
+      if (hasDiagramModes()) return;
       if (dom.contains(event.relatedTarget as Node | null)) return;
       if (expanded) { expanded = false; render(); }
     };
@@ -184,7 +260,7 @@ export function codeView(tabId: string, theme: "light" | "dark") {
       updating = true;
       cm?.dispatch({ effects: editableCompartment.reconfigure([EditorView.editable.of(view.editable), EditorState.readOnly.of(!view.editable)]) });
       updating = false;
-      if (!view.editable) expanded = false;
+      if (!view.editable) { expanded = false; diagramMode = "preview"; }
       render();
     };
     view.dom.addEventListener("deditor-editable-change", modeChanged);
@@ -201,7 +277,7 @@ export function codeView(tabId: string, theme: "light" | "dark") {
     return { dom, stopEvent: () => true, ignoreMutation: () => true,
       setSelection(anchor, head) {
         if (!view.editable) return;
-        if (editor.hidden) { expanded = true; render(); }
+        if (editor.hidden) { expanded = true; if (hasDiagramModes()) diagramMode = "split"; render(); }
         updating = true;
         const active = ensureEditor();
         active.dispatch({ selection: { anchor: Math.min(anchor, active.state.doc.length), head: Math.min(head, active.state.doc.length) } });
@@ -216,9 +292,9 @@ export function codeView(tabId: string, theme: "light" | "dark") {
         cm?.dispatch({ effects: editableCompartment.reconfigure([EditorView.editable.of(view.editable), EditorState.readOnly.of(!view.editable)]) }); updating = false;
         language.value = node.attrs.language ?? "";
         if (languageChanged) { loadLanguage(); loadPresentation(); }
-        if (textChanged || languageChanged || language.readOnly === view.editable) render();
+        if (textChanged || languageChanged || language.readOnly === view.editable) render(textChanged && !languageChanged);
         return true;
-      }, destroy() { view.dom.removeEventListener("deditor-writing-change", settingsChanged); view.dom.removeEventListener("deditor-document-change", documentChanged); view.dom.removeEventListener("deditor-editable-change", modeChanged); dom.removeEventListener("focusout", collapse); destroyed = true; generation++; controllers.forEach(controller => controller.abort()); cm?.destroy(); },
+      }, destroy() { split.destroy(); view.dom.removeEventListener("deditor-writing-change", settingsChanged); view.dom.removeEventListener("deditor-document-change", documentChanged); view.dom.removeEventListener("deditor-editable-change", modeChanged); dom.removeEventListener("focusout", collapse); destroyed = true; generation++; if (renderTimer) clearTimeout(renderTimer); controllers.forEach(controller => controller.abort()); cm?.destroy(); },
     };
   };
 }

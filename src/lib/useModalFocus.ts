@@ -69,7 +69,15 @@ export function useModalFocus(
       stack.splice(stack.indexOf(panel), 1);
       document.removeEventListener("keydown", onKey, true);
       document.removeEventListener("focusin", onFocus);
-      if (previous?.isConnected) previous.focus();
+      if (previous?.isConnected) {
+        previous.focus();
+        // Embedded editors can collapse on blur while a dialog is open. Their
+        // hidden input cannot receive focus; the outer editor restores its
+        // selection and reopens the embedded editor when focused instead.
+        if (document.activeElement !== previous) {
+          previous.parentElement?.closest<HTMLElement>('[contenteditable="true"]')?.focus();
+        }
+      }
     };
   }, [open, identity]);
   return ref;
