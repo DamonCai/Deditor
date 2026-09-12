@@ -1,5 +1,6 @@
 import { installEditorSearch } from "../lib/editorSearch";
 import { outlineActiveIndex } from "../lib/markdownOutline";
+import { outlineHeadingText } from "../lib/markdownVisual/outlineHeading";
 import { markdownCrossBlockInput } from "../lib/markdownVisual/crossBlockInput";
 import { installDocumentEnd, handleSelectedBlockExit } from "../lib/markdownVisual/documentEnd";
 import { imageClipboard } from "../lib/markdownVisual/imageClipboard";
@@ -221,9 +222,9 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
         const outline = () => {
           if (!activeRef.current) return;
           const result: { pos: number; level: number; text: string }[] = [];
-          view.state.doc.descendants((node, pos) => { if (node.type.name === "heading") result.push({ pos: pos + 1, level: node.attrs.level, text: node.textContent }); });
+          view.state.doc.descendants((node, pos) => { if (node.type.name === "heading") { result.push({ pos: pos + 1, level: node.attrs.level, text: outlineHeadingText(node) }); return false; } });
           headingPositions.current = result;
-          setHeadings(result);
+          setHeadings(previous => previous.length === result.length && previous.every((item, i) => item.pos === result[i].pos && item.level === result[i].level && item.text === result[i].text) ? previous : result);
         };
         const flush = () => {
           const content = document.apply(view.state.doc);
@@ -452,7 +453,8 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
   useEffect(() => { if (searchOpen) (searchFocus.current ? replaceInput.current : searchInput.current)?.focus(); }, [searchOpen]);
   useEffect(() => {
     if (!active || !ready) return;
-    return installEditorSearch(replace => openSearch(replace && !readonly));
+    return installEditorSearch(replace => openSearch(replace && !readonly), () =>
+      activeRef.current && useEditorStore.getState().activeId === tabId && useEditorStore.getState().markdownMode === "visual");
   }, [active, ready, readonly]);
   useEffect(() => {
     if (!searchOpen || !active) {

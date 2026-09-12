@@ -398,9 +398,9 @@ await test('outline: preview rail reads live headings and jumps to current posit
  assert.equal(document.querySelector('.preview-toc-item[aria-current="location"]').textContent,'Third');
 });
 await test('outline: shared preview presentation, pin and Escape keep document unchanged',async()=>{
- const original='# Parent\n\n## Child\n\n# Parent\n';await act(async()=>store.getState().setContent(original,'a','command'));
+ const original='# 父标题 **重点**\n\n## Child\n\n# 父标题 **重点**\n';await act(async()=>store.getState().setContent(original,'a','command'));
  await act(async()=>document.querySelector('.preview-toc-rail').click());
- assert.deepEqual([...document.querySelectorAll('.preview-toc-item')].map(item=>[item.dataset.lvl,item.textContent]),[['1','Parent'],['2','Child'],['1','Parent']]);
+ assert.deepEqual([...document.querySelectorAll('.preview-toc-item')].map(item=>[item.dataset.lvl,item.textContent]),[['1','父标题 重点'],['2','Child'],['1','父标题 重点']]);
  assert.equal(document.querySelector('.md-visual-controls'),null);assert.equal(document.querySelector('.md-visual-toc'),null);
  await act(async()=>document.querySelector('.preview-toc-toggle').click());assert.equal(store.getState().tocVisible,true);
  assert.equal(document.querySelector('.preview-toc').dataset.pinned,'true');
@@ -410,8 +410,13 @@ await test('outline: shared preview presentation, pin and Escape keep document u
  assert.equal(content(),original);
  // The actual Preview uses exactly the same rows, pin control and collapsed rail.
  const host=document.createElement('div');document.body.append(host);const previewRoot=createRoot(host);
- await act(async()=>{store.setState({previewMaximized:true});previewRoot.render(React.createElement(app.Preview,{tabId:'a',theme:'light',active:false}));await pause(150);});
+ await act(async()=>{store.setState({previewMaximized:true});previewRoot.render(React.createElement(app.Preview,{tabId:'a',theme:'light',active:true}));});
+ await act(async()=>pause(180));
  assert.deepEqual([...host.querySelectorAll('.preview-toc-item')].map(item=>[item.dataset.lvl,item.textContent]),[...document.querySelector('.md-visual-shell').querySelectorAll('.preview-toc-item')].map(item=>[item.dataset.lvl,item.textContent]));
+ await act(async()=>host.querySelectorAll('.preview-toc-item')[2].click());
+ assert.equal(host.querySelector('.preview-toc-item[aria-current="location"]'),host.querySelectorAll('.preview-toc-item')[2]);
+ await act(async()=>app.getVisualEditor().navigate(1,10));
+ assert.equal(document.querySelector('.md-visual-shell .preview-toc-item').textContent,'父标题 重点');
  await act(async()=>{previewRoot.unmount();store.setState({previewMaximized:false});});host.remove();
 });
 await test('menu search: find and replace focus the visible editor, close and preserve history',async()=>{

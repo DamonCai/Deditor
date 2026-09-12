@@ -15,9 +15,9 @@ export function openEditorSearch(replace = false) {
   return true;
 }
 
-export function installEditorSearch(open: (replace: boolean) => void) {
+export function installEditorSearch(open: (replace: boolean) => void, isCurrent = () => true) {
   const handler = (event: Event) => {
-    if (event.defaultPrevented) return;
+    if (event.defaultPrevented || !isCurrent()) return;
     event.preventDefault(); open((event as CustomEvent<{ replace: boolean }>).detail.replace);
   };
   window.addEventListener(searchEvent, handler);

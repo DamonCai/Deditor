@@ -700,7 +700,7 @@ export default function Preview({
   const handleTocJump = (id: string) => {
     const root = containerRef.current;
     if (!root) return;
-    const target = Array.from(root.querySelectorAll<HTMLElement>("[id]")).find(element => decodeAnchor(element.id) === id) ?? null;
+    const target = Array.from(root.querySelectorAll<HTMLElement>("[id]")).find(element => (element.id === id || decodeAnchor(element.id) === decodeAnchor(id))) ?? null;
     if (!target) return;
     // Anchor on the heading's data-line (markdown.ts stamps it) so the
     // logical target survives async mermaid/plantuml hydration shifts.
