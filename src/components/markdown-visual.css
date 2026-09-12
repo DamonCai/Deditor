@@ -53,7 +53,8 @@
   position: relative; inset: auto; width: 100%; max-width: 100%; flex-wrap: wrap;
   opacity: 1; pointer-events: auto; margin-bottom: 8px;
 }
-.md-diagram-block .md-diagram-modes .deditor-segment { min-width: 72px; padding: 0 18px !important; }
+/* Match the document toolbar; only override Milkdown's button padding reset. */
+.md-diagram-block .md-diagram-modes .deditor-segment { padding: 0 10px !important; }
 .md-diagram-block .md-code-body {
   display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr);
   height: var(--md-diagram-height, auto); min-height: 180px; max-height: 60vh; overflow: hidden;

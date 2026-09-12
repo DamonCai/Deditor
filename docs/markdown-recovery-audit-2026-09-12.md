@@ -37,3 +37,7 @@
 ## English summary
 
 Two root causes were reproduced and fixed: manual save errors were not surfaced consistently, and closing a modal could leave a collapsed embedded code editor unfocused. Eight injected recovery groups and eight existing save-race groups pass. Real browser checks cover continued typing after errors, code selection restoration, undo and continued typing, close-and-save failure, and dark/English presentation. Disk IO is mocked; native platform acceptance remains separate.
+
+## 暂停时补充
+
+较早原生隔离包已用自建只读文件实际触发Permission denied，错误关闭后**粘贴**续写、恢复权限后保存/关闭重开通过；最终包逐键及快捷键仍有未明异常，不能计为全面通过。完整回归、包版本边界、原生现场、外部ccd6a14提交与清理状态，以[总记录暂停接续](markdown-operation-gaps-results-2026-09-12.md)为最新结论。用户明确要求暂停，下次从该记录继续。
