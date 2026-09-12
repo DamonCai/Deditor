@@ -1,6 +1,43 @@
-# 阅读编辑逐项验收（2026-09-12，进行中）
+# 阅读编辑逐项验收（2026-09-12）
 
 用户要求依据[64 组操作清单](markdown-visual-operation-inventory-2026-09-12.md)逐项验证，并明确授权多个 agent 并行。分工为输入/剪贴板及图片、表格、格式/链接，主任务负责光标/列表/代码/搜索和最终整合。仅使用自建样例，不提交推送。
+
+## 修复数量统计（按独立问题去重）
+
+本次操作审计共处理 **26 项问题：25 项原有问题，另 1 项为本轮实现过程中发现并修掉的多图插入回归**。不计其他任务独立修复的回车历史/列表样式，不计测试准备错误、工具定位异常，也不把保护性分支或测试变体拆成新问题。此处统计修复项，不表示所有平台均验收。
+
+| 类别 | 数量 | 对应问题 |
+| --- | ---: | --- |
+| 列表 | 3 | ① 子项转任务误改父项完成状态；② 任务按钮无法取消；③ 首列表项 Tab 插入多余空格 |
+| 表格 | 5 | ④ Shift Enter 无效；⑤ TSV 边界空白丢失；⑥ 单元格列表解析与源码位置错误；⑦ 菜单被裁切；⑧ 增行列后键盘撤销失效 |
+| 行内格式 | 2 | ⑨ 关闭行内代码后继续输入仍带格式；⑩ 行内源码展开时工具栏选中状态丢失 |
+| 代码与保留块 | 2 | ⑪ 代码块 Tab 焦点逃逸；⑫ HTML/YAML 等保留块源码 Tab 焦点逃逸 |
+| 搜索与源码保真 | 3 | ⑬ 全部替换重排未修改内容；⑭ 单次替换反复命中同一项；⑮ 重复不可变节点映射到错误源码位置 |
+| 图片 | 6 | ⑯ 路径维护误删转义标签文字；⑰ 宽度回显与保存不一致；⑱ alt 与 title 控件/实际属性混淆；⑲ alt/宽度撤销后失焦重新提交旧值；⑳ 图片粘贴未替换文字选区；㉑ 多图插入只剩末张（本轮实施回归） |
+| 输入辅助 | 1 | ㉒ Esc 取消表情后同长度新前缀没有候选 |
+| 历史与启动 | 4 | ㉓ 草稿读取失败残留另一分类旧列表；㉔ 初始化未完成时撤销/重做可点却无效；㉕ 关闭后立即退出恢复旧草稿；㉖ 冷启动丢失系统传入文件路径 |
+| 合计 | **26** | **25 项原有问题 + 1 项实施回归** |
+
+图片 alt 控件误标、缺少独立入口和渲染覆盖归为同一问题；alt/width 两种撤销表现归为同一问题；表格列表的显示与源码定位归为同一问题，避免重复计算。94 组操作专项与 106 项集成是验证数量，不是 bug 数量。
+
+English: The deduplicated audit contains 26 fixes: 25 pre-existing issues and one multi-image insertion regression introduced and corrected during this implementation. Test cases, test setup errors, tool failures and fixes owned by other tasks are excluded.
+
+## 最新验收结果（v5，以此节为准）
+
+已把 64 组操作整理成固定目录，并由三个 agent 分别检查输入/图片、表格/导航、格式/链接/搜索；主任务负责整合、源码保真和真实 macOS 闭环。以下历史小节保留复现过程，其“待补”状态由本节和当前覆盖表更新。
+
+- 最终固定快照完整 `npm run test:all` 退出码 0：62 核心、106 阅读集成、94 组操作专项、144 通用组件、119 XMind、13 导出，以及开发依赖启动、语法、代码行数和图标检查通过。94 组为基础 13、Enter 历史 8、输入 11、表格 11、格式 10、图片 8、特殊块 4、搜索 5、会话 5、导航 7、图片剪贴板 8、关闭持久化 4；不等于 64 组目录的全部平台组合已通过。
+- 生产原生构建退出码 0。最终 v5 新包完成两次真正冷启动打开不同文件；日志均显示 setup 之前接收的 Opened 路径在前端启动后成功取出，不再丢失。
+- 旧 dirty 草稿确认已经写入恢复文件后，制造外部冲突，连续执行“从磁盘重载→Cmd W→Cmd Q”，中间不增加等待；退出后的恢复文件不含旧文档，下一次冷启动也未恢复旧草稿。最后关闭测试文档并退出独立应用。
+- 前一整合包已完成任务转换、代码缩进、表格换行、连续替换、图片属性撤销、保存与重开的原生精确核对。v4 亮暗主题各 1,374 项复杂呈现检查无差异；v5 没有更改展示样式，追加的是图片剪贴板、关闭恢复与冷启动修复。性能证据仍为文档层检查，不代表长期压力测试。
+
+快速复查入口：`npm run test:markdown-operations`。它执行核心、阅读集成及上述操作专项；`npm run test:all` 再覆盖其他能力。统一入口减少重复手点，真实 UI 检查继续承担焦点、系统剪贴板、原生落盘等自动化不能替代的部分。
+
+最终证据：`tests/artifacts/operation-integrated-v5-all.log`、`operation-integrated-v5-build.log`、`operation-integrated-v5-manifest.json`、`operation-integrated-v5-native.log`、`operation-integrated-v5-native-result.json`。320 项摘要与工作区产品/测试文件一致；两份 operations 配置仅存在于隔离快照。证据目录被 Git 忽略，换机须另行迁移。本任务未提交推送；期间外部提交推进到 `c1eda93`，后续接手须重查 Git。
+
+尚未全面验收：真实中文候选/组词、Windows、真实表格拖拽及取消/边缘滚动、系统多图片来源、真实图床账号和长期压力。一次表格首键观察与引用起点 Backspace 的工具定位问题仍保留原记录，不能算已解决。强制结束进程早于 IPC 完成也不在关闭持久化保证内。
+
+新增专项：[导航](markdown-navigation-operation-audit-2026-09-12.md)、[图片剪贴板](markdown-image-clipboard-audit-2026-09-12.md)、[关闭恢复](markdown-close-persistence-fix-2026-09-12.md)。
 
 ## 本次主任务已经复现并修复
 
@@ -53,11 +90,11 @@ LF/CRLF 自动化已核对精确替换、三个换行间隔、列表标记、未
 
 ## 未完成边界
 
-输入/剪贴板、图片、表格、格式/链接、特殊块已汇入下方记录。仍在补搜索连续操作与历史草稿边界；真实 IME、Windows、真实图床账户和长期压力测试不得记为通过。整份 64 组清单尚未完成。
+本节为早期阶段边界。搜索、历史草稿、图片剪贴板和关闭恢复已补齐当前专项及最终整合；系统与平台未验收项见文首。64 组目录不代表所有组合已验收。
 
 ## English
 
-The operation audit is in progress. Reproduced and fixed unintended ancestor task changes, missing task-list cancellation, code Tab leaving the editor, and replace-all rewriting untouched Markdown. Targeted tests and fixed-snapshot browser checks are recorded above. Parallel audits and final integrated/native validation remain pending; no commit or push was performed.
+Three parallel audits have been integrated. The final v5 snapshot passed the complete suite (62 core tests, 106 reading integration tests, 94 operation groups and the remaining product regressions) and production native build. macOS checks include exact save/undo/reopen, two cold file opens and reload–close–quit without restoring the closed draft. Real IME, Windows, native drag/drop, real upload accounts and long-term stress remain unverified. This task did not commit or push.
 
 ## 整合快照与专项汇总（第一次整合）
 
@@ -93,28 +130,28 @@ The operation audit is in progress. Reproduced and fixed unintended ancestor tas
 
 | 范围 | 当前证据 | 仍需区分的边界 |
 | --- | --- | --- |
-| A 光标/选区 | 鼠标双三击、拖选、扩选、格式边界已有实测，追加导航专项中 | Windows 快捷键、全部跨块组合 |
+| A 光标/选区 | 鼠标双三击、拖选、扩选、格式边界已有实测，7 组导航专项通过 | Windows 快捷键、全部跨块组合 |
 | B 输入/删除 | 11 组输入专项、13 组基础操作、8 组 Enter 历史以及原生保存 | 真实 IME 候选/组词 |
 | C 剪贴板 | 实际剪切粘贴、Unicode、富文本与空白、多行源码 | 跨应用真实来源、系统图片剪贴板、原生文本拖动 |
 | D 格式 | 10 组格式/链接回归与真实切换，行内代码退出继续输入修复 | 真实 IME 交错 |
-| E 列表/引用 | 嵌套任务、取消及父状态有原生证据；追加导航/缩进专项中 | 首项 Tab 已复现，修复处理中 |
+| E 列表/引用 | 嵌套任务、取消及父状态有原生证据；7 组导航/缩进专项通过 | 首项 Tab 已修复并完成原生保存核对 |
 | F 表格 | 11 组专项、真实控件及原生换行保存撤销 | 原生真实行列拖拽/取消/边缘滚动；一次未稳定复现首键观察 |
 | G 链接/脚注 | 格式链接专项、脚注真实 Tab/Esc、既有原生补测 | 外部应用启动和整篇布局对跑不由局部样式推出 |
-| H 图片 | 7 组专项、路径/替代文字/标题/宽度真实修改 | 真实图床账号、最终包全套目录/资源组合 |
+| H 图片 | 8 组专项、路径/替代文字/标题/宽度真实修改 | 真实图床账号、最终包全套目录/资源组合 |
 | I 特殊块 | 4 组专项、实际公式/图表/raw、代码 Tab 原生保存 | 联网失败完整链路及真实 IME |
-| J 搜索/大纲 | 大纲真实操作；全部替换原生精确保真；单次替换新增 5 组与真实三次替换/撤销 | 新搜索补丁最终整合与原生待补 |
-| K 保存/会话 | 原生保存重开、外部干净重载/脏冲突保留；追加草稿和长文历史检查中 | 新发现草稿失败残留已修复；长文撤销异常定位中 |
-| L 显示/稳定 | 540 项复杂呈现无差异，设置不改内容与文档层性能通过 | 长期压力、原生大文档、Windows 仍不能算完成 |
+| J 搜索/大纲 | 大纲真实操作；全部替换原生精确保真；单次替换新增 5 组与真实三次替换/撤销 | 连续三次替换及撤销已原生落盘核对 |
+| K 保存/会话 | 原生保存重开、外部干净重载/脏冲突保留；5 组会话及 4 组关闭恢复专项通过 | 草稿失败残留、快速关闭恢复已修复；长时压力仍未验收 |
+| L 显示/稳定 | 亮暗主题各 1374 项复杂呈现无差异，设置不改内容与文档层性能通过 | 长期压力、原生大文档、Windows 仍不能算完成 |
 
-详细搜索新增见[搜索专项](markdown-search-operations-audit-2026-09-12.md)。后续检查和修复仍在执行，不能把本表作为全量通过声明。
+详细搜索新增见[搜索专项](markdown-search-operations-audit-2026-09-12.md)。本表用于区分证据与边界，不是全平台、全组合通过声明。
 
 ## 交叉检查新增源码映射回归
 
 ProseMirror 允许同一个不可变段落节点出现在多处。带脚注文档里复制同一个段落节点后，原先映射表按节点对象作键，第二份覆盖第一份的位置；随后修改界面第一份，却把源码写到第二份。现在映射按文档中的出现索引保存。LF/CRLF 正反用例确认旧版失败、修复后两份能独立编辑且位置一致；62 核心通过。证据 `operation-shared-node-before.log`、`operation-shared-node-after.log`。这属于合法模型操作的确定性回归，不据此宣称普通系统剪贴板也复现同一故障。
 
-本轮追加搜索/草稿/加载按钮/列表 Tab/图片属性撤销后，正在最终整合。并行其他任务还在修改列表样式：第一次整合快照的 540 项呈现通过仍只属于当时版本；新的增强呈现检查捕获了未收口样式差异，不能沿用旧通过数覆盖新样式。
+此阶段追加搜索/草稿/加载按钮/列表 Tab/图片属性撤销；其后最终整合见文首。第一次整合 540 项呈现只属于当时版本，后续差异及 v4 收口结果分别记录于下方。
 
-## 最终编辑操作整合（v3，原生短链待接续）
+## 编辑操作整合历史（v3）
 
 `operation-integrated-v3-all.log` 完整通过：62 核心、106 阅读集成、82 组基本/Enter历史/输入/表格/格式/图片/特殊块/搜索/会话/导航专项，以及144通用组件、119 XMind、13导出、语法、代码行数和图标。`operation-integrated-v3-perf.log` 文档层性能通过。当前摘要为 `operation-integrated-v3-manifest.json`。构建首次因新回调未使用参数未通过类型检查，已改为明确未使用名称并重新构建；不能把第一次失败写成构建成功。
 
@@ -132,4 +169,4 @@ v4纳入并行列表样式收口结果后，亮暗主题各1374项检查均无�
 
 ### 新发现的冷启动打开路径丢失
 
-原生日志10:49:04已收到并记录Opened路径，紧接着才进入setup；10:49:05前端drain返回0，显示旧恢复草稿而非系统指定的新文件。队列原来在setup注册，过早Opened没有可写入state。现把PendingOpens注册提前到Builder，setup仅追加Windows argv路径，不覆盖队列。待最终新包真正冷启动复测，不能仅以源码修改宣布通过。
+原生日志10:49:04已收到并记录Opened路径，紧接着才进入setup；10:49:05前端drain返回0，显示旧恢复草稿而非系统指定的新文件。队列原来在setup注册，过早Opened没有可写入state。现把PendingOpens注册提前到Builder，setup仅追加Windows argv路径，不覆盖队列。v5 新包已实际冷启动两次：先打开 cold-one，再退出并冷启动打开 cold-two，均一次系统打开即显示目标正文，旧草稿没有恢复。证据见文首原生日志。

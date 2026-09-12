@@ -12,7 +12,7 @@
 
 ## 具体证据
 
-`scripts/test-markdown-image-clipboard-audit.mjs` **7 组通过**：
+`scripts/test-markdown-image-clipboard-audit.mjs` **8 组通过**：
 
 1. 段落中间图片插入位置、PNG 字节/目录/文件引用、模拟保存、一次撤销、重做及组件重建。
 2. 选中文字粘贴图片替换选区；旧版失败对照已实际执行。
@@ -24,6 +24,8 @@
 
 TypeScript 检查与差异格式检查通过。日志在 `tests/artifacts/image-clipboard-audit.log`。
 
+8. 三张 PNG 同时粘贴到空文档、文末及文字选区，三张引用按顺序保留；一次撤销、重做与组件重建一致。旧循环插入在空文档只剩最后一张（实际失败 `1 !== 3`），已改为单次 Slice/Fragment 替换整个原选区，异步映射逻辑未变。
+
 ## 固定快照浏览器
 
 独立快照 `/var/folders/ls/ffs5872n5pz2yk47_m92ylvc0000gn/T/deditor-png-clipboard-y2j37ra6`，样例 `tests/markdown-image-clipboard-review.html`，5199 服务。
@@ -31,3 +33,5 @@ TypeScript 检查与差异格式检查通过。日志在 `tests/artifacts/image-
 浏览器工具本次可用。用浏览器剪贴板 API 写入自建 `image/png`，真实键盘选中 `beta` 后 Cmd+V：保存请求为 `/generated/assets/image-5ae2fe98-1512-4d0b-a704-336d1e1c5755.png`，字节与自建 PNG 完全相同；图片显示完成且 `naturalWidth=1`。正文保留 `alpha ` 和 ` gamma`，选中的 `beta` 被图片替换。Cmd+Z 一次恢复 `Before\n\nalpha beta gamma\n\nAfter\n`，图片数归零。快照哈希和读取值见 `tests/artifacts/image-clipboard-audit-snapshot.json`。
 
 该浏览器页模拟保存并将图片 URL 映射到自建 data URL，不能当作真实磁盘写入/原生截图剪贴板验收。未新增 Windows、macOS 系统截图剪贴板或真实文件落盘结论；C05 中的文本拖动、外部文件拖入也不在本次范围。自己的浏览器标签与 5199 服务已关闭。
+
+最后多图修正晚于上述单图浏览器快照；该修正由真实组件专项覆盖，未新增多图系统剪贴板或浏览器多图验收结论。最终 8 组专项、TypeScript 与差异格式检查通过。

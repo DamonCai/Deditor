@@ -405,6 +405,14 @@ export function closeTabById(id: string): Promise<boolean> {
     }
     if (useEditorStore.getState().tabs.some((t) => t.id === id)) {
       useEditorStore.getState().closeTab(id);
+      try {
+        // Load lazily: restoration itself imports the binary-file reader here.
+        const { flushPersist } = await import("./persistence");
+        await flushPersist();
+      } catch (error) {
+        logError("failed to persist closed tab", error);
+        return false;
+      }
     }
     return true;
   })();

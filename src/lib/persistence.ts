@@ -337,13 +337,28 @@ export async function loadPersisted(): Promise<UiExtras | null> {
 }
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let latestExtras: UiExtras | null = null;
+let pendingWrite: Promise<void> = Promise.resolve();
 
 export function schedulePersist(extras: UiExtras): void {
+  latestExtras = extras;
   if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => doSave(extras), 500);
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    void doSave(extras).catch((err) => logWarn("write_app_state failed", err));
+  }, 500);
 }
 
-function doSave(extras: UiExtras): void {
+/** Persist a completed close without leaving its recovery state on a timer. */
+export function flushPersist(): Promise<void> {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = null;
+  // Persistence starts after session hydration, when the UI supplies its sizes.
+  if (!latestExtras) return pendingWrite;
+  return doSave(latestExtras);
+}
+
+function doSave(extras: UiExtras): Promise<void> {
   const s = useEditorStore.getState();
   // Diff tabs are ephemeral — drop them before persisting so they don't show
   // up empty on next launch.
@@ -400,7 +415,11 @@ function doSave(extras: UiExtras): void {
     autoSave: s.autoSave,
     formatOnSave: s.formatOnSave,
   };
-  invoke("write_app_state", { content: JSON.stringify(base) })
+  const content = JSON.stringify(base);
+  // An older in-flight snapshot must finish before a close snapshot is written.
+  const write = pendingWrite.then(() => invoke<void>("write_app_state", { content }));
+  pendingWrite = write.catch(() => {});
+  return write
     .then(() => {
       // Sweep legacy localStorage once we know the file write succeeded —
       // otherwise an interrupted migration could lose the snapshot.
@@ -411,6 +430,5 @@ function doSave(extras: UiExtras): void {
       } catch {
         /* private mode etc.; harmless */
       }
-    })
-    .catch((err) => logWarn("write_app_state failed", err));
+    });
 }
