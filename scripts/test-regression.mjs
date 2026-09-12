@@ -339,7 +339,7 @@ test(3, "Markdown block and link insertion produce valid syntax without losing s
   });
 });
 
-test(4, "Markdown toolbar dialogs validate tables and reading mode disables editing", async () => {
+test(4, "Markdown toolbar dialogs validate tables and source/split modes keep editing enabled", async () => {
   reset();
   await withToolbarEditor("", async view => {
     await render(React.createElement(app.MarkdownToolbar));
@@ -354,8 +354,11 @@ test(4, "Markdown toolbar dialogs validate tables and reading mode disables edit
     const html = new MarkdownIt().render(view.state.doc.toString());
     assert.equal((html.match(/<th>/g) || []).length, 3);
     assert.equal((html.match(/<td>/g) || []).length, 6);
-    await act(async () => store.setState({markdownMode:"read"}));
-    assert.ok([...document.querySelectorAll('.md-tool, .md-heading-select, .md-color-trigger')].every(b=>b.disabled));
+    for (const markdownMode of ['source', 'split']) {
+      await act(async () => store.setState({markdownMode}));
+      assert.equal(document.querySelector('.md-heading-select').disabled, false);
+      assert.equal(document.querySelector('.md-tool[aria-label="Bold (**…**)"]').disabled, false);
+    }
     assert.ok([...document.querySelectorAll('.deditor-segment')].every(b=>!b.disabled));
   });
 });
@@ -2033,9 +2036,8 @@ test(8, "Diagram menus switch families, restore keyboard focus and reject stale 
     await act(async()=>document.querySelector('[role="menuitem"]').click());
     assert.equal(view.state.doc.toString(),'changed original');
     assert.match(document.querySelector('[role="alert"]').textContent,/document changed/i);
-    await act(async()=>store.setState({markdownMode:"read"}));
-    assert.equal(document.querySelector('[role="menu"]'),null);assert.equal(mermaid.disabled,true);
-    await act(async()=>store.setState({markdownMode:"source"}));
+    await act(async()=>document.body.dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true})));
+    assert.equal(document.querySelector('[role="menu"]'),null);assert.equal(mermaid.disabled,false);
     await act(async()=>mermaid.click());
     await act(async()=>store.setState({activeId:'another'}));
     assert.equal(document.querySelector('[role="menu"]'),null);
