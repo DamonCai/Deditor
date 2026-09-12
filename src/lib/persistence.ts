@@ -42,6 +42,7 @@ interface PersistedV3 {
   editorFontSize?: number;
   /** Legacy global zoom snapshot: migrate its configured baseline only. */
   editorBaseFontSize?: number;
+  /** "read" is accepted only for migrating the removed Markdown mode. */
   markdownMode?: "source" | "split" | "visual" | "read";
   previewMaximized?: boolean;
   /** Right-side TOC visibility in markdown reading mode. Default true. */
@@ -276,7 +277,9 @@ export async function loadPersisted(): Promise<UiExtras | null> {
   }
 
   useEditorStore.setState({
-    markdownMode: ["source", "split", "visual", "read"].includes(data.markdownMode ?? "") ? data.markdownMode! : !data.showPreview ? "source" : data.previewMaximized ? "visual" : "split",
+    markdownMode: data.markdownMode === "read" ? "visual"
+      : data.markdownMode === "source" || data.markdownMode === "split" || data.markdownMode === "visual" ? data.markdownMode
+      : !data.showPreview ? "source" : data.previewMaximized ? "visual" : "split",
     showPreview: data.showPreview,
     showSidebar: data.showSidebar,
     previewMaximized: data.previewMaximized ?? false,

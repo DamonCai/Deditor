@@ -26,8 +26,8 @@
   --crepe-color-selected: color-mix(in srgb, var(--accent) 20%, transparent);
   --crepe-color-inline-area: var(--hover-bg);
   --crepe-base-font-size: var(--md-visual-font-size);
-  --crepe-font-title: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-  --crepe-font-default: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --crepe-font-title: var(--md-font-family);
+  --crepe-font-default: var(--md-font-family);
   --crepe-font-code: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   --crepe-shadow-1: var(--shadow-popup);
   --crepe-shadow-2: var(--shadow-popup);
@@ -61,17 +61,17 @@
 /* Node-view wrappers adapt to the shared document flow, without styling IDE chrome. */
 .md-document blockquote::before { display: none; }
 /* Table font is .9em in the shared sheet: retain its 1.4em outer spacing. */
-.md-visual-shell .milkdown .md-document .milkdown-table-block { margin: 1.26em 0; }
+.md-visual-shell .milkdown .md-document .milkdown-table-block { margin: calc(var(--md-table-font-scale) * var(--md-block-space)) 0; }
 .md-visual-shell .milkdown .md-document .milkdown-table-block table { margin: 0; }
 .md-visual-shell .milkdown .md-document :is(td, th) > p { margin: 0; }
-.md-visual-shell .milkdown .md-document .milkdown-list-item-block { margin: 0.35em 0; padding: 0; }
-.md-visual-shell .milkdown .md-document .list-item { position: relative; gap: 0; padding-left: 0.15em; margin: 0; }
-.md-visual-shell .milkdown .md-document .list-item .label-wrapper { position: absolute; right: 100%; width: 1.5em; height: 1.85em; padding: 0; color: var(--preview-muted); }
+.md-visual-shell .milkdown .md-document .milkdown-list-item-block { margin: var(--md-list-item-space) 0; padding: 0; }
+.md-visual-shell .milkdown .md-document .list-item { position: relative; gap: 0; padding-left: var(--md-list-item-indent); margin: 0; }
+.md-visual-shell .milkdown .md-document .list-item .label-wrapper { position: absolute; right: 100%; width: 1.5em; height: calc(var(--md-body-line-height) * 1em); padding: 0; color: var(--preview-muted); }
 .md-visual-shell .milkdown .md-document .list-item .label-wrapper .label { height: auto; width: auto; padding: 0; line-height: inherit; }
 .md-visual-shell .milkdown .md-document .list-item .label-wrapper svg { width: 14px; height: 14px; }
 .md-visual-shell .milkdown .md-document .list-item > .children > .content-dom > p { margin: 0; }
-.md-visual-shell .milkdown .md-document .list-item > .children > .content-dom > p + p { margin-top: 0.5em; }
-.md-visual-shell .milkdown .md-document .list-item > .children > .content-dom > :is(ul, ol) { margin-top: 0.35em; margin-bottom: 0.5em; }
+.md-visual-shell .milkdown .md-document .list-item > .children > .content-dom > p + p { margin-top: var(--md-list-nested-space); }
+.md-visual-shell .milkdown .md-document .list-item > .children > .content-dom > :is(ul, ol) { margin-top: var(--md-list-item-space); margin-bottom: var(--md-list-nested-space); }
 /* One view-only cue in the outer gutter, including for nested blocks. */
 .md-visual-scroll { position: relative; }
 .md-block-hint {
@@ -84,8 +84,8 @@
 
 .md-visual-shell .milkdown .md-document > :nth-child(1 of :not(.ProseMirror-widget, .prosemirror-virtual-cursor)) { margin-top: 0; }
 .md-visual-shell .milkdown .md-document .milkdown-list-item-block:has(> li > [role="checkbox"]) { margin-left: -1.4em; }
-.md-visual-shell .milkdown .md-document .md-code-block { position: relative; border: 0; border-radius: 0; margin: 1.4em 0; overflow: visible; }
-.md-visual-shell .milkdown .md-document .md-code-block[data-kind="diagram"] { margin: 1.2em 0; }
+.md-visual-shell .milkdown .md-document .md-code-block { position: relative; border: 0; border-radius: 0; margin: var(--md-block-space) 0; overflow: visible; }
+.md-visual-shell .milkdown .md-document .md-code-block[data-kind="diagram"] { margin: var(--md-diagram-space) 0; }
 .md-visual-shell .milkdown .md-document .md-code-block[data-kind="math"] { margin: 1em 0; }
 .md-visual-shell .milkdown .md-document .md-code-preview { padding: 0 !important; }
 .md-visual-shell .milkdown .md-document .md-code-preview > :first-child { margin-top: 0; }
@@ -110,10 +110,10 @@
 .md-visual-shell .milkdown .md-document .md-raw-preview { white-space: normal; }
 .md-visual-shell .milkdown .md-document .md-code-preview .katex-display { margin: 0; }
 .md-visual-shell .milkdown .md-document .list-item > .label-wrapper[role="checkbox"] { position: static; flex: 0 0 14px; margin-right: 0.8em; }
-.md-visual-shell .milkdown .md-document .list-item > .children > .content-dom > :is(ul,ol):last-child { margin-bottom: 0; }
+.md-visual-shell .milkdown .md-document .list-item > .children > .content-dom > :is(ul,ol):last-child { margin-bottom: calc(var(--md-list-nested-space) - var(--md-list-item-space)); }
 .md-visual-shell .milkdown .md-document .list-item .label-wrapper svg { fill: var(--preview-muted); }
 .md-visual-shell .milkdown .md-document .list-item .label-wrapper .checked svg { fill: var(--preview-link); }
-.md-visual-shell .milkdown .md-document .milkdown-image-block { margin: max(16px, 1em) 0; }
+.md-visual-shell .milkdown .md-document .milkdown-image-block { margin: var(--md-image-space) 0; }
 .md-visual-shell .milkdown .md-document .milkdown-image-block > .image-wrapper { margin: 0; min-width: 0; max-width: 100%; }
 .md-visual-shell .milkdown .md-document .milkdown-image-block img { min-height: 0; height: auto !important; margin: 0; }
 .md-visual-shell .milkdown .md-document .milkdown-image-inline { vertical-align: baseline; }
@@ -146,8 +146,8 @@
 .md-persisted-image .md-image-width { visibility:hidden; }
 .md-persisted-image:focus-within .md-image-width, .md-persisted-image:hover .md-image-width, .md-persisted-image.ProseMirror-selectednode .md-image-width { visibility:visible; }
 /* Transfer block margins to the editable wrapper; do not count them twice. */
-.md-visual-shell .milkdown .md-document .md-raw-block:has(> .md-raw-preview > .md-callout) { margin: 1.4em 0; }
-.md-visual-shell .milkdown .md-document .md-raw-block:has(> .md-raw-preview > .md-toc) { margin: 1.2em 0; }
+.md-visual-shell .milkdown .md-document .md-raw-block:has(> .md-raw-preview > .md-callout) { margin: var(--md-block-space) 0; }
+.md-visual-shell .milkdown .md-document .md-raw-block:has(> .md-raw-preview > .md-toc) { margin: var(--md-diagram-space) 0; }
 .md-visual-shell .milkdown .md-document .md-raw-preview > :first-child { margin-top: 0; }
 .md-visual-shell .milkdown .md-document .md-raw-preview > :last-child { margin-bottom: 0; }
 .md-visual-shell .milkdown .md-document > .md-raw-block:has(> .md-raw-preview > .md-frontmatter) { margin-top: 1em; }

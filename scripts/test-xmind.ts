@@ -1,3 +1,4 @@
+import { richNestedSheet } from "../tests/fixtures/xmind-rich-nested";
 import { moveOrthogonalSegment } from '../src/lib/xmind/flexibleRelationship';
 import { smartColorSheets } from '../tests/fixtures/xmind-smart-colors';
 import { groupRangeAxis, groupRangeBounds, groupRangeReversed, nearestGroupMember } from '../src/lib/xmind/groupRange';
@@ -26,6 +27,7 @@ import {
   writeDocument,
   editDocument,
   findTopic,
+  foldableTopicIds,
   childrenOf,
   newTopic,
   duplicateTopic,
@@ -525,7 +527,8 @@ test(1, "diamond and ellipse contain title and metadata with labels below the ou
       const dy = Math.abs(y - n.height / 2) / (n.height / 2);
       assert.ok(shape === "diamond" ? dx + dy < 1 : shape === "ellipse" ? dx * dx + dy * dy < 1 : dx < 1 && dy < 1);
     }
-    assert.ok(n.labelLines.length > 1);
+    assert.equal(n.labelLines.length, 1);
+    assert.ok(n.labelLines[0].endsWith("…"));
     for (const icon of n.indicatorPositions) {
       assert.ok(icon.x >= c.x && icon.x + 16 <= c.x + c.width);
       assert.ok(icon.y >= c.y && icon.y + 16 <= c.y + c.height);
@@ -1161,7 +1164,7 @@ test(2, "symmetric vertical milestones balance 1–5 details while preserving re
       }
     });
     assert.equal(JSON.stringify(sheet),before);
-    const folded=buildScene(sheet,new Set(children.map(c=>c.id)));assert.equal(folded.nodes.length,6);
+    const folded=buildScene(sheet,new Set(children.map(c=>c.id)));assert.equal(folded.nodes.length,scene.nodes.length,'native symmetric stages cannot fold');
     const doc=openDocument(sampleArchive([sheet]));
     const edited=editDocument(doc.sheets,sheet.id,{type:'title',id:children[2].id,title:'Saved symmetric stage'});
     const reopened=openDocument(writeDocument(doc,edited));
@@ -1397,7 +1400,7 @@ test(4, "advanced rich topics place markers beside titles and labels below the o
     for(const [x,y] of [[c.x,c.y],[c.x+c.width,c.y],[c.x,c.y+c.height],[c.x+c.width,c.y+c.height]])
       assert.ok(pointInOutline([x,y],outline),`${node.shape} clips rich content`);
     for(const label of node.labels) {
-      assert.ok(label.y>=node.height+6);
+      assert.ok(label.y>=node.height+4);
       assert.ok(node.y+label.y+label.height<=scene.bounds.y+scene.bounds.height);
     }
     assert.equal(node.labels[0].x,0);
@@ -1406,6 +1409,54 @@ test(4, "advanced rich topics place markers beside titles and labels below the o
     for(const icon of markerPositions)assert.ok(icon.x+16<=node.titleX);
     for(const icon of node.indicatorPositions)assert.ok(icon.x>=c.x-1e-7 && icon.x+16<=c.x+c.width+1e-7);
     assert.equal(node.topic.title,sheet.rootTopic.children!.detached!.find(t=>t.id===node.topic.id)!.title);
+  }
+});
+test(18, "long labels ellipsize without changing saved text or topic size", () => {
+  const labels = ['短标签', '中文超长标签😀'.repeat(30), 'Long English label '.repeat(50)];
+  const sheet: Sheet = { id: 'labels', title: 'Labels', rootTopic: { id: 'r', title: 'Root', labels } };
+  const before = JSON.stringify(sheet), node = buildScene(sheet).nodes[0];
+  for (const label of node.labels) {
+    assert.equal(label.lines.length, 1);
+    assert.ok(label.width <= node.width);
+    assert.equal(label.height, 20);
+  }
+  assert.equal(node.labels[0].lines[0], labels[0]);
+  assert.ok(node.labels.slice(1).every(l => l.lines[0].endsWith('…')));
+  assert.equal(JSON.stringify(sheet), before);
+  const doc = openDocument(sampleArchive([sheet]));
+  const changed = editDocument(doc.sheets, sheet.id, { type: 'title', id: 'r', title: 'Saved' });
+  assert.deepEqual(openDocument(writeDocument(doc, changed)).sheets[0].rootTopic.labels, labels);
+});
+test(18, "label overflow reserves a third-row count without discarding hidden values", () => {
+  for(const count of [3,4,6,100]) {
+    const labels=Array.from({length:count},(_,i)=>`Long label ${i} 中文`.repeat(10));
+    const sheet:Sheet={id:'labels',title:'Labels',rootTopic:{id:'r',title:'Root',labels}};
+    const node=buildScene(sheet).nodes[0];
+    assert.equal(node.labels.length,3);
+    if(count>3) assert.equal(node.labels[2].hiddenCount,count-2);
+    else assert.equal(node.labels[2].hiddenCount,undefined);
+    assert.ok(node.labels.every(l=>l.y<=node.height+48));
+    assert.deepEqual(sheet.rootTopic.labels,labels);
+  }
+});
+test(18, "symmetric stages ignore stored folds while ordinary descendants remain foldable", () => {
+  for (const suffix of ['', '.btt']) {
+    const sheet: Sheet = { id: 's', title: 'Symmetric', rootTopic: { id: 'r', title: 'Root',
+      structureClass: 'org.xmind.ui.timeline.through.symmetric.vertical' + suffix,
+      children: { attached: [{ id: 'stage', title: 'Stage', branch: 'folded', children: { attached: [
+        { id: 'detail', title: 'Detail', children: { attached: [{ id: 'leaf', title: 'Leaf' }] } }
+      ] } }], detached: [{ id: 'free', title: 'Free', children: { attached: [{ id: 'free-leaf', title: 'Free leaf' }] } }] } } };
+    const allowed = foldableTopicIds(sheet.rootTopic);
+    assert.ok(!allowed.has('stage')); assert.ok(allowed.has('detail')); assert.ok(allowed.has('free'));
+    assert.ok(buildScene(sheet, new Set(['stage'])).nodes.some(n => n.topic.id === 'leaf'));
+    const doc = openDocument(sampleArchive([sheet]));
+    const unchanged = editDocument(doc.sheets, 's', { type: 'fold', ids: ['stage'], folded: false });
+    assert.deepEqual(writeDocument(doc, unchanged), doc.original, 'unsupported fold does not rewrite legacy data');
+    const changed = editDocument(doc.sheets, 's', { type: 'fold', ids: ['stage', 'detail'], folded: true });
+    assert.equal(findTopic(changed[0].rootTopic, 'detail')!.branch, 'folded');
+    assert.ok(!buildScene(changed[0], new Set(['stage', 'detail'])).nodes.some(n => n.topic.id === 'leaf'));
+    const ordinary = structuredClone(sheet); ordinary.rootTopic.structureClass = 'org.xmind.ui.timeline.through.vertical';
+    assert.ok(foldableTopicIds(ordinary.rootTopic).has('stage'));
   }
 });
 test(2, "external label rows reserve sibling and group space without moving outline anchors",()=>{
@@ -1888,6 +1939,70 @@ test(17, "media and multiline label combinations keep parent and descendant visu
     assert.deepEqual(read(saved),expected,'editing title preserves every image, label and marker field');
     const files=unzipSync(saved);
     for(const key in doc.files)if(key!=='content.json')assert.deepEqual(files[key],doc.files[key],'embedded resource preserved');
+  }
+});
+test(19, "deep media and label groups remain separate through mixed folding in every structure", () => {
+  for(const [structureClass] of STRUCTURES) for(let variant=0;variant<4;variant++) {
+    const sheet=richNestedSheet(structureClass,variant), before=JSON.stringify(sheet);
+    const ids=[...foldableTopicIds(sheet.rootTopic)].filter(id=>id!==sheet.rootTopic.id);
+    for(const folds of [new Set<string>(),new Set(ids.filter((_,i)=>i%2===0))]) {
+      const scene=buildScene(sheet,folds);
+      for(let i=0;i<scene.nodes.length;i++)for(let j=i+1;j<scene.nodes.length;j++) {
+        const a=nodeVisualBounds(scene.nodes[i]),b=nodeVisualBounds(scene.nodes[j]);
+        assert.ok(a.x+a.width<=b.x+.01||b.x+b.width<=a.x+.01||a.y+a.height<=b.y+.01||b.y+b.height<=a.y+.01,
+          `${structureClass} variant ${variant}: ${scene.nodes[i].topic.id} overlaps ${scene.nodes[j].topic.id}`);
+      }
+    }
+    assert.equal(JSON.stringify(sheet),before);
+  }
+});
+test(20, "native default title width is 300 across levels and preserves explicit sizing", () => {
+  const sheet:Sheet={id:'native-width',title:'Width',rootTopic:{id:'root',title:'标签省略与超出三行',
+    children:{attached:[{id:'main',title:'Native Review20 symmetric up',
+      children:{attached:[{id:'detail',title:'中文标题宽度检查'.repeat(2)}]}}]}}};
+  const before=structuredClone(sheet), scene=buildScene(sheet);
+  assert.equal(scene.nodes[0].lines.length,1);
+  assert.equal(scene.nodes.find(n=>n.topic.id==='main')!.lines.length,1);
+  assert.equal(scene.nodes.find(n=>n.topic.id==='detail')!.lines.length,1);
+  assert.deepEqual(sheet,before);
+  const explicit=structuredClone(sheet);explicit.rootTopic.style={properties:{'fo:max-width':'130'}};
+  assert.ok(buildScene(explicit).nodes[0].lines.length>1);
+  const doc=openDocument(sampleArchive([sheet]));
+  const changed=editDocument(doc.sheets,sheet.id,{type:'title',id:'detail',title:'Preserve width policy'});
+  const reopened=openDocument(writeDocument(doc,changed));
+  assert.equal(reopened.sheets[0].rootTopic.customWidth,undefined);
+  assert.equal(reopened.sheets[0].rootTopic.style,undefined);
+  assert.equal(reopened.sheets[0].rootTopic.children!.attached![0].title,sheet.rootTopic.children!.attached![0].title);
+});
+test(20, "title wrapping preserves words, whitespace, CJK punctuation and whole emoji clusters", () => {
+  const layout=(title:string,width=130)=>buildScene({id:'wrap',title:'Wrap',rootTopic:{id:'r',title,
+    style:{properties:{'fo:max-width':String(width)}}}},new Set(),text=>Array.from(new Intl.Segmenter(undefined,{granularity:'grapheme'}).segment(text)).length*10).nodes[0].lines;
+  assert.deepEqual(layout('alpha bravo charlie'),['alpha bravo ','charlie']);
+  assert.deepEqual(layout('averylongunbrokentoken'),['averylongunbr','okentoken']);
+  assert.deepEqual(layout('alpha  bravo\n\n  charlie'),['alpha  bravo','','  charlie']);
+  assert.deepEqual(layout('中文标题，继续',40),['中文标','题，继续']);
+  const emoji='👨‍👩‍👧‍👦';const text=emoji.repeat(6);const lines=layout(text,40);
+  assert.deepEqual(lines,[emoji.repeat(4),emoji.repeat(2)]);
+  assert.equal(lines.join(''),text);
+});
+test(20, "label ellipsis keeps emoji and combining characters intact", () => {
+  const segmenter=new Intl.Segmenter(undefined,{granularity:'grapheme'});
+  // Model a fallback font whose glyph advances differ inside a combined cluster.
+  const measure=(text:string)=>Array.from(text).reduce((width,char)=>width+(/[\u200d\u0301]/u.test(char)?0:12),0);
+  for(const cluster of ['👨‍👩‍👧‍👦','👍🏽','🇨🇳','e\u0301']) {
+    const labels=[cluster.repeat(20)];
+    const sheet:Sheet={id:'unicode-label',title:'Labels',rootTopic:{id:'r',title:'R',labels}};
+    const node=buildScene(sheet,new Set(),measure).nodes[0];
+    const displayed=node.labels[0].lines[0];
+    assert.ok(displayed.endsWith('…'));
+    assert.ok(node.labels[0].width<=node.width);
+    const visible=Array.from(segmenter.segment(displayed.slice(0,-1)),p=>p.segment);
+    assert.ok(visible.length>0);
+    assert.ok(visible.every(part=>part===cluster),`partial grapheme in ${JSON.stringify(displayed)}`);
+    assert.equal(node.labels[0].fullText,labels[0]);
+    const doc=openDocument(sampleArchive([sheet]));
+    const changed=editDocument(doc.sheets,sheet.id,{type:'title',id:'r',title:'Saved'});
+    assert.deepEqual(openDocument(writeDocument(doc,changed)).sheets[0].rootTopic.labels,labels);
   }
 });
 console.log(`${passed} XMind tests passed`);

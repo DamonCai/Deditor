@@ -6,10 +6,8 @@ import { EditorState, Prec, Compartment } from "@codemirror/state";
 import { basicSetup } from "codemirror";
 import { languages } from "@codemirror/language-data";
 import { LanguageDescription } from "@codemirror/language";
-import DOMPurify from "dompurify";
+import { markdownDisplayHtml, hydrateMarkdownDisplay } from "../markdownDisplay";
 import { renderMarkdown } from "../markdown";
-import { hydrateMermaid } from "../mermaidHydrate";
-import { hydratePlantuml } from "../plantumlHydrate";
 import { islandLight } from "../islandLightTheme";
 import { islandDark } from "../islandDarkTheme";
 import { tStatic } from "../i18n";
@@ -95,17 +93,13 @@ export function codeView(tabId: string, theme: "light" | "dark") {
       const staging = document.createElement("div");
       void renderMarkdown(source, { theme }).then(async html => {
         if (destroyed || token !== generation) return;
-        staging.innerHTML = DOMPurify.sanitize(html);
-        const mermaid = staging.querySelector<HTMLElement>(".mermaid-diagram");
-        if (mermaid) mermaid.dataset.mermaidSource = code;
-        const plantuml = staging.querySelector<HTMLElement>(".plantuml-diagram");
-        if (plantuml) plantuml.dataset.plantumlSource = code;
+        staging.innerHTML = markdownDisplayHtml(html);
         if (renderedSource === null && !preview.hasChildNodes()) {
           preview.append(...Array.from(staging.cloneNode(true).childNodes));
         }
-        const hydrated = [hydrateMermaid(staging, theme), hydratePlantuml(staging)];
-        controllers = hydrated;
-        await Promise.all(hydrated.map(controller => controller.done));
+        const display = hydrateMarkdownDisplay(staging, { theme });
+        controllers = [display];
+        await display.done;
         if (destroyed || token !== generation) return;
         preview.replaceChildren(...Array.from(staging.childNodes));
         renderedSource = source; pendingSource = null;

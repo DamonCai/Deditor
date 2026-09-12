@@ -52,11 +52,10 @@ export default function MarkdownToolbar() {
   const visual = useSyncExternalStore(subscribeVisualEditor, getVisualEditor);
   const content = useEditorStore(s => s.tabs.find(t => t.id === s.activeId)?.content ?? "");
   const activeId = useEditorStore((s) => s.activeId);
-  const reading = useEditorStore((s) => s.markdownMode === "read");
   const session = activeId ? markdownSession(activeId, content) : null;
   const editorFontSize = useEditorStore((s) => s.tabs.find((tab) => tab.id === s.activeId)?.zoomFontSize ?? s.editorFontSize);
   const setEditorZoomFontSize = useEditorStore((s) => s.setEditorZoomFontSize);
-  const disabled = reading || (!visual && !state);
+  const disabled = !visual && !state;
   const [dialog, setDialog] = useState<{
     kind: InsertKind;
     target: NonNullable<ReturnType<typeof captureEditorTarget>>;
@@ -66,7 +65,7 @@ export default function MarkdownToolbar() {
   const [highlight, setHighlight] = useState("#fff59d");
   useEffect(() => {
     setDialog(null);
-  }, [activeId, reading]);
+  }, [activeId]);
   const run = (action: () => void) => {
     if (disabled) return;
     action();
@@ -174,14 +173,14 @@ export default function MarkdownToolbar() {
           <div className="md-tool-group md-tool-group--leading">
             <Tool
               title={t("md.undo")}
-              disabled={reading || !session?.canUndo}
+              disabled={!session?.canUndo}
               onClick={() => history(undo)}
             >
               <FiRotateCcw />
             </Tool>
             <Tool
               title={t("md.redo")}
-              disabled={reading || !session?.canRedo}
+              disabled={!session?.canRedo}
               onClick={() => history(redo)}
             >
               <FiRotateCw />

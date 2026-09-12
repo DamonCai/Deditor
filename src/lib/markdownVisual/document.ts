@@ -128,14 +128,32 @@ export class MarkdownDocument {
   }
   editInline(from: number, length: number, raw: string, next: ProseNode) {
     const end = from + length, delta = raw.length - length;
+    const multiline = /[\r\n]/.test(this.source.slice(from, end));
     const shift = (n: SourceNode): SourceNode => ({ ...n, position: n.position ? {
       start: { offset: (n.position.start.offset ?? 0) >= end ? (n.position.start.offset ?? 0) + delta : n.position.start.offset },
       end: { offset: (n.position.end.offset ?? 0) >= end ? (n.position.end.offset ?? 0) + delta : n.position.end.offset },
     } : undefined, children: n.children?.map(shift) });
     this.source = this.source.slice(0, from) + raw + this.source.slice(end);
     this.ast = this.ast.map(shift);
-    const parsed = editingTree(this.source).children ?? [];
-    if (parsed.length === this.ast.length) this.ast = parsed;
+    // An inline edit without line breaks cannot consume a neighboring block.
+    // Re-index only its enclosing block unless reference resolution or a block
+    // boundary/type change requires whole-document context.
+    const blockIndex = this.ast.findIndex(n => { const [start, stop] = range(n); return start <= from && from + raw.length <= stop; });
+    const block = this.ast[blockIndex];
+    const contextual = (n: SourceNode): boolean => ["definition", "footnoteDefinition", "linkReference", "imageReference", "footnoteReference"].includes(n.type) || !!n.children?.some(contextual);
+    let local = false;
+    if (block && !multiline && !/[\r\n\[]/.test(raw) && !contextual(block)) {
+      const [start, stop] = range(block);
+      const parsed = editingTree(this.source.slice(start, stop)).children ?? [];
+      if (parsed.length === 1 && parsed[0].type === block.type && !contextual(parsed[0])) {
+        const offset = (n: SourceNode): SourceNode => ({ ...n, position: n.position ? { start: { offset: start + (n.position.start.offset ?? 0) }, end: { offset: start + (n.position.end.offset ?? 0) } } : undefined, children: n.children?.map(offset) });
+        this.ast[blockIndex] = offset(parsed[0]); local = true;
+      }
+    }
+    if (!local) {
+      const parsed = editingTree(this.source).children ?? [];
+      if (parsed.length === this.ast.length) this.ast = parsed;
+    }
     this.doc = next;
   }
   inlineAt(position: number) {

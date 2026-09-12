@@ -1,3 +1,4 @@
+import { saveMarkdownImage } from "./markdownImageStorage";
 import { showError } from "./feedback";
 import { flushDocument, flushDocuments } from "./documentFlush";
 import { open, save } from "@tauri-apps/plugin-dialog";
@@ -457,7 +458,7 @@ export async function saveImage(
   data: string,
   folder = "assets",
 ): Promise<string> {
-  return invoke<string>("save_image", { dir: baseDir, name, data, folder });
+  return saveMarkdownImage(baseDir, name, data, folder);
 }
 
 export async function createFile(parentDir: string, name: string): Promise<string> {

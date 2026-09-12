@@ -1,5 +1,6 @@
 #[cfg(target_os = "macos")]
 mod window_chrome;
+mod markdown_images;
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
@@ -132,6 +133,31 @@ fn save_image(dir: String, name: String, data: String, folder: Option<String>) -
     })?;
     log::info!("saved image: {} ({} bytes)", path.display(), bytes.len());
     Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+async fn download_markdown_image(url: String) -> Result<markdown_images::DownloadedImage, String> {
+    tauri::async_runtime::spawn_blocking(move || markdown_images::download(&url))
+        .await.map_err(|_| "Image download task failed".to_string())?
+}
+
+#[tauri::command]
+fn save_image_to_directory(directory: String, name: String, data: String) -> Result<String, String> {
+    let path = PathBuf::from(&directory);
+    if !path.is_absolute() || path.components().any(|part| matches!(part, std::path::Component::ParentDir)) {
+        return Err("Expected an absolute image directory".into());
+    }
+    // Reuse the existing filename/folder checks and directory creation, while
+    // keeping save_image's relative-folder contract unchanged for other callers.
+    let parent = path.parent().ok_or("Choose a folder below the filesystem root")?;
+    let folder = path.file_name().and_then(|name| name.to_str()).ok_or("Invalid image directory")?;
+    save_image(parent.to_string_lossy().into(), name, data, Some(folder.into()))
+}
+
+#[tauri::command]
+async fn upload_markdown_image(path: String, endpoint: String, token: Option<String>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || markdown_images::upload(&expand(&path), &endpoint, token.as_deref()))
+        .await.map_err(|_| "Image upload task failed".to_string())?
 }
 
 #[tauri::command]
@@ -1349,6 +1375,9 @@ pub fn run() {
             list_dir,
             resolve_path,
             save_image,
+            download_markdown_image,
+            save_image_to_directory,
+            upload_markdown_image,
             create_file,
             create_dir,
             rename_path,
@@ -1753,6 +1782,11 @@ mod markdown_image_tests {
             assert!(save_image(root.clone(), "bad.png".into(), encoded.clone(), Some(folder.into())).is_err());
         }
         assert!(save_image(root, "../bad.png".into(), encoded, None).is_err());
+        let external = dir.join("external # 中文%20");
+        save_image_to_directory(external.to_string_lossy().into(), "external.png".into(), BASE64.encode(b"external-fixture")).unwrap();
+        assert_eq!(fs::read(external.join("external.png")).unwrap(), b"external-fixture");
+        assert!(save_image_to_directory("relative/path".into(), "x.png".into(), BASE64.encode(b"x")).is_err());
+        assert!(save_image_to_directory(dir.join("../escape").to_string_lossy().into(), "x.png".into(), BASE64.encode(b"x")).is_err());
         fs::remove_dir_all(dir).unwrap();
     }
 }

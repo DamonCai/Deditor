@@ -1,4 +1,4 @@
-import { documentImageDirectory } from "../lib/markdownImageSettings";
+import { documentImageDirectory, markdownImageReference } from "../lib/markdownImageSettings";
 import { markdownSession, sourceChange } from "../lib/markdownSession";
 import { installMarkdownComposition } from "../lib/markdownComposition";
 import { markdownHistory } from "../lib/markdownHistory";
@@ -882,7 +882,7 @@ async function handleImagePaste(blob: File, mime: string, view: EditorView) {
     void showError(tStatic("editor.saveImageFailed", { err: String(err) }));
     return;
   }
-  const rel = `${folder}/${name}`;
+  const rel = isMd ? markdownImageReference(folder, name) : `${folder}/${name}`;
   const insert = isMd ? `![](${/[\s()]/.test(rel) ? `<${rel}>` : rel})` : rel;
   const pos = view.state.selection.main.from;
   view.dispatch({

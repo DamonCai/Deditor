@@ -789,6 +789,8 @@ export default function XmindView({ dataUrl, tabId }: Props) {
                         .map((s) => s.trim())
                         .filter(Boolean),
                     }),
+                  false,
+                  "labels",
                 )}
                 {field(t("xmind.link"), topic.href ?? "",
                   href => execute({ type: "href", id: topic.id, href }), false, "href")}

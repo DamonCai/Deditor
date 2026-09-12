@@ -1,11 +1,12 @@
+import MarkdownDocumentSurface from "./MarkdownDocumentSurface";
+import { markdownDisplayHtml, hydrateMarkdownDisplay } from "../lib/markdownDisplay";
+import { installFootnotePreview } from "../lib/markdownFootnotePreview";
 import { Button } from "./ui/Button";
 import { FiX, FiChevronLeft, FiChevronRight } from "react-icons/fi";
 import { RiPushpinLine, RiPushpinFill } from "react-icons/ri";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { renderMarkdown, renderCode } from "../lib/markdown";
-import { hydratePlantuml } from "../lib/plantumlHydrate";
-import { hydrateMermaid } from "../lib/mermaidHydrate";
 import { hydrateLocalImages } from "../lib/localImgHydrate";
 import { documentImageRoot } from "../lib/markdownImageSettings";
 import { isMarkdown } from "../lib/lang";
@@ -78,6 +79,8 @@ export default function Preview({
   // Self-subscribed per tab — each PreviewHost slot only re-renders for its
   // own tab's content / filePath / dirty flips.
   const source = useTabContent(tabId);
+  const footnoteLanguage = useEditorStore(s => s.language);
+  useEffect(() => { if (containerRef.current) return installFootnotePreview(containerRef.current, footnoteLanguage); }, [footnoteLanguage]);
   const documentTheme = useEditorStore(s => s.markdownSettings.documentTheme);
   const fontSize = useEditorStore(s => s.tabs.find(tab => tab.id === tabId)?.zoomFontSize ?? s.editorFontSize);
   const filePath = useTabFilePath(tabId);
@@ -104,7 +107,7 @@ export default function Preview({
       const out = isMd
         ? await renderMarkdown(source, { theme })
         : await renderCode(source, filePath, { theme });
-      if (!cancelled) setHtml(out);
+      if (!cancelled) setHtml(isMd ? markdownDisplayHtml(out) : out);
     }, 80);
     return () => {
       cancelled = true;
@@ -112,29 +115,11 @@ export default function Preview({
     };
   }, [source, filePath, theme, isMd]);
 
-  // After every HTML refresh, walk the DOM and replace plantuml placeholders
-  // with their rendered SVG (cache → network with short timeout). The returned
-  // AbortController cancels in-flight fetches when html changes again.
-  // NOTE: an earlier "optimization" tried to short-circuit these with
-  // `html.includes(...)` before calling querySelectorAll. `perf-hydrate.ts`
-  // proved that wrong: querySelectorAll with a class selector is backed by
-  // an indexed lookup in jsdom (and Chromium) and runs in ~5 µs on an
-  // 8000-element DOM, while String.includes() over a 200 KB html blob is
-  // ~180 µs. Indexed DOM beats linear string scan; the obvious-looking
-  // pre-check made things 30× slower. Don't add it back.
+  // Shared diagram/image mounting; abort detached work when the HTML changes.
   useEffect(() => {
     if (!containerRef.current) return;
-    const ctrl = hydratePlantuml(containerRef.current);
-    return () => ctrl.abort();
-  }, [html]);
-
-  // Mermaid blocks: lazy-load mermaid.js, render each placeholder. Re-runs
-  // whenever the html or theme changes (theme switch needs a re-render so the
-  // diagram re-themes correctly).
-  useEffect(() => {
-    if (!containerRef.current) return;
-    const ctrl = hydrateMermaid(containerRef.current, theme);
-    return () => ctrl.abort();
+    const display = hydrateMarkdownDisplay(containerRef.current, { theme, filePath, imageRoot });
+    return () => display.abort();
   }, [html, theme]);
 
   // Local images: rewrite `<img>` src to a Tauri asset:// URL so the WebView
@@ -782,11 +767,11 @@ export default function Preview({
   return (
     <div className="flex flex-col h-full">
       <div className={`preview-reading-host${readingMode ? " preview-reading-host--reading" : ""}`}>
-        <div
+        <MarkdownDocumentSurface
           ref={containerRef}
-          data-md-theme={isMd ? documentTheme : "default"}
+          fontSize={fontSize} documentTheme={isMd ? documentTheme : "default"}
           className={`preview${readingMode ? " preview-fullwidth" : ""}`}
-          style={{ flex: 1, "--md-document-zoom": `${fontSize - 14}px` } as React.CSSProperties}
+          style={{ flex: 1 }}
           dangerouslySetInnerHTML={{ __html: html }}
         />
         {readingMode && (

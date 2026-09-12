@@ -2123,11 +2123,49 @@ test(1, 'XMind fold persists across sheets and save, with undo/redo', async () =
   assert.equal(doc.sheets[0].rootTopic.children.attached[0].branch,'folded');
 });
 
+test(18, 'XMind symmetric stage folding is inert without hiding ordinary descendant controls', async () => {
+  for (const suffix of ['', '.btt']) {
+    const sheets = [{ id: 'sym', title: 'Symmetric', rootTopic: { id: 'r', title: 'Root',
+      structureClass: 'org.xmind.ui.timeline.through.symmetric.vertical' + suffix,
+      children: { attached: [{ id: 'stage', title: 'Stage', branch: 'folded', children: { attached: [
+        { id: 'detail', title: 'Detail', children: { attached: [{ id: 'leaf', title: 'Leaf' }] } }
+      ] } }] } } }];
+    await mountXmind(true, zipSync({'content.json': strToU8(JSON.stringify(sheets))}));
+    const before = store.getState().tabs[0].content;
+    assert.ok(document.querySelector('[data-topic="leaf"]'));
+    assert.ok(!document.querySelector('[data-topic="stage"] [data-fold]'));
+    await selectR3('stage'); await keyR3('/', {metaKey: true});
+    assert.equal(store.getState().tabs[0].content, before);
+    assert.ok(document.querySelector('[data-topic="leaf"]'));
+    await selectR3('detail'); await keyR3('/', {metaKey: true});
+    assert.ok(!document.querySelector('[data-topic="leaf"]'));
+    await click('Undo');
+    assert.equal(store.getState().tabs[0].content, before);
+    assert.ok(document.querySelector('[data-topic="leaf"]'));
+  }
+});
+
+test(18, 'XMind overflowing labels show the hidden count and open their complete editable text', async () => {
+  const labels = Array.from({length:6}, (_,i) => `Long label ${i} 中文标签`.repeat(5));
+  const sheets = [{id:'labels',title:'Labels',rootTopic:{id:'r',title:'Root',children:{attached:[{id:'label-topic',title:'Topic',labels}]}}}];
+  await mountXmind(true,zipSync({'content.json':strToU8(JSON.stringify(sheets))}));
+  const before = store.getState().tabs[0].content;
+  const capsule = document.querySelector('[data-topic="label-topic"] [data-label-overflow]');
+  assert.equal(capsule.querySelector('text').textContent,'4+');
+  assert.equal(document.querySelectorAll('[data-topic="label-topic"] [data-label]').length,3);
+  await act(async()=>capsule.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',bubbles:true})));
+  const input = document.querySelector('[data-field="labels"]');
+  assert.equal(input.value,labels.join(', ')); assert.equal(document.activeElement,input);
+  assert.equal(store.getState().tabs[0].content,before);
+  await act(async()=>app.saveFile());
+  assert.deepEqual(xmindSheets()[0].rootTopic.children.attached[0].labels,labels);
+});
+
 test(2, 'XMind fold controls follow left/up/down layout and labels remain separate', async () => {
   for (const direction of ['left','up','down']) {
     const structure = direction === 'left' ? 'logic.left' : 'org-chart.'+direction;
     const sheets = [{id:'test-sheet',title:'Test',rootTopic:{id:'root',title:'Root',structureClass:'org.xmind.ui.'+structure,
-      children:{attached:[{id:'branch',title:'分支', labels:['visual-QA', '跨平台'],children:{attached:[{id:'leaf',title:'Leaf'}]}}]}}}];
+      children:{attached:[{id:'branch',title:'分支', labels:['QA', '测试'],children:{attached:[{id:'leaf',title:'Leaf'}]}}]}}}];
     await mountXmind(true, zipSync({'content.json':strToU8(JSON.stringify(sheets))}));
     const node=document.querySelector('[data-topic="branch"]');
     const [x,y] = node.querySelector('[data-fold]').getAttribute('transform').match(/-?[\d.]+/g).map(Number);
@@ -2136,8 +2174,8 @@ test(2, 'XMind fold controls follow left/up/down layout and labels remain separa
     if(direction==='up') assert.ok(y<0);
     if(direction==='down') assert.ok(y>Number(shape.getAttribute('height')));
     assert.equal(node.querySelectorAll('[data-label]').length,2);
-    assert.equal(node.querySelector('[data-label="0"] text').textContent,'visual-QA');
-    assert.equal(node.querySelector('[data-label="1"] text').textContent,'跨平台');
+    assert.equal(node.querySelector('[data-label="0"] text').textContent,'QA');
+    assert.equal(node.querySelector('[data-label="1"] text').textContent,'测试');
     for(const label of node.querySelectorAll('[data-label] rect')) {
       const labelBottom=Number(label.getAttribute('y'))+Number(label.getAttribute('height'));
       assert.ok(labelBottom<=Number(shape.getAttribute('height'))+1e-7,'label remains in the topic hit region');

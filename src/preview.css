@@ -1,3 +1,21 @@
+/* Single presentation contract, also embedded by the existing HTML export.
+   Editable wrappers consume these values rather than copying block metrics. */
+:is(.md-surface, .preview, .milkdown .ProseMirror.md-document) {
+  --md-font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial,
+    sans-serif;
+  --md-content-width: 860px;
+  --md-document-padding: 32px 32px 72px;
+  --md-body-line-height: 1.85;
+  --md-list-item-space: 0.35em;
+  --md-list-item-indent: 0.15em;
+  --md-list-nested-space: 0.5em;
+  --md-table-font-scale: 0.9;
+  --md-block-space: 1.4em;
+  --md-diagram-space: 1.2em;
+  --md-image-space: max(16px, 1em);
+}
 /* Shared document typography for preview and visual editing, independent of IDE chrome.
    Keep blocks in normal flow: scroll sync relies on their offsetTop values. */
 :is(.preview, .milkdown .ProseMirror.md-document) {
@@ -8,19 +26,15 @@
   --preview-code: #7350a2;
   --preview-code-bg: #f5f6f8;
   --preview-rule: #e5e8ed;
-  padding: 32px 32px 72px;
+  padding: var(--md-document-padding);
   font-size: calc(16px + var(--md-document-zoom, 0px));
-  line-height: 1.85;
+  line-height: var(--md-body-line-height);
   color: var(--preview-text);
   overflow-y: auto;
   min-width: 0;
   height: 100%;
   box-sizing: border-box;
   overflow-wrap: anywhere;
-  --md-font-family:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-    "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial,
-    sans-serif;
   font-family: var(--md-font-family);
   -webkit-font-smoothing: antialiased;
 }
@@ -38,7 +52,7 @@
   /* Left-aligned reading column — content keeps a comfortable line length
      (860px cap) but every block (paragraph, heading, table) shares the same
      left edge for a clean visual baseline. */
-  max-width: 860px;
+  max-width: var(--md-content-width);
   margin-left: 0;
   margin-right: 0;
 }
@@ -118,11 +132,12 @@
   font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
 }
 :is(.preview, .milkdown .ProseMirror.md-document) pre {
-  margin: 1.4em 0;
+  margin: var(--md-block-space) 0;
   padding: 0;
   border-radius: 8px;
   overflow: auto;
   overflow-wrap: normal;
+  white-space: pre;
   tab-size: 4;
   background: var(--preview-code-bg);
   border: 1px solid var(--preview-rule);
@@ -148,7 +163,7 @@
 /* A restrained accent distinguishes quotations without competing with text. */
 :is(.preview, .milkdown .ProseMirror.md-document) blockquote {
   box-sizing: border-box;
-  margin: 1.4em 0;
+  margin: var(--md-block-space) 0;
   padding: 12px 18px;
   color: var(--preview-muted);
   border-left: 3px solid color-mix(in srgb, var(--preview-link) 55%, var(--bg));
@@ -181,18 +196,18 @@
   list-style: square outside;
 }
 :is(.preview, .milkdown .ProseMirror.md-document) li {
-  margin: 0.35em 0;
-  padding-left: 0.15em;
+  margin: var(--md-list-item-space) 0;
+  padding-left: var(--md-list-item-indent);
 }
 :is(.preview, .milkdown .ProseMirror.md-document) li > :is(ul, ol) {
-  margin-top: 0.35em;
-  margin-bottom: 0.5em;
+  margin-top: var(--md-list-item-space);
+  margin-bottom: var(--md-list-nested-space);
 }
 :is(.preview, .milkdown .ProseMirror.md-document) li > p {
   margin: 0;
 }
 :is(.preview, .milkdown .ProseMirror.md-document) li > p + p {
-  margin-top: 0.5em;
+  margin-top: var(--md-list-nested-space);
 }
 :is(.preview, .milkdown .ProseMirror.md-document) li::marker {
   color: var(--preview-muted);
@@ -214,12 +229,12 @@
    it gets its own horizontal scrollbar instead of pushing the pane wider. */
 :is(.preview, .milkdown .ProseMirror.md-document) table {
   border-collapse: collapse;
-  margin: 1.4em 0;
+  margin: var(--md-block-space) 0;
   display: block;
   width: fit-content;
   max-width: 100%;
   overflow-x: auto;
-  font-size: 0.9em;
+  font-size: calc(var(--md-table-font-scale) * 1em);
   line-height: 1.65;
   /* Wide tables scroll within the document instead of widening its pane. */
   overflow-wrap: normal;
@@ -236,7 +251,7 @@
   font-weight: 600;
   text-align: left;
 }
-:is(.preview, .milkdown .ProseMirror.md-document) tr:nth-child(2n) td {
+:is(.preview, .milkdown .ProseMirror.md-document) tr:nth-child(2n of :not(:has(th))) td {
   background: color-mix(in srgb, var(--preview-text) 2%, var(--bg));
 }
 :is(.preview, .milkdown .ProseMirror.md-document) hr {
@@ -281,7 +296,7 @@
 :is(.preview, .milkdown .ProseMirror.md-document) .plantuml-diagram {
   display: flex;
   justify-content: flex-start;
-  margin: 1.2em 0;
+  margin: var(--md-diagram-space) 0;
   padding: 12px;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -328,7 +343,7 @@
 :is(.preview, .milkdown .ProseMirror.md-document) .mermaid-diagram {
   display: flex;
   justify-content: flex-start;
-  margin: 1.2em 0;
+  margin: var(--md-diagram-space) 0;
   padding: 12px;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -393,7 +408,7 @@
 :is(.preview, .milkdown .ProseMirror.md-document) .md-frontmatter { margin: 1em 0; padding: 0.6em 1em; border: 1px solid var(--preview-rule); border-radius: 6px; color: var(--preview-muted); }
 :is(.preview, .milkdown .ProseMirror.md-document) .md-frontmatter summary { cursor: pointer; font: 0.85em monospace; }
 :is(.preview, .milkdown .ProseMirror.md-document) .md-frontmatter pre { margin-bottom: 0; }
-:is(.preview, .milkdown .ProseMirror.md-document) .md-toc { margin: 1.2em 0; border-left: 2px solid var(--preview-rule); padding-left: 1em; }
+:is(.preview, .milkdown .ProseMirror.md-document) .md-toc { margin: var(--md-diagram-space) 0; border-left: 2px solid var(--preview-rule); padding-left: 1em; }
 :is(.preview, .milkdown .ProseMirror.md-document) .md-toc ol { list-style: none; padding-left: 0; }
 :is(.preview, .milkdown .ProseMirror.md-document) .md-callout { border-left-color: var(--preview-link); }
 :is(.preview, .milkdown .ProseMirror.md-document) .md-callout-title { display: block; font-size: 0.85em; font-weight: 650; color: var(--preview-link); }
@@ -401,8 +416,8 @@
 :is(.preview, .milkdown .ProseMirror.md-document) .footnotes { font-size: 0.88em; color: var(--preview-muted); }
 :is(.preview, .milkdown .ProseMirror.md-document) .footnote-ref { font-size: 0.75em; vertical-align: super; }
 
-:is(.preview[data-md-theme="compact"], .md-visual-shell[data-md-theme="compact"] .md-document) { line-height: 1.6; }
-:is(.preview[data-md-theme="compact"], .md-visual-shell[data-md-theme="compact"] .md-document) p { margin-top: 0.65em; margin-bottom: 0.65em; }
+:is(.preview[data-md-theme="compact"], .md-surface[data-md-theme="compact"] .md-document) { --md-body-line-height: 1.6; line-height: var(--md-body-line-height); }
+:is(.preview[data-md-theme="compact"], .md-surface[data-md-theme="compact"] .md-document) p { margin-top: 0.65em; margin-bottom: 0.65em; }
 
 /* Directly editable alert/footnote content shares the preview spacing. */
 :is(.preview, .milkdown .ProseMirror.md-document) .md-callout-content > :first-child { margin-top: 0; }
@@ -411,3 +426,10 @@
 .milkdown .md-document sup.footnote-ref { cursor: pointer; }
 
 :is(.preview, .milkdown .ProseMirror.md-document) mark { background: #f6d54a70; color: inherit; }
+
+/* Floating footnotes share document typography without affecting its layout. */
+:is(.preview, .milkdown .ProseMirror.md-document).md-footnote-preview { position: fixed; z-index: 90; width: 360px; max-width: calc(100vw - 16px); height: auto; max-height: min(320px, calc(100vh - 16px)); padding: 14px 16px; margin: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); box-shadow: 0 6px 24px #0003; font-size: 14px; }
+.preview.md-footnote-preview .md-footnote-content { display: contents; }
+.preview.md-footnote-preview .md-footnote-preview-content > :first-child { margin-top: 0; }
+.preview.md-footnote-preview .md-footnote-preview-content > :last-child { margin-bottom: 0; }
+.preview.md-footnote-preview .md-footnote-preview-jump { display: block; margin-top: 12px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 4px; color: var(--preview-link); font: inherit; background: var(--bg); cursor: pointer; }

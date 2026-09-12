@@ -3,3 +3,7 @@
 .md-writing-panel label { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
 .md-writing-panel label > :is(select,input:not([type="checkbox"])) { width: 100%; padding: 5px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: inherit; }
 .md-writing-panel small { color: var(--text-soft); font-size: 11px; }
+
+.md-image-host[open] { display: grid; gap: 10px; }
+.md-image-host summary { cursor: pointer; font-size: 12px; }
+.md-writing-panel input[aria-invalid="true"] { border-color: var(--danger, #c33); }

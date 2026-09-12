@@ -1,5 +1,4 @@
-import { hydrateMermaid } from "../mermaidHydrate";
-import { hydratePlantuml } from "../plantumlHydrate";
+import { markdownDisplayHtml, hydrateMarkdownDisplay } from "../markdownDisplay";
 import { useEditorStore } from "../../store/editor";
 import { sourceTree, range } from "./document";
 import type { Node as ProseNode } from "@milkdown/kit/prose/model";
@@ -8,7 +7,6 @@ import { EditorView, keymap } from "@codemirror/view";
 import { EditorState, Prec } from "@codemirror/state";
 import { basicSetup } from "codemirror";
 import { markdown } from "@codemirror/lang-markdown";
-import DOMPurify from "dompurify";
 import { renderMarkdownFragment } from "../markdownFragments";
 import { hydrateLocalImages } from "../localImgHydrate";
 import { documentImageRoot } from "../markdownImageSettings";
@@ -42,22 +40,12 @@ export function rawView(filePath: string | null, tabId: string) {
       const line = source.slice(0, start).split("\n").length;
       void renderMarkdownFragment(node.textContent + "\n\n" + definitions, source, line, { theme: document.documentElement.classList.contains("dark") ? "dark" : "light" }).then(html => {
         if (destroyed || version !== generation) return;
-        // Read inert source text before sanitizing: arrows in diagram attributes
-        // are rejected by DOMPurify. Restore only renderer metadata, never HTML.
-        const template = document.createElement("template"); template.innerHTML = html;
-        preview.innerHTML = DOMPurify.sanitize(html);
-        for (const kind of ["mermaid", "plantuml"]) {
-          const originals = template.content.querySelectorAll(`.${kind}-diagram`);
-          preview.querySelectorAll(`.${kind}-diagram`).forEach((element, index) => {
-            for (const suffix of ["source", "encoded"]) {
-              const name = `data-${kind}-${suffix}`, value = originals[index]?.getAttribute(name);
-              if (value !== null && value !== undefined) element.setAttribute(name, value);
-            }
-          });
-        }
+        preview.innerHTML = markdownDisplayHtml(html);
         const currentSource = useEditorStore.getState().tabs.find(t => t.id === tabId)?.content ?? source;
-        hydrateLocalImages(preview, filePath, documentImageRoot(currentSource, filePath));
-        controllers = [hydrateMermaid(preview, document.documentElement.classList.contains("dark") ? "dark" : "light"), hydratePlantuml(preview)];
+        controllers = [hydrateMarkdownDisplay(preview, {
+          theme: document.documentElement.classList.contains("dark") ? "dark" : "light",
+          filePath, imageRoot: documentImageRoot(currentSource, filePath),
+        })];
       }).catch(error => { logError("Markdown preserved block render failed", error); if (!destroyed && version === generation) preview.textContent = node.textContent; });
     };
     const close = (focus = true) => {
@@ -105,13 +93,31 @@ export function rawView(filePath: string | null, tabId: string) {
     view.dom.addEventListener("deditor-editable-change", modeChanged);
     const imageRootChanged = () => hydrateLocalImages(preview, filePath, documentImageRoot(useEditorStore.getState().tabs.find(t => t.id === tabId)?.content ?? "", filePath));
     view.dom.addEventListener("deditor-image-root-change", imageRootChanged);
-    // Context changes can renumber a footnote or rename a TOC heading without changing this node.
-    let refreshQueued = false;
-    const unsubscribe = useEditorStore.subscribe((state, previous) => {
-      if (state.tabs.find(t => t.id === tabId)?.content === previous.tabs.find(t => t.id === tabId)?.content || !/\[\^|^\s*\[(?:toc|\[toc\])\]/im.test(node.textContent) || refreshQueued) return;
+    // A TOC depends on headings, not every body keystroke. Keep node identities
+    // so ordinary edits do not parse/render the entire document in a microtask.
+    // Raw nodes can contain headings, reference definitions or footnotes.
+    const contextNodes = () => {
+      const nodes: ProseNode[] = [];
+      const footnotes = /\[\^/.test(node.textContent);
+      view.state.doc.descendants(child => {
+        if (child.type.name === "heading" || child.type.name === "deditor_raw" ||
+          footnotes && ["footnote_reference", "footnote_definition"].includes(child.type.name)) {
+          nodes.push(child); return false;
+        }
+      });
+      return nodes;
+    };
+    let context = contextNodes(), refreshQueued = false;
+    const documentChanged = () => {
+      if (!/\[\^|^\s*\[(?:toc|\[toc\])\]/im.test(node.textContent)) return;
+      const next = contextNodes();
+      const unchanged = next.length === context.length && next.every((child, index) => child.eq(context[index]));
+      context = next;
+      if (unchanged || refreshQueued) return;
       refreshQueued = true;
       queueMicrotask(() => { refreshQueued = false; if (!destroyed) render(); });
-    });
+    };
+    view.dom.addEventListener("deditor-document-change", documentChanged);
     render();
     return { dom, stopEvent: () => true,
       ignoreMutation: () => true,
@@ -128,7 +134,7 @@ export function rawView(filePath: string | null, tabId: string) {
           updating = true; cm.dispatch({ changes: { from: 0, to: cm.state.doc.length, insert: next.textContent } }); updating = false;
         }
         if (changed) render(); return true;
-      }, destroy() { controllers.forEach(controller => controller.abort()); unsubscribe(); view.dom.removeEventListener("deditor-editable-change", modeChanged); view.dom.removeEventListener("deditor-image-root-change", imageRootChanged); destroyed = true; generation++; cm?.destroy(); },
+      }, destroy() { controllers.forEach(controller => controller.abort()); view.dom.removeEventListener("deditor-document-change", documentChanged); view.dom.removeEventListener("deditor-editable-change", modeChanged); view.dom.removeEventListener("deditor-image-root-change", imageRootChanged); destroyed = true; generation++; cm?.destroy(); },
     };
   };
 }

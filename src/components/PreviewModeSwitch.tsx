@@ -6,7 +6,7 @@ import { SegmentedControl } from "./ui/SegmentedControl";
 export default function PreviewModeSwitch({ markdown = false }: { markdown?: boolean }) {
   const t = useT();
   const markdownMode = useEditorStore(s => s.markdownMode);
-  const setMarkdownMode = (markdownMode: "source" | "split" | "visual" | "read") => useEditorStore.setState({ markdownMode });
+  const setMarkdownMode = (markdownMode: "source" | "split" | "visual") => useEditorStore.setState({ markdownMode });
   const showPreview = useEditorStore((s) => s.showPreview);
   const previewMaximized = useEditorStore((s) => s.previewMaximized);
   const viewMode: "edit" | "split" | "preview" = !showPreview
@@ -28,7 +28,6 @@ export default function PreviewModeSwitch({ markdown = false }: { markdown?: boo
     { value: "source", label: t("md.viewEdit") },
     { value: "split", label: t("md.viewSplit") },
     { value: "visual", label: t("md.viewVisual") },
-    { value: "read", label: t("md.viewReadonly") },
   ]} />;
 
   return (

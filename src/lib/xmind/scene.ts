@@ -6,6 +6,7 @@ import { shapeContentCenter, advancedShapeScale, flowContentScale, referenceSymb
 import { relationshipGeometry } from "./relationship";
 import { topicIndicators, type TopicIndicator } from "./indicators";
 import {
+  foldableTopicIds,
   type Topic,
   type Sheet,
   type Properties,
@@ -27,7 +28,7 @@ export interface SceneNode extends Box {
   imageHeight: number;
   imageWidth: number;
   labelLines: string[];
-  labels: (Box & { lines: string[] })[];
+  labels: (Box & { lines: string[]; fullText: string; hiddenCount?: number })[];
   indicators: TopicIndicator[];
   indicatorColumns: number;
   labelY: number;
@@ -250,6 +251,13 @@ const estimate: Measure = (text, size) =>
     (sum, c) => sum + (c.charCodeAt(0) > 255 ? 1 : 0.56) * size,
     0,
   );
+const graphemes = typeof Intl.Segmenter === "function"
+  ? new Intl.Segmenter(undefined, { granularity: "grapheme" }) : null;
+const textGraphemes = (text: string): string[] => graphemes
+  ? Array.from(graphemes.segment(text), part => part.segment) : Array.from(text);
+const eastAsianBreak = /[\u2e80-\u9fff\uf900-\ufaff\uac00-\ud7af]|\p{Extended_Pictographic}/u;
+const closingPunctuation = /^[，。、！？：；）》」』】〕〉…]/u;
+const openingPunctuation = /[（《「『【〔〈]$/u;
 function wrap(
   text: string,
   width: number,
@@ -259,15 +267,25 @@ function wrap(
 ): string[] {
   const lines: string[] = [];
   for (const line of text.split("\n")) {
-    let current = "";
-    // Segment whitespace/CJK explicitly; long unbroken words still wrap.
-    for (const char of Array.from(line)) {
-      if (current && measure(current + char, size, p) > width) {
-        lines.push(current);
-        current = char;
-      } else current += char;
+    let current: string[] = [];
+    const characters = textGraphemes(line);
+    for (const char of characters) {
+      if (current.length && measure(current.join("") + char, size, p) > width) {
+        let boundary = 0;
+        for (let i = 0; i < current.length; i++) {
+          const before = current[i], after = current[i + 1] ?? char;
+          if (!closingPunctuation.test(after) && !openingPunctuation.test(before) &&
+              (/[ \t\u200b\-\u2010]$/u.test(before) || eastAsianBreak.test(before) || eastAsianBreak.test(after))) boundary = i + 1;
+        }
+        // Match native break-spaces / break-word behavior: keep normal words
+        // together, and split an overlong token only when no break is available.
+        const end = boundary || current.length;
+        lines.push(current.slice(0, end).join(""));
+        current = current.slice(end);
+      }
+      current.push(char);
     }
-    lines.push(current);
+    lines.push(current.join(""));
   }
   return lines.length ? lines : [""];
 }
@@ -316,6 +334,8 @@ export function buildScene(
   folded: Set<string> = new Set(),
   measure: Measure = estimate,
 ): Scene {
+  const foldable = foldableTopicIds(sheet.rootTopic);
+  folded = new Set([...folded].filter(id => foldable.has(id)));
   const warnings = new Set<string>();
   function groupTitle(title: string, width: number, properties: Properties) {
     if(boundaryHidesTitle(properties['shape-class'])) title='';
@@ -375,7 +395,7 @@ export function buildScene(
     const scale = flowContentScale(style.shape)?.[0] ?? advancedShapeScale(shapeName(style.shape)) ?? 1;
     const widthHint = customWidth === undefined ? number(
       p["fo:max-width"] ?? p["fo:width"],
-      depth === 0 ? 260 : 210,
+      300,
     ) : Math.max(style.fontSize,customWidth/scale-horizontalPadding);
     const lines = wrap(
       topic.title,
@@ -391,17 +411,6 @@ export function buildScene(
     const imageHeight = topic.image
       ? Math.min(180, topic.image.height ?? 80)
       : 0;
-    // Measure every visible row with the same font used by the SVG renderer.
-    const auxiliary = { ...p, "fo:font-weight": "400", "fo:font-style": "normal" };
-    // Keep each label as a separate capsule. Long labels wrap within their own
-    // box instead of merging unrelated labels into a single text paragraph.
-    const labels = (topic.labels ?? []).map((label) => {
-      const lines = wrap(label, Math.max(60, widthHint) - 16, 11, auxiliary, measure);
-      return { lines, x: 0, y: 0,
-        width: Math.max(20, ...lines.map((line) => measure(line, 11, auxiliary) + 16)),
-        height: lines.length * 16 + 4 };
-    });
-    const labelLines = labels.flatMap((label) => label.lines);
     const indicators = topicIndicators(topic);
     const inlineIcons = indicators.filter(i => i.kind === "notes" || i.kind === "link");
     const leadingIcons = indicators.filter(i => i.kind !== "notes" && i.kind !== "link");
@@ -424,19 +433,56 @@ export function buildScene(
       width: contentWidth, height: contentHeight };
     // Native tags sit below the outline, left aligned and packed into rows.
     // Their bounds participate in layout/Fit without inflating the topic shape.
-    const labelY = height + 6;
+    const labelFont = { "fo:font-family": "Helvetica, Arial, sans-serif", "fo:font-weight": "400", "fo:font-style": "normal" };
+    // Ellipsis affects presentation only; retain the full label in the document.
+    const labels = (topic.labels ?? []).map((label) => {
+      const text = label.replace(/[\r\n]+/g, " ");
+      const available = Math.max(20, width - 12);
+      let display = text;
+      if (measure(text, 13, labelFont) > available) {
+        const characters = textGraphemes(text);
+        let low = 0, high = characters.length;
+        while (low < high) {
+          const middle = Math.ceil((low + high) / 2);
+          if (measure(characters.slice(0, middle).join("") + "…", 13, labelFont) <= available) low = middle;
+          else high = middle - 1;
+        }
+        display = characters.slice(0, low).join("") + "…";
+      }
+      return { lines: [display], fullText: label, hiddenCount: undefined as number | undefined, x: 0, y: 0,
+        width: Math.max(20, measure(display, 13, labelFont)) + 12, height: 20 };
+    });
+    const labelY = height + 4;
     let nextLabelX = 0, nextLabelY = labelY, rowHeight = 0;
     for (const label of labels) {
       if (nextLabelX && nextLabelX + label.width > width) {
         nextLabelX = 0;
-        nextLabelY += rowHeight + 4;
+        nextLabelY += rowHeight + 2;
         rowHeight = 0;
       }
       label.x = nextLabelX;
       label.y = nextLabelY;
-      nextLabelX += label.width + 4;
+      nextLabelX += label.width + 2;
       rowHeight = Math.max(rowHeight, label.height);
     }
+    if (nextLabelY > labelY + 44) {
+      const total = labels.length;
+      while (labels.length && labels[labels.length - 1].y > labelY + 44) labels.pop();
+      // Reserve the end of the third row for the number of undisplayed tags.
+      let hidden = total - labels.length;
+      let badgeWidth = Math.max(20, measure(`${hidden}+`, 13, labelFont)) + 12;
+      while (labels.length) {
+        const last = labels[labels.length - 1];
+        if (last.y < labelY + 44 || last.x + last.width + 2 + badgeWidth <= width) break;
+        labels.pop(); hidden++;
+        badgeWidth = Math.max(20, measure(`${hidden}+`, 13, labelFont)) + 12;
+      }
+      const last = labels[labels.length - 1];
+      labels.push({ lines: [`${hidden}+`], fullText: (topic.labels ?? []).slice(labels.length).join("\n"), hiddenCount: hidden,
+        x: last?.y === labelY + 44 ? last.x + last.width + 2 : 0,
+        y: labelY + 44, width: badgeWidth, height: 20 });
+    }
+    const labelLines = labels.flatMap(label => label.lines);
     const indicatorY = content.y + pictureHeight + (titleHeight - 16) / 2;
     const align = p["fo:text-align"];
     const titleAnchor = align === "left" || align === "start" ? "start"
@@ -614,7 +660,7 @@ export function buildScene(
           const child = children[j], sign = j % 2 === 0 ? -1 : 1;
           // Upper and lower ribs share horizontal space, while each side
           // reserves its own content width. Consecutive joints stay staggered.
-          const base = Math.max(cursor, laneEnds[j % 2] + 44);
+          let base = Math.max(cursor, laneEnds[j % 2] + 44);
           const branchIndex = depth === 0 ? j : branch;
           const bare = { ...child, boundaries:undefined,summaries:undefined,children: { ...child.children, attached: [] } };
           const part = layout(bare, depth + 1, branchIndex, "right", topic.id);
@@ -662,6 +708,14 @@ export function buildScene(
           });
           attachGroups(part, cause);
           part.bounds = boundsOf([...part.nodes.map(nodeVisualBounds), ...part.groups.map(groupBounds)]);
+          // A wide collapsed cause can extend left of its spine joint. Reserve
+          // the actual content edge, not just the joint, against the prior rib.
+          const clearance = laneEnds[j % 2] + 44 - part.bounds.x;
+          if (clearance > 0) {
+            shift(part, clearance, 0);
+            base += clearance;
+            tip.x += clearance;
+          }
           laneEnds[j % 2] = part.bounds.x + part.bounds.width;
           ribs.push({ part, base, tip });
           cursor = base + 36;

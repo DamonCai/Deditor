@@ -43,6 +43,30 @@ crepe.editor.action(ctx => {
    const tr = state.tr.insertText(replacement, position, position + text.length);
    return model.apply(tr.doc);
  };
+ test("inline index: repeated CJK and syntax edits match a fresh whole-document index", () => {
+   for (const original of [
+     "# title\n\nText **target** end.\n\nTail *last*.\n",
+     "intro\r\n\r\nText **target**\r\nnext line\r\n\r\nTail *last*.\r\n",
+     "> [!NOTE]\n> Text **target** end\n>\n> - nested\n\nTail *last*.\n",
+     "| Item | Value |\n|---|---|\n| **target** | text |\n\nTail *last*.\n",
+     "Text **target** [link][ref] and note[^n].\n\n[ref]: https://example.test\n\n[^n]: original\n\nTail *last*.\n",
+     "Before\n\n## **target**\n\nTail *last*.\n",
+   ]) {
+     const model = make(original); const from = original.indexOf("**target**"); let length = "**target**".length;
+     for (const raw of ["**中文 target**", "**中X文 target**", "**中文 target**", "**target**", "**[target][ref]**", "**target\\*literal**", "**target**\n\nnew paragraph", "**target**"]) {
+       const structural = raw.includes("\n") || model.source.slice(from,from+length).includes("\n");
+       const expected = model.source.slice(0,from) + raw + model.source.slice(from+length);
+       model.editInline(from,length,raw,parse(expected)); length=raw.length;
+       assert.equal(model.source,expected);
+       const fresh=make(expected);
+       // Structural pastes intentionally defer exact indexing until reset. The
+       // live inline editor keeps one raw range while it is open.
+       if (structural || model.doc.childCount !== fresh.doc.childCount) { model.reset(expected); continue; }
+       model.doc.descendants((node,pos)=>{if(node.isText) for(const at of [pos,pos+node.nodeSize]) assert.equal(model.sourceOffset(at),fresh.sourceOffset(at),JSON.stringify({original,raw,at}));});
+       assert.deepEqual(model.inlineAt(model.positionAtSource(expected.indexOf("*last*"))+1),fresh.inlineAt(fresh.positionAtSource(expected.indexOf("*last*"))+1));
+     }
+   }
+ });
  test("structured: footnotes and alert prose are editable and patch exact source", () => {
    const source = "正文[^n] 后文。\n\n> [!NOTE]\n> 提示 **重点**。\n\n[^n]: 脚注解释。\n";
    const model = make(source);

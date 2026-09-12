@@ -63,7 +63,7 @@ interface EditorState {
   tabPositions: Record<string, TabPosition>;
   theme: Theme;
   language: Lang;
-  markdownMode: "source" | "split" | "visual" | "read";
+  markdownMode: "source" | "split" | "visual";
   showPreview: boolean;
   showSidebar: boolean;
   previewMaximized: boolean;
@@ -703,7 +703,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   togglePreviewMaximized: () => {
     const tab = get().tabs.find(t => t.id === get().activeId);
-    if (tab && !tab.diff && isMarkdown(tab.filePath)) { set({ markdownMode: ["visual", "read"].includes(get().markdownMode) ? "split" : "visual" }); return; }
+    if (tab && !tab.diff && isMarkdown(tab.filePath)) { set({ markdownMode: get().markdownMode === "visual" ? "split" : "visual" }); return; }
     const next = !get().previewMaximized;
     // entering maximized also turns preview on
     set({ previewMaximized: next, showPreview: next ? true : get().showPreview });

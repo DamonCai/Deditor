@@ -69,3 +69,11 @@ export function documentImageRoot(source: string, filePath: string | null): stri
   const path = value.trim();
   return resolveMarkdownImage(/^file:/i.test(path) ? path : path.replace(/%/g, "%25").replace(/#/g, "%23").replace(/\?/g, "%3F"), filePath);
 }
+
+/** Encode filesystem spelling once, including literal percent/hash characters.
+ * Absolute destinations use file URLs so typora-root-url cannot reinterpret them. */
+export function markdownImageReference(folder: string, name: string) {
+  const path = `${folder}/${name}`.replace(/\\/g, "/");
+  const encoded = path.split("/").map((part, index) => index === 0 && /^[a-z]:$/i.test(part) ? part : encodeURIComponent(part).replace(/\(/g, "%28").replace(/\)/g, "%29")).join("/");
+  return isAbsolutePath(folder) ? (path.startsWith("//") ? "file:" : path.startsWith("/") ? "file://" : "file:///") + encoded : encoded;
+}

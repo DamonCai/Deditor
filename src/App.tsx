@@ -84,7 +84,7 @@ export default function App() {
   const isDiffTab = !!activeMeta?.isDiff;
   const htmlFile = isHtml(filePath);
   const showPreview = isMarkdown(filePath) ? markdownMode !== "source" : htmlShowPreview;
-  const previewMaximized = isMarkdown(filePath) ? ["visual", "read"].includes(markdownMode) : htmlPreviewMaximized;
+  const previewMaximized = isMarkdown(filePath) ? markdownMode === "visual" : htmlPreviewMaximized;
   const previewEnabled = !isDiffTab && showPreview && (isMarkdown(filePath) || htmlFile);
   // Initial caret + scroll for the active tab. Read imperatively so subscribing
   // components don't re-render every cursor move; Editor only consumes these
@@ -545,8 +545,8 @@ export default function App() {
               >
                 {htmlFile && activeTabId ? (
                   <HtmlPreview key={activeTabId} tabId={activeTabId} />
-                ) : activeTabId && (markdownMode === "visual" || markdownMode === "read") ? (
-                  <Suspense fallback={null}><MarkdownVisualEditor key={activeTabId} tabId={activeTabId} readonly={markdownMode === "read"} theme={theme} /></Suspense>
+                ) : activeTabId && markdownMode === "visual" ? (
+                  <Suspense fallback={null}><MarkdownVisualEditor key={activeTabId} tabId={activeTabId} theme={theme} /></Suspense>
                 ) : (
                   <PreviewHost
                     activeId={activeTabId}

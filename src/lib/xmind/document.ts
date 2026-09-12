@@ -90,6 +90,20 @@ export function walkTopics(
   visit(root, parent);
   for (const child of childrenOf(root)) walkTopics(child, visit, root);
 }
+/** Symmetric timeline stages are radial submaps, which XMind cannot fold. */
+export function foldableTopicIds(root: Topic): Set<string> {
+  const ids = new Set<string>();
+  const visit = (topic: Topic, symmetricStage = false) => {
+    if (topic.children?.attached?.length && !symmetricStage &&
+      topic.structureClass !== "org.xmind.ui.map.unbalanced.symmetric") ids.add(topic.id);
+    const symmetric = topic.structureClass === "org.xmind.ui.timeline.through.symmetric.vertical" ||
+      topic.structureClass === "org.xmind.ui.timeline.through.symmetric.vertical.btt";
+    for (const child of topic.children?.attached ?? []) visit(child, symmetric);
+    for (const child of [...topic.children?.detached ?? [], ...topic.children?.summary ?? [], ...topic.children?.callout ?? []]) visit(child);
+  };
+  visit(root);
+  return ids;
+}
 function fromLegacy(t: XmindTopic): Topic {
   return {
     id: t.id,
@@ -329,14 +343,16 @@ export function editDocument(
     case "relationship-delete":
       sheet.relationships = sheet.relationships?.filter((r) => r.id !== command.id);
       break;
-    case "fold":
+    case "fold": {
+      const allowed = foldableTopicIds(root);
       for (const id of command.ids) {
         const target = findTopic(root, id);
-        if (!target?.children?.attached?.length) continue;
+        if (!target || !allowed.has(id)) continue;
         if (command.folded) target.branch = "folded";
         else delete target.branch;
       }
       break;
+    }
     case "title":
       if (!topic) throw new Error("Topic not found");
       if (topic.title !== command.title) delete topic.titleUnedited;

@@ -1,4 +1,6 @@
-import { documentImageDirectory, documentImageRoot, resolveMarkdownImage } from "../lib/markdownImageSettings";
+import MarkdownDocumentSurface from "./MarkdownDocumentSurface";
+import { installFootnotePreview } from "../lib/markdownFootnotePreview";
+import { documentImageDirectory, documentImageRoot, resolveMarkdownImage, markdownImageReference } from "../lib/markdownImageSettings";
 import { shorthandRemark, highlightRemark, shorthandMarks, emojiSchema, shorthandInputRules, configureShorthand } from "../lib/markdownVisual/shorthand";
 import { strikethroughInputRule } from "@milkdown/kit/preset/gfm";
 import { editableBlockquote, footnoteReference, footnoteDefinition, footnoteUpdates, footnoteNodeView } from "../lib/markdownVisual/structuredBlocks";
@@ -75,7 +77,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
     view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, from, to)).scrollIntoView());
   };
   useEffect(() => {
-    let cancelled = false, cleanupFlush = () => {}, cleanupInput = () => {}, cleanupAccessibility = () => {}, cleanupCompositionViewport = () => {}, cleanupInlineSource = () => {}, cleanupTypewriter = () => {};
+    let cancelled = false, cleanupFlush = () => {}, cleanupInput = () => {}, cleanupAccessibility = () => {}, cleanupCompositionViewport = () => {}, cleanupInlineSource = () => {}, cleanupTypewriter = () => {}, cleanupFootnotes = () => {};
     setReady(false); setError("");
     const host = document.createElement("div"); root.current!.append(host);
     const session = markdownSession(tabId, sourceRef.current); session.breakGroup();
@@ -87,7 +89,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
       const name = `image-${crypto.randomUUID()}.${ext}`;
       const bytes = new Uint8Array(await file.arrayBuffer()); let binary = "";
       for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
-      try { const folder = documentImageDirectory(sourceRef.current, filePath, useEditorStore.getState().markdownSettings.imageDirectory); await saveImage(base, name, btoa(binary), folder); return `${folder}/${name}`; }
+      try { const folder = documentImageDirectory(sourceRef.current, filePath, useEditorStore.getState().markdownSettings.imageDirectory); await saveImage(base, name, btoa(binary), folder); return markdownImageReference(folder, name); }
       catch (err) { logError("Markdown image upload failed", err); void showError(String(err)); throw err; }
     };
     const initialSource = sourceRef.current;
@@ -181,6 +183,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
         cleanupCompositionViewport = compositionViewport.destroy;
         const typewriter = installTypewriter(view, scroller.current!);
         cleanupTypewriter = typewriter.destroy;
+        cleanupFootnotes = installFootnotePreview(view.dom, language);
         const originalImageView = view.props.nodeViews?.["image-block"];
         const originalInlineImageView = view.props.nodeViews?.image;
         view.setProps({ nodeViews: { ...view.props.nodeViews, ...(originalImageView ? { "image-block": accessibleImageView(originalImageView, language) } : {}), ...(originalInlineImageView ? { image: rootAwareImageView(originalInlineImageView) } : {}), footnote_reference: footnoteNodeView, footnote_definition: footnoteNodeView, deditor_raw: rawView(filePath, tabId), code_block: codeView(tabId, theme) },
@@ -193,7 +196,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
             if (inlineEditing?.apply(tr)) {
               if (!projected) flush();
             } else if (result.transactions.some(transaction => transaction.docChanged)) flush();
-            if (tr.docChanged) outline();
+            if (result.transactions.some(transaction => transaction.docChanged)) { outline(); view.dom.dispatchEvent(new Event("deditor-document-change")); }
             session.visualSelection = { anchor: view.state.selection.anchor, head: view.state.selection.head };
             publish(); inlineEditing?.update();
             if (!projected && (tr.docChanged || tr.selectionSet)) typewriter.update();
@@ -209,6 +212,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
           const tr = view.state.tr.replaceWith(0, view.state.doc.content.size, next.content);
           tr.setSelection(Selection.near(tr.doc.resolve(Math.min(selection.head, tr.doc.content.size))));
           view.updateState(view.state.apply(tr.setMeta("addToHistory", false))); outline(); publish();
+          view.dom.dispatchEvent(new Event("deditor-document-change"));
         };
         const beforeInput = (event: Event) => {
           const type = (event as InputEvent).inputType;
@@ -244,7 +248,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
       const outgoing = runtime.current;
       if (outgoing && useEditorStore.getState().tabs.find(tab => tab.id === tabId)?.content === outgoing.document.source) outgoing.flush();
       session.breakGroup(); session.visualScroll = scroller.current?.scrollTop ?? session.visualScroll;
-      cancelled = true; cleanupFlush(); cleanupInput(); cleanupAccessibility(); cleanupCompositionViewport(); cleanupInlineSource(); cleanupTypewriter(); runtime.current = null;
+      cancelled = true; cleanupFlush(); cleanupInput(); cleanupAccessibility(); cleanupCompositionViewport(); cleanupInlineSource(); cleanupTypewriter(); cleanupFootnotes(); runtime.current = null;
       if (getVisualEditor()?.tabId === tabId) setVisualEditor(null);
       void crepe.destroy().catch(err => logError("Markdown visual editor cleanup failed", err)); host.remove();
     };
@@ -284,7 +288,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
     const index = (matchIndex + delta + matches.current.length) % matches.current.length;
     setMatchIndex(index); const match = matches.current[index]; select(match.from, match.to);
   };
-  return <section className="md-visual-shell" data-md-theme={writing.documentTheme} data-md-focus={writing.focusParagraph} data-readonly={readonly} style={{ "--md-visual-font-size": `${fontSize}px`, "--md-document-zoom": `${fontSize - 14}px` } as React.CSSProperties}
+  return <MarkdownDocumentSurface editorHost fontSize={fontSize} documentTheme={writing.documentTheme} className="md-visual-shell" data-md-focus={writing.focusParagraph} data-readonly={readonly}
     onKeyDownCapture={event => {
       if (event.nativeEvent.isComposing) return;
       const mod = event.metaKey || event.ctrlKey;
@@ -318,5 +322,5 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
         {!headings.length && <span>{t("preview.tocEmpty")}</span>}
       </nav>}
     </div>
-  </section>;
+  </MarkdownDocumentSurface>;
 }

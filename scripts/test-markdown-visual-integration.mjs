@@ -40,6 +40,7 @@ export {default as EditorHost} from './src/components/EditorHost';
 export {getActiveView} from './src/lib/editorBridge';
 export {default as Visual} from './src/components/MarkdownVisualEditor';
 export {default as Preview} from './src/components/Preview';
+export {markdownDisplayHtml,hydrateMarkdownDisplay} from './src/lib/markdownDisplay';
 export {useEditorStore} from './src/store/editor';
 export {getVisualEditor} from './src/lib/markdownVisualBridge';
 export {markdownHistory} from './src/lib/markdownHistory';
@@ -48,8 +49,9 @@ export {renderMarkdown} from './src/lib/markdown';
 export {installCompositionViewport} from './src/lib/markdownVisual/compositionViewport';
 export {loadPersisted,schedulePersist} from './src/lib/persistence';
 export {default as WritingSettings} from './src/components/MarkdownWritingSettings';
+export {default as ModeSwitch} from './src/components/PreviewModeSwitch';
 export {collectMarkdownImages} from './src/lib/markdownImageCollect';
-export {documentImageDirectory,documentImageRoot,resolveMarkdownImage} from './src/lib/markdownImageSettings';
+export {documentImageDirectory,documentImageRoot,resolveMarkdownImage,markdownImageReference} from './src/lib/markdownImageSettings';
 export {hydrateLocalImages} from './src/lib/localImgHydrate';
 export {rebaseMarkdownImages} from './src/lib/markdownImagePaths';
 export {installTypewriter} from './src/lib/markdownVisual/typewriter';
@@ -199,10 +201,10 @@ await test('round 4: unmount/remount retains content and history',async()=>{
 });
 function RetainedEditors() {
  const activeId=store(s=>s.activeId),mode=store(s=>s.markdownMode);
- const visual=activeId==='a' && ['visual','read'].includes(mode);
+ const visual=activeId==='a' && mode==='visual';
  return React.createElement(React.Fragment,null,
   React.createElement('div',{style:{display:visual?'none':'block'}},React.createElement(app.EditorHost,{activeId,theme:'light',fontSize:14})),
-  visual?React.createElement(app.Visual,{tabId:'a',readonly:mode==='read',theme:'light'}):null);
+  visual?React.createElement(app.Visual,{tabId:'a',theme:'light'}):null);
 }
 await test('round 5: retained source editor relinquishes commands to visual mode and shares native undo events',async()=>{
  await act(async()=>{root.render(null);store.setState({activeId:'a',markdownMode:'visual'});store.getState().setContent('# Retained\n\nbody\n','a','command');});
@@ -218,7 +220,7 @@ await test('round 5: retained source editor relinquishes commands to visual mode
  await act(async()=>undo());assert.equal(content(),before);assert.equal(view.state.doc.toString(),before);
 });
 await test('round 5: HTML retained editor keeps its own undo while Markdown source is hidden',async()=>{
- const markdown=content();await act(async()=>store.setState({activeId:'b',markdownMode:'read'}));
+ const markdown=content();await act(async()=>store.setState({activeId:'b',markdownMode:'visual'}));
  const html=store.getState().tabs.find(t=>t.id==='b').content,view=app.getActiveView();assert.ok(view);assert.equal(app.getVisualEditor(),null);
  await act(async()=>view.dispatch({changes:{from:view.state.doc.length,insert:'<p>independent</p>'}}));
  const {undo}=await import('@codemirror/commands');await act(async()=>undo(view));
@@ -283,6 +285,30 @@ await test('reported editing bug: code caret stays in its block and readonly his
    cm.contentDOM.dispatchEvent(new dom.window.InputEvent('beforeinput',{inputType:'historyUndo',bubbles:true,cancelable:true}));
  });assert.equal(content(),expected);
  await render(false);await act(async()=>app.markdownHistory());assert.equal(content(),original);
+});
+await test('shared display: sanitized renderer metadata, image roots and cancellation use one lifecycle',async()=>{
+ const raw='<p data-line="4"><strong>Safe</strong><img src="/a.svg" onerror="alert(1)"></p><script>alert(1)</script><div class="mermaid-diagram" data-mermaid-source="A --&gt; B"></div>';
+ const html=app.markdownDisplayHtml(raw), host=document.createElement('div');host.innerHTML=html;
+ assert.equal(host.querySelector('script'),null);assert.equal(host.querySelector('img').hasAttribute('onerror'),false);
+ assert.equal(host.querySelector('[data-line]').dataset.line,'4');assert.equal(host.querySelector('.mermaid-diagram').dataset.mermaidSource,'A --> B');
+ host.querySelector('.mermaid-diagram').remove();
+ const display=app.hydrateMarkdownDisplay(host,{theme:'light',filePath:'/doc/a.md',imageRoot:'/site'});
+ await display.done;assert.equal(host.querySelector('img').dataset.absPath,'/site/a.svg');display.abort();assert.equal(display.signal.aborted,true);
+});
+await test('shared surface: display settings preserve the editable DOM, source and selection session',async()=>{
+ const original='# Shared surface\n\nBody **emphasis**.\n';
+ await act(async()=>store.getState().setContent(original,'a','command'));await render(false);
+ await act(async()=>app.getVisualEditor().navigate(3,3));
+ const caret=document.getSelection();const caretNode=caret.anchorNode,caretOffset=caret.anchorOffset;
+ const editor=document.querySelector('.ProseMirror');const previousFont=store.getState().editorFontSize;
+ await act(async()=>store.setState({editorFontSize:18,markdownSettings:{...store.getState().markdownSettings,documentTheme:'compact'}}));
+ assert.equal(document.querySelector('.ProseMirror'),editor);assert.equal(content(),original);
+ assert.equal(document.getSelection().anchorNode,caretNode);assert.equal(document.getSelection().anchorOffset,caretOffset);
+ const surface=document.querySelector('.md-surface');assert.equal(surface.dataset.mdTheme,'compact');assert.equal(surface.style.getPropertyValue('--md-document-zoom'),'4px');
+ await act(async()=>root.render(React.createElement(app.Preview,{tabId:'a',theme:'light'})));await pause(180);
+ assert.equal(document.querySelector('.preview.md-surface').dataset.mdTheme,'compact');assert.equal(document.querySelector('.preview').style.getPropertyValue('--md-document-zoom'),'4px');
+ assert.equal(content(),original);
+ await act(async()=>store.setState({editorFontSize:previousFont,markdownSettings:{...store.getState().markdownSettings,documentTheme:'default'}}));await render(false);
 });
 await test('presentation: consecutive headings survive DOM reparse and undo without spacing changes',async()=>{
  const original='# First\n## Second\n### Third\n#### Fourth\n##### Fifth\n###### Sixth\n';
@@ -445,7 +471,7 @@ await test('shorthand parity: complex fixture renders semantic marks, alerts and
 await test('image metadata: per-document scalar folder rules support templates and reject malformed YAML',async()=>{
  const folder=app.documentImageDirectory;
  assert.equal(folder('---\ntypora-copy-images-to: "./${filename}.assets"\n---\ntext','C:\\docs\\中文.md','images'),'中文.assets');
- for(const value of ['../escape','[bad]','*missing','"/absolute"','"a:bad"']) assert.equal(folder('---\ntypora-copy-images-to: '+value+'\n---\n','/doc/a.md','images'),'images');
+ for(const value of ['../escape','~/images','[bad]','*missing','"a:bad"']) assert.equal(folder('---\ntypora-copy-images-to: '+value+'\n---\n','/doc/a.md','images'),'images');
  assert.equal(folder('---\nother: &a { k: v }\ntypora-copy-images-to: *a\n---\n','/doc/a.md','images'),'images');
  assert.equal(folder('```yaml\ntypora-copy-images-to: ignored\n```','/doc/a.md','images'),'images');
 });
@@ -464,6 +490,125 @@ await test('image collection: copies once, patches Markdown/HTML/references, kee
   assert.equal(content().split('media/'+copied[0].name).length-1,3);
   await act(async()=>app.markdownHistory());assert.equal(content(),original);
  } finally {globalThis.mdInvoke=oldInvoke;}
+});
+await test('rich footnote preview: shared formatted content, scoped IDs, navigation, Escape and live invalidation',async()=>{
+ const original='Text[^note] repeated[^note].\n\n[^note]: **Rich** and `code`.\n\n    second paragraph\n';
+ await act(async()=>store.getState().setContent(original,'a','command'));await render(false);
+ const check=async(container)=>{
+  let link=container.querySelector('.footnote-ref a');assert.ok(link);
+  const before=content();await act(async()=>{link.dispatchEvent(new window.MouseEvent('pointerover',{bubbles:true}));await pause(0);});
+  let popup=document.querySelector('.md-footnote-preview');assert.ok(popup);assert.ok(popup.querySelector('strong'));assert.ok(popup.querySelector('code'));assert.ok(popup.textContent.includes('second paragraph'));
+  assert.equal(popup.querySelectorAll('[id]').length,0);assert.equal(container.contains(popup),false);assert.equal(content(),before);
+  assert.equal(link.getAttribute('aria-describedby'),popup.id);
+  await act(async()=>document.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+  assert.equal(document.querySelector('.md-footnote-preview'),null);assert.equal(link.hasAttribute('aria-describedby'),false);
+  await act(async()=>link.focus());assert.ok(document.querySelector('.md-footnote-preview'));
+  await act(async()=>link.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Tab',bubbles:true,cancelable:true})));
+  assert.ok(document.activeElement.closest('.md-footnote-preview'));
+  await act(async()=>document.activeElement.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true})));
+  assert.equal(document.querySelector('.md-footnote-preview'),null);assert.equal(document.activeElement,link);
+  await act(async()=>link.dispatchEvent(new window.MouseEvent('pointerover',{bubbles:true})));
+  await act(async()=>document.querySelector('.md-footnote-preview-jump').click());
+  assert.equal(document.querySelector('.md-footnote-preview'),null);assert.equal(content(),before);
+ };
+ await check(document.querySelector('.ProseMirror'));
+ await act(async()=>root.render(React.createElement(app.Preview,{tabId:'a',theme:'light'})));await act(async()=>pause(150));
+ await check(document.querySelector('.preview'));
+ const link=document.querySelector('.preview .footnote-ref a');
+ await act(async()=>link.dispatchEvent(new window.MouseEvent('pointerover',{bubbles:true})));assert.ok(document.querySelector('.md-footnote-preview'));
+ await act(async()=>store.getState().setContent(original.replace('**Rich**','**Changed**'),'a','command'));await act(async()=>pause(150));
+ assert.equal(document.querySelector('.md-footnote-preview'),null);
+ const changed=document.querySelector('.preview .footnote-ref a');await act(async()=>changed.dispatchEvent(new window.MouseEvent('pointerover',{bubbles:true})));
+ assert.ok(document.querySelector('.md-footnote-preview').textContent.includes('Changed'));
+ await act(async()=>root.render(null));assert.equal(document.querySelector('.md-footnote-preview'),null);await render(false);
+});
+await test('external image folders: per-document absolute targets and encoded references survive collection',async()=>{
+ const ref=app.markdownImageReference;
+ assert.equal(ref('media # 中文%20','a(1).png'),'media%20%23%20%E4%B8%AD%E6%96%87%2520/a%281%29.png');
+ assert.equal(ref('/images # %20','a.png'),'file:///images%20%23%20%2520/a.png');
+ assert.equal(ref('D:/images','a.png'),'file:///D:/images/a.png');
+ assert.equal(ref('//server/share/images','a.png'),'file://server/share/images/a.png');
+ assert.equal(app.documentImageDirectory('---\ntypora-copy-images-to: /outside/images\n---\n','/doc/a.md','assets'),'/outside/images');
+ const original='---\ntypora-copy-images-to: /outside/images # comment\n---\n\n![a](local.png)\n';
+ await act(async()=>store.getState().setContent(original,'a','command'));await render(false);
+ const old=globalThis.mdInvoke,calls=[];globalThis.mdInvoke=async(command,args)=>{
+  if(command==='read_binary_as_base64')return 'aQ==';
+  if(command==='save_image_to_directory'){calls.push(args);return args.directory+'/'+args.name;}
+  return old(command,args);
+ };
+ try {
+  await act(async()=>app.collectMarkdownImages('a'));assert.equal(calls.length,1);assert.equal(calls[0].directory,'/outside/images');
+  assert.ok(content().includes('file:///outside/images/'+calls[0].name));
+  await act(async()=>{const again=await app.collectMarkdownImages('a');assert.equal(again.copied,0);assert.equal(again.skipped,1);});
+  await act(async()=>app.markdownHistory());assert.equal(content(),original);
+ } finally {globalThis.mdInvoke=old;}
+});
+await test('remote images: download once per URL, preserve fragments, failures, code and one-step undo',async()=>{
+ const original='![a](https://example.test/a?size=2#one) ![b][remote]\n\n<img src="https://example.test/a?size=2#two">\n\n![failed](https://example.test/fail) ![local](local.png)\n\n`![code](https://example.test/code)`\n\n[remote]: https://example.test/a?size=2#two "title"\n';
+ await act(async()=>store.getState().setContent(original,'a','command'));await render(false);
+ const old=globalThis.mdInvoke,calls=[],saved=[];
+ globalThis.mdInvoke=async(command,args)=>{
+  if(command==='download_markdown_image'){calls.push(args);if(args.url.endsWith('/fail'))throw new Error('offline');return {data:'cGljdHVyZQ==',extension:'svg'};}
+  if(command==='save_image'){saved.push(args);return '/generated/'+args.folder+'/'+args.name;}
+  return old(command,args);
+ };
+ try {
+  let outcome;await act(async()=>{outcome=await app.collectMarkdownImages('a',{kind:'download'});});
+  assert.equal(outcome.copied,1);assert.equal(outcome.skipped,1);assert.equal(outcome.failures.length,1);assert.equal(calls.length,2);assert.equal(saved.length,1);
+  assert.equal(calls[0].url,'https://example.test/a?size=2');assert.ok(content().includes(saved[0].name+'#one'));assert.ok(content().includes(saved[0].name+'#two'));
+  assert.ok(content().includes('![failed](https://example.test/fail)'));assert.ok(content().includes('`![code](https://example.test/code)`'));assert.ok(!content().includes(saved[0].name+'?'));
+  await act(async()=>app.markdownHistory());assert.equal(content(),original);
+ } finally {globalThis.mdInvoke=old;}
+});
+await test('PicGo upload: resolved files are deduplicated and signed results survive roundtrip and undo',async()=>{
+ const original='---\ntypora-root-url: /site\n---\n\n![a](/img/a.svg#one) ![b](file:///site/img/a.svg#two) ![web](https://example.test/keep)\n';
+ await act(async()=>store.getState().setContent(original,'a','command'));await render(false);
+ const old=globalThis.mdInvoke,calls=[];globalThis.mdInvoke=async(command,args)=>{
+  if(command==='upload_markdown_image'){calls.push(args);return 'https://host.test/hello image.svg?signature=abc&v=2';}return old(command,args);
+ };
+ try {
+  let outcome;await act(async()=>{outcome=await app.collectMarkdownImages('a',{kind:'upload',endpoint:'http://127.0.0.1:36677/upload',token:'test-only'});});
+  assert.equal(outcome.copied,1);assert.equal(calls.length,1);assert.equal(calls[0].path,'/site/img/a.svg');assert.equal(calls[0].token,'test-only');
+  assert.ok(content().includes('https://host.test/hello%20image.svg?signature=abc&v=2#one'));assert.ok(content().includes('![web](https://example.test/keep)'));
+  await act(async()=>app.markdownHistory());assert.equal(content(),original);
+ } finally {globalThis.mdInvoke=old;}
+});
+await test('image transfers: concurrent edits survive, stop keeps completed results, duplicate runs are rejected',async()=>{
+ const original='![a](https://example.test/a) ![b](https://example.test/b)\n\nOriginal body\n';
+ await act(async()=>store.getState().setContent(original,'a','command'));await render(false);
+ const old=globalThis.mdInvoke;let stop=false,calls=0;
+ globalThis.mdInvoke=async(command,args)=>{
+  if(command==='download_markdown_image'){
+   calls++;await assert.rejects(app.collectMarkdownImages('a',{kind:'download'}),/already running/);
+   store.getState().setContent(original.replace('Original body','Concurrent body'),'a','command');stop=true;return {data:'aQ==',extension:'png'};
+  }
+  if(command==='save_image')return '/generated/'+args.folder+'/'+args.name;return old(command,args);
+ };
+ try {
+  let outcome;await act(async()=>{outcome=await app.collectMarkdownImages('a',{kind:'download'},()=>stop);});
+  assert.equal(calls,1);assert.equal(outcome.stopped,true);assert.equal(outcome.copied,1);assert.ok(content().includes('Concurrent body'));assert.ok(content().includes('![b](https://example.test/b)'));
+  await act(async()=>app.markdownHistory());assert.equal(content(),original.replace('Original body','Concurrent body'));
+ } finally {globalThis.mdInvoke=old;}
+});
+await test('image transfer failures never inject unsafe URLs or filenames',async()=>{
+ const original='![a](local.png) ![b](https://example.test/b)\n';
+ await act(async()=>store.getState().setContent(original,'a','command'));await render(false);
+ const old=globalThis.mdInvoke;let writes=0;
+ globalThis.mdInvoke=async(command,args)=>{
+  if(command==='upload_markdown_image')return 'javascript:alert(1)';
+  if(command==='download_markdown_image')return {data:'aQ==',extension:'../unsafe'};
+  if(command==='save_image')writes++;return old(command,args);
+ };
+ try {
+  for(const operation of [{kind:'upload',endpoint:'http://127.0.0.1:36677/upload'},{kind:'download'}]) await act(async()=>{const result=await app.collectMarkdownImages('a',operation);assert.equal(result.failures.length,1);assert.equal(result.copied,0);});
+  assert.equal(content(),original);assert.equal(writes,0);
+ } finally {globalThis.mdInvoke=old;}
+});
+await test('PicGo settings: migration retains a local endpoint and drops credentials',async()=>{
+ assert.equal(app.normalizeMarkdownPreferences({}).picgoEndpoint,'http://127.0.0.1:36677/upload');
+ assert.equal(app.normalizeMarkdownPreferences({picgoEndpoint:'http://localhost:3000/upload',token:'secret'}).picgoEndpoint,'http://localhost:3000/upload');
+ assert.ok(!('token' in app.normalizeMarkdownPreferences({token:'secret'})));
+ for(const value of ['https://example.com/upload','http://u:p@localhost/upload','http://localhost/upload?secret=x','http://localhost.evil.test/upload']) assert.equal(app.normalizeMarkdownPreferences({picgoEndpoint:value}).picgoEndpoint,'http://127.0.0.1:36677/upload');
 });
 await test('image root paths: website roots, encoded filenames, explicit files, Windows and UNC',async()=>{
  const resolve=app.resolveMarkdownImage,header=value=>'---\ntypora-root-url: '+value+'\n---\n';
@@ -674,6 +819,14 @@ await test('P2 context: TOC refreshes after heading text changes without rewriti
  assert.equal(document.querySelector('.md-toc a').textContent,'First');await render(false);
  await act(async()=>{const heading=document.querySelector('.ProseMirror h1');heading.firstChild.textContent='First updated';heading.dispatchEvent(new Event('input',{bubbles:true}));await pause(100);});
  assert.equal(document.querySelector('.md-toc a').textContent,'First updated');assert.ok(content().startsWith('[TOC]\n\n'));
+ const toc=document.querySelector('.md-toc'), link=toc.querySelector('a');
+ await act(async()=>{const tail=[...document.querySelectorAll('.ProseMirror p')].find(p=>p.textContent==='Tail');tail.firstChild.textContent='Tail body edit';tail.dispatchEvent(new Event('input',{bubbles:true}));await pause(100);});
+ assert.equal(document.querySelector('.md-toc'),toc);assert.equal(document.querySelector('.md-toc a'),link);
+ await act(async()=>store.getState().setContent(content().replace('# First updated','# External heading'),'a','command'));
+ await pause(100);assert.equal(document.querySelector('.md-toc a').textContent,'External heading');
+ await act(async()=>app.markdownHistory());await pause(100);
+ assert.equal(document.querySelector('.md-toc a').textContent,'First updated');
+
 });
 await test('P1 inline source: multiline clipboard text survives projection closure and undo',async()=>{
  const original='Before **word** after.\n\nTail\n';await act(async()=>store.getState().setContent(original,'a','command'));
@@ -855,7 +1008,40 @@ await test('P3 settings UI and persistence: explicit options survive reload, old
  const oldTheme=JSON.parse(persistedState);oldTheme.markdownSettings.documentTheme='serif';persistedState=JSON.stringify(oldTheme);
  await act(async()=>app.loadPersisted());assert.equal(store.getState().markdownSettings.documentTheme,'default');
  assert.equal(document.querySelector('option[value="serif"]'),null);
+ await act(async()=>store.setState({markdownMode:'visual'}));
+ assert.equal([...document.querySelectorAll('.md-writing-panel button')].find(button=>button.textContent==='Download remote images').disabled,false);
+
  const legacy=JSON.parse(persistedState);delete legacy.markdownSettings;persistedState=JSON.stringify(legacy);
  await act(async()=>app.loadPersisted());assert.deepEqual(store.getState().markdownSettings,app.defaultMarkdownPreferences);
+});
+await test('removed read mode: legacy restore opens editable visual mode, preserves draft and saves the new mode',async()=>{
+ const draft='# Migrated draft\n\nKeep **this** source.\n';
+ const legacy=JSON.parse(persistedState);legacy.markdownMode='read';legacy.showPreview=false;legacy.previewMaximized=true;
+ legacy.tabs=[{filePath:null,content:draft,savedContent:'',cursor:4,scrollTopLine:1}];legacy.activeIndex=0;persistedState=JSON.stringify(legacy);
+ await act(async()=>{root.render(null);await app.loadPersisted();});
+ assert.equal(store.getState().markdownMode,'visual');const id=store.getState().activeId;
+ const current=()=>store.getState().tabs.find(tab=>tab.id===id).content;
+ assert.equal(current(),draft);
+ await act(async()=>{root.render(React.createElement(app.Visual,{tabId:id,theme:'light'}));await pause(120);});
+ assert.equal(document.querySelector('.ProseMirror').getAttribute('contenteditable'),'true');
+ await act(async()=>{app.getVisualEditor().navigate(3,1);app.getVisualEditor().insert('edited ',false);});
+ assert.equal(current(),draft.replace('Keep','edited Keep'));
+ await act(async()=>app.markdownHistory(false,id));assert.equal(current(),draft);
+ app.schedulePersist({sidebarPx:230,previewPct:50});await pause(750);
+ assert.equal(JSON.parse(persistedState).markdownMode,'visual');assert.equal(JSON.parse(persistedState).tabs[0].content,draft);
+ assert.equal(store.getState().showPreview,false);assert.equal(store.getState().previewMaximized,true);
+});
+await test('view selector: three Markdown modes leave HTML preview flags independent in both languages',async()=>{
+ for(const language of ['en','zh']) {
+  await act(async()=>{store.setState({language});root.render(React.createElement(app.ModeSwitch,{markdown:true}));});
+  const buttons=[...document.querySelectorAll('button')];assert.equal(buttons.length,3);
+  assert.deepEqual(buttons.map(b=>b.textContent),language==='zh'?['编辑','实时预览','阅读编辑']:['Edit','Live Preview','Visual']);
+  for(const [index,mode] of ['source','split','visual'].entries()) {
+   await act(async()=>buttons[index].click());assert.equal(store.getState().markdownMode,mode);
+   assert.equal(store.getState().showPreview,false);assert.equal(store.getState().previewMaximized,true);
+  }
+ }
+ await act(async()=>root.render(React.createElement(app.ModeSwitch)));
+ assert.deepEqual([...document.querySelectorAll('button')].map(b=>b.textContent),['编辑','实时预览','阅读']);
 });
 await act(async()=>root.unmount());assert.deepEqual(runtimeErrors,[]);dom.window.close();console.log(`${passed} integration tests passed`);

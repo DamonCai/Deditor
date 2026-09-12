@@ -23,6 +23,7 @@ import {
   type Topic,
   type Command,
   findTopic,
+  foldableTopicIds,
   newTopic,
   duplicateTopic,
   selectedTopicRoots,
@@ -61,7 +62,7 @@ interface Props {
   camera?: Camera;
   onCamera: (camera: Camera) => void;
   onLink: (href: string) => void;
-  onInspect: (field?: "notes", id?: string) => void;
+  onInspect: (field?: "notes" | "labels", id?: string) => void;
   registerFlush: (flush: () => void) => () => void;
 }
 let measureContext: CanvasRenderingContext2D | null | undefined;
@@ -167,13 +168,14 @@ export default function XmindCanvas({
   // Document folding participates in save/undo. Search and outline revelation
   // are view-only overrides, so looking for a topic never dirties the file.
   const [foldOverrides, setFoldOverrides] = useState<Map<string, boolean>>(new Map());
+  const foldable = useMemo(() => foldableTopicIds(sheet.rootTopic), [sheet]);
   const folded = useMemo(() => {
     const result = new Set<string>();
     walkTopics(sheet.rootTopic, (n) => {
-      if (foldOverrides.get(n.id) ?? n.branch === "folded") result.add(n.id);
+      if (foldable.has(n.id) && (foldOverrides.get(n.id) ?? n.branch === "folded")) result.add(n.id);
     });
     return result;
-  }, [sheet, foldOverrides]);
+  }, [sheet, foldOverrides, foldable]);
   const parents = useMemo(() => {
     const result = new Map<string, string>();
     walkTopics(sheet.rootTopic, (n, parent) => { if (parent) result.set(n.id, parent.id); });
@@ -410,7 +412,7 @@ export default function XmindCanvas({
     }
   };
   const toggleFold = useCallback((id: string) => {
-    if (!findTopic(sheet.rootTopic, id)?.children?.attached?.length) return;
+    if (!foldable.has(id)) return;
     const collapse = !folded.has(id);
     // Select the owner before hiding selected descendants.
     onSelect([id]);
@@ -421,7 +423,7 @@ export default function XmindCanvas({
       return next;
     });
     if (!readonly) onCommand({ type: "fold", ids: [id], folded: collapse });
-  }, [sheet, folded, readonly, onSelect, onCommand]);
+  }, [foldable, folded, readonly, onSelect, onCommand]);
   const focusNode = (id: string) => {
     const n = byId.get(id);
     if (n) {
@@ -637,7 +639,7 @@ export default function XmindCanvas({
               aria-label={n.topic.title}
               aria-selected={chosen}
               aria-expanded={
-                n.topic.children?.attached?.length ? !isFolded : undefined
+                foldable.has(n.topic.id) ? !isFolded : undefined
               }
               transform={`translate(${n.x + (offset?.x ?? 0)},${n.y + (offset?.y ?? 0)})`}
               style={{ cursor: readonly ? "pointer" : "grab" }}
@@ -731,6 +733,7 @@ export default function XmindCanvas({
                   }
                   fontStyle={n.properties["fo:font-style"]}
                   textDecoration={n.properties["fo:text-decoration"]}
+                  style={{ whiteSpace: "pre" }}
                   pointerEvents="none"
                 >
                   {n.lines.map((line, i) => (
@@ -745,13 +748,21 @@ export default function XmindCanvas({
                 </text>
               )}
               {n.labels.map((label, index) => (
-                <g key={index} data-label={index} pointerEvents="none">
+                <g key={index} data-label={index} data-label-overflow={label.hiddenCount || undefined}
+                  role="button" tabIndex={0} aria-label={`${t("xmind.labels")}: ${label.fullText}`}
+                  onPointerDown={e => e.stopPropagation()}
+                  onClick={e => { e.stopPropagation(); onSelect([n.topic.id]); }}
+                  onDoubleClick={e => { e.stopPropagation(); onInspect("labels", n.topic.id); }}
+                  onKeyDown={e => { if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault(); e.stopPropagation(); onInspect("labels", n.topic.id);
+                  } }}>
+                  <title>{label.fullText}</title>
                   <rect x={label.x} y={label.y} width={label.width} height={label.height}
-                    rx={5} fill="#E9E9E9" />
+                    rx={8} fill="#FFFFFF" fillOpacity={0.7} stroke="#000000" strokeOpacity={0.1} strokeWidth={1} />
                   <text x={label.x + label.width/2} y={label.y + 14} textAnchor="middle"
-                    fontSize={11} fontWeight={400} fontStyle="normal"
-                    fontFamily={n.properties["fo:font-family"] ?? "NeverMind, PingFang SC, Microsoft YaHei, sans-serif"}
-                    fill="#555555">
+                    fontSize={13} fontWeight={400} fontStyle="normal"
+                    fontFamily="Helvetica, Arial, sans-serif"
+                    fill="#000000" fillOpacity={0.5}>
                     {label.lines.map((line, i) => <tspan key={i} x={label.x + label.width/2} dy={i ? 16 : 0}>{line}</tspan>)}
                   </text>
                 </g>
@@ -774,7 +785,7 @@ export default function XmindCanvas({
                     }
                   }}>{indicator}</g> : <g key={i}>{indicator}</g>;
               })}
-              {!!n.topic.children?.attached?.length && (
+              {foldable.has(n.topic.id) && (
                 <g
                   data-fold="true"
                   className="xm-fold"
@@ -869,7 +880,7 @@ export default function XmindCanvas({
                 width={g.titleWidth} height={g.titleHeight} rx={4} fill={g.properties["line-color"]} />
               <text x={g.x+g.titleOffsetX+g.titleWidth/2} y={g.y-g.titleHeight+4+g.titleFontSize}
                 textAnchor="middle" fill={g.properties["fo:color"]} fontSize={g.titleFontSize}
-                fontFamily={g.properties["fo:font-family"]} fontWeight={g.properties["fo:font-weight"]}>
+                fontFamily={g.properties["fo:font-family"]} fontWeight={g.properties["fo:font-weight"]} style={{ whiteSpace: "pre" }}>
                 {g.titleLines.map((line,i)=><tspan key={i} x={g.x+g.titleOffsetX+g.titleWidth/2} dy={i?g.titleLineHeight:0}>{line}</tspan>)}
               </text>
             </g>}
@@ -946,7 +957,7 @@ export default function XmindCanvas({
         {scene.nodes.filter(n => n.topic.id === editing).map(renderNode)}
     </>;
   }, [scene, selected, query, dragOffset, resources, readonly, editing, draft, editing || selectedRelationship || selectedGroup ? camera : null, size.width, size.height,
-    folded, t, commitEdit, toggleFold, byId, displayById, draggedIds, braceEdges, fishboneRibs, sheet, viewId,
+    folded, foldable, t, commitEdit, toggleFold, byId, displayById, draggedIds, braceEdges, fishboneRibs, sheet, viewId,
     selectedRelationship, selectedGroup, onSelectGroup, onCommand, onSelect, onInspect, onLink, setRelationshipFlush]);
 
   return (
@@ -1218,7 +1229,7 @@ export default function XmindCanvas({
             </>
           )}
           <Button
-            disabled={!findTopic(sheet.rootTopic, selected[0])?.children?.attached?.length}
+            disabled={!foldable.has(selected[0])}
             onClick={() => act(() => toggleFold(selected[0]))}
           >
             {t("xmind.fold")}
