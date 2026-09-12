@@ -43,6 +43,7 @@ export {default as Preview} from './src/components/Preview';
 export {markdownDisplayHtml,hydrateMarkdownDisplay} from './src/lib/markdownDisplay';
 export {useEditorStore} from './src/store/editor';
 export {getVisualEditor} from './src/lib/markdownVisualBridge';
+export {installMarkdownAccessibility} from './src/lib/markdownVisual/accessibility';
 export {markdownHistory} from './src/lib/markdownHistory';
 export {saveFile,saveFileAs,saveAllDirty,renamePath} from './src/lib/fileio';
 export {renderMarkdown} from './src/lib/markdown';
@@ -246,6 +247,38 @@ await test('reported editing bug: a closed or open search never steals the caret
  await editTop('Top while searching');
  await act(async()=>document.querySelector('[role="search"] button:last-child').click());
  await editTop('Top after closing search');
+});
+await test('search: Unicode offsets and reopening after long-document edits use current positions',async()=>{
+ const original=Array.from({length:100},(_,i)=>`## Section ${i}\n\nİ 😀 **target** paragraph ${i}\n`).join('\n');
+ await act(async()=>{root.render(null);store.setState({activeId:'a'});store.getState().setContent(original,'a','command');});await render();
+ await act(async()=>app.getVisualEditor().find());
+ const query=async()=>act(async()=>{
+  const input=document.querySelector('[role="search"] input');
+  Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value').set.call(input,'target');
+  input.dispatchEvent(new dom.window.Event('input',{bubbles:true}));
+ });
+ await query();assert.equal(app.getVisualEditor().selected,'target');
+ assert.match(document.querySelector('[role="search"]').textContent,/1 \/ 100/);
+ await act(async()=>document.querySelector('[role="search"] button:last-child').click());
+ await act(async()=>app.getVisualEditor().navigate(1,4));
+ await act(async()=>app.getVisualEditor().insert('prefix',false));
+ await act(async()=>app.getVisualEditor().find());
+ assert.equal(app.getVisualEditor().selected,'target');
+ await act(async()=>app.markdownHistory(false,'a'));assert.equal(content(),original);
+ await act(async()=>document.querySelector('[role="search"] button:last-child').click());
+});
+await test('accessibility: unchanged controls produce no repeated attribute mutations',async()=>{
+ const host=document.createElement('div');host.innerHTML='<div class="handle" data-show="false"></div><div class="milkdown-list-item-block"><div class="label-wrapper"><span class="unchecked"></span></div><div data-content-dom>Task text</div></div>';
+ document.body.append(host);const fake={dom:host,editable:true};const dispose=app.installMarkdownAccessibility(fake);
+ const observer=new MutationObserver(()=>{});observer.observe(host,{subtree:true,attributes:true});
+ host.dispatchEvent(new Event('deditor-editable-change'));
+ assert.equal(observer.takeRecords().length,0,'unchanged semantics do not cause ProseMirror DOM reconciliation');
+ host.querySelector('.unchecked').className='checked';await pause(10);
+ assert.equal(host.querySelector('.label-wrapper').getAttribute('aria-checked'),'true');
+ fake.editable=false;host.dispatchEvent(new Event('deditor-editable-change'));
+ assert.equal(host.querySelector('.label-wrapper').tabIndex,-1);
+ assert.equal(host.querySelector('.label-wrapper').getAttribute('aria-readonly'),'true');
+ observer.disconnect();dispose();host.remove();
 });
 await test('reported editing bug: lower reference list text is directly editable',async()=>{
  const original='# Top\n\n+ plain\n+ [label][r] <kbd>key</kbd><br>next\n+ lower\n\n[r]: https://example.com\n';

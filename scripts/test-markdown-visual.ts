@@ -5,6 +5,8 @@ import { editableBlockquote, footnoteReference, footnoteDefinition, footnoteUpda
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { MarkdownSession } from "../src/lib/markdownSession";
+import { MarkdownSearch } from "../src/lib/markdownVisual/search";
+import { nativeMarkdownCursor } from "../src/lib/markdownVisual/cursor";
 const dom = new JSDOM('<!doctype html><html><body><div id="editor"></div></body></html>', { url: "http://localhost", pretendToBeVisual: true });
 for (const name of ["window", "document", "Node", "HTMLElement", "Element", "MutationObserver", "DOMParser", "DOMRect", "Text", "SVGElement", "HTMLInputElement", "HTMLDivElement", "HTMLButtonElement", "CustomEvent", "Event"] as const) Object.defineProperty(globalThis, name, { value: dom.window[name], configurable: true });
 Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
@@ -30,12 +32,52 @@ const crepe = new CrepeBuilder({ root: document.querySelector("#editor") }).addF
 crepe.editor.use(shorthandRemark).use(highlightRemark).use(shorthandMarks.flat()).use(emojiSchema).use(shorthandInputRules).config(configureShorthand).use(editableBlockquote).use(footnoteReference).use(footnoteDefinition).use(footnoteUpdates).use(absoluteHeadingInputRule).use(faithfulLink).use(faithfulInlineHtml).use(faithfulImage).use(extendedTableCells.flat()).use(inlineSchemas.flat()).config(configureInlineSerialization).use(frontmatter).use(rawRemark(false)).use(rawSchema);
 await crepe.editor.remove(remarkInlineLinkPlugin.plugin); await crepe.editor.remove(remarkPreserveEmptyLinePlugin.plugin);
 await crepe.editor.remove(wrapInHeadingInputRule); await crepe.editor.remove(strikethroughInputRule);
+crepe.editor.use(nativeMarkdownCursor);
 await crepe.editor.remove(history); await crepe.editor.remove(trailing); await crepe.create();
 let passed = 0;
 const test = (name: string, fn: () => void) => { fn(); passed++; console.log(`PASS ${name}`); };
 crepe.editor.action(ctx => {
  const parse = ctx.get(parserCtx), serialize = ctx.get(serializerCtx);
  const make = (source: string) => new MarkdownDocument(source, parse, serialize);
+ test("native caret: mark affinity keeps arrow behavior and yields to composition", () => {
+   const view = ctx.get(editorViewCtx), previous = view.state;
+   const doc = parse('plain **bold** plain'); let end = 0;
+   doc.descendants((node, pos) => { if (node.isText && node.text === 'bold') end = pos + node.nodeSize; });
+   view.updateState(EditorState.create({doc, plugins: previous.plugins, selection: TextSelection.create(doc, end)}));
+   view.dispatch(view.state.tr.setStoredMarks([]));
+   const key = (name: string, composing = false) => view.someProp('handleKeyDown', handler => handler(view, new dom.window.KeyboardEvent('keydown', {key:name, isComposing:composing})));
+   key('ArrowLeft'); assert.equal(view.state.selection.head, end); assert.ok(view.state.storedMarks?.some(mark=>mark.type.name==='strong'));
+   key('ArrowRight', true); assert.ok(view.state.storedMarks?.some(mark=>mark.type.name==='strong'));
+   key('ArrowRight'); assert.equal(view.state.selection.head, end); assert.deepEqual(view.state.storedMarks, []);
+   assert.equal(view.dom.classList.contains('virtual-cursor-enabled'),false);
+   assert.equal(view.dom.querySelector('.prosemirror-virtual-cursor'),null);
+   view.updateState(previous);
+ });
+ test("search: Unicode case matching and inline atoms preserve exact selection offsets", () => {
+   const doc = parse("İ 😀 **Target** [link](https://example.test) target [x]\\n".replace('\\n', '\n'));
+   const search = new MarkdownSearch();
+   for (const query of ['target', '😀', '[x]', 'link', 'İ']) {
+     const results = search.find(doc, query);
+     assert.equal(results.length, query === 'target' ? 2 : 1);
+     for (const match of results) assert.equal(doc.textBetween(match.from, match.to).toLowerCase(), query.toLowerCase());
+   }
+   assert.deepEqual(search.find(doc, ''), []);
+ });
+ test("search: cached blocks follow insertions, deletions and undo across a long document", () => {
+   const source = Array.from({length: 500}, (_, i) => `## Section ${i}\n\nİ **target ${i}** 中文\n\n> target quote ${i}\n`).join('\n');
+   const original = parse(source), search = new MarkdownSearch();
+   let state = EditorState.create({doc: original});
+   assert.equal(search.find(state.doc, 'target').length, 1000);
+   for (let i = 0; i < 20; i++) {
+     const found = search.find(state.doc, 'target');
+     const selected = found[(i * 47) % found.length];
+     state = state.apply(state.tr.insertText(i % 2 ? '中文 replacement' : 'TARGET new', selected.from, selected.to));
+     const results = search.find(state.doc, 'target');
+     assert.equal(results.length, 1000 - Math.ceil(i / 2));
+     for (const match of results) assert.equal(state.doc.textBetween(match.from, match.to).toLowerCase(), 'target');
+   }
+   assert.equal(search.find(original, 'target').length, 1000);
+ });
  const editText = (model: InstanceType<typeof MarkdownDocument>, text: string, replacement: string) => {
    let position = -1; model.doc.descendants((node, pos) => { if (position < 0 && node.isText && node.text!.includes(text)) position = pos + node.text!.indexOf(text); });
    assert(position >= 0, `Find ${text}`);

@@ -2,6 +2,8 @@ import MarkdownDocumentSurface from "./MarkdownDocumentSurface";
 import { installFootnotePreview } from "../lib/markdownFootnotePreview";
 import { documentImageDirectory, documentImageRoot, resolveMarkdownImage, markdownImageReference } from "../lib/markdownImageSettings";
 import { shorthandRemark, highlightRemark, shorthandMarks, emojiSchema, shorthandInputRules, configureShorthand } from "../lib/markdownVisual/shorthand";
+import { MarkdownSearch } from "../lib/markdownVisual/search";
+import { nativeMarkdownCursor } from "../lib/markdownVisual/cursor";
 import { strikethroughInputRule } from "@milkdown/kit/preset/gfm";
 import { editableBlockquote, footnoteReference, footnoteDefinition, footnoteUpdates, footnoteNodeView } from "../lib/markdownVisual/structuredBlocks";
 import { sharedHeadingIds } from "../lib/markdownVisual/headingIds";
@@ -72,6 +74,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
   const [matchCount, setMatchCount] = useState(0), [matchIndex, setMatchIndex] = useState(0);
   const lastSearch = useRef({ query: "", open: false });
   const matches = useRef<{ from: number; to: number }[]>([]);
+  const searchIndex = useRef(new MarkdownSearch());
   const select = (from: number, to = from) => {
     const view = runtime.current?.view; if (!view) return;
     view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, from, to)).scrollIntoView());
@@ -99,7 +102,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
         addRowIcon: tableIcon(t("md.addRow"), "plus"), addColIcon: tableIcon(t("md.addColumn"), "plus"),
         deleteRowIcon: tableIcon(t("md.deleteRow"), "minus"), deleteColIcon: tableIcon(t("md.deleteColumn"), "minus"),
         alignLeftIcon: tableIcon(t("md.alignLeft"), "left"), alignCenterIcon: tableIcon(t("md.alignCenter"), "center"), alignRightIcon: tableIcon(t("md.alignRight"), "right"),
-      }).addFeature(listItem).addFeature(cursor)
+      }).addFeature(listItem).addFeature(cursor, { virtual: false })
       .addFeature(linkTooltip, { inputPlaceholder: t("md.linkUrl") })
       .addFeature(imageBlock, { onUpload: upload,
         proxyDomURL: url => {
@@ -133,6 +136,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
         return true;
       },
     })));
+    crepe.editor.use(nativeMarkdownCursor);
     const initialize = async () => {
       await crepe.editor.remove(history); await crepe.editor.remove(trailing);
       await crepe.editor.remove(wrapInHeadingInputRule); await crepe.editor.remove(strikethroughInputRule);
@@ -265,14 +269,12 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, theme }:
   }, [readonly, ready, tabId]);
   useEffect(() => { if (searchOpen) searchInput.current?.focus(); }, [searchOpen]);
   useEffect(() => {
-    const found: { from: number; to: number }[] = [];
-    if (query && runtime.current) runtime.current.view.state.doc.descendants((node, pos) => {
-      if (!node.isTextblock) return;
-      // Include adjoining text marks while keeping positions aligned around inline atoms.
-      const text = node.textBetween(0, node.content.size, "", "\ufffc").toLocaleLowerCase(), search = query.toLocaleLowerCase();
-      for (let index = text.indexOf(search); index >= 0; index = text.indexOf(search, index + search.length)) found.push({ from: pos + 1 + index, to: pos + 1 + index + search.length });
-      return false;
-    });
+    if (!searchOpen) {
+      lastSearch.current = { query, open: false };
+      matches.current = []; setMatchCount(0); setMatchIndex(0);
+      return;
+    }
+    const found = runtime.current ? searchIndex.current.find(runtime.current.view.state.doc, query) : [];
     // Recompute results after edits, but only user search actions may move the caret.
     // A retained query must never reselect/overwrite a distant match while typing.
     const requested = searchOpen && (!lastSearch.current.open || lastSearch.current.query !== query);

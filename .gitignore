@@ -160,5 +160,6 @@ $RECYCLE.BIN/
 
 /DEditor*.dmg
 /test
+/package-lock.json
 
 # Commit package-lock.json and src-tauri/Cargo.lock for reproducible installs.

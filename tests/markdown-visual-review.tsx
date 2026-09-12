@@ -11,14 +11,27 @@ import { EditorView as ProseView } from "@milkdown/kit/prose/view";
 import { EditorState as ProseState } from "@milkdown/kit/prose/state";
 const timings: string[] = [];
 const timingRestores: (() => void)[] = [];
+const profiledViews = new WeakSet<object>();
 if (new URLSearchParams(location.search).has("long")) {
   for (const [prototype, methods] of [
     [MarkdownDocument.prototype, ['apply', 'sourceOffset']],
-    [ProseView.prototype, ['updateState']], [ProseState.prototype, ['applyTransaction']],
+    [ProseView.prototype, ['updateState', 'updatePluginViews', 'scrollToSelection']], [ProseState.prototype, ['applyTransaction']],
   ] as const) for (const method of methods) {
     const target = prototype as unknown as Record<string, (...args: any[]) => any>;
     const original = target[method];
-    target[method] = function (...args: any[]) { const start = performance.now(); try { return original.apply(this, args); } finally { timings.push(`${method}:${(performance.now() - start).toFixed(1)}`); } };
+    target[method] = function (...args: any[]) {
+      // Test-only profiling of upstream plugin views; never used by the application.
+      if (method === 'updatePluginViews') {
+        const editor = this as any;
+        const plugins = [...(editor.directPlugins ?? []), ...editor.state.plugins].filter((plugin: any) => plugin.spec.view);
+        editor.pluginViews?.forEach((plugin: any, index: number) => {
+          if (!plugin.update || profiledViews.has(plugin)) return;
+          profiledViews.add(plugin); const update = plugin.update;
+          plugin.update = function (...values: any[]) { const begin = performance.now(); try { return update.apply(this, values); } finally { const duration = performance.now() - begin; if (duration > 1) timings.push(`${plugins[index]?.key ?? index}:${duration.toFixed(1)}`); } };
+        });
+      }
+      const start = performance.now(); try { return original.apply(this, args); } finally { timings.push(`${method}:${(performance.now() - start).toFixed(1)}`); }
+    };
     timingRestores.push(() => { target[method] = original; });
   }
 }
@@ -44,7 +57,8 @@ const parity = new URLSearchParams(location.search).has("parity");
 const dark = new URLSearchParams(location.search).has("dark");
 const imageRootFixture = complexMarkdown.replaceAll('/tests/fixtures/', '/').replace('revision: 1', 'revision: 1\ntypora-root-url: /tests/fixtures').replace('# 综合文档 H1', '# 综合文档 H1\n\n![根目录块图](/markdown-review.svg)\n\n行内根目录图片 ![根目录行内图](/markdown-presentation.svg)\n\n<figure><img src="/markdown-review.svg" alt="根目录 HTML 图"></figure>');
 const longReview = new URLSearchParams(location.search).has("long");
-const longFixture = complexMarkdown.replace('## 文末验收', Array.from({ length: 100 }, (_, i) => `## 性能第 ${i + 1} 节\n\n性能输入定位点 ${i + 1}：中文正文与 **强调内容**，${"长文光标、原文和页面位置核对。".repeat(12)}\n\n> 引用 **重点**\n>\n> - 嵌套项目\n\n| 名称 | 数量 |\n| --- | ---: |\n| **表格正文** | ${i + 1} |\n`).join('\n') + '\n## 文末验收');
+const sectionCount = Math.max(1, Math.min(1000, Number(new URLSearchParams(location.search).get("sections")) || 100));
+const longFixture = complexMarkdown.replace('## 文末验收', Array.from({ length: sectionCount }, (_, i) => `## 性能第 ${i + 1} 节\n\n性能输入定位点 ${i + 1}：中文正文与 **强调内容**，${"长文光标、原文和页面位置核对。".repeat(12)}\n\n> 引用 **重点**\n>\n> - 嵌套项目\n\n| 名称 | 数量 |\n| --- | ---: |\n| **表格正文** | ${i + 1} |\n`).join('\n') + '\n## 文末验收');
 const fixture = longReview ? longFixture : new URLSearchParams(location.search).has("image-root") ? imageRootFixture : new URLSearchParams(location.search).has("complex") ? complexMarkdown : ime ? imeMarkdown : new URLSearchParams(location.search).has("scroll") ? scrollMarkdown : new URLSearchParams(location.search).has("presentation") ? presentationMarkdown : new URLSearchParams(location.search).has("interaction") ? interactionMarkdown : sample;
 const docs = [ { id: "md-review", filePath: "/generated/visual-review.md", content: fixture, savedContent: fixture },
  { id: "md-other", filePath: "/generated/second.md", content: "# 第二个标签\n\n独立历史。\n", savedContent: "# 第二个标签\n\n独立历史。\n" },
