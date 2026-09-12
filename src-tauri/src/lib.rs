@@ -1337,6 +1337,9 @@ pub fn run() {
     install_panic_hook();
 
     tauri::Builder::default()
+        // macOS can deliver Opened before setup. Register the queue on the
+        // builder so those early file requests have somewhere to wait.
+        .manage(PendingOpens(Mutex::new(Vec::new())))
         // Persist window position / size / monitor / maximized state so
         // re-opens land where you left off — including across displays.
         .plugin(tauri_plugin_window_state::Builder::new().build())
@@ -1389,7 +1392,9 @@ pub fn run() {
             if !initial.is_empty() {
                 log::info!("seeded {} file(s) from argv for open-on-launch", initial.len());
             }
-            app.manage(PendingOpens(Mutex::new(initial)));
+            if let Ok(mut queue) = app.state::<PendingOpens>().0.lock() {
+                queue.extend(initial);
+            }
 
             install_app_menu(app)?;
             #[cfg(target_os = "macos")]

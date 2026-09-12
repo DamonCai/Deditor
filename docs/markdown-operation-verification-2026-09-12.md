@@ -83,7 +83,7 @@ The operation audit is in progress. Reproduced and fixed unintended ancestor tas
 - 代码行尾 Enter→Tab→输入 next→Shift Tab→Esc→保存，磁盘恰为原文代码多出一行 next，公式语言不变；连续撤销并保存恢复完整基线。
 - 表格 first 行尾 Shift Return→输入 line→保存，磁盘含 `first<br>line`；两次撤销恢复基线。首次从代码输入框直接点击表格的无等待组合没有换行，仅形成 firstline；随后分步和选区定位两种原生复测通过，浏览器无等待 AX/坐标链也通过。工具期间出现窗口/截图异常与手动状态变更提示，根因未稳定复现，保留观察项，不能声称此首次异常已修复。
 - 原生查找 target 共 4 处，全部替换 changed 后磁盘严格等于基线 replaceAll；表格、列表标记、引用和尾部三空格均保留。一次撤销并保存等于基线；重做、保存、关闭、恢复关闭标签后呈现正确且磁盘等于预期替换文本。
-- 干净文档外部写入自动更新正文；未保存时外部写入出现冲突横幅，本地文字仍保留。点击保留我的修改再保存，磁盘逐字节等于本地版本。第二次冲突点击从磁盘重载后关闭，无未保存提示；最后磁盘为基线。首次冲突观察期间工具报告手动状态变更且模式变化，已重新独立复测，不把该观察归为产品丢稿。
+- 干净文档外部写入自动更新正文；未保存时外部写入出现冲突横幅，本地文字仍保留。点击保留我的修改再保存，磁盘逐字节等于本地版本。第二次冲突尝试重载后立即关闭/退出，后续仍恢复旧测试草稿，不能算这一分支通过；最终包已另做分步重载核对，见后文。首次冲突观察期间工具报告手动状态变更且模式变化，已重新独立复测，不把该观察归为产品丢稿。
 
 证据：`operation-native-child.md`、`operation-native-code.md`、`operation-native-replaced.md`、`operation-native-kept-local.md`、`operation-native-app.log`。已关闭测试文档并退出本次独立应用。这里不新增 Windows/真实 IME 结论，也不覆盖真实行列拖拽。
 
@@ -121,3 +121,15 @@ ProseMirror 允许同一个不可变段落节点出现在多处。带脚注文�
 新增[搜索专项](markdown-search-operations-audit-2026-09-12.md)与[会话专项](markdown-session-operation-audit-2026-09-12.md)。图片属性撤销的实际浏览器补测已附在图片专项。导航首项Tab修复包含在当前整合，未抢占表格单元格内Tab。
 
 注意另一个用户任务在同一工作区独立推进列表共享样式：v3增强呈现检查的1374项仍发现6条高度/位置/软换行文本差异，源自正在变化的列表显示范围；字体和图片加载已确认正常。该样式结果单独保留，不能因编辑操作全量回归通过而标整体呈现通过，也不能把最早540项旧样式通过结论套给v3。
+
+## v3 原生新增闭环
+
+最终短文 `operation-native-final.md` 中：首项Tab后保存逐字节不变；第二项Tab嵌套、ShiftTab提升，两次撤销恢复基线。原生连续三次替换得到cat! cat! cat!，落盘严格等于预期。图片alt改值提交、重新聚焦、CmdZ、Tab、保存后等于初始原文；width先320再640，重新聚焦撤销后离开，落盘width仍320；关闭重开控件仍显示320和old alt。
+
+最后以本地未保存正文加字制造磁盘冲突，点击从磁盘重载，读取真实UI确认原文、121字符、撤销禁用、dirty标记消失，再关闭文档并退出。最终state.json仅有无路径欢迎标签，测试进程不存在，磁盘已恢复基线。证据 `operation-native-final-replaced.md`、`operation-native-final-width.md`、`operation-native-final-app.log`。
+
+v4纳入并行列表样式收口结果后，亮暗主题各1374项检查均无差异，主题切换须等异步图表完成再比较，见`operation-integrated-v4-presentation.json`。v4相对v3产品只列表CSS和listKeys排版整理，完整回归证据沿用同逻辑v3，原生生产构建通过。
+
+### 新发现的冷启动打开路径丢失
+
+原生日志10:49:04已收到并记录Opened路径，紧接着才进入setup；10:49:05前端drain返回0，显示旧恢复草稿而非系统指定的新文件。队列原来在setup注册，过早Opened没有可写入state。现把PendingOpens注册提前到Builder，setup仅追加Windows argv路径，不覆盖队列。待最终新包真正冷启动复测，不能仅以源码修改宣布通过。

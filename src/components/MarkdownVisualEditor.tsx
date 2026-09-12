@@ -1,3 +1,4 @@
+import { imageClipboard } from "../lib/markdownVisual/imageClipboard";
 import { markdownListKeys } from "../lib/markdownVisual/listKeys";
 import { faithfulParagraph } from "../lib/markdownVisual/paragraph";
 import { $view } from "@milkdown/kit/utils";
@@ -116,6 +117,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
       try { const folder = documentImageDirectory(sourceRef.current, filePath, useEditorStore.getState().markdownSettings.imageDirectory); await saveImage(base, name, btoa(binary), folder); return markdownImageReference(folder, name); }
       catch (err) { logError("Markdown image upload failed", err); void showError(String(err)); throw err; }
     };
+    const clipboardImages = imageClipboard(upload, () => activeRef.current && !readonlyRef.current && !cancelled, () => session.breakGroup());
     const initialSource = sourceRef.current;
     const codeNodeView = codeView(tabId, theme);
     const crepe = new CrepeBuilder({ root: host, defaultValue: initialSource })
@@ -134,7 +136,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
         inlineUploadButton: t("md.uploadImage"), blockUploadButton: t("md.uploadImage"), blockConfirmButton: t("common.confirm"),
         inlineUploadPlaceholderText: t("md.imageUrlLabel"), blockUploadPlaceholderText: t("md.imageUrlLabel"), blockCaptionPlaceholderText: t("md.imageTitleLabel") })
       .addFeature(latex);
-    crepe.editor.use(shorthandRemark).use(highlightRemark).use(shorthandMarks.flat()).use(emojiSchema).use(shorthandInputRules).config(configureShorthand).use(editableBlockquote).use(footnoteReference).use(footnoteDefinition).use(footnoteUpdates).use(footnoteOrder).use(inlineSourceSchema).use(absoluteHeadingInputRule).use(activeBlockHint).use(sharedHeadingIds).use(faithfulParagraph).use(faithfulLink).use(faithfulInlineHtml).use(faithfulImage).use(extendedTableCells.flat()).config(configureTableEditing).use(inlineSchemas.flat()).config(configureInlineSerialization).use(frontmatter).use(rawRemark(mdx)).use(rawSchema);
+    crepe.editor.use(clipboardImages.plugin).use(shorthandRemark).use(highlightRemark).use(shorthandMarks.flat()).use(emojiSchema).use(shorthandInputRules).config(configureShorthand).use(editableBlockquote).use(footnoteReference).use(footnoteDefinition).use(footnoteUpdates).use(footnoteOrder).use(inlineSourceSchema).use(absoluteHeadingInputRule).use(activeBlockHint).use(sharedHeadingIds).use(faithfulParagraph).use(faithfulLink).use(faithfulInlineHtml).use(faithfulImage).use(extendedTableCells.flat()).config(configureTableEditing).use(inlineSchemas.flat()).config(configureInlineSerialization).use(frontmatter).use(rawRemark(mdx)).use(rawSchema);
     crepe.editor.config(ctx => ctx.update(editorViewOptionsCtx, prev => ({ ...prev, attributes: { class: "md-document", "aria-label": t("md.visualEditor"), spellcheck: "false" },
       handleKeyDown: (view, event) => {
         if (event.key !== "Tab" || !view.editable || !isInTable(view.state)) return false;
@@ -143,7 +145,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
         if (!event.shiftKey && addRowAfter(view.state, view.dispatch)) goToNextCell(1)(view.state, view.dispatch);
         return true;
       },
-      handlePaste: (view, event, slice) => pasteTableClipboard(view, event) || pastePlainText(view, event, slice, ctx.get(parserCtx)),
+      handlePaste: (view, event, slice) => clipboardImages.paste(view, event) || pasteTableClipboard(view, event) || pastePlainText(view, event, slice, ctx.get(parserCtx)),
       handleDOMEvents: { ...prev.handleDOMEvents,
       mousedown: (_view, event) => {
         if ((event.metaKey || event.ctrlKey) && (event.target as HTMLElement).closest("a")) { event.preventDefault(); return true; }
@@ -396,6 +398,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
   const wasActive = useRef(active);
   useLayoutEffect(() => {
     const rt = runtime.current; if (!rt) return;
+    if (!active || readonly) rt.view.dom.dispatchEvent(new Event("deditor-image-paste-cancel"));
     if (!active) {
       if (wasActive.current) {
         rt.closeInline(); rt.view.dom.blur(); rt.session.endComposition(); rt.session.breakGroup();
