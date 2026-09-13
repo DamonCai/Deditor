@@ -154,6 +154,8 @@ export function codeView(tabId: string, theme: "light" | "dark") {
       if (threeModes) expanded = diagramMode !== "preview";
       modes.hidden = !threeModes || !view.editable;
       family.hidden = !threeModes;
+      if (threeModes) copy.remove();
+      else if (!copy.isConnected) bar.append(copy);
       family.textContent = lang === "mermaid" ? "Mermaid" : "PlantUML";
       language.hidden = threeModes;
       preview.tabIndex = threeModes && view.editable ? 0 : -1;

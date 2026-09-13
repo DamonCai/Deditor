@@ -5,7 +5,7 @@ import { hardbreakFilterNodes } from "@milkdown/kit/preset/commonmark";
 import type { Node as ProseNode } from "@milkdown/kit/prose/model";
 import { SerializerState } from "@milkdown/kit/transformer";
 import { remarkCtx } from "@milkdown/kit/core";
-import { tableCellSchema, tableHeaderSchema, tableHeaderRowSchema } from "@milkdown/kit/preset/gfm";
+import { tableCellSchema, tableHeaderSchema, tableHeaderRowSchema, tableSchema } from "@milkdown/kit/preset/gfm";
 export { tableListTree } from "./tableTree";
 
 const tableCellExtensions = [tableCellSchema, tableHeaderSchema].map(schema => schema.extendSchema(previous => ctx => {
@@ -50,4 +50,8 @@ export function configureTableEditing(ctx: Ctx) {
 const nonemptyTableHeader = tableHeaderRowSchema.extendSchema(previous => ctx => ({
   ...previous(ctx), content: "table_header+",
 }));
-export const extendedTableCells = [...tableCellExtensions, nonemptyTableHeader, tableMenuPlacement, accurateTableDrop];
+// GFM allows a header-only table after its final data row is deleted.
+const headerOnlyTable = tableSchema.extendSchema(previous => ctx => ({
+  ...previous(ctx), content: "table_header_row table_row*",
+}));
+export const extendedTableCells = [...tableCellExtensions, nonemptyTableHeader, headerOnlyTable, tableMenuPlacement, accurateTableDrop];

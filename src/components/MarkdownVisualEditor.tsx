@@ -1,3 +1,4 @@
+import { stableTableView } from "../lib/markdownVisual/tableView";
 import { installEditorSearch } from "../lib/editorSearch";
 import { outlineActiveIndex } from "../lib/markdownOutline";
 import { outlineHeadingText } from "../lib/markdownVisual/outlineHeading";
@@ -237,9 +238,10 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
         const typewriter = installTypewriter(view, scroller.current!);
         cleanupTypewriter = typewriter.destroy;
         cleanupFootnotes = installFootnotePreview(view.dom, language);
+        const originalTableView = view.props.nodeViews?.table;
         const originalImageView = view.props.nodeViews?.["image-block"];
         const originalInlineImageView = view.props.nodeViews?.image;
-        view.setProps({ nodeViews: { ...view.props.nodeViews, ...(originalImageView ? { "image-block": accessibleImageView(originalImageView, language, tabId) } : {}), ...(originalInlineImageView ? { image: rootAwareImageView(originalInlineImageView) } : {}), math_inline: mathView(tabId), footnote_reference: footnoteNodeView, footnote_definition: footnoteNodeView, deditor_raw: rawView(filePath, tabId), code_block: codeNodeView },
+        view.setProps({ nodeViews: { ...view.props.nodeViews, ...(originalTableView ? { table: stableTableView(originalTableView) } : {}), ...(originalImageView ? { "image-block": accessibleImageView(originalImageView, language, tabId) } : {}), ...(originalInlineImageView ? { image: rootAwareImageView(originalInlineImageView) } : {}), math_inline: mathView(tabId), footnote_reference: footnoteNodeView, footnote_definition: footnoteNodeView, deditor_raw: rawView(filePath, tabId), code_block: codeNodeView },
           handleScrollToSelection: () => compositionViewport.handleScroll(),
           dispatchTransaction: tr => {
             if (cancelled) return;

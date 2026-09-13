@@ -1,3 +1,5 @@
+import { beginPaneResize } from "./lib/paneResize";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import { openEditorSearch } from "./lib/editorSearch";
 import { useEffect, useRef, useState } from "react";
 // @tauri-apps/api/webview transitively imports the full Window class (~62 KB).
@@ -64,7 +66,7 @@ import { scheduleIdlePrefetch } from "./lib/idlePrefetch";
 import { logError } from "./lib/logger";
 import { Button } from "./components/ui/Button";
 
-type DragKind = "sidebar" | "preview" | null;
+type DragKind = "sidebar" | "preview";
 
 export default function App() {
   // Per-field selectors only — destructuring the whole store re-renders App
@@ -123,7 +125,7 @@ export default function App() {
   const findInFilesOpen = useEditorStore((s) => s.findInFilesOpen);
   const setFindInFilesOpen = useEditorStore((s) => s.setFindInFilesOpen);
   const shortcuts = useEditorStore((s) => s.shortcuts);
-  const dragRef = useRef<DragKind>(null);
+  const stopResize = useRef<(() => void) | null>(null);
   const uiRef = useRef({ sidebarPx, previewPct });
   uiRef.current = { sidebarPx, previewPct };
 
@@ -398,31 +400,24 @@ export default function App() {
     };
   }, []);
 
-  useEffect(() => {
-    const onMove = (e: MouseEvent) => {
-      const kind = dragRef.current;
-      if (!kind) return;
+  useEffect(() => () => stopResize.current?.(), []);
+  // A mode/tab change can remove the active divider before pointerup arrives.
+  useEffect(() => { stopResize.current?.(); }, [activeTabId, previewEnabled, previewMaximized, showSidebar, zenMode]);
+  const startResize = (kind: DragKind, event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || event.isPrimary === false) return;
+    stopResize.current?.();
+    stopResize.current = beginPaneResize(event.currentTarget, event.nativeEvent, e => {
       if (kind === "sidebar") {
         setSidebarPx(Math.min(500, Math.max(140, e.clientX)));
       } else {
-        const sidebar = showSidebar ? sidebarPx : 0;
+        const sidebar = !zenMode && showSidebar ? sidebarPx : 0;
         const remaining = window.innerWidth - sidebar;
         const editorWidth = e.clientX - sidebar;
         const pct = (editorWidth / remaining) * 100;
         setPreviewPct(100 - Math.min(85, Math.max(15, pct)));
       }
-    };
-    const onUp = () => {
-      dragRef.current = null;
-      document.body.style.cursor = "";
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-  }, [sidebarPx, showSidebar]);
+    });
+  };
 
   const editorPct = 100 - previewPct;
 
@@ -440,10 +435,7 @@ export default function App() {
             </div>
             <div
               className="splitter"
-              onMouseDown={() => {
-                dragRef.current = "sidebar";
-                document.body.style.cursor = "col-resize";
-              }}
+              onPointerDown={event => startResize("sidebar", event)}
             />
           </>
         )}
@@ -531,10 +523,7 @@ export default function App() {
               <div
                 key="splitter"
                 className="splitter"
-                onMouseDown={() => {
-                  dragRef.current = "preview";
-                  document.body.style.cursor = "col-resize";
-                }}
+                onPointerDown={event => startResize("preview", event)}
               />
             )}
             {isMarkdown(filePath) && !isDiffTab && activeTabId && <MarkdownVisualSlot key={activeTabId} tabId={activeTabId} active={previewEnabled && markdownMode === "visual"} theme={theme} />}

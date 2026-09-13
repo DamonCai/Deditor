@@ -51,7 +51,8 @@
 .md-diagram-family { color: var(--text-soft); font-size: 11px; margin-right: auto; }
 .md-diagram-block .md-code-bar {
   position: relative; inset: auto; width: 100%; max-width: 100%; flex-wrap: wrap;
-  opacity: 1; pointer-events: auto; margin-bottom: 8px;
+  opacity: 1; pointer-events: auto; margin-bottom: 0;
+  border: 0; border-bottom: 1px solid var(--border); border-radius: 0;
 }
 /* Match the document toolbar; only override Milkdown's button padding reset. */
 .md-diagram-block .md-diagram-modes .deditor-segment { padding: 0 10px !important; }
@@ -219,3 +220,13 @@
 .md-visual-shell .milkdown .milkdown-table-block .cell-handle .button-group[data-placement="above"]::after {
   top: auto; bottom: -8px;
 }
+
+/* One frame includes the diagram toolbar and all three display modes. */
+.md-visual-shell .milkdown .md-document .md-code-block.md-diagram-block {
+  border: 1px solid var(--border); border-radius: 8px;
+}
+.md-diagram-block > .md-code-bar { border-radius: 7px 7px 0 0; }
+.md-diagram-block > .md-code-body { border-radius: 0 0 7px 7px; }
+
+.md-table-menu { position: fixed; z-index: 2000; display: flex; flex-direction: column; gap: 2px; min-width: 160px; padding: 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); box-shadow: var(--shadow-popup); }
+.md-table-menu .deditor-btn { justify-content: flex-start; }

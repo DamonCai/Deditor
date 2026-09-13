@@ -190,6 +190,13 @@ await test('round 4: read-only transition closes source and disables edit contro
  assert.equal(document.querySelector('.md-diagram-modes').hidden,true);
  assert.ok([...document.querySelectorAll('.md-diagram-modes button')].every(b=>b.disabled));
 });
+await test('round 5: diagram modes have no copy action; ordinary code retains it',async()=>{
+ for(const lang of ['mermaid','plantuml','puml','uml']){
+  await reset(diagramSource(lang));
+  for(const value of ['preview','edit','split']){await mode(value);assert.ok(![...document.querySelectorAll('.md-code-bar button')].some(button=>button.textContent==='Copy'));}
+ }
+ await reset(diagramSource('typescript','const x = 1;'));assert.ok([...document.querySelectorAll('.md-code-bar button')].some(button=>button.textContent==='Copy'));
+});
 await test('round 5: ordinary code and math retain existing editing behavior',async()=>{
  for (const lang of ['typescript','latex','flow','sequence']) {
   await reset(diagramSource(lang,'x'));

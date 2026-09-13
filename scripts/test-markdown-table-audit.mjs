@@ -40,6 +40,7 @@ export {default as Visual} from './src/components/MarkdownVisualEditor';
 export {useEditorStore} from './src/store/editor';
 export {getVisualEditor} from './src/lib/markdownVisualBridge';
 export {markdownHistory} from './src/lib/markdownHistory';
+export {deleteTableRows} from './src/lib/markdownVisual/tableMenu';
 export {saveFile} from './src/lib/fileio';
 `,resolveDir:process.cwd()},outfile:output,bundle:true,format:'esm',platform:'node',packages:'external',loader:{'.css':'empty'},plugins:[{name:'isolated-io',setup(b){
  b.onResolve({filter:/.*/},a=>a.path.endsWith('.css')?{path:'css',namespace:'stub'}:stubs[a.path]?{path:a.path,namespace:'stub'}:a.path.endsWith('/feedback')?{path:'feedback',namespace:'stub'}:undefined);
@@ -74,6 +75,54 @@ const paste=async(text,html='')=>{const event=new dom.window.Event('paste',{bubb
 const command=async(name,payload)=>{await act(async()=>{editorContext.get(commandsCtx).call(gfm[name].key,payload);await pause(20);});};
 const roundtrip=async(before,expected=matrix(),steps=1)=>{const edited=content();await exactHistory(before,steps);assert.deepEqual(matrix(),expected);assert.equal(content(),edited);assert.ok(edited.startsWith('Before unchanged\n\n'));assert.ok(edited.endsWith('\n\nAfter unchanged\n'));};
 try {
+ await test('F00 selection updates keep the table DOM stable',async()=>{
+  const text='Before unchanged\n\n| A | B | C |\n| --- | --- | --- |\n'+Array.from({length:100},(_,i)=>`| row${i} | value${i} | end${i} |`).join('\n')+'\n\nAfter unchanged\n';
+  const rounds=[];
+  for(let round=0;round<3;round++){
+   await reset(text);const positions=[];view.state.doc.descendants((n,p)=>{if(n.isTextblock&&n.textContent.startsWith('row'))positions.push(p+1);});
+   let rebuilds=0;const start=performance.now();
+   await act(async()=>{for(const pos of positions.slice(0,30)){const before=view.dom.querySelector('.milkdown-table-block');view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc,pos)));if(before!==view.dom.querySelector('.milkdown-table-block'))rebuilds++;}});
+   rounds.push({ms:Math.round((performance.now()-start)*100)/100,rebuilds});assert.equal(content(),text);
+  }
+  console.log('TABLE_SELECTION_BENCH '+JSON.stringify(rounds));
+  if(!process.env.DEDITOR_BASELINE)assert.ok(rounds.every(r=>r.rebuilds===0));
+ });
+ await test('F00b right-click row deletion preserves history, focus and untouched rows',async()=>{
+  await reset(original);await select('one');
+  const cell=view.dom.querySelector('tbody tr:nth-child(2) td');
+  await act(async()=>cell.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:20,clientY:20})));
+  const menu=document.querySelector('.md-table-menu');assert.ok(menu);assert.equal(menu.querySelectorAll('button')[1].textContent,'Delete row');
+  await act(async()=>menu.querySelectorAll('button')[1].click());assert.equal(document.querySelector('.md-table-menu'),null);
+  assert.deepEqual(matrix(),[['A','B'],['three','four']]);assert.equal(view.state.selection.$head.parent.textContent,'three');
+  await roundtrip(original);
+ });
+ await test('F00c deleting header promotes next row, preserving marks and alignment',async()=>{
+  await reset(original);await select('A');await act(async()=>app.deleteTableRows(view));
+  assert.deepEqual(matrix(),[['one','two'],['three','four']]);assert.equal(table().node.firstChild.type.name,'table_header_row');
+  assert.equal(table().node.firstChild.firstChild.type.name,'table_header');await roundtrip(original);
+ });
+ await test('F00d delete multiple rows and last remaining header with exact undo',async()=>{
+  await reset(original);const {node,pos}=table(),map=TableMap.get(node);
+  await act(async()=>view.dispatch(view.state.tr.setSelection(CellSelection.rowSelection(view.state.doc.resolve(pos+1+map.map[2]),view.state.doc.resolve(pos+1+map.map[4])))));
+  await act(async()=>app.deleteTableRows(view));assert.deepEqual(matrix(),[['A','B']]);await roundtrip(original);
+  const headerOnly='Before unchanged\n\n| A | B |\n| --- | --- |\n\nAfter unchanged\n';
+  await reset(headerOnly);await select('A');await act(async()=>app.deleteTableRows(view));assert.equal(table(),undefined);await exactHistory(headerOnly);
+ });
+ await test('F00e keyboard row menu selects complete row and Escape restores focus',async()=>{
+  await reset(original);await select('one');await key('F10',{shiftKey:true});
+  let menu=document.querySelector('.md-table-menu');assert.ok(menu);await act(async()=>menu.querySelector('button').click());
+  assert.ok(view.state.selection instanceof CellSelection);assert.ok(view.state.selection.isRowSelection());assert.equal(content(),original);
+  await select('two');await key('F10',{shiftKey:true});menu=document.querySelector('.md-table-menu');
+  await act(async()=>menu.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true})));
+  assert.equal(document.querySelector('.md-table-menu'),null);assert.equal(view.hasFocus(),true);
+ });
+ await test('F00f cell mouse down never schedules a paragraph selection',async()=>{
+  await reset(original);await select('one');const at=view.state.selection.head;const cell=view.dom.querySelector('tbody tr:nth-child(3) td');
+  const nodeView=view.props.nodeViews.table(table().node,view,()=>table().pos,[],{find:()=>[]});
+  const target=nodeView.contentDOM.appendChild(document.createElement('td'));
+  const event=new dom.window.MouseEvent('mousedown',{bubbles:true});Object.defineProperty(event,'target',{value:target});
+  assert.equal(nodeView.stopEvent(event),false);await pause(40);assert.equal(view.state.selection.head,at);nodeView.destroy();
+ });
  await test('F01 cell edit/delete/format retains surrounding source and exact history',async()=>{
   await reset(original);await select('one',1);await act(async()=>view.dispatch(view.state.tr.insertText('X')));assert.equal(matrix()[1][0],'oXne');await roundtrip(original);
   await reset(original);await select('one',1);await act(async()=>view.dispatch(view.state.tr.delete(view.state.selection.from,view.state.selection.from+1)));assert.equal(matrix()[1][0],'oe');await roundtrip(original);

@@ -578,8 +578,15 @@ summary:focus-visible, .preview-toc-item:focus-visible, .cm-button:focus-visible
 .filetree-caret { flex-shrink: 0; color: var(--text-soft); transition: transform 120ms ease; }
 .filetree-caret[data-open="true"] { transform: rotate(90deg); }
 
+/* Only the active pane-resize gesture suppresses browser text selection. */
+body.deditor-pane-resizing, body.deditor-pane-resizing * {
+  cursor: col-resize !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
 /* Splitter */
 .splitter {
+  touch-action: none;
   width: 4px;
   cursor: col-resize;
   background: transparent;

@@ -28,8 +28,8 @@
     "perf:memo": "npx tsx scripts/perf-memo.tsx",
     "perf:lang": "npx tsx scripts/perf-lang.ts",
     "perf:rust": "cargo test --release --manifest-path src-tauri/Cargo.toml ipc_bench -- --nocapture --test-threads=1",
-    "perf:all": "npm run perf:store && npm run perf:react && npm run perf:soak && npm run perf:libs && npm run perf:startup && npm run perf:dom && npm run perf:mainsub && npm run perf:hydrate && npm run perf:memo && npm run perf:lang && npm run perf:document && npm run perf:xmind && npm run perf:rust && npm run perf:markdown-preview && npm run perf:markdown-input",
-    "test:regression": "node scripts/test-regression.mjs",
+    "perf:all": "npm run perf:store && npm run perf:react && npm run perf:soak && npm run perf:libs && npm run perf:startup && npm run perf:dom && npm run perf:mainsub && npm run perf:hydrate && npm run perf:memo && npm run perf:lang && npm run perf:document && npm run perf:xmind && npm run perf:rust && npm run perf:markdown-preview && npm run perf:markdown-input && npm run perf:markdown-table-selection",
+    "test:regression": "node scripts/test-regression.mjs && node scripts/test-pane-resize.mjs",
     "test:file-icons": "tsx scripts/test-file-icons.ts",
     "generate:file-icons": "node scripts/generate-file-icons.mjs",
     "test:syntax": "tsx scripts/test-syntax.ts",
@@ -71,7 +71,8 @@
     "test:markdown-sequence-block": "node scripts/test-markdown-round3-block.mjs",
     "test:markdown-sequence-session": "node scripts/test-markdown-sequence-session.mjs && node scripts/test-markdown-mode-focus.mjs",
     "test:markdown-sequences": "npm run test:markdown-sequence-inline && npm run test:markdown-sequence-table && npm run test:markdown-sequence-block && npm run test:markdown-sequence-session",
-    "test:markdown-operation-gaps": "node scripts/test-markdown-boundary-audit.mjs && node scripts/test-markdown-selection-audit.mjs && node scripts/test-markdown-mouse-audit.mjs && node scripts/test-markdown-recovery-audit.mjs"
+    "test:markdown-operation-gaps": "node scripts/test-markdown-boundary-audit.mjs && node scripts/test-markdown-selection-audit.mjs && node scripts/test-markdown-mouse-audit.mjs && node scripts/test-markdown-recovery-audit.mjs",
+    "perf:markdown-table-selection": "node scripts/perf-markdown-table-selection.mjs"
   },
   "dependencies": {
     "@codemirror/commands": "^6.7.1",
