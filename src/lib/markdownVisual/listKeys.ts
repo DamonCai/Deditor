@@ -1,6 +1,7 @@
 import { $shortcut } from "@milkdown/kit/utils";
 import { TextSelection, type Command } from "@milkdown/kit/prose/state";
 import { lift } from "@milkdown/kit/prose/commands";
+import { liftTarget } from "@milkdown/kit/prose/transform";
 import { sinkListItem, liftListItem } from "@milkdown/kit/prose/schema-list";
 import { isInTable } from "@milkdown/kit/prose/tables";
 import { taskIndent } from "../markdownListIndent";
@@ -91,6 +92,23 @@ const indentList = (reverse: boolean): Command => (state, dispatch, view) => {
     // entire item. Lift this block, leaving its preceding paragraphs in place.
     if (parent.type.name === "blockquote" || parent.type.name === "list_item" && $from.index(-1) > 0) {
       if (lift(state, dispatch && (tr => dispatch(tr.setMeta("deditor-list-operation", true).scrollIntoView())), view)) return true;
+      // A split list item must start with a paragraph. When its remaining
+      // content starts with another heading/list, supply the empty list marker
+      // before lifting, in the same undoable transaction.
+      const $to = state.selection.$to;
+      if (parent.type.name === "list_item" && $to.index(-1) + 1 < parent.childCount) {
+        const paragraph = state.schema.nodes.paragraph?.createAndFill();
+        if (paragraph) {
+          const tr = state.tr.insert($to.after(), paragraph);
+          const range = tr.selection.$from.blockRange(tr.selection.$to);
+          const target = range && liftTarget(range);
+          if (range && target != null) {
+            tr.lift(range, target);
+            dispatch?.(tr.setMeta("deditor-list-operation", true).scrollIntoView());
+            return true;
+          }
+        }
+      }
       // Never fall back to moving the whole item when only a continuation was selected.
       return true;
     }

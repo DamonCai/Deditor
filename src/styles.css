@@ -777,3 +777,14 @@ body.deditor-pane-resizing, body.deditor-pane-resizing * {
 .file-type-icon .file-type-icon__dark { display: none; }
 .dark .file-type-icon .file-type-icon__light { display: none; }
 .dark .file-type-icon .file-type-icon__dark { display: block; }
+
+/* Independent editor groups use the existing tab and pane colors. */
+.editor-group { overflow: hidden; }
+.editor-group > .select-none { flex-shrink: 0; }
+.editor-group[data-focused="false"] [data-tab-id] { border-top-color: transparent !important; }
+.editor-group-divider:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+::highlight(deditor-search) { background: rgba(255, 213, 79, 0.45); }
+::highlight(deditor-search-current) { background: rgba(255, 152, 0, 0.7); }
+.dark ::highlight(deditor-search) { background: rgba(255, 213, 79, 0.22); }
+.dark ::highlight(deditor-search-current) { background: rgba(255, 152, 0, 0.45); }

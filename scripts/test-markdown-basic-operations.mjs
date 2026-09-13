@@ -158,9 +158,9 @@ try {
   for(const eol of ['\n','\r\n']) {
    const original=('# Search\n\n+ [x] target task\n\n\n| A | B |\n| :--- | ---: |\n| same | table |\n\n[link][ref]\n\n[ref]: https://example.com "target title"\n\nEnd target   \n').replaceAll('\n',eol);
    await reset(original);await act(async()=>app.getVisualEditor().find());
-   const input=async(index,value)=>act(async()=>{const element=document.querySelectorAll('[role="search"] input')[index];Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(element,value);element.dispatchEvent(new Event('input',{bubbles:true}));});
+   const input=async(index,value)=>act(async()=>{const element=document.querySelectorAll('[role="search"] input:not([type="checkbox"])')[index];Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(element,value);element.dispatchEvent(new Event('input',{bubbles:true}));});
    await input(0,'target');await input(1,'result');
-   await act(async()=>[...document.querySelectorAll('[role="search"] button')].find(b=>b.textContent==='Replace All').click());
+   await act(async()=>document.querySelector('[role=search] button[name=replaceAll]').click());
    assert.equal(content(),original.replaceAll('target','result'));await exactHistory(original);
   }
  });

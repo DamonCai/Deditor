@@ -3,7 +3,7 @@ import { PreviewScrollIntent } from "../lib/previewScrollIntent";
 import MarkdownOutline from "./MarkdownOutline";
 import { decodeAnchor, openMarkdownFileLink } from "../lib/markdownLinks";
 import MarkdownDocumentSurface from "./MarkdownDocumentSurface";
-import { markdownDisplayHtml, hydrateMarkdownDisplay } from "../lib/markdownDisplay";
+import { MarkdownPreviewCache, MarkdownPreviewDocument, type PreviewBlock } from "../lib/markdownPreviewDocument";
 import { installFootnotePreview } from "../lib/markdownFootnotePreview";
 import { Button } from "./ui/Button";
 import { FiX, FiChevronLeft, FiChevronRight } from "react-icons/fi";
@@ -88,11 +88,26 @@ export default function Preview({
   const fontSize = useEditorStore(s => s.tabs.find(tab => tab.id === tabId)?.zoomFontSize ?? s.editorFontSize);
   const filePath = useTabFilePath(tabId);
   const [rendered, setRendered] = useState<{
-    html: string; source: string; filePath: string | null;
+    blocks: PreviewBlock[]; source: string; filePath: string | null;
     theme: "light" | "dark"; mathAutoNumber: boolean;
   } | null>(null);
-  const html = retainDom ? rendered?.html ?? "" : "";
+  // Commit identity also changes when only source-line markers move.
+  const html = retainDom ? rendered : null;
   const containerRef = useRef<HTMLDivElement>(null);
+  const previewCache = useRef(new MarkdownPreviewCache());
+  const previewDocument = useRef<MarkdownPreviewDocument | null>(null);
+  useLayoutEffect(() => {
+    if (!containerRef.current) return;
+    const document = new MarkdownPreviewDocument(containerRef.current);
+    previewDocument.current = document;
+    return () => { document.destroy(); previewDocument.current = null; previewCache.current.clear(); };
+  }, []);
+  const committedImageRoot = rendered && isMarkdown(rendered.filePath) ? documentImageRoot(rendered.source, rendered.filePath) : null;
+  useLayoutEffect(() => {
+    previewDocument.current?.update(retainDom ? rendered?.blocks ?? [] : [], {
+      theme: rendered?.theme ?? theme, filePath: rendered?.filePath ?? filePath, imageRoot: committedImageRoot,
+    });
+  }, [html, retainDom, rendered?.theme, rendered?.filePath, committedImageRoot]);
   const scrollIndexRef = useRef<PreviewScrollIndex | null>(null);
   useLayoutEffect(() => {
     if (!containerRef.current) return;
@@ -137,8 +152,10 @@ export default function Preview({
       const out = isMd
         ? await renderMarkdown(source, { theme, mathAutoNumber })
         : await renderCode(source, filePath, { theme });
-      if (!cancelled) setRendered({
-        html: isMd ? markdownDisplayHtml(out) : out,
+      if (cancelled) return;
+      const blocks = isMd ? previewCache.current.prepare(out) : [{ html: out, lines: [] }];
+      setRendered({
+        blocks,
         source, filePath, theme, mathAutoNumber,
       });
     }, 80);
@@ -147,17 +164,6 @@ export default function Preview({
       clearTimeout(id);
     };
   }, [source, filePath, theme, isMd, mathAutoNumber, renderEnabled, renderCurrent]);
-
-  // Hydrate the committed result's theme. Hidden source/theme changes retain
-  // this result, so they neither start new diagram work nor abort in-flight
-  // hydration on the retained DOM. A newly rendered result keeps the existing
-  // replacement/unmount cleanup behavior.
-  const renderedTheme = rendered?.theme ?? theme;
-  useEffect(() => {
-    if (!containerRef.current || !html) return;
-    const display = hydrateMarkdownDisplay(containerRef.current, { theme: renderedTheme, filePath, imageRoot });
-    return () => display.abort();
-  }, [html, renderedTheme]);
 
   // Local images: rewrite `<img>` src to a Tauri asset:// URL so the WebView
   // can load files outside its own origin. Relative paths resolve against the
@@ -745,7 +751,6 @@ export default function Preview({
           fontSize={fontSize} customStyleEnabled={isMd} documentTheme={isMd ? documentTheme : "default"}
           className={`preview${readingMode ? " preview-fullwidth" : ""}`}
           style={{ flex: 1 }}
-          dangerouslySetInnerHTML={{ __html: html }}
         />
         {readingMode && (
           <MarkdownOutline items={tocItems} current={activeTocId} navigate={handleTocJump} active={active} />

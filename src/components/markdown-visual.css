@@ -2,8 +2,6 @@
 .md-visual-layout { display: flex; flex: 1; min-height: 0; }
 .md-visual-scroll { flex: 1; overflow: auto; min-width: 0; overscroll-behavior: contain; container-type: inline-size; }
 .md-visual-content { width: 100%; min-height: 100%; }
-.md-visual-search { display: flex; align-items: center; gap: 5px; padding: 6px 10px; border-bottom: 1px solid var(--border); flex-wrap: wrap; font-size: 12px; }
-.md-visual-search input { width: min(250px, 50%); }
 .md-visual-shell .milkdown {
   --crepe-color-background: var(--bg);
   --crepe-color-on-background: var(--text);

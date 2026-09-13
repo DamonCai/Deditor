@@ -405,6 +405,13 @@ export async function closeActiveTab(): Promise<boolean> {
 }
 
 export function closeTabById(id: string): Promise<boolean> {
+  const state = useEditorStore.getState();
+  const other = state.activePane === "left" ? "right" : "left";
+  if (state.panes?.[state.activePane].tabIds.includes(id) && state.panes[other].tabIds.includes(id)) {
+    flushDocument(id);
+    state.detachPaneTab(id, state.activePane);
+    return Promise.resolve(true);
+  }
   const existing = closingTabs.get(id);
   if (existing) return existing;
   const pending = (async () => {
@@ -445,7 +452,8 @@ export function closeTabById(id: string): Promise<boolean> {
 }
 
 export async function closeOtherTabs(keepId: string): Promise<void> {
-  const ids = useEditorStore.getState().tabs.filter((t) => t.id !== keepId).map((t) => t.id);
+  const state = useEditorStore.getState();
+  const ids = (state.panes?.[state.activePane].tabIds ?? state.tabs.map(t => t.id)).filter(id => id !== keepId);
   for (const id of ids) {
     if (!await closeTabById(id)) return;
   }

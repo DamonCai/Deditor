@@ -1,5 +1,6 @@
 export interface VisualEditorBridge {
   tabId: string;
+  owner?: symbol;
   selected: string;
   heading: number;
   editable: boolean;

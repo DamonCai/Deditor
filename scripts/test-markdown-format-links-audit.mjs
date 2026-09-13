@@ -94,6 +94,17 @@ await test('D01 outdent: nested quotes/lists, heading Backspace and table bounda
  const original='* keep\n\n  ## target\n';await reset(original);await select('target',0);await key('Backspace');assert.equal(view.state.selection.$from.depth,1);assert.equal(view.state.selection.$from.parent.type.name,'heading');await exactHistory(original);
  const table='| A | B |\n| --- | --- |\n| target | other |\n';await reset(table);await select('target');await run(()=>button('Decrease indent').click());assert.equal(content(),table);
 });
+await test('D01 outdent: consecutive continuation headings and range selection',async()=>{
+ for(const selectedRange of [false,true]){
+  const original='* keep\n\n  ## target\n\n  ### next\n\n  following\n';
+  await reset(original);await select('target');
+  if(selectedRange){let end;view.state.doc.descendants((n,p)=>{if(n.isTextblock && n.textContent==='next')end=p+1+n.content.size;});await run(()=>view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc,view.state.selection.from,end))));}
+  await run(()=>button('Decrease indent').click());
+  assert.equal(view.state.selection.$from.depth,1,'selected heading leaves list');
+  assert.equal(view.state.selection.$from.parent.type.name,'heading');
+  assert.ok(view.state.doc.textContent.includes('next'));await exactHistory(original);
+ }
+});
 await test('D01 toolbar: paragraph and all heading levels roundtrip and undo',async()=>{
  for(let n=1;n<=6;n++){
  const original='Before\n\nHeading\n\nTail\n';await reset(original);await select('Heading');

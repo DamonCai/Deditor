@@ -1,5 +1,5 @@
 import { memo, useMemo } from "react";
-import { useActiveTab, isTabDirty, useEditorStore } from "../store/editor";
+import { paneViewKey, useActiveTab, isTabDirty, useEditorStore } from "../store/editor";
 import { countText, documentStatsField } from "../lib/documentStats";
 import { getActiveView, getActiveViewTabId, getActiveViewContent } from "../lib/editorBridge";
 import { detectLang, isMarkdown, isBinaryRenderable } from "../lib/lang";
@@ -58,7 +58,7 @@ function StatusBarImpl() {
   const t = useT();
   const active = useActiveTab();
   const cursorOffset = useEditorStore((s) =>
-    active ? s.tabPositions[active.id]?.cursor ?? 0 : 0,
+    active ? s.tabPositions[paneViewKey(active.id, s.activePane)]?.cursor ?? 0 : 0,
   );
   const selectionLen = useEditorStore((s) => s.activeSelectionLength);
   const filePath = active?.filePath ?? null;

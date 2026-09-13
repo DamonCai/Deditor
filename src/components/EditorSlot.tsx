@@ -13,6 +13,7 @@ interface Props {
    *  the user switched tabs. Editor re-registers itself as the active view
    *  whenever this flips true. */
   active?: boolean;
+  visible?: boolean;
   theme: "light" | "dark";
   fontSize: number;
   /** When true, skip the per-tab CodeMirror state cache (split-view secondary). */
@@ -31,6 +32,7 @@ interface Props {
 const EditorSlot = memo(function EditorSlot({
   tabId,
   active,
+  visible = active,
   theme,
   fontSize,
   noStateCache,
@@ -55,6 +57,7 @@ const EditorSlot = memo(function EditorSlot({
     <Editor
       tabId={tabId}
       active={isMarkdown(tab.filePath) && !tab.diff ? (sourceVisible ? active : false) : active}
+      visible={isMarkdown(tab.filePath) && !tab.diff ? sourceVisible && visible : visible}
       value={tab.content}
       filePath={tab.filePath}
       diff={tab.diff}

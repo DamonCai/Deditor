@@ -70,7 +70,8 @@ export default function MarkdownToolbar() {
   const run = (action: () => void) => {
     if (disabled) return;
     action();
-    if (visual) visual.focus(); else getActiveView()?.focus();
+    const currentVisual = getVisualEditor();
+    if (currentVisual) currentVisual.focus(); else getActiveView()?.focus();
   };
   const openInsert = (kind: InsertKind) => {
     if (disabled) return;

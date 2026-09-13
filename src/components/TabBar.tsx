@@ -1,8 +1,8 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/shallow";
-import { FiChevronDown, FiPlus, FiX } from "react-icons/fi";
+import { FiChevronDown, FiPlus, FiX, FiColumns } from "react-icons/fi";
 import { LuGitCompare } from "react-icons/lu";
-import { useEditorStore, isTabDirty, type Tab } from "../store/editor";
+import { useEditorPaneId, useEditorStore, isTabDirty, type Tab } from "../store/editor";
 import { closeTabById, closeOtherTabs, newFile, revealInFinder } from "../lib/fileio";
 import { useT, tStatic } from "../lib/i18n";
 import LangIcon from "./LangIcon";
@@ -28,6 +28,8 @@ function toEncodedPath(path: string): string {
 // splitter drag) don't re-run TabBar's body. Internal store subscriptions
 // still wake it when relevant fields change.
 function TabBarImpl() {
+  const paneId = useEditorPaneId();
+  const split = useEditorStore(s => !!s.panes);
   const t = useT();
   // Per-field selectors. tabs is shallow-compared so a keystroke (which mutates
   // tabs[].content but keeps the same object identity for all other tabs)
@@ -42,6 +44,7 @@ function TabBarImpl() {
   const [hiddenTabIds, setHiddenTabIds] = useState<string[]>([]);
   const stripRef = useRef<HTMLDivElement>(null);
   const overflowBtnRef = useRef<HTMLButtonElement>(null);
+  const overflowId = paneId ? `tab-overflow-dropdown-${paneId}` : "tab-overflow-dropdown";
   const tabOrder = JSON.stringify(tabs.map((tab) => tab.id));
   const hiddenTabs = tabs.filter((tab) => hiddenTabIds.includes(tab.id));
 
@@ -187,7 +190,8 @@ function TabBarImpl() {
       e.stopPropagation();
       // Read tabs length imperatively so the handler doesn't have to depend
       // on tabs (which changes ref on every keystroke).
-      const tabsLen = useEditorStore.getState().tabs.length;
+      const state = useEditorStore.getState();
+      const tabsLen = state.panes?.[paneId ?? state.activePane].tabIds.length ?? state.tabs.length;
       const items: MenuItem[] = [];
       if (tab.filePath) {
         const path = tab.filePath;
@@ -216,6 +220,9 @@ function TabBarImpl() {
         });
         items.push({ divider: true });
       }
+      items.push({ label: t("split.right"), onClick: () => useEditorStore.getState().splitRight(tab.id) });
+      if (useEditorStore.getState().panes) items.push({ label: t("split.merge"), onClick: () => useEditorStore.getState().mergePanes() });
+      items.push({ divider: true });
       items.push({ label: t("tabbar.close"), onClick: () => closeTabById(tab.id) });
       items.push({
         label: t("tabbar.closeOthers"),
@@ -224,7 +231,7 @@ function TabBarImpl() {
       });
       setMenu({ x: e.clientX, y: e.clientY, items });
     },
-    [t],
+    [t, paneId],
   );
 
   return (
@@ -270,6 +277,8 @@ function TabBarImpl() {
       >
         <FiPlus size={14} />
       </Button>
+      <Button variant="ghost" size="icon" style={iconBtnStyle} title={t(split ? "split.merge" : "split.right")}
+        onClick={() => useEditorStore.getState().toggleSplitEditor()}><FiColumns size={14} /></Button>
       {hiddenTabs.length > 0 && <Button
         ref={overflowBtnRef}
         variant="ghost"
@@ -277,7 +286,7 @@ function TabBarImpl() {
         onClick={() => setOverflowOpen((v) => !v)}
         title={t("tabbar.hiddenTabs", { n: hiddenTabs.length })}
         aria-expanded={overflowOpen}
-        aria-controls={overflowOpen ? "tab-overflow-dropdown" : undefined}
+        aria-controls={overflowOpen ? overflowId : undefined}
         style={{ ...iconBtnStyle, position: "relative" }}
       >
         <FiChevronDown size={14} />
@@ -296,6 +305,7 @@ function TabBarImpl() {
       </Button>}
       {overflowOpen && hiddenTabs.length > 0 && (
         <OverflowDropdown
+          id={overflowId}
           tabs={hiddenTabs}
           activeId={activeId}
           anchorRef={overflowBtnRef}
@@ -418,6 +428,7 @@ const TabItem = memo(function TabItem({
 });
 
 function OverflowDropdown({
+  id,
   tabs,
   activeId,
   anchorRef,
@@ -425,6 +436,7 @@ function OverflowDropdown({
   onClose,
   onDismiss,
 }: {
+  id: string;
   tabs: Tab[];
   activeId: string | null;
   anchorRef: React.RefObject<HTMLButtonElement>;
@@ -459,7 +471,7 @@ function OverflowDropdown({
     const onDocDown = (e: MouseEvent) => {
       const target = e.target as Node;
       if (anchorRef.current?.contains(target)) return;
-      const dd = document.getElementById("tab-overflow-dropdown");
+      const dd = document.getElementById(id);
       if (dd?.contains(target)) return;
       onDismiss();
     };
@@ -487,7 +499,7 @@ function OverflowDropdown({
 
   return (
     <div
-      id="tab-overflow-dropdown"
+      id={id}
       style={{
         position: "fixed",
         top: pos.top,
