@@ -40,7 +40,7 @@ export {default as Visual} from './src/components/MarkdownVisualEditor';
 export {useEditorStore} from './src/store/editor';
 export {getVisualEditor} from './src/lib/markdownVisualBridge';
 export {markdownHistory} from './src/lib/markdownHistory';
-export {deleteTableRows} from './src/lib/markdownVisual/tableMenu';
+export {deleteTableRows,deleteTableColumns} from './src/lib/markdownVisual/tableMenu';
 export {saveFile} from './src/lib/fileio';
 `,resolveDir:process.cwd()},outfile:output,bundle:true,format:'esm',platform:'node',packages:'external',loader:{'.css':'empty'},plugins:[{name:'isolated-io',setup(b){
  b.onResolve({filter:/.*/},a=>a.path.endsWith('.css')?{path:'css',namespace:'stub'}:stubs[a.path]?{path:a.path,namespace:'stub'}:a.path.endsWith('/feedback')?{path:'feedback',namespace:'stub'}:undefined);
@@ -75,6 +75,37 @@ const paste=async(text,html='')=>{const event=new dom.window.Event('paste',{bubb
 const command=async(name,payload)=>{await act(async()=>{editorContext.get(commandsCtx).call(gfm[name].key,payload);await pause(20);});};
 const roundtrip=async(before,expected=matrix(),steps=1)=>{const edited=content();await exactHistory(before,steps);assert.deepEqual(matrix(),expected);assert.equal(content(),edited);assert.ok(edited.startsWith('Before unchanged\n\n'));assert.ok(edited.endsWith('\n\nAfter unchanged\n'));};
 try {
+ const columnSource='Before unchanged\n\n| A | B | C |\n| :--- | :---: | ---: |\n| **甲** | 中间 | `代码` |\n| 一 | 二 | 三 |\n\nAfter unchanged\n';
+ const openColumnMenu=async(cell)=>{await act(async()=>cell.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:20,clientY:20})));const menu=document.querySelector('.md-table-menu');assert.ok(menu);return menu;};
+ const deleteFromMenu=async(menu)=>{const button=[...menu.querySelectorAll('button')].find(b=>b.textContent==='Delete column');assert.ok(button);await act(async()=>button.click());assert.equal(document.querySelector('.md-table-menu'),null);assert.ok(view.hasFocus());};
+ await test('F00col1 right-click deletes first, middle or last column, retaining marks and alignment',async()=>{
+  for(const col of [0,1,2]){
+   await reset(columnSource);const before=matrix(),attrs=Array.from({length:3},(_,i)=>table().node.firstChild.child(i).attrs.alignment);
+   // The right-click destination, rather than the old caret, determines the column.
+   await select('一');await deleteFromMenu(await openColumnMenu(view.dom.querySelectorAll('tr')[1].children[col]));
+   assert.deepEqual(matrix(),before.map(row=>row.filter((_,i)=>i!==col)));
+   table().node.forEach(row=>assert.deepEqual(Array.from({length:row.childCount},(_,i)=>row.child(i).attrs.alignment),attrs.filter((_,i)=>i!==col)));
+   if(col!==0)assert.match(content(),/\*\*甲\*\*/);if(col!==2)assert.match(content(),/`代码`/);
+   view.state.doc.check();await roundtrip(columnSource);
+  }
+ });
+ await test('F00col2 multi-column selection via keyboard menu deletes once and supports exact undo',async()=>{
+  await reset(columnSource);const {node,pos}=table(),map=TableMap.get(node);
+  await act(async()=>view.dispatch(view.state.tr.setSelection(CellSelection.colSelection(view.state.doc.resolve(pos+1+map.map[2]),view.state.doc.resolve(pos+1+map.map[1])))));
+  await key('F10',{shiftKey:true});await deleteFromMenu(document.querySelector('.md-table-menu'));
+  assert.deepEqual(matrix(),[['A'],['甲'],['一']]);await roundtrip(columnSource);
+ });
+ await test('F00col3 last column, header-only and all columns remove table; readonly and outside are inert',async()=>{
+  for(const sample of ['Before unchanged\n\n| 唯一 |\n| --- |\n| 内容 |\n\nAfter unchanged\n','Before unchanged\n\n| 唯一 |\n| --- |\n\nAfter unchanged\n']){
+   await reset(sample);await deleteFromMenu(await openColumnMenu(view.dom.querySelector('th')));assert.equal(table(),undefined);await exactHistory(sample);assert.ok(content().includes('Before unchanged'));assert.ok(content().includes('After unchanged'));
+  }
+  await reset(columnSource);const {node,pos}=table(),map=TableMap.get(node);
+  await act(async()=>view.dispatch(view.state.tr.setSelection(CellSelection.colSelection(view.state.doc.resolve(pos+1+map.map[0]),view.state.doc.resolve(pos+1+map.map[2])))));
+  await deleteFromMenu(await openColumnMenu(view.dom.querySelector('th')));assert.equal(table(),undefined);await exactHistory(columnSource);
+  await reset(columnSource);await select('中间');await render(true);await act(async()=>app.deleteTableColumns(view));assert.equal(content(),columnSource);
+  await act(async()=>view.dom.querySelector('td').dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true})));assert.equal(document.querySelector('.md-table-menu'),null);
+  await reset(columnSource);await select('Before unchanged');await act(async()=>app.deleteTableColumns(view));assert.equal(content(),columnSource);
+ });
  await test('F00 selection updates keep the table DOM stable',async()=>{
   const text='Before unchanged\n\n| A | B | C |\n| --- | --- | --- |\n'+Array.from({length:100},(_,i)=>`| row${i} | value${i} | end${i} |`).join('\n')+'\n\nAfter unchanged\n';
   const rounds=[];

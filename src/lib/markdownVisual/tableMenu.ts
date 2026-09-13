@@ -1,8 +1,16 @@
 import { $prose } from "@milkdown/kit/utils";
 import { Plugin, Selection } from "@milkdown/kit/prose/state";
-import { CellSelection, TableMap, selectedRect } from "@milkdown/kit/prose/tables";
+import { CellSelection, TableMap, selectedRect, isInTable, deleteColumn, deleteTable } from "@milkdown/kit/prose/tables";
 import type { EditorView } from "@milkdown/kit/prose/view";
 import { tStatic } from "../i18n";
+
+export function deleteTableColumns(view: EditorView) {
+  if (!view.editable || !isInTable(view.state)) return;
+  const { left, right, map } = selectedRect(view.state);
+  const command = left === 0 && right === map.width ? deleteTable : deleteColumn;
+  command(view.state, tr => view.dispatch(tr.setMeta('deditor-list-operation', true).scrollIntoView()));
+  view.focus();
+}
 
 export function deleteTableRows(view: EditorView) {
   if (!view.editable) return;
@@ -36,7 +44,10 @@ export const tableMenuPlacement = $prose(() => new Plugin({
     const open = (event: MouseEvent | KeyboardEvent) => {
       if (!view.editable || !(event.target instanceof Element)) return;
       const keyboard = event.type === 'keydown';
-      const cell = keyboard ? view.domAtPos(view.state.selection.head).node.parentElement?.closest('td,th') : event.target.closest('td,th');
+      const selection = view.state.selection;
+      const cell = keyboard ? selection instanceof CellSelection
+        ? view.nodeDOM(selection.$headCell.pos) as HTMLElement | null
+        : view.domAtPos(selection.head).node.parentElement?.closest('td,th') : event.target.closest('td,th');
       if (!cell || !view.dom.contains(cell)) return;
       event.preventDefault(); event.stopPropagation(); close();
       const at = view.state.doc.resolve(view.posAtDOM(cell, 0));
@@ -59,6 +70,7 @@ export const tableMenuPlacement = $prose(() => new Plugin({
         view.dispatch(view.state.tr.setSelection(CellSelection.rowSelection(view.state.doc.resolve(tableStart + map.map[top * map.width]), view.state.doc.resolve(tableStart + map.map[(bottom - 1) * map.width]))));
       });
       action('md.deleteRow', () => deleteTableRows(view));
+      action('md.deleteColumn', () => deleteTableColumns(view));
       menu.onmousedown = e => { e.preventDefault(); e.stopPropagation(); };
       menu.onkeydown = e => {
         if (e.key === 'Escape' || e.key === 'Tab') { e.preventDefault(); close(); view.focus(); }
