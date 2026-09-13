@@ -72,6 +72,28 @@ const range=async(text,start,end)=>{let at;view.state.doc.descendants((node,pos)
 const run=async(fn)=>act(async()=>{fn();await pause(40);});
 const button=label=>{const item=[...document.querySelectorAll('button')].find(b=>b.getAttribute('aria-label')===label || b.getAttribute('aria-label')?.startsWith(label+' ('));assert.ok(item,label);return item;};
 try {
+await test('D01 outdent: only the selected continuation leaves lists or quotes',async()=>{
+ for(const marker of ['*','1.','- [ ]','- [x]'])for(const heading of ['', '## ']){
+  const indent=marker.startsWith('1.')?'   ':'  ';
+  const original=`Before\n\n${marker} keep\n\n${indent}${heading}target\n\n${indent}following\n\nAfter\n`;
+  await reset(original);await select('target');
+  await run(()=>button('Decrease indent').click());
+  let targetDepth,keepDepth,followingDepth;
+  view.state.doc.descendants((n,p)=>{if(!n.isTextblock)return;const depth=view.state.doc.resolve(p+1).depth;if(n.textContent==='target')targetDepth=depth;if(n.textContent==='keep')keepDepth=depth;if(n.textContent==='following')followingDepth=depth;});
+  assert.equal(targetDepth,1,marker+' target moved to document');assert.ok(keepDepth>1,marker+' previous paragraph remains in list');assert.ok(followingDepth>1,marker+' following paragraph remains in list');
+  assert.equal(view.state.selection.$from.parent.type.name,heading?'heading':'paragraph');
+  await exactHistory(original);
+ }
+});
+await test('D01 outdent: nested quotes/lists, heading Backspace and table boundaries',async()=>{
+ for(const original of ['> keep\n>\n> ## target\n>\n> following\n','> > keep\n> >\n> > ## target\n','* outer\n  * keep\n\n    ## target\n']){
+  await reset(original);await select('target');let count=0;
+  while(view.state.selection.$from.depth>1 && count++<5)await key('Tab',{shiftKey:true});
+  assert.equal(view.state.selection.$from.depth,1);assert.equal(view.state.selection.$from.parent.type.name,'heading');assert.ok(view.state.doc.textContent.includes('keep'));await exactHistory(original);
+ }
+ const original='* keep\n\n  ## target\n';await reset(original);await select('target',0);await key('Backspace');assert.equal(view.state.selection.$from.depth,1);assert.equal(view.state.selection.$from.parent.type.name,'heading');await exactHistory(original);
+ const table='| A | B |\n| --- | --- |\n| target | other |\n';await reset(table);await select('target');await run(()=>button('Decrease indent').click());assert.equal(content(),table);
+});
 await test('D01 toolbar: paragraph and all heading levels roundtrip and undo',async()=>{
  for(let n=1;n<=6;n++){
  const original='Before\n\nHeading\n\nTail\n';await reset(original);await select('Heading');

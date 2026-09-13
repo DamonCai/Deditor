@@ -58,8 +58,8 @@ const store=app.useEditorStore, root=createRoot(document.getElementById('root'))
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const {Editor:MilkdownEditor,editorViewCtx}=await import('@milkdown/kit/core');
 const {TextSelection}=await import('@milkdown/kit/prose/state');
-const make=MilkdownEditor.make;let created=0;const views=[];
-MilkdownEditor.make=function(...args){const editor=make.apply(this,args),create=editor.create;editor.create=async()=>{const result=await create();editor.action(ctx=>{views.push(ctx.get(editorViewCtx));created++;});return result;};return editor;};
+const make=MilkdownEditor.make;let created=0,creationGate;const views=[];
+MilkdownEditor.make=function(...args){const editor=make.apply(this,args),create=editor.create;editor.create=async()=>{const result=await create();editor.action(ctx=>{views.push(ctx.get(editorViewCtx));created++;});if(creationGate)await creationGate;return result;};return editor;};
 const legacy=process.argv.includes('--legacy');
 const source=(id,count=2)=>`# ${id} 中文😀\n\n`+Array.from({length:count},(_,i)=>`Paragraph ${i} **bold** [link](https://example.com) 中文内容。\n\n`).join('');
 const tab=(id,count=2)=>({id,filePath:`/generated/${id}.md`,content:source(id,count),savedContent:source(id,count)});
@@ -89,7 +89,10 @@ try {
   const editedA=text('a'),selection=a.state.selection.head;
   const scroll=a.dom.closest('.md-visual-scroll');scroll.scrollTop=123;await act(async()=>scroll.dispatchEvent(new Event('scroll',{bubbles:true})));
   await switchTo('b');await act(async()=>app.getVisualEditor().insert('B edit ',false));const editedB=text('b');
-  await switchTo('a');assert.equal(current(),a);assert.equal(a.state.selection.head,selection);assert.equal(scroll.scrollTop,123);
+  assert.equal(document.activeElement,current().dom,'switch must transfer native keyboard focus');
+  await act(async()=>{a.dom.dispatchEvent(new dom.window.InputEvent('beforeinput',{inputType:'historyUndo',bubbles:true,cancelable:true}));a.dom.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'z',metaKey:true,bubbles:true,cancelable:true}));});
+  assert.equal(text('a'),editedA,'hidden native responder cannot undo previous tab');assert.equal(text('b'),editedB);
+  await switchTo('a');assert.equal(document.activeElement,a.dom);assert.equal(current(),a);assert.equal(a.state.selection.head,selection);assert.equal(scroll.scrollTop,123);
   await act(async()=>app.saveFile());assert.equal(writes.at(-1).content,editedA);
   await act(async()=>app.markdownHistory());assert.equal(text('a'),original);assert.equal(text('b'),editedB);
   await act(async()=>app.markdownHistory(true));assert.equal(text('a'),editedA);
@@ -119,6 +122,12 @@ try {
   await setup([{...tab('empty'),content:'',savedContent:''},tab('nonempty')]);await switchTo('nonempty');await switchTo('empty');
   await act(async()=>app.getVisualEditor().insert('中文😀',false));assert.match(text('empty'),/中文😀/);await act(async()=>app.markdownHistory());assert.equal(text('empty'),'');
   pass('source-only and diff stay lazy; empty Unicode editing');
+  const other=document.createElement('button');document.body.append(other);other.focus();
+  await setup([tab('focus-a'),tab('focus-b')]);assert.equal(document.activeElement,other,'startup restoration must not steal focus');
+  let release;creationGate=new Promise(resolve=>release=resolve);
+  document.body.focus();other.blur();await act(async()=>store.getState().setActive('focus-b'));await act(async()=>pause(30));other.focus();
+  await act(async()=>{release();creationGate=undefined;await pause(40);});await settle('focus-b');assert.equal(document.activeElement,other,'late editor must respect focus moved elsewhere');
+  other.remove();pass('startup and delayed creation respect focus elsewhere');
  }
  assert.equal(runtimeErrors.length,0);console.log(`${passed} tab switching groups passed`);
 } finally {MilkdownEditor.make=make;await act(async()=>root.unmount());await pause(100);dom.window.close();fs.rmSync(output,{force:true});}

@@ -21,8 +21,9 @@ import {
   FiRotateCw,
   FiTerminal,
   FiChevronDown,
+  FiArrowLeft,
 } from "react-icons/fi";
-import { undo, redo } from "@codemirror/commands";
+import { undo, redo, indentLess } from "@codemirror/commands";
 import {
   captureEditorTarget,
   getActiveEditorState,
@@ -208,6 +209,7 @@ export default function MarkdownToolbar() {
               <FiCheckSquare />,
             )}
             {item("md.quote", () => prefixLines("> "), <FiMessageSquare />)}
+            {item("md.outdent", () => { if (visual) visual.outdent?.(); else { const view = getActiveView(); if (view) indentLess(view); } }, <FiArrowLeft />)}
           </div>
           <div className="md-tool-group md-toolbar-colors">
             <MarkdownColorPicker

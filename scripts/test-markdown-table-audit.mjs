@@ -140,6 +140,19 @@ try {
    await command('deleteSelectedCellsCommand');assert.deepEqual(matrix(),expected);await roundtrip(loaded);
   }
  });
+ await test('F01 imported table formatting renders and keeps source/undo/caret mapping',async()=>{
+  const source='Before unchanged\n\n| A | B |\n| --- | --- |\n| numbers | 1.\u00a0one<br>2.\u00a0two |\n| bullets | \\-\u00a0alpha<br>\\-\u00a0beta |\n| labels | * **情报运营：**为正文<br>    <br>* **项目(预计)：**继续正文 |\n\nAfter unchanged\n';
+  for(const word of ['one','alpha','情报运营']){
+   await reset(source);assert.equal(content(),source);
+   assert.equal(view.dom.querySelectorAll('td li').length,6);
+   assert.deepEqual([...view.dom.querySelectorAll('td strong')].map(n=>n.textContent),['情报运营：','项目(预计)：']);
+   const offset=source.indexOf(word)+1,pre=source.slice(0,offset);await act(async()=>app.getVisualEditor().navigate(pre.split('\n').length,pre.length-pre.lastIndexOf('\n')));
+   await act(async()=>view.dispatch(view.state.tr.insertText('X')));
+   assert.ok(content().includes(word.slice(0,1)+'X'+word.slice(1)),word+' edits correct source position');
+   assert.ok(content().startsWith('Before unchanged\n\n'));assert.ok(content().endsWith('\nAfter unchanged\n'));
+   await exactHistory(source);
+  }
+ });
  await test('F01 cell edit/delete/format retains surrounding source and exact history',async()=>{
   await reset(original);await select('one',1);await act(async()=>view.dispatch(view.state.tr.insertText('X')));assert.equal(matrix()[1][0],'oXne');await roundtrip(original);
   await reset(original);await select('one',1);await act(async()=>view.dispatch(view.state.tr.delete(view.state.selection.from,view.state.selection.from+1)));assert.equal(matrix()[1][0],'oe');await roundtrip(original);

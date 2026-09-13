@@ -85,6 +85,16 @@ const indentList = (reverse: boolean): Command => (state, dispatch, view) => {
   if (view?.editable === false || view?.composing || !(state.selection instanceof TextSelection) || isInTable(state)) return false;
   const { $from } = state.selection;
   if ($from.parent.type.spec.code) return false;
+  if (reverse && $from.sameParent(state.selection.$to) && $from.depth > 1) {
+    const parent = $from.node(-1);
+    // A continuation paragraph/heading belongs to an item, but is not the
+    // entire item. Lift this block, leaving its preceding paragraphs in place.
+    if (parent.type.name === "blockquote" || parent.type.name === "list_item" && $from.index(-1) > 0) {
+      if (lift(state, dispatch && (tr => dispatch(tr.setMeta("deditor-list-operation", true).scrollIntoView())), view)) return true;
+      // Never fall back to moving the whole item when only a continuation was selected.
+      return true;
+    }
+  }
   let item = null;
   for (let depth = $from.depth; depth > 0; depth--) {
     if ($from.node(depth).type.name === "list_item") {
@@ -110,9 +120,13 @@ const indentList = (reverse: boolean): Command => (state, dispatch, view) => {
   (reverse ? liftWithIndent(item) : sinkListItem(item))(state, dispatch && (tr => dispatch(tr.setMeta("deditor-list-operation", true))), view);
   return true;
 };
+export const outdentMarkdownBlock = indentList(true);
 export const markdownListKeys = $shortcut(() => ({
   Delete: { key: "Delete", priority: 120, onRun: () => joinTaskForward },
-  Backspace: { key: "Backspace", priority: 120, onRun: () => leaveTask },
+  Backspace: { key: "Backspace", priority: 120, onRun: () => (state, dispatch, view) => {
+    if (state.selection.empty && state.selection.$from.parent.type.name === "heading" && state.selection.$from.parentOffset === 0 && outdentMarkdownBlock(state, dispatch, view)) return true;
+    return leaveTask(state, dispatch, view);
+  } },
   Enter: { key: "Enter", priority: 120, onRun: () => (state, dispatch, view) => {
     let onlyBreaks = true;
     state.selection.$from.parent.forEach(child => { if (child.type.name !== "hardbreak") onlyBreaks = false; });
@@ -120,5 +134,5 @@ export const markdownListKeys = $shortcut(() => ({
     return leaveTask(state, dispatch, view);
   } },
   Tab: { key: "Tab", priority: 110, onRun: () => indentList(false) },
-  "Shift-Tab": { key: "Shift-Tab", priority: 110, onRun: () => indentList(true) },
+  "Shift-Tab": { key: "Shift-Tab", priority: 110, onRun: () => outdentMarkdownBlock },
 }));

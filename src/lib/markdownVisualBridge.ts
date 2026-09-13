@@ -11,6 +11,7 @@ export interface VisualEditorBridge {
   find?: () => void;
   wrap: (prefix: string, suffix: string) => void;
   prefix: (prefix: string) => void;
+  outdent?: () => void;
   insert: (markdown: string, block: boolean) => void;
   color: (property: "color" | "background", color: string) => void;
   link: (url: string, text?: string) => void;

@@ -342,6 +342,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
           if (event.key === "Enter" && !event.isComposing && event.keyCode !== 229) beginEnter();
         };
         const beforeInput = (event: Event) => {
+          if (!activeRef.current) { event.preventDefault(); event.stopPropagation(); return; }
           const type = (event as InputEvent).inputType;
           // Removing a selected block/range is a complete action. Keep the next
           // typing group separate so undo can return to the empty document.
@@ -538,6 +539,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
   };
   return <MarkdownDocumentSurface editorHost fontSize={fontSize} documentTheme={writing.documentTheme} className="md-visual-shell" data-md-focus={writing.focusParagraph} data-readonly={readonly}
     onKeyDownCapture={event => {
+      if (!activeRef.current) { event.preventDefault(); event.stopPropagation(); return; }
       if (event.nativeEvent.isComposing) return;
       const mod = event.metaKey || event.ctrlKey;
       if (mod && !event.shiftKey && event.key.toLowerCase() === "f") { event.preventDefault(); event.stopPropagation(); openSearch(event.altKey && !readonly); }

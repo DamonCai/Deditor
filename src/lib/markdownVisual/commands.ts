@@ -7,6 +7,7 @@ import type { EditorView } from "@milkdown/kit/prose/view";
 import type { VisualEditorBridge } from "../markdownVisualBridge";
 import { getVisualEditor } from "../markdownVisualBridge";
 import { tStatic } from "../i18n";
+import { outdentMarkdownBlock } from "./listKeys";
 const names: Record<string, string> = { "**": "strong", "*": "emphasis", "~~": "strike_through", "`": "inlineCode", "<u>": "deditor_underline", "<sup>": "deditor_sup", "<sub>": "deditor_sub" };
 export function visualCommands(view: EditorView, tabId: string, parse: (s: string) => ProseNode, boundary: () => void): VisualEditorBridge {
   const { from, to, $from } = view.state.selection;
@@ -41,6 +42,7 @@ export function visualCommands(view: EditorView, tabId: string, parse: (s: strin
   return { tabId, editable: view.editable, selected,
     heading: $from.parent.type.name === "heading" ? $from.parent.attrs.level : 0,
     focus, insert,
+    outdent() { boundary(); outdentMarkdownBlock(view.state, view.dispatch, view); boundary(); focus(); },
     marked: marker => {
       const mark = view.state.schema.marks[names[marker]];
       return !!mark && (from === to ? !!mark.isInSet(currentMarks()) : view.state.doc.rangeHasMark(from, to, mark));
