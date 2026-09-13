@@ -77,6 +77,7 @@
 .md-visual-shell .milkdown .md-diagram-block .md-code-editor .cm-editor { flex: 1; min-width: 0; min-height: 0; border: 0; border-radius: 0; }
 .md-visual-shell .milkdown .md-diagram-block .md-code-preview { max-height: 60vh; background: var(--bg); }
 .md-visual-shell .milkdown .md-diagram-block .md-code-preview > :is(.mermaid-diagram, .plantuml-diagram) { border: 0; border-radius: 0; min-height: 100%; }
+.md-visual-shell .milkdown .md-diagram-block[data-diagram-mode="preview"] .md-code-preview > :is(.mermaid-diagram, .plantuml-diagram):not(.error) { justify-content: center; }
 .md-visual-shell[data-readonly="true"] .md-code-toggle { display: none; }
 
 /* Markdown has no standard persisted resize ratio. Keep image alt text semantic. */
