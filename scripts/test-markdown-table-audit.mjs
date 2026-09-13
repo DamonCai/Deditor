@@ -123,6 +123,23 @@ try {
   const event=new dom.window.MouseEvent('mousedown',{bubbles:true});Object.defineProperty(event,'target',{value:target});
   assert.equal(nodeView.stopEvent(event),false);await pause(40);assert.equal(view.state.selection.head,at);nodeView.destroy();
  });
+ await test('F00g selected list column excludes adjacent blank cells in copy, delete and undo',async()=>{
+  const text='Before unchanged\n\n| Work | Targets | Notes |\n| --- | --- | --- |\n| Left untouched | 1. 中文目标<br>2. **Second**<br>3. Last | Right untouched |\n|  | 1. Next<br>2. 😀 | Tail |\n\nAfter unchanged\n';
+  for(const index of [0,1,2]){
+   await reset(text);const loaded=content();await command('selectColCommand',{pos:table().pos+1,index});assert.equal(content(),loaded);
+   const selection=view.state.selection;assert.ok(selection instanceof CellSelection);assert.ok(selection.isColSelection());
+   const selected=[];selection.forEachCell((node,pos)=>selected.push({text:node.textContent,pos}));assert.equal(selected.length,3);
+   const map=TableMap.get(table().node);assert.ok(selected.every(cell=>map.findCell(cell.pos-table().pos-1).left===index));
+   const copied=selection.content();copied.content.forEach(row=>assert.equal(row.childCount,1));
+   if(index===1){assert.ok(copied.content.textBetween(0,copied.content.size).includes('中文目标'));assert.ok(!copied.content.textBetween(0,copied.content.size).includes('untouched'));}
+   await select('Left untouched',0);
+   await act(async()=>view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc,view.state.selection.from,view.state.selection.from+4))));
+   assert.equal(view.dom.classList.contains('ProseMirror-hideselection'),false);assert.equal(view.state.selection.content().content.textBetween(0,view.state.selection.content().content.size),'Left');
+   await command('selectColCommand',{pos:table().pos+1,index});
+   const before=matrix(),expected=before.map(row=>row.filter((_,col)=>col!==index));
+   await command('deleteSelectedCellsCommand');assert.deepEqual(matrix(),expected);await roundtrip(loaded);
+  }
+ });
  await test('F01 cell edit/delete/format retains surrounding source and exact history',async()=>{
   await reset(original);await select('one',1);await act(async()=>view.dispatch(view.state.tr.insertText('X')));assert.equal(matrix()[1][0],'oXne');await roundtrip(original);
   await reset(original);await select('one',1);await act(async()=>view.dispatch(view.state.tr.delete(view.state.selection.from,view.state.selection.from+1)));assert.equal(matrix()[1][0],'oe');await roundtrip(original);

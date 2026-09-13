@@ -118,6 +118,23 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
     let cancelled = false, cleanupFlush = () => {}, cleanupInput = () => {}, cleanupAccessibility = () => {}, cleanupCompositionViewport = () => {}, cleanupInlineSource = () => {}, cleanupTypewriter = () => {}, cleanupFootnotes = () => {}, cleanupLinkSelection = () => {};
     setReady(false); setError("");
     const host = document.createElement("div"); root.current!.append(host);
+    const openLink = (href: string, dom: HTMLElement) => {
+      if (href.startsWith("#")) {
+        const id = decodeAnchor(href.slice(1));
+        Array.from(dom.querySelectorAll<HTMLElement>("[id]")).find(el => decodeAnchor(el.id) === id)?.scrollIntoView({ block: "start" });
+      } else if (/^(https?:|mailto:)/i.test(href)) void openUrl(href).catch(err => logError("Markdown link open failed", err));
+      else if (isLocalRef(href)) void openMarkdownFileLink(href, filePath).catch(err => logError("Markdown local link open failed", err));
+    };
+    // The tooltip is outside ProseMirror, so its anchors do not reach the
+    // editor's click handler. Its label retains file: even when upstream
+    // sanitizes the tooltip href to an empty string.
+    const openTooltipLink = (event: MouseEvent) => {
+      const link = (event.target as Element | null)?.closest(".milkdown-link-preview a.link-display");
+      if (!link) return;
+      event.preventDefault(); event.stopPropagation();
+      if (!cancelled && activeRef.current) openLink(link.textContent ?? "", host);
+    };
+    host.addEventListener("click", openTooltipLink, true);
     const session = markdownSession(tabId, sourceRef.current); session.breakGroup();
     const mdx = /\.mdx$/i.test(filePath ?? "");
     const upload = async (file: File) => {
@@ -164,11 +181,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
         event.preventDefault();
         const href = link.getAttribute("href") ?? "";
         if (!readonlyRef.current && !event.metaKey && !event.ctrlKey) return true;
-        if (href.startsWith("#")) {
-          const id = decodeAnchor(href.slice(1));
-          Array.from(view.dom.querySelectorAll<HTMLElement>("[id]")).find(el => decodeAnchor(el.id) === id)?.scrollIntoView({ block: "start" });
-        } else if (/^(https?:|mailto:)/i.test(href)) void openUrl(href).catch(err => logError("Markdown link open failed", err));
-        else if (isLocalRef(href)) void openMarkdownFileLink(href, filePath).catch(err => logError("Markdown local link open failed", err));
+        openLink(href, view.dom);
         return true;
       } },
     })));
@@ -381,6 +394,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active =
       } else await crepe.destroy();
     }).catch(err => logError("Markdown visual editor cleanup failed", err));
     const releaseBindings = () => {
+      host.removeEventListener("click", openTooltipLink, true);
       cleanupFlush(); cleanupInput(); cleanupAccessibility(); cleanupCompositionViewport(); cleanupInlineSource(); cleanupTypewriter(); cleanupFootnotes(); cleanupLinkSelection();
       if (runtime.current?.crepe === crepe) runtime.current = null;
     };

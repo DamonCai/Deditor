@@ -4,11 +4,23 @@ import { hydrateMermaid } from "./mermaidHydrate";
 import { hydratePlantuml } from "./plantumlHydrate";
 import { hydrateLocalImages } from "./localImgHydrate";
 
+let displayPurifier: typeof DOMPurify | undefined;
+function markdownPurifier() {
+  if (!displayPurifier) {
+    // Keep this exception local to Markdown display, not other HTML consumers.
+    displayPurifier = DOMPurify(window);
+    displayPurifier.addHook("uponSanitizeAttribute", (node, data) => {
+      if (node.nodeName === "A" && data.attrName === "href" && /^file:/i.test(data.attrValue)) data.forceKeepAttr = true;
+    });
+  }
+  return displayPurifier;
+}
+
 /** Both hosts mount the same sanitized renderer output. Diagram source is inert
  * metadata: restore it after sanitization, which can reject arrows in attributes. */
 export function markdownDisplayHtml(html: string): string {
   const original = document.createElement("template"); original.innerHTML = html;
-  const clean = document.createElement("template"); clean.innerHTML = DOMPurify.sanitize(html, {ADD_TAGS:["iframe"], FORBID_ATTR:["srcdoc"]});
+  const clean = document.createElement("template"); clean.innerHTML = markdownPurifier().sanitize(html, {ADD_TAGS:["iframe"], FORBID_ATTR:["srcdoc"]});
   for (const kind of ["mermaid", "plantuml", "legacy"]) {
     const sources = original.content.querySelectorAll(`.${kind}-diagram`);
     clean.content.querySelectorAll(`.${kind}-diagram`).forEach((element, index) => {

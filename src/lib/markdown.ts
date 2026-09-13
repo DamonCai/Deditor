@@ -113,6 +113,10 @@ const md = new MarkdownIt({
   breaks: false,
   typographer: false,
 });
+// Local documents are opened by the host's link handler, just like relative paths.
+// Retain markdown-it's checks for every other protocol.
+const validateMarkdownLink = md.validateLink.bind(md);
+md.validateLink = href => /^file:/i.test(href) || validateMarkdownLink(href);
 
 md.use(anchor, { permalink: false });
 md.use(markdownTableLists);
