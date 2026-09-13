@@ -26,7 +26,7 @@ interface TauriDragDropPayload {
 import EditorHost from "./components/EditorHost";
 import EditorSlot from "./components/EditorSlot";
 import PreviewHost from "./components/PreviewHost";
-import MarkdownVisualSlot from "./components/MarkdownVisualSlot";
+import MarkdownVisualHost from "./components/MarkdownVisualHost";
 import HtmlPreview from "./components/HtmlPreview";
 import HtmlToolbar from "./components/HtmlToolbar";
 import TitleBar from "./components/TitleBar";
@@ -526,7 +526,7 @@ export default function App() {
                 onPointerDown={event => startResize("preview", event)}
               />
             )}
-            {isMarkdown(filePath) && !isDiffTab && activeTabId && <MarkdownVisualSlot key={activeTabId} tabId={activeTabId} active={previewEnabled && markdownMode === "visual"} theme={theme} />}
+            <MarkdownVisualHost activeId={activeTabId} active={previewEnabled && markdownMode === "visual" && isMarkdown(filePath)} theme={theme} />
             {previewEnabled && !(isMarkdown(filePath) && markdownMode === "visual") && (
               <div
                 key="preview-pane"
