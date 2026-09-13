@@ -1,4 +1,5 @@
 import { outlineActiveIndex } from "../lib/markdownOutline";
+import { PreviewScrollIntent } from "../lib/previewScrollIntent";
 import MarkdownOutline from "./MarkdownOutline";
 import { decodeAnchor, openMarkdownFileLink } from "../lib/markdownLinks";
 import MarkdownDocumentSurface from "./MarkdownDocumentSurface";
@@ -112,6 +113,14 @@ export default function Preview({
   // Suppress outgoing scroll events for this many ms after a programmatic scroll
   // (set when applying incoming scrollLine from editor).
   const suppressOutgoingUntil = useRef(0);
+  const scrollIntentRef = useRef<PreviewScrollIntent | null>(null);
+  useLayoutEffect(() => {
+    if (!containerRef.current) return;
+    const intent = new PreviewScrollIntent(containerRef.current, () => { suppressOutgoingUntil.current = 0; });
+    scrollIntentRef.current = intent;
+    return () => { intent.destroy(); scrollIntentRef.current = null; };
+  }, []);
+  useLayoutEffect(() => { scrollIntentRef.current?.reset(); }, [html]);
   const onScrollRef = useRef(onScroll);
   onScrollRef.current = onScroll;
   // Last known fractional source-line at the top of the preview viewport.
@@ -206,6 +215,7 @@ export default function Preview({
       }
     }
     suppressOutgoingUntil.current = Date.now() + 200;
+    scrollIntentRef.current?.reset();
     root.scrollTo({ top: Math.max(0, top), behavior: "auto" });
     return true;
   };
@@ -386,10 +396,12 @@ export default function Preview({
     let rafId = 0;
     const handler = () => {
       if (Date.now() < suppressOutgoingUntil.current) return;
+      if (!scrollIntentRef.current?.active) return;
       if (!onScrollRef.current) return;
       if (rafId) return;
       rafId = requestAnimationFrame(() => {
         rafId = 0;
+        if (Date.now() < suppressOutgoingUntil.current || !scrollIntentRef.current?.active) return;
         const markers = scrollIndexRef.current?.read();
         if (!markers || markers.lines.length === 0) return;
         const { lines, tops } = markers;

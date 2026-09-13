@@ -70,6 +70,22 @@ try {
  const check=(name)=>{checked++;console.log(`PASS ${name}`);};
 
  if(!measureOnly){
+ await reset();const outgoing=[];await show({onScroll:line=>outgoing.push(line)});await settle();
+ const scrollRoot=document.querySelector('.preview');
+ Object.defineProperty(scrollRoot,'scrollHeight',{configurable:true,get:()=>5000});
+ Object.defineProperty(scrollRoot,'clientHeight',{configurable:true,get:()=>600});
+ await act(async()=>pause(220));
+ const scroll=async()=>act(async()=>{scrollRoot.scrollTop=1200;scrollRoot.dispatchEvent(new window.Event('scroll'));await pause(30);});
+ await scroll();assert.equal(outgoing.length,0,'layout scroll never drives the source');
+ scrollRoot.dispatchEvent(new window.WheelEvent('wheel',{bubbles:true,deltaY:100}));await scroll();assert.equal(outgoing.length,1,'real wheel navigation still synchronizes');
+ await content('new rendered document');await settle();await act(async()=>pause(220));await scroll();assert.equal(outgoing.length,1,'HTML replacement scroll is ignored even after the timing guard expires');
+ scrollRoot.dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true}));await scroll();assert.equal(outgoing.length,2,'scrollbar/selection drag still synchronizes');
+ await act(async()=>{scrollRoot.dispatchEvent(new window.Event('scroll'));document.body.dispatchEvent(new window.InputEvent('beforeinput',{bubbles:true,inputType:'insertText',data:'x'}));await pause(30);});
+ assert.equal(outgoing.length,2,'queued preview scroll cannot run after source input');
+ scrollRoot.dispatchEvent(new window.KeyboardEvent('keydown',{bubbles:true,key:'PageDown'}));await scroll();assert.equal(outgoing.length,3,'keyboard preview scrolling still synchronizes');
+ await show({onScroll:line=>outgoing.push(line),scrollLine:2});await act(async()=>pause(220));await scroll();assert.equal(outgoing.length,3,'incoming source navigation is not echoed');
+ check('WebKit layout scrolls cannot move source; wheel, drag and keyboard navigation remain active');
+
  await reset(); await show(); await settle();
  assert.equal(calls.length,1); assert.match(text(),/initial/); check('omitted active defaults to visible');
  await show({active:false}); await content('hidden latest'); await settle();

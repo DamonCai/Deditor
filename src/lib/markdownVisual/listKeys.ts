@@ -85,7 +85,7 @@ const indentList = (reverse: boolean): Command => (state, dispatch, view) => {
   if (view?.editable === false || view?.composing || !(state.selection instanceof TextSelection) || isInTable(state)) return false;
   const { $from } = state.selection;
   if ($from.parent.type.spec.code) return false;
-  if (reverse && $from.sameParent(state.selection.$to) && $from.depth > 1) {
+  if (reverse && $from.depth > 1 && state.selection.$to.depth === $from.depth && $from.node(-1) === state.selection.$to.node(-1)) {
     const parent = $from.node(-1);
     // A continuation paragraph/heading belongs to an item, but is not the
     // entire item. Lift this block, leaving its preceding paragraphs in place.

@@ -88,8 +88,8 @@ await test('D01 outdent: only the selected continuation leaves lists or quotes',
 await test('D01 outdent: nested quotes/lists, heading Backspace and table boundaries',async()=>{
  for(const original of ['> keep\n>\n> ## target\n>\n> following\n','> > keep\n> >\n> > ## target\n','* outer\n  * keep\n\n    ## target\n']){
   await reset(original);await select('target');let count=0;
-  while(view.state.selection.$from.depth>1 && count++<5)await key('Tab',{shiftKey:true});
-  assert.equal(view.state.selection.$from.depth,1);assert.equal(view.state.selection.$from.parent.type.name,'heading');assert.ok(view.state.doc.textContent.includes('keep'));await exactHistory(original);
+  while(view.state.selection.$from.depth>1 && count++<5){const before=content();await key('Tab',{shiftKey:true});await exactHistory(before);await act(async()=>pause(100));await select('target');}
+  assert.equal(view.state.selection.$from.depth,1);assert.equal(view.state.selection.$from.parent.type.name,'heading',JSON.stringify({original,content:content(),doc:view.state.doc.toJSON()}));assert.ok(view.state.doc.textContent.includes('keep'));
  }
  const original='* keep\n\n  ## target\n';await reset(original);await select('target',0);await key('Backspace');assert.equal(view.state.selection.$from.depth,1);assert.equal(view.state.selection.$from.parent.type.name,'heading');await exactHistory(original);
  const table='| A | B |\n| --- | --- |\n| target | other |\n';await reset(table);await select('target');await run(()=>button('Decrease indent').click());assert.equal(content(),table);
