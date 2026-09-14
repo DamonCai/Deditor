@@ -38,7 +38,7 @@ const MarkdownVisualHost = memo(function MarkdownVisualHost({ activeId, active, 
       const editor = getVisualEditor();
       if (didFocus || editor?.tabId !== visibleId || !editor.editable) return;
       didFocus = true;
-      editor.focus();
+      (editor.restoreFocus ?? editor.focus)();
     };
     const unsubscribe = subscribeVisualEditor(focus);
     focus();

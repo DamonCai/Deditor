@@ -27,7 +27,9 @@ export default function PreviewModeSwitch({ markdown = false }: { markdown?: boo
       const editor = current.markdownMode === "visual" ? getVisualEditor() : getActiveView();
       const tabId = current.markdownMode === "visual" ? getVisualEditor()?.tabId : getActiveViewTabId();
       if (!editor || tabId !== current.activeId) return;
-      done = true; setFocusRequest(null); editor.focus();
+      done = true; setFocusRequest(null);
+      if (current.markdownMode === "visual" && "restoreFocus" in editor) (editor.restoreFocus ?? editor.focus)();
+      else editor.focus();
     };
     // The selected projection may still be loading. Wait for its bridge, and
     // abandon the request if the user has moved focus or changed documents.

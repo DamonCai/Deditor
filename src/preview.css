@@ -324,6 +324,57 @@
   padding: 4px 0;
 }
 
+/* Fenced HTML is rendered through the shared sanitizer in both Markdown
+   displays. Keep large SVG/HTML fragments within the document column. */
+:is(.preview, .milkdown .ProseMirror.md-document) .html-render-block {
+  /* Common Tailwind color tokens occur in portable SVG snippets. Supplying
+     their standard values keeps var(--color-step) presentation attributes
+     visible when the Markdown document has no matching stylesheet. */
+  --slate-50: #f8fafc;
+  --slate-200: #e2e8f0;
+  --slate-400: #94a3b8;
+  --slate-600: #475569;
+  --slate-800: #1e293b;
+  --indigo-50: #eef2ff;
+  --indigo-400: #818cf8;
+  --indigo-600: #4f46e5;
+  --indigo-800: #3730a3;
+  --emerald-50: #ecfdf5;
+  --emerald-200: #a7f3d0;
+  --emerald-400: #34d399;
+  --emerald-600: #059669;
+  --emerald-800: #065f46;
+  --sky-50: #f0f9ff;
+  --sky-200: #bae6fd;
+  --sky-400: #38bdf8;
+  --sky-600: #0284c7;
+  --sky-800: #075985;
+  --rose-50: #fff1f2;
+  --rose-400: #fb7185;
+  --rose-600: #e11d48;
+  --rose-800: #9f1239;
+  --amber-50: #fffbeb;
+  --amber-200: #fde68a;
+  --amber-400: #fbbf24;
+  --amber-600: #d97706;
+  --amber-800: #92400e;
+  width: 100%;
+  min-width: 0;
+  margin: var(--md-block-space) 0;
+  overflow: auto;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) .html-render-block > svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  /* Portable SVG snippets are commonly authored for a light canvas and leave
+     some cards transparent (`fill="none"`). Do not let the app's dark page
+     show through those cards; an authored SVG background still paints over
+     this fallback. */
+  background-color: #fff;
+  color-scheme: light;
+}
+
 /* PlantUML diagram */
 :is(.preview, .milkdown .ProseMirror.md-document) .plantuml-diagram {
   display: flex;

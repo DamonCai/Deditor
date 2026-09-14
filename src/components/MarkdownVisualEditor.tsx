@@ -75,6 +75,7 @@ import { saveImage } from "../lib/fileio";
 import { logError } from "../lib/logger";
 import { showError } from "../lib/feedback";
 import { Button } from "./ui/Button";
+import { normalizeMarkdownFences } from "../lib/markdownFence";
 import "@milkdown/crepe/theme/common/style.css";
 import "./markdown-visual.css";
 
@@ -164,7 +165,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
     const clipboardImages = imageClipboard(upload, () => activeRef.current && !readonlyRef.current && !cancelled, () => session.breakGroup());
     const initialSource = sourceRef.current;
     const codeNodeView = codeView(tabId, theme);
-    const crepe = new CrepeBuilder({ root: host, defaultValue: initialSource })
+    const crepe = new CrepeBuilder({ root: host, defaultValue: normalizeMarkdownFences(initialSource) })
       .addFeature(codeMirror)
       .addFeature(table, {
         addRowIcon: tableIcon(t("md.addRow"), "plus"), addColIcon: tableIcon(t("md.addColumn"), "plus"),
@@ -219,17 +220,22 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
       if (cancelled) return;
       crepe.editor.action(ctx => {
         const view = ctx.get(editorViewCtx), parse = ctx.get(parserCtx), serialize = ctx.get(serializerCtx);
-        const document = new MarkdownDocument(initialSource, parse, serialize, mdx, view.state.doc);
+        const parseSource = (value: string) => parse(normalizeMarkdownFences(value));
+        const document = new MarkdownDocument(initialSource, parseSource, serialize, mdx, view.state.doc);
         let inlineEditing: ReturnType<typeof installInlineSource> | undefined;
         let enterOperation = false;
         let selectionDeleteOperation = false;
         const historyState = () => ({ document: document.snapshot(), selection: { anchor: view.state.selection.anchor, head: view.state.selection.head }, selectionJSON: view.state.selection.toJSON(), sourceSelection: { anchor: document.sourceOffset(view.state.selection.anchor), head: document.sourceOffset(view.state.selection.head) } });
         const publish = () => {
           if (cancelled || !activeRef.current) return;
-          const bridge = visualCommands(view, tabId, parse, () => session.breakGroup());
+          const bridge = visualCommands(view, tabId, parseSource, () => session.breakGroup());
           bridge.source = document.source;
           bridge.owner = owner.current;
-          const fresh = () => { inlineEditing?.close(); return visualCommands(view, tabId, parse, () => session.breakGroup()); };
+          bridge.restoreFocus = () => {
+            view.dom.dispatchEvent(new Event("deditor-restore-focus"));
+            view.focus();
+          };
+          const fresh = () => { inlineEditing?.close(); return visualCommands(view, tabId, parseSource, () => session.breakGroup()); };
           bridge.wrap = (...args) => fresh().wrap(...args);
           bridge.prefix = (...args) => fresh().prefix(...args);
           bridge.insert = (...args) => fresh().insert(...args);

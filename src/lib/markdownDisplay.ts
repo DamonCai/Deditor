@@ -3,6 +3,7 @@ import DOMPurify from "dompurify";
 import { hydrateMermaid } from "./mermaidHydrate";
 import { hydratePlantuml } from "./plantumlHydrate";
 import { hydrateLocalImages } from "./localImgHydrate";
+import { hydrateHtmlBlocks } from "./htmlBlockHydrate";
 
 let displayPurifier: typeof DOMPurify | undefined;
 function markdownPurifier() {
@@ -30,6 +31,16 @@ export function markdownDisplayHtml(html: string): string {
       }
     });
   }
+  const htmlSources = original.content.querySelectorAll(".html-render-block");
+  clean.content.querySelectorAll(".html-render-block").forEach((element, index) => {
+    const source = htmlSources[index]?.getAttribute("data-html-source");
+    if (source != null) element.setAttribute("data-html-source", source);
+  });
+  clean.content.querySelectorAll<HTMLElement>(".html-render-block").forEach(element => {
+    const source = element.getAttribute("data-html-source") ?? "";
+    element.removeAttribute("data-html-source");
+    element.innerHTML = markdownPurifier().sanitize(source, {ADD_TAGS:["iframe"], FORBID_ATTR:["srcdoc"]});
+  });
   for (const frame of clean.content.querySelectorAll("iframe")) {
     const src = frame.getAttribute("src") ?? "";
     if (!/^https?:\/\//i.test(src)) {frame.remove();continue;}
@@ -52,7 +63,8 @@ export interface MarkdownDisplayOptions {
 export function hydrateMarkdownDisplay(root: HTMLElement, options: MarkdownDisplayOptions) {
   hydrateLocalImages(root, options.filePath ?? null, options.imageRoot ?? null);
   const children = [hydrateMermaid(root, options.theme), hydratePlantuml(root), hydrateLegacyDiagrams(root, options.theme)];
+  const html = hydrateHtmlBlocks(root);
   const controller = new AbortController();
-  controller.signal.addEventListener("abort", () => children.forEach(child => child.abort()), { once: true });
-  return Object.assign(controller, { done: Promise.all(children.map(child => child.done)).then(() => {}) });
+  controller.signal.addEventListener("abort", () => [...children, html].forEach(child => child.abort()), { once: true });
+  return Object.assign(controller, { done: Promise.all([...children, html].map(child => child.done)).then(() => {}) });
 }

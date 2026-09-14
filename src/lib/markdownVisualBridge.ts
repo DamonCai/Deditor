@@ -8,6 +8,9 @@ export interface VisualEditorBridge {
   source?: string;
   marked: (marker: string) => boolean;
   focus: () => void;
+  /** Restore keyboard focus after a mode/tab switch without treating a
+   * remembered code-block caret as a request to open its source editor. */
+  restoreFocus?: () => void;
   navigate?: (line: number, column?: number) => void;
   find?: () => void;
   wrap: (prefix: string, suffix: string) => void;

@@ -22,6 +22,7 @@ import { logError } from "../logger";
 export function codeView(tabId: string, theme: "light" | "dark") {
   return (initial: ProseNode, view: ProseView, getPos: () => number | undefined): NodeView => {
     let node = initial, updating = false, generation = 0, languageGeneration = 0, destroyed = false, expanded = false;
+    let suppressSelectionReveal = false;
     type DiagramMode = "edit" | "split" | "preview";
     let diagramMode: DiagramMode = "preview";
     let renderTimer: ReturnType<typeof setTimeout> | undefined;
@@ -265,7 +266,16 @@ export function codeView(tabId: string, theme: "light" | "dark") {
       if (!view.editable) { expanded = false; diagramMode = "preview"; }
       render();
     };
+    const restoreFocus = () => {
+      // A remembered caret can live inside this node while switching files or
+      // entering Reading Edit. Keep the rendered projection visible until the
+      // user actually clicks or keyboards into the block.
+      if (!hasDiagramModes() && expanded) { expanded = false; render(); }
+      suppressSelectionReveal = true;
+      queueMicrotask(() => { suppressSelectionReveal = false; });
+    };
     view.dom.addEventListener("deditor-editable-change", modeChanged);
+    view.dom.addEventListener("deditor-restore-focus", restoreFocus);
     const configure = () => {
       const settings = useEditorStore.getState().markdownSettings;
       dom.dataset.lineNumbers = String(settings.codeLineNumbers);
@@ -279,6 +289,7 @@ export function codeView(tabId: string, theme: "light" | "dark") {
     return { dom, stopEvent: () => true, ignoreMutation: () => true,
       setSelection(anchor, head) {
         if (!view.editable) return;
+        if (suppressSelectionReveal) { suppressSelectionReveal = false; return; }
         if (editor.hidden) { expanded = true; if (hasDiagramModes()) diagramMode = "split"; render(); }
         updating = true;
         const active = ensureEditor();
@@ -296,7 +307,7 @@ export function codeView(tabId: string, theme: "light" | "dark") {
         if (languageChanged) { loadLanguage(); loadPresentation(); }
         if (textChanged || languageChanged || language.readOnly === view.editable) render(textChanged && !languageChanged);
         return true;
-      }, destroy() { split.destroy(); view.dom.removeEventListener("deditor-writing-change", settingsChanged); view.dom.removeEventListener("deditor-document-change", documentChanged); view.dom.removeEventListener("deditor-editable-change", modeChanged); dom.removeEventListener("focusout", collapse); destroyed = true; generation++; if (renderTimer) clearTimeout(renderTimer); controllers.forEach(controller => controller.abort()); cm?.destroy(); },
+      }, destroy() { split.destroy(); view.dom.removeEventListener("deditor-writing-change", settingsChanged); view.dom.removeEventListener("deditor-document-change", documentChanged); view.dom.removeEventListener("deditor-editable-change", modeChanged); view.dom.removeEventListener("deditor-restore-focus", restoreFocus); dom.removeEventListener("focusout", collapse); destroyed = true; generation++; if (renderTimer) clearTimeout(renderTimer); controllers.forEach(controller => controller.abort()); cm?.destroy(); },
     };
   };
 }
