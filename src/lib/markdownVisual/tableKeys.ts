@@ -1,6 +1,6 @@
 import type { EditorView } from "@milkdown/kit/prose/view";
 import { EditorState, NodeSelection, Selection, TextSelection } from "@milkdown/kit/prose/state";
-import { addRowAfter, goToNextCell, isInTable } from "@milkdown/kit/prose/tables";
+import { addRowAfter, CellSelection, goToNextCell, isInTable } from "@milkdown/kit/prose/tables";
 
 /** Preserve table caret positions through clearing, boundary navigation and history. */
 export function handleTableKeys(view: EditorView, event: KeyboardEvent) {
@@ -27,6 +27,28 @@ export function handleTableKeys(view: EditorView, event: KeyboardEvent) {
     }
   }
   if (!inTable) return false;
+  if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey
+    && !view.composing && !event.isComposing && event.keyCode !== 229) {
+    // GFM binds plain Enter to ExitTable. Keep ordinary line breaks in the
+    // cell; its serializer persists hardbreaks as <br>. Mod-Enter still exits.
+    if (selection instanceof TextSelection) {
+      let cellDepth = selection.$from.depth;
+      while (cellDepth > 0 && !["table_cell", "table_header"].includes(selection.$from.node(cellDepth).type.name)) cellDepth--;
+      if (cellDepth && selection.$from.sharedDepth(selection.to) >= cellDepth) {
+        event.preventDefault();
+        view.dispatch(view.state.tr.setMeta("hardbreak", true).replaceSelectionWith(view.state.schema.nodes.hardbreak.create()).scrollIntoView());
+        return true;
+      }
+    } else if (selection instanceof CellSelection) {
+      // Enter starts editing the selected cell without clearing a rectangle.
+      const next = Selection.findFrom(selection.$headCell, 1, true);
+      if (next) {
+        event.preventDefault();
+        view.dispatch(view.state.tr.setSelection(next).scrollIntoView());
+        return true;
+      }
+    }
+  }
   if ((event.key === "Backspace" || event.key === "Delete") && !event.metaKey && !event.ctrlKey && !event.altKey
     && !event.isComposing && !view.composing && selection instanceof NodeSelection
     && selection.node.type.name === "paragraph" && selection.$from.parent.childCount === 1

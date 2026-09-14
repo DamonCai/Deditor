@@ -193,9 +193,25 @@ try {
   await reset(original);await select('one');await key('Tab');assert.equal(view.state.selection.$head.parent.textContent,'two');await key('Tab',{shiftKey:true});assert.equal(view.state.selection.$head.parent.textContent,'one');
   await select('four');await key('Tab');assert.equal(table().node.childCount,4);assert.equal(view.state.selection.$head.parent.textContent,'');await roundtrip(original);
  });
- await test('F02 Enter exits table; Shift Enter makes a durable in-cell line break',async()=>{
-  await reset(original);await select('one',1);await key('Enter');assert.equal(view.state.selection.$head.parent.type.name,'paragraph');assert.equal(view.state.selection.$head.depth,1);await roundtrip(original);
+ await test('F02 Enter stays in the cell; Mod Enter exits and Shift Enter still breaks inside',async()=>{
+  await reset(original);await select('one',1);await key('Enter');assert.equal(view.state.selection.$head.depth,4);assert.match(content(),/o<br>ne/);assert.equal(matrix()[1][1],'two');await roundtrip(original);
+  for(const modifier of [/Mac|iP(hone|[ao]d)/.test(navigator.platform)?'metaKey':'ctrlKey']) {await reset(original);await select('one',1);await key('Enter',{[modifier]:true});assert.equal(view.state.selection.$head.depth,1);await roundtrip(original);}
   await reset(original);await select('one',1);await key('Enter',{shiftKey:true});assert.equal(table().node.child(1).child(0).firstChild.childCount,3);assert.match(content(),/o<br>ne/);await roundtrip(original);
+ });
+
+ await test('F02 plain Enter handles headers, empty cells, edges, selections and repeated breaks',async()=>{
+  for(const [text,offset] of [['A',0],['one',0],['one',3],['four',4]]) {
+   await reset(original);await select(text,offset);const cell=view.state.selection.$head.before(3);await key('Enter');assert.equal(view.state.selection.$head.before(3),cell);await roundtrip(original);
+  }
+  const empty=original.replace('| one | two |','|  | two |');await reset(empty);const emptyCell=table().pos+1+table().node.firstChild.nodeSize+3;await act(async()=>view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc,emptyCell))));await key('Enter');assert.equal(matrix()[1][0],'\n');await roundtrip(empty);
+  await reset(original);await select('one',1);await act(async()=>view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc,view.state.selection.from,view.state.selection.from+1))));await key('Enter');assert.equal(matrix()[1][0],'o\ne');await roundtrip(original);
+  await reset(original);await select('one');await key('Enter');await key('Enter');await act(async()=>view.dispatch(view.state.tr.insertText('中文😀')));assert.equal(matrix()[1][0],'one\n\n中文😀');await roundtrip(original,matrix(),3);
+  const listed=original.replace('| one | two |','| - alpha<br>- beta | two |');await reset(listed);await select('alpha',2);const cell=view.state.selection.$head.before(3);await key('Enter');assert.equal(view.state.selection.$head.before(3),cell);assert.match(content(),/al<br>  pha/);await roundtrip(listed);
+ });
+
+ await test('F02 Enter on a cell selection starts editing without deleting cells; IME confirmation is ignored',async()=>{
+  await reset(original);const {node,pos}=table(),map=TableMap.get(node);await act(async()=>view.dispatch(view.state.tr.setSelection(CellSelection.create(view.state.doc,pos+1+map.map[2],pos+1+map.map[3]))));await key('Enter');assert.ok(view.state.selection instanceof TextSelection);assert.equal(view.state.selection.$head.depth,4);assert.equal(content(),original);
+  await select('one',1);await act(async()=>view.dom.dispatchEvent(new dom.window.CompositionEvent('compositionstart',{bubbles:true})));await key('Enter',{isComposing:true,keyCode:229});await act(async()=>{view.dom.dispatchEvent(new dom.window.CompositionEvent('compositionend',{bubbles:true}));await pause(30);});assert.equal(content(),original);assert.equal(view.state.selection.$head.depth,4);
  });
 
  await test('F02 repeated softbreaks and lists inside cells preserve content across remount',async()=>{
