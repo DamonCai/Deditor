@@ -47,6 +47,20 @@ async function check(round, name, source, verify, theme = "light") {
   }
 }
 
+await check(1, "document-editor NBSP and escaped NBSP list markers", table("1.\u00a0first<br>2.\u00a0second<br>\\-\u00a0third<br>\\-\u00a0fourth"), doc => {
+  assert.equal(doc.querySelectorAll("td ol > li").length,2);
+  assert.equal(doc.querySelectorAll("td ul > li").length,2);
+  assert.deepEqual([...doc.querySelectorAll("td li")].map(n=>n.textContent.trim()),["first","second","third","fourth"]);
+});
+await check(2, "table CJK punctuation labels and nested HTML breaks", table("* **情报运营：**为正文<br>    <br>* **项目(预计)：**继续正文"), doc => {
+  assert.equal(doc.querySelectorAll("td li").length,2);
+  assert.deepEqual([...doc.querySelectorAll("td strong")].map(n=>n.textContent),["情报运营：","项目(预计)："]);
+  assert.equal(doc.querySelector("td:nth-child(2)").textContent.includes("**"),false);
+});
+await check(2, "escaped stars, ordinary escaped bullets, code and NBSP prose stay literal", table("\\- plain<br>`1.\u00a0code`<br>`\\-\u00a0code`<br>\\*\\*情报：\\*\\*正文<br>正文\u00a0保留"), doc => {
+  assert.equal(doc.querySelectorAll("td li, td strong").length,0);
+  assert.ok(doc.querySelector("td:nth-child(2)").textContent.includes("正文\u00a0保留"));
+});
 for (const marker of ["-", "+", "*"]) {
   await check(1, `${marker} bullet list`, table(`${marker} **第一项**<br>${marker} *第二项*`), doc => {
     assert.equal(doc.querySelectorAll("td ul > li").length, 2);

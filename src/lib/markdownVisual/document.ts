@@ -12,14 +12,23 @@ import remarkMath from "remark-math";
 import remarkFrontmatter from "remark-frontmatter";
 import type { Node as ProseNode } from "@milkdown/kit/prose/model";
 import { sourceChange } from "../markdownSession";
+import { normalizeMarkdownFences } from "../markdownFence";
 
 export interface SourceNode {
   type: string; value?: string; children?: SourceNode[];
   position?: { start: { offset?: number }; end: { offset?: number } };
 }
 const syntax = unified().use(remarkParse).use(remarkGfm, { singleTilde: false }).use(remarkMark).use(remarkShorthand).use(remarkMath).use(remarkFrontmatter, ["yaml", "toml"]);
-export function sourceTree(source: string): SourceNode { return syntax.parse(source) as SourceNode; }
+export function sourceTree(source: string): SourceNode { return syntax.parse(normalizeMarkdownFences(source)) as SourceNode; }
 function editingTree(source: string): SourceNode { const tree = sourceTree(source); editableBlockTree(tree, source); tableListTree(tree, source); taskIndentTree(tree); orderFootnoteTree(tree); return tree; }
+function editingBlock(source: string, definitions: string): SourceNode {
+  const parsed = (editingTree(source + (definitions ? "\n\n" + definitions : "")).children ?? [])
+    .filter(node => range(node)[0] < source.length);
+  // Definitions resolve links but are not owned by this block. An unclosed
+  // construct may absorb that context; never cache its oversized source range.
+  return parsed.length === 1 && range(parsed[0])[1] <= source.length ? parsed[0]
+    : { type: "deditorRaw", position: { start: { offset: 0 }, end: { offset: source.length } } };
+}
 const protectedTypes = new Set(["html", "definition", "linkReference", "imageReference", "yaml", "toml"]);
 export function protectedBlock(node: SourceNode): boolean {
   if (node.type === "paragraph" && /^\[(?:toc|\[toc\])\]$/i.test(node.children?.map(n => n.value ?? "").join("") ?? "")) return true;
@@ -124,8 +133,10 @@ export class MarkdownDocument {
   private ast: SourceNode[] = [];
   private positions = new WeakMap<ProseNode, { ast: SourceNode; start: number; ranges: { from: number; to: number; pos: number; end: number }[] }>();
   private sourceOffsets: { doc: ProseNode; ast: SourceNode[]; source: string; values: Map<number, number> } | undefined;
-  constructor(source: string, private parse: (source: string) => ProseNode, private serialize: (doc: ProseNode) => string, private mdx = false, initialDoc?: ProseNode) {
-    this.source = source; this.doc = initialDoc ?? parse(source); this.index();
+  private parse: (source: string) => ProseNode;
+  constructor(source: string, parse: (source: string) => ProseNode, private serialize: (doc: ProseNode) => string, private mdx = false, initialDoc?: ProseNode) {
+    this.parse = value => parse(normalizeMarkdownFences(value));
+    this.source = source; this.doc = initialDoc ?? this.parse(source); this.index();
   }
   private index() {
     this.ast = this.mdx && this.source ? [{ type: "deditorRaw", value: this.source, position: { start: { offset: 0 }, end: { offset: this.source.length } } }] : editingTree(this.source).children ?? [];
@@ -298,9 +309,8 @@ export class MarkdownDocument {
     });
     let cursor = from + leading.length;
     const spans = parts.map((part, index) => {
-      const parsed = (editingTree(part + (definitions ? "\n\n" + definitions : "")).children ?? []).filter(node => range(node)[0] < part.length);
-      const ast = changed[index].type.name !== "deditor_raw" && parsed.length === 1
-        ? shifted(parsed[0], cursor)
+      const ast = changed[index].type.name !== "deditor_raw"
+        ? shifted(editingBlock(part, definitions), cursor)
         : { type: "deditorRaw", position: { start: { offset: cursor }, end: { offset: cursor + part.length } } };
       cursor += part.length + eol.length * 2;
       return ast;
@@ -337,8 +347,7 @@ export class MarkdownDocument {
           const candidate = children(parsed).find(child => child.type === node.type && (node.type.name !== "footnote_definition" || child.attrs.identifier === node.attrs.identifier));
           if (candidate && this.serialize(parsed.type.create(null,candidate)) === this.serialize(next.type.create(null,node))) raw = patch;
         }
-        const parsed = (editingTree(raw + (definitions ? "\n\n" + definitions : "")).children ?? []).filter(node => range(node)[0] < raw.length);
-        const replacement = parsed.length === 1 ? parsed[0] : {type:"deditorRaw",position:{start:{offset:0},end:{offset:raw.length}}};
+        const replacement = editingBlock(raw, definitions);
         const delta = raw.length - (to - from);
         this.ast = this.ast.map((entry, index) => index === changed ? offsetTree(replacement, from) : delta && range(entry)[0] >= to ? offsetTree(entry, delta) : entry);
         this.source = this.source.slice(0,from) + raw + this.source.slice(to);
@@ -364,8 +373,7 @@ export class MarkdownDocument {
       const trailing = !ast && from<this.source.length ? eol+eol : "";
       const edit={from,to,insert:leading+raw+trailing};edits.push(edit);
       if(node) {
-        const parsed=(editingTree(raw + (definitions ? "\n\n"+definitions : "")).children??[]).filter(node => range(node)[0] < raw.length);
-        const local=parsed.length===1 ? parsed[0] : {type:"deditorRaw",position:{start:{offset:0},end:{offset:raw.length}}};
+        const local=editingBlock(raw, definitions);
         assigned.set(newIndex!,{ast:local,edit,relative:leading.length});
       }
     };
@@ -385,7 +393,7 @@ export class MarkdownDocument {
         const leading=at>0&&!this.source.slice(0,at).endsWith(eol+eol)?eol+eol:"";
         const edit={from:at,to:at,insert:leading+raw+(at<this.source.length?eol+eol:"")};edits.push(edit);
         let offset=leading.length;
-        newNodes.forEach(index=>{const part=serialize(after[index]), parsed=(editingTree(part + (definitions ? "\n\n"+definitions : "")).children??[]).filter(node => range(node)[0] < part.length);assigned.set(index,{ast:parsed[0]??{type:"deditorRaw",position:{start:{offset:0},end:{offset:part.length}}},edit,relative:offset});offset+=part.length+2*eol.length;});
+        newNodes.forEach(index=>{const part=serialize(after[index]);assigned.set(index,{ast:editingBlock(part,definitions),edit,relative:offset});offset+=part.length+2*eol.length;});
       }
     }
     const unused = before.flatMap((node,index)=>node.type.name === "footnote_definition"?[index]:[]);

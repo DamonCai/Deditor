@@ -69,8 +69,8 @@ const range=async(text,start,end)=>{let at;view.state.doc.descendants((node,pos)
 const run=async(fn)=>act(async()=>{fn();await pause(40);});
 const button=label=>{const item=[...document.querySelectorAll('button')].find(b=>b.getAttribute('aria-label')===label || b.getAttribute('aria-label')?.startsWith(label+' ('));assert.ok(item,label);return item;};
 
-const input=async(index,value)=>run(()=>{const el=document.querySelectorAll('[role="search"] input')[index];Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}));});
-const searchButton=text=>{const b=[...document.querySelectorAll('[role="search"] button')].find(b=>b.textContent===text);assert.ok(b,text);return b;};
+const input=async(index,value)=>run(()=>{const el=document.querySelectorAll('[role="search"] input:not([type="checkbox"])')[index];Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}));});
+const searchButton=text=>{const names={'Whole word':'input[name=word]','Match case':'input[name=case]','Regex':'input[name=re]','Replace current':'button[name=replace]','Replace All':'button[name=replaceAll]'};const b=document.querySelector('[role=search] '+names[text]);assert.ok(b,text);return b;};
 const count=()=>document.querySelector('[role="search"]').textContent;
 const open=async()=>run(()=>app.getVisualEditor().find());
 

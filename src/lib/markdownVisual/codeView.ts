@@ -3,7 +3,7 @@ import { diagramSplit } from "./diagramSplit";
 import { markdownMathContext } from "../markdownMath";
 import type { Node as ProseNode } from "@milkdown/kit/prose/model";
 import type { EditorView as ProseView, NodeView } from "@milkdown/kit/prose/view";
-import { NodeSelection, TextSelection } from "@milkdown/kit/prose/state";
+import { NodeSelection, TextSelection, Selection } from "@milkdown/kit/prose/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { EditorState, Prec, Compartment, type Extension } from "@codemirror/state";
 import { basicSetup } from "codemirror";
@@ -22,6 +22,7 @@ import { logError } from "../logger";
 export function codeView(tabId: string, theme: "light" | "dark") {
   return (initial: ProseNode, view: ProseView, getPos: () => number | undefined): NodeView => {
     let node = initial, updating = false, generation = 0, languageGeneration = 0, destroyed = false, expanded = false;
+    let suppressSelectionReveal = false;
     type DiagramMode = "edit" | "split" | "preview";
     let diagramMode: DiagramMode = "preview";
     let renderTimer: ReturnType<typeof setTimeout> | undefined;
@@ -45,7 +46,22 @@ export function codeView(tabId: string, theme: "light" | "dark") {
     const toggle = document.createElement("button"); toggle.className = "deditor-btn md-code-toggle"; toggle.dataset.variant = "ghost";
     const copy = document.createElement("button"); copy.className = "deditor-btn"; copy.dataset.variant = "ghost"; copy.textContent = tStatic("editor.copy");
     copy.onclick = () => { void navigator.clipboard.writeText(node.textContent).catch(err => logError("Markdown code copy failed", err)); };
-    const family = document.createElement("span"); family.className = "md-diagram-family";
+    const family = document.createElement("button"); family.type = "button"; family.className = "deditor-btn md-diagram-family"; family.dataset.variant = "ghost";
+    family.title = tStatic("md.selectDiagram"); family.setAttribute("aria-label", tStatic("md.selectDiagram")); family.onmousedown = event => event.preventDefault(); family.onclick = selectNode;
+    const familyIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg"); familyIcon.setAttribute("viewBox", "0 0 24 24"); familyIcon.setAttribute("aria-hidden", "true");
+    const familyPath = document.createElementNS("http://www.w3.org/2000/svg", "path"); familyPath.setAttribute("d", "M8 3h8v5H8z M3 16h7v5H3z M14 16h7v5h-7z M12 8v4 M6.5 16v-4h11v4"); familyIcon.append(familyPath);
+    const familyLabel = document.createElement("span"); family.append(familyIcon, familyLabel);
+    const remove = document.createElement("button"); remove.type = "button"; remove.className = "deditor-btn md-diagram-delete"; remove.dataset.variant = "ghost";
+    remove.title = tStatic("md.deleteDiagram"); remove.setAttribute("aria-label", tStatic("md.deleteDiagram"));
+    const removeIcon = familyIcon.cloneNode(false) as SVGElement, removePath = familyPath.cloneNode() as SVGElement;
+    removePath.setAttribute("d", "M3 6h18 M9 6V3h6v3 M5 6l1 15h12l1-15 M10 10v7 M14 10v7"); removeIcon.append(removePath); remove.append(removeIcon);
+    remove.onmousedown = event => event.preventDefault();
+    remove.onclick = () => {
+      const pos = getPos(); if (!view.editable || pos === undefined) return;
+      const tr = view.state.tr.delete(pos, pos + node.nodeSize);
+      tr.setSelection(Selection.near(tr.doc.resolve(Math.min(pos, tr.doc.content.size))));
+      view.dispatch(tr.setMeta('deditor-list-operation', true).scrollIntoView()); view.focus();
+    };
     const modes = document.createElement("div"); modes.className = "deditor-segments md-diagram-modes";
     modes.setAttribute("role", "group"); modes.setAttribute("aria-label", tStatic("md.diagramMode"));
     const modeButtons = (["edit", "split", "preview"] as const).map(mode => {
@@ -54,7 +70,7 @@ export function codeView(tabId: string, theme: "light" | "dark") {
       button.onclick = () => setDiagramMode(mode);
       modes.append(button); return button;
     });
-    bar.append(language, family, toggle, modes, copy);
+    bar.append(language, family, toggle, modes, remove, copy);
     const editor = document.createElement("div"), preview = document.createElement("div"); preview.className = "md-code-preview"; editor.className = "md-code-editor";
     const body = document.createElement("div"); body.className = "md-code-body";
     const split = diagramSplit(body); body.append(editor, split.separator, preview);
@@ -113,6 +129,7 @@ export function codeView(tabId: string, theme: "light" | "dark") {
           update.changes.iterChanges((fromA, toA, fromB, toB, text) => {
             tr.replaceWith(offset + fromA, offset + toA, text.length ? view.state.schema.text(text.toString()) : []); offset += (toB - fromB) - (toA - fromA);
           });
+          if (update.transactions.some(transaction => transaction.isUserEvent("input.paste") || transaction.isUserEvent("delete.cut"))) tr.setMeta("deditor-list-operation", true);
           tr.setSelection(TextSelection.create(tr.doc, pos + 1 + update.state.selection.main.anchor, pos + 1 + update.state.selection.main.head));
           view.dispatch(tr);
         }
@@ -153,8 +170,10 @@ export function codeView(tabId: string, theme: "light" | "dark") {
       dom.dataset.diagramMode = threeModes ? diagramMode : "";
       if (threeModes) expanded = diagramMode !== "preview";
       modes.hidden = !threeModes || !view.editable;
-      family.hidden = !threeModes;
-      family.textContent = lang === "mermaid" ? "Mermaid" : "PlantUML";
+      family.hidden = !threeModes; family.disabled = !view.editable; remove.hidden = !threeModes || !view.editable;
+      if (threeModes) copy.remove();
+      else if (!copy.isConnected) bar.append(copy);
+      familyLabel.textContent = lang === "mermaid" ? "Mermaid" : "PlantUML";
       language.hidden = threeModes;
       preview.tabIndex = threeModes && view.editable ? 0 : -1;
       if (threeModes) preview.setAttribute("aria-label", tStatic("md.diagramPreview"));
@@ -172,7 +191,7 @@ export function codeView(tabId: string, theme: "light" | "dark") {
       toggle.hidden = threeModes || !diagram || !view.editable;
       toggle.textContent = tStatic(expanded ? "md.hideSource" : "md.editSourceBlock");
       language.readOnly = !view.editable;
-      selectBlock.hidden = !view.editable;
+      selectBlock.hidden = !view.editable || threeModes;
       const code = node.textContent;
       const fence = "`".repeat(Math.max(3, ...Array.from(code.matchAll(/`+/g), m => m[0].length + 1)));
       const source = lang === "latex" ? `$$\n${code}\n$$` : `${fence}${lang}\n${code}\n${fence}`;
@@ -242,14 +261,15 @@ export function codeView(tabId: string, theme: "light" | "dark") {
     };
     const collapse = (event: FocusEvent) => {
       if (hasDiagramModes()) return;
-      if (dom.contains(event.relatedTarget as Node | null)) return;
+      if (dom.contains(event.relatedTarget as Node | null) || event.relatedTarget instanceof Element && event.relatedTarget.closest(".md-editor-menu")) return;
       if (expanded) { expanded = false; render(); }
     };
+    const menuClosed = () => queueMicrotask(() => {
+      if (!destroyed && !hasDiagramModes() && expanded && !dom.contains(document.activeElement)) { expanded = false; render(); }
+    });
+    view.dom.addEventListener("deditor-contextmenu-close", menuClosed);
     dom.addEventListener("focusout", collapse);
-    dom.oncontextmenu = event => {
-      if (dom.dataset.kind !== "code") return;
-      event.preventDefault(); language.focus();
-    };
+
     toggle.onclick = () => { if (!view.editable) return; expanded = !expanded; render(); if (expanded) ensureEditor().focus(); };
     language.onchange = () => {
       if (!view.editable) return;
@@ -263,7 +283,16 @@ export function codeView(tabId: string, theme: "light" | "dark") {
       if (!view.editable) { expanded = false; diagramMode = "preview"; }
       render();
     };
+    const restoreFocus = () => {
+      // A remembered caret can live inside this node while switching files or
+      // entering Reading Edit. Keep the rendered projection visible until the
+      // user actually clicks or keyboards into the block.
+      if (!hasDiagramModes() && expanded) { expanded = false; render(); }
+      suppressSelectionReveal = true;
+      queueMicrotask(() => { suppressSelectionReveal = false; });
+    };
     view.dom.addEventListener("deditor-editable-change", modeChanged);
+    view.dom.addEventListener("deditor-restore-focus", restoreFocus);
     const configure = () => {
       const settings = useEditorStore.getState().markdownSettings;
       dom.dataset.lineNumbers = String(settings.codeLineNumbers);
@@ -277,6 +306,7 @@ export function codeView(tabId: string, theme: "light" | "dark") {
     return { dom, stopEvent: () => true, ignoreMutation: () => true,
       setSelection(anchor, head) {
         if (!view.editable) return;
+        if (suppressSelectionReveal) { suppressSelectionReveal = false; return; }
         if (editor.hidden) { expanded = true; if (hasDiagramModes()) diagramMode = "split"; render(); }
         updating = true;
         const active = ensureEditor();
@@ -294,7 +324,7 @@ export function codeView(tabId: string, theme: "light" | "dark") {
         if (languageChanged) { loadLanguage(); loadPresentation(); }
         if (textChanged || languageChanged || language.readOnly === view.editable) render(textChanged && !languageChanged);
         return true;
-      }, destroy() { split.destroy(); view.dom.removeEventListener("deditor-writing-change", settingsChanged); view.dom.removeEventListener("deditor-document-change", documentChanged); view.dom.removeEventListener("deditor-editable-change", modeChanged); dom.removeEventListener("focusout", collapse); destroyed = true; generation++; if (renderTimer) clearTimeout(renderTimer); controllers.forEach(controller => controller.abort()); cm?.destroy(); },
+      }, destroy() { split.destroy(); view.dom.removeEventListener("deditor-contextmenu-close", menuClosed); view.dom.removeEventListener("deditor-writing-change", settingsChanged); view.dom.removeEventListener("deditor-document-change", documentChanged); view.dom.removeEventListener("deditor-editable-change", modeChanged); view.dom.removeEventListener("deditor-restore-focus", restoreFocus); dom.removeEventListener("focusout", collapse); destroyed = true; generation++; if (renderTimer) clearTimeout(renderTimer); controllers.forEach(controller => controller.abort()); cm?.destroy(); },
     };
   };
 }

@@ -1,228 +1,76 @@
 # DEditor
 
-DEditor 是基于 Tauri 2、React 和 TypeScript 的桌面 Markdown / 多语言代码编辑器，面向 macOS 和 Windows。使用系统 WebView，不随应用捆绑 Chromium。
+**写 Markdown、改代码、画思维导图，一个编辑器就够。**
 
-当前开发版本为 **0.9.0**。Markdown 已接入阅读编辑内核，并补充行内源码展开、文档扩展语法及写作设置；源码编辑、HTML 预览和 XMind 编辑各自保留独立处理路径。安装包大小、启动时间和内存占用取决于平台、构建方式及打开的文件，本项目不将历史测量值作为固定承诺。
+DEditor 面向 macOS 和 Windows，把 Markdown 可视化写作、多语言代码编辑和 XMind 编辑放进同一个本地工作区。适合写技术方案、整理笔记、修改配置，以及对照文档做日常开发。
 
-## Markdown 写作
+[核心特点](#核心特点) · [与常用编辑器相比](#与常用编辑器相比) · [效果展示](#效果展示) · [快速开始](#快速开始)
 
-打开 `.md` 或 `.markdown` 文件后，在工具条选择视图。旧版本保存的 Markdown“只读”设置会自动恢复为“阅读编辑”：
+![DEditor 阅读编辑：在排版后的正文中直接修改文字和表格](docs/images/markdown-reading.jpg)
 
-| 模式 | 用途 |
-| --- | --- |
-| 编辑 | 使用 CodeMirror 编辑完整 Markdown 源码 |
-| 实时预览 | 源码与渲染结果分栏显示，支持滚动联动 |
-| 阅读编辑 | 在排版后的文章中直接输入、选择、删除和修改内容 |
+## 核心特点
 
-阅读编辑与实时预览共用正文排版：标题、段落、列表、引用、表格、代码、公式及图片在相同栏宽和字号下保持一致，字号调整同时生效。阅读编辑在页边显示当前编辑块的轻量提示：标题 H1–H6、正文 `¶`、引用 `>`、提示块 `[!]`、脚注 `[^]`、列表 `-` / `1.`、任务 `[ ]`、表格 `| |`、代码 `</>`、公式 `$$`、图表 UML、图片 IMG、分隔线 `---`，以及 HTML / YAML / 保留原文 MD。提示跟随编辑光标或整块选中位置，选择一段文字或失焦时隐藏；不占正文空间、不写入 Markdown，也不会出现在实时预览或导出中。
+- **写作方式随时切换**：Markdown 源码、左右实时预览、阅读编辑三种模式；直接修改排版后的正文，切换模式后继续撤销。
+- **表格和图表就地处理**：表格批量增删行列、对齐、矩形选择；Mermaid / PlantUML 块内编辑与预览，支持数学公式、任务列表、脚注和目录。
+- **常用代码工具内置**：多语言高亮、多光标、列选、折叠、命令面板；JSON 格式化、压缩与键排序，SQL 方言格式化，跨文件搜索与替换。
+- **文档与代码并排工作**：左右独立标签组、独立滚动，支持同一文件双视图和双栏差异比较。写方案时可以随手核对实现。
+- **从想法到交付**：编辑 XMind 的主题、层级、联系与样式；Markdown 可导出 HTML、PDF、DOCX、PPTX 等格式，图表可导出 SVG。
+- **围绕本地文件工作**：草稿恢复、历史版本差异、可选自动保存、本地图片整理；明暗主题、中英文界面。基于 Tauri，复用系统 WebView，无需随应用捆绑 Chromium。
 
-阅读编辑基于 Milkdown / ProseMirror，支持标题、粗斜体、删除线、颜色与高亮、列表、引用、任务框、表格、链接、图片及公式。表格可直接编辑单元格、增加或删除行列，Tab / Shift+Tab 导航，末单元格 Tab 增加一行；从表格软件粘贴制表符分隔的矩形数据时自动扩展单元格，支持带引号的多行内容。列表支持 Tab 缩进、Shift+Tab 提升层级和连续 Enter 退出；兼容已有的表格内列表扩展。
+## 与常用编辑器相比
 
-光标进入粗体、斜体、删除线、行内代码或链接时，当前片段展开为原始 Markdown，可直接修改标记和链接地址。展开片段沿用正文的字体类型和字号，不切换为等宽小字。移出片段、失焦或按 Esc 后恢复排版；展开与收起不产生文档修改或撤销记录，未闭合标记与多行粘贴仍按原文保存。
+如果你习惯这些编辑器，可以这样理解 DEditor 的定位：
 
-阅读编辑使用系统原生光标，保留格式边界的方向键导航。阅读模式查找支持中文、表情、大小写、全词及正则表达式，可替换当前匹配或全部匹配，并作为一次操作撤销；正则替换支持捕获组。关闭查找后，继续输入不会重复执行全文查找。未变化文本块和标题位置会复用计算结果，以减少长文中的重复处理。
+| 编辑器 | 熟悉的能力与侧重点 | DEditor 对应的体验 |
+| --- | --- | --- |
+| [Sublime Text](https://www.sublimetext.com/) | 多重选择、分屏、快速导航，侧重代码与文本编辑 | 提供多光标、分屏与快速导航，并内置 Markdown 阅读编辑和图表展示 |
+| [Typora](https://typora.io/) | 在排版后的 Markdown 中直接写作，支持表格、公式与图表 | 提供可视化写作，同时保留源码、双栏预览，以及独立代码文件编辑 |
+| [Notepad++](https://npp-user-manual.org/docs/user-interface/) | 文本与代码处理、搜索替换、多标签和插件 | 集成常用文本工具、JSON / SQL 格式化，再加入文档排版、导出与 XMind 编辑 |
 
-操作按钮和任务框按发生变化的区域更新，避免局部输入或悬停触发全文控件检查；关闭目录时不重复计算目录，重新打开会读取最新标题和位置。性能优化保留任务框的键盘操作和辅助阅读语义。
+**DEditor 的特点是把这些日常工作连起来，减少写文档、改代码、整理导图时的应用切换。** 上表依据所链接的官方介绍与手册概括常见用途；插件可能扩展各编辑器的能力，不代表完整功能或性能排名。
 
-当前文档首次进入阅读编辑后，跨模式保留该编辑实例，避免每次切换重建整篇文档；切换标签时释放它。隐藏的编辑器暂停内容同步和命令处理，返回时复用未变块，普通单行正文修改优先局部解析；结构或引用上下文变化仍完整解析。保存与跨模式撤销使用同一份当前文档。6,303 行样例的测量与边界见[补齐与验收记录](docs/markdown-typora-implementation-2026-09-12.md)，这些测量不代表真实中文输入法或所有设备的固定延迟。 普通行内链接所在段落也支持局部解析；引用式链接和脚注仍保留完整上下文，见[单项优化验证](docs/markdown-inline-link-performance-2026-09-12.md)。
+## 效果展示
 
-代码块在进入编辑时创建 CodeMirror，支持高亮与语言设置。公式、Mermaid、PlantUML，以及 `flow` / `sequence` 围栏显示渲染结果，并提供块源码编辑入口。Mermaid、旧式流程/时序图和 KaTeX 在本地渲染，PlantUML 使用联网服务。公式支持 mhchem 化学记法、显式编号、可选自动编号，以及 `\label` / `\ref` / `\eqref`；KaTeX 的命令范围不等于完整 LaTeX 或 MathJax。
+以下为真实产品组件的浏览器截图，内容全部来自[自建展示样例](tests/readme-showcase.tsx)。桌面系统标题栏和原生菜单未包含在截图中。
 
-普通代码块与实时预览使用相同的 Shiki 高亮；点击代码或聚焦后按 Enter 进入 CodeMirror 编辑，Esc 或离开代码块后恢复呈现。公式和图表沿用同一渲染链路，源码控件在悬停或聚焦时出现。进入块源码编辑时保留原呈现高度，避免高图表突然收缩带动正文；输入时直接更新原文，退出后再更新图表，未修改的预览直接复用。
+### 用文字画流程，图表留在文档里
 
-源码、阅读编辑和工具条共用每标签撤销历史；切换模式、切换标签后可以继续撤销。中文组词按完整的一次输入记录撤销，候选更新停顿不会拆成多个拼音步骤；取消组词保留原有重做记录。保存仍以 Markdown 原文为依据：普通文字编辑优先修改对应源范围，未编辑的块保留原样；结构调整可能规范化被修改的块。显式格式化及“保存时格式化”仍按设置执行。
+Mermaid 图表支持块内「编辑 / 实时预览 / 阅读」切换，正文与公式一起排版。
 
-引用式链接及常见行内 HTML（颜色、键帽文字、换行等）保持正文可编辑，不锁住所在列表或表格。未识别 HTML、引用定义、frontmatter 等内容采用保留源码块，点击内容或“编辑此块源码”可就地修改，确认后返回呈现结果。`.mdx` 保留整篇源码，不执行 JSX，不提供完整 JSX 可视化编辑。图片保留 alt 说明与路径。悬停或聚焦图片后可设置像素宽度，清空即恢复自动尺寸；显式宽度通过标准 HTML `<img width="…">` 持久化，阅读编辑、预览和导出均识别，不使用无法保存的临时拖动比例。
+![Mermaid 流程图与数学公式](docs/images/markdown-diagram.jpg)
 
-脚注按文档中的引用顺序编号，支持回跳；`[TOC]` / `[[toc]]` 自动列出文档标题并随标题更新，重复标题使用与预览相同的链接编号。`==高亮==`、`H~2~O`、`X^2^`、`:smile:` 等简写与实时预览一致，支持输入后转换和保存重开；转义、代码示例和未知表情名称保持文字。YAML 文档头可折叠查看；`[!NOTE]`、`[!TIP]`、`[!IMPORTANT]`、`[!WARNING]`、`[!CAUTION]` 引用提示块共用渲染样式。带脚注的正文、脚注定义和提示块内容可直接编辑；悬停或键盘聚焦脚注引用时显示富文本解释浮层，保留强调、链接、代码等排版，并可跳到定义；Tab 进入浮层，Esc 返回引用。修改内容后旧浮层关闭，再次打开读取最新内容。无法识别的复杂内容仍保留为可编辑源码块。阅读编辑和实时预览都将已引用脚注按引用顺序集中显示在文末；阅读编辑只调整显示顺序，保留定义原本的源码位置。未引用定义仍在阅读编辑文末保留，便于继续编辑。
+### 左边看代码，右边写说明
 
-普通点击链接仍可编辑；按住 Cmd（macOS）或 Ctrl（Windows）点击可打开链接。支持文内标题和 `other.md#章节` 跳转，中文标题、重复标题、转义路径使用与实时预览相同的规则。目录侧栏支持层级折叠、过滤和当前章节高亮。
+左右面板可以打开不同文件，也可以对照同一文件；各自保留显示模式和滚动位置。
 
-正文输入支持括号和引号配对、跳过已有闭合符号、成对退格，以及选中文字后用 Markdown 符号包裹；遵循全局“自动闭合括号”设置。输入 `:smi` 等表情前缀显示候选，可用方向键、Enter / Tab 或鼠标选择，Esc 关闭。中文组词期间暂停这些辅助操作。空选区的 Markdown 格式符号仍遵循已有输入规则，尚未提供 Typora 全套配对偏好。
+![暗色主题下的代码与 Markdown 分屏](docs/images/split-dark.jpg)
 
-“写作设置 → 历史版本 / 恢复草稿”可查看保存版本和独立草稿记录，恢复当前文档或作为新文档打开。恢复正文可撤销，保存后才写回目标文件；草稿副本不会覆盖原文件。历史记录保存在应用数据目录的 `markdown-history`，单条上限 2 MB、每文档最多 30 条、总计最多 100 MB / 1000 条，超限轮换，不取代外部备份。
+<details>
+<summary>查看 XMind 思维导图效果</summary>
 
-“写作设置”提供以下选项，并随应用设置保存：
+在同一工作区打开 `.xmind`，编辑主题、调整层级、设置样式，再保存为 XMind 文件。
 
-- 代码块：独立行号、换行、缩进宽度和新建围栏默认语言，阅读编辑与实时预览共用显示选项。
-- 公式自动编号：按文档顺序编号，支持公式标签引用；显式编号优先。
-- 拼写检查：启用系统 WebView 提供的检查能力，具体词典和菜单取决于平台。
-- 自定义排版 CSS：仅作用于 Markdown 文章区域；不修改全局字体，不允许外部资源或全局应用选择器。HTTP(S) iframe 使用隔离沙箱显示，部分需要跨站权限的嵌入服务可能不可用。
-- 文章主题：默认、紧凑，阅读编辑与实时预览同时应用；正文字体类型统一，主题只调整排版密度。旧“衬线”设置自动恢复默认字体。
-- 段落聚焦：仅在阅读编辑正文获得焦点时弱化其他段落，不改动预览和导出。
-- 打字机模式：**默认关闭**，显式开启后输入光标居中；中文组词及确认保护期不触发居中。
-- 图片存放目录：默认 `assets`，可使用文档目录下的相对子目录，或通过“选择图片目录”指定绝对目录；源码粘贴和阅读编辑添加图片共用设置。文档 YAML 中的 `typora-copy-images-to` 优先，可使用 `./${filename}.assets` 或绝对目录；非法值回退到全局设置。绝对目标保存为显式文件 URL，避免被图片预览根目录重新解释。
-- 图片预览根目录：支持 YAML 的 `typora-root-url`，例如 `/website` 会将 `/images/a.png` 指向 `/website/images/a.png`。普通相对路径仍相对于文档，显式 `file:`、Windows 盘符路径和网络图片保留各自含义；阅读编辑、预览及图片整理使用同一解析规则。根目录只控制引用解析，不改变图片存放目录。
-- 整理本地图片：在写作设置中将当前文档引用的本地图片复制到目标目录，统一更新 Markdown、引用式和 HTML 图片路径；原文件保留，正文改动可撤销，失败项保留旧引用，网络图片跳过。
-- 下载远程图片：将当前文档 HTTP(S) 图片下载到图片目录，成功后替换引用；重复图片只下载一次，失败项保留原文，每张最多 20 MB。
-- 图床：支持本机 PicGo 服务，默认地址 `http://127.0.0.1:36677/upload`。先按 [PicGo 文档](https://docs.picgo.app/gui/guide/advance)配置图床并开启服务，再点击“上传本文本地图片”；只发送当前文档引用的本地图片，成功后替换为返回 URL。可选访问令牌只保留在本次界面会话，不写入设置文件。网络下载和上传均可在当前图片完成后停止；撤销只恢复文档引用，不删除本地或图床文件。
-- 图片路径维护：另存到其他目录时保留图片目标；应用内重命名或移动时更新已打开 Markdown 的相对图片路径。更新会成为可撤销的修改，后续保存写入文件；不扫描或重写未打开文档，也不追踪应用外的移动。
-- HTML / PDF 导出模板：默认、报告、紧凑，导出使用打开导出面板时的主题与模板快照。
+![XMind 主题、分支与样式展示](docs/images/xmind.jpg)
 
-工具条还提供链接、图片、表格、折叠块、公式和图表插入，以及 **HTML、PDF、DOCX、PPTX、TXT、SVG、PNG** 导出。SVG 用于导出文档中的图表；PDF 使用系统打印流程。导出不等于具备对应 Office 文件的导入编辑能力。
+XMind 版本与模板兼容性仍在持续核对，详见[验收范围](docs/xmind-acceptance-matrix-2026-09-11.md)。
 
-## 代码与文件工具
+</details>
 
-- CodeMirror 6：多光标、列选、代码折叠、缩进引导线、空白字符、迷你地图、自动换行、自动闭合括号、书签和颜色预览。
-- 多语言高亮：JavaScript / TypeScript、Python、Rust、Go、Java、C/C++、HTML/CSS、Vue、Svelte、SQL、JSON、YAML、TOML、Shell 等，也识别 Dockerfile、Makefile 等特殊文件名。
-- JSON / JSONC / JSON5：格式化、压缩、键排序；支持部分 Python 字典字面量输入。
-- SQL 格式化与方言选择；通用 Prettier 格式化按文件类型加载。
-- 多工作区文件树、模糊文件导航、当前文件符号跳转、跨文件搜索与替换。
-- 文件与目录拖入、重命名、新建、删除、系统定位、最近文档、重新打开关闭的标签。
-- 双栏文件差异比较、同文件分屏编辑、专注模式。
-- 自动保存可选关闭、失焦保存或停止编辑后保存；外部文件变化时，未修改标签自动重载，存在修改时提示处理。
-- 明暗主题、中英文界面、编辑器设置及快捷键开关；统一工具条、对话框和状态栏。
+## 快速开始
 
-## 支持查看的文件
-
-| 类型 | 行为 |
-| --- | --- |
-| Markdown | 源码、分栏预览、阅读编辑 |
-| HTML / HTM | 源码与独立沙箱 iframe 预览，保留文件自身排版 |
-| XMind | 本地 SVG 画布，主题编辑、层级调整、拖拽、布局、样式、备注、标签、联系、边界、概要、工作表及撤销/保存 |
-| 图片 | 内嵌查看 PNG、JPEG、GIF、SVG、WebP 等 |
-| PDF | 内嵌查看，具体交互受平台 WebView 支持影响 |
-| 音频 / 视频 | 使用平台媒体能力播放，格式兼容性取决于系统编解码器 |
-| Office、压缩包、数据库、可执行文件等二进制 | 十六进制查看，最多显示前 256 KB；不是 Word / Excel / PowerPoint 可视化编辑器 |
-
-XMind 使用专用文档模型并尽量保留原归档中的未知字段和附件，兼容性核对仍在推进；不能将已覆盖样例等同于所有 XMind 版本和模板均兼容。
-
-## 常用快捷键
-
-macOS 使用 Cmd，Windows 使用 Ctrl。快捷键会随当前编辑区有所区别，可在设置中查看和调整。
-
-| 快捷键 | 功能 |
-| --- | --- |
-| `Cmd/Ctrl+N`、`O`、`S` | 新建、打开、保存 |
-| `Cmd/Ctrl+Shift+S` | 另存为 |
-| `Cmd/Ctrl+W`、`Cmd/Ctrl+Shift+T` | 关闭标签、重新打开最近关闭标签 |
-| `Cmd/Ctrl+Z`、`Cmd/Ctrl+Shift+Z` | 撤销、重做 |
-| `Cmd/Ctrl+P` | 跨工作区模糊查找文件 |
-| `Cmd/Ctrl+Shift+P` | 命令面板 |
-| `Cmd/Ctrl+R` | 当前文档符号 / 标题跳转 |
-| `Cmd/Ctrl+F` | 当前编辑区查找 |
-| `Cmd/Ctrl+Shift+F` | 跨文件搜索与替换 |
-| `Cmd/Ctrl+Alt+G` | 源码编辑器跳行 |
-| `Cmd/Ctrl+B` | 源码模式切换侧栏；阅读编辑正文中用于加粗 |
-| `Cmd/Ctrl+K` | 专注模式 |
-| `Cmd/Ctrl+\` | 同文件分屏编辑 |
-| `Cmd/Ctrl+,` | 设置 |
-| `F2`、`F8`、`Shift+F8` | 源码书签操作；XMind 使用自己的主题编辑快捷键 |
-
-## 安装依赖与启动
-
-使用 Node.js 22 或 24 系列、npm、Rust stable。Cargo 声明的最低 Rust 版本为 1.77.2，但实际构建还受锁定依赖的工具链要求影响。macOS 需要 Xcode Command Line Tools；Windows 需要 Microsoft C++ Build Tools 和 WebView2。Linux 可用于开发，需要 WebKitGTK 等系统依赖，当前主要交付目标仍为 macOS / Windows。
+准备 Node.js 22 / 24、npm 和 Rust stable。macOS 需要 Xcode Command Line Tools；Windows 需要 Microsoft C++ Build Tools 和 WebView2。
 
 ```sh
 npm ci
 ```
 
-macOS：
+| 操作 | macOS | Windows（PowerShell） |
+| --- | --- | --- |
+| 启动开发版 | `./scripts/start.sh` | `.\scripts\start.ps1` |
+| 构建安装包 | `./scripts/build-mac.sh` | `.\scripts\build-win.ps1` |
 
-```sh
-./scripts/start.sh
-# 保留 Vite 缓存
-./scripts/start.sh --no-reset
-```
+启动后打开文件或拖入文件夹作为工作区；Markdown 可在右上角切换视图，标签右键可选择「向右分屏」。更多快捷键、构建与测试说明见[开发与维护](docs/development.md)。
 
-Windows：
+核心编辑与本地文件处理可离线使用；PlantUML、远程图片和图床需要网络。PDF 导出通过系统打印完成，Office 格式导出不包含 Office 文件可视化编辑。Windows、真实中文输入法及部分复杂交互仍有[待验收范围](docs/development.md#测试与验证)。
 
-```powershell
-.\scripts\start.ps1
-# 保留 Vite 缓存
-.\scripts\start.ps1 -NoReset
-```
-
-启动脚本检查工具链、补装缺失依赖并启动 Tauri 开发环境。默认只清理 Vite 缓存，不重置文档状态；不要将 `--reset-state` / `-ResetState` 当作日常启动选项。
-
-只启动前端可用 `npm run dev`。普通浏览器不提供 Tauri 的文件和系统接口，不能据此前端页面代替完整桌面应用。
-
-## 打包
-
-macOS：
-
-```sh
-./scripts/build-mac.sh
-./scripts/build-mac.sh --universal
-```
-
-DMG 复制到 `scripts/`，原始构建位于 `src-tauri/target/release/bundle/`。
-
-Windows：
-
-```powershell
-.\scripts\build-win.ps1
-```
-
-MSI / NSIS 安装包位于 `src-tauri/target/release/bundle/msi/` 和 `nsis/`。使用对应平台的构建环境；发布所需的代码签名、公证和证书需单独配置。本地构建成功不代表安装、升级或平台交互已经验收。
-
-隔离的 Markdown 验证应用使用独立名称和 identifier，不覆盖正式应用：
-
-```sh
-npx tauri build --config tests/markdown-native-review.conf.json --bundles app
-```
-
-## 测试与验证
-
-```sh
-npm run build
-npm run test:all
-cargo test --release --manifest-path src-tauri/Cargo.toml -- --test-threads=1
-npm run perf:all
-```
-
-`test:all` 汇总 Markdown 文档层、阅读编辑集成、通用组件、XMind、导出、语言高亮及文件图标测试。各项也可单独执行：
-
-| 命令 | 范围 |
-| --- | --- |
-| `npm run test:markdown-visual` | 原文保真、源位置映射、共用历史、语法边界 |
-| `npm run test:markdown-visual:integration` | 阅读组件、保存/另存、失败恢复、表格、模式切换及旧设置迁移 |
-| `npm run test:regression` | 编辑器、HTML、工具条、文件操作及 XMind 组件回归 |
-| `npm run test:xmind` | XMind 模型、布局、归档写回与字段保留 |
-| `npm run test:export` | 各种导出格式、资源与错误路径 |
-| `npm run test:syntax` | 语言识别与高亮 |
-| `npm run test:file-icons` | 图标映射、授权文件和构建资源 |
-| `npm run perf:all` | store、组件、长时操作、文档、XMind 和 Rust 基准 |
-| `npm run perf:markdown-controls` | 100 / 500 / 2000 项任务文档的局部控件更新基准；不包含浏览器排版或真实输入法 |
-
-浏览器隔离验证入口为 `tests/markdown-visual-review.html`；`?typora&parity` 增加化学公式、编号引用和旧式图表等完整样例；`?long&sections=500` 测量复杂长文输入与模式切换。`?parity&presentation` 并排运行真实 Preview 与阅读编辑，使用同一自建样例核对布局。`?complex&parity` 使用 300 余行完整自建 Markdown 核对 H1–H6、多级嵌套、表格、代码、公式、图表、定宽图片、脚注、目录、提示块和文末编辑。`?interaction` 检查长文输入、搜索和光标稳定性；`?scroll` 检查高图表、长代码及文末输入时的位置变化。`?ime` 使用中文长文，提供组词事件和额外滚动的模拟按钮，用于检查输入法滚动保护；模拟测试不等同于原生候选字验收。测试只使用自建样例，不读取用户已有文档或正式应用历史。`tests/artifacts/`、截图和安装包被 Git 忽略；需要迁移时单独保存。
-
-自动化测试不能代替真实输入法、原生保存对话框、重启恢复及双平台交互。中文组词期间已加入可视区保护，修复后的真实 IME、部分原生交互和复杂语法兼容性仍有待验收项，见 [Markdown 实施记录](docs/markdown-visual-editing-verification-2026-09-11.md)及[本次提交验证记录](docs/markdown-release-verification-2026-09-11.md)。P0–P3 的当前范围和验收状态见[执行清单](docs/markdown-typora-roadmap-2026-09-11.md)及[本次扩展验证](docs/markdown-p1p3-verification-2026-09-12.md)。字体调整后的非导出差距、图片路径修复和行内收起性能测量见[非导出检查记录](docs/markdown-non-export-audit-2026-09-12.md)。直接编辑、简写、按文档图片目录、原生图片整理和后续长文优化见[非导出扩展实施记录](docs/markdown-extended-editing-2026-09-12.md)。固定 Typora 核对清单及本次功能补齐、历史恢复、复杂文档和压力测试的结论见[补齐与验收记录](docs/markdown-typora-implementation-2026-09-12.md)。最新组词历史修复与未完成的原生验收见 [P0 输入验证](docs/markdown-p0-input-verification-2026-09-11.md)。XMind 状态见[独立验收矩阵](docs/xmind-acceptance-matrix-2026-09-11.md)。
-
-## 架构与持久化
-
-长文输入和原生光标的最新结果见[验证记录](docs/markdown-native-caret-long-document-2026-09-12.md)。测试页 `?long&sections=500` 可生成 6303 行复杂样例；普通连续输入、跨模式撤销和共享样式已有操作证据，真实中文候选、Windows 以及长时间大文档压力测试仍未完成。
-
-| 层次 | 主要位置与职责 |
-| --- | --- |
-| 应用外壳 | `src/App.tsx`、`src/components/`：布局、模式、标签、工具条和浮层 |
-| 状态 | `src/store/editor.ts`：文档内容、共享设置及标签状态 |
-| 源码编辑 | CodeMirror 6，语言与主题按需加载，保留标签编辑会话 |
-| 阅读编辑 | `src/components/MarkdownVisualEditor.tsx` 与 `src/lib/markdownVisual/` |
-| Markdown 共享展示 | `MarkdownDocumentSurface.tsx` 统一字号与文章主题，`preview.css` 统一排版，`markdownDisplay.ts` 统一静态块处理及图片/图表渲染生命周期；阅读编辑仅保留必要的控件与 DOM 包裹适配 |
-| Markdown 文档与历史 | `markdownVisual/document.ts`、`markdownSession.ts`、`markdownHistory.ts` |
-| 文件与持久化 | `src/lib/fileio.ts`、`persistence.ts`、`fileWatch.ts`；通过 Rust IPC 执行文件操作 |
-| XMind | `src/lib/xmind/` 及专用画布，独立模型与历史 |
-| 原生后端 | `src-tauri/src/lib.rs`：文件 IO、搜索、路径处理、原生菜单、日志等；`markdown_images.rs`：Markdown 图片下载与 PicGo 通信；`markdown_history.rs`：历史版本、草稿和容量轮换 |
-
-维护 Markdown 呈现时，优先修改共享展示层，避免分别调整预览与阅读编辑的正文样式。自建复杂样例页面 `tests/markdown-visual-review.html?complex&parity` 提供“检查呈现一致性”，对照真实 Preview 的字体、颜色、行高、尺寸与块位置；窄窗、大字号和紧凑排版也须复测。ProseMirror 继续独立持有可编辑正文，显示设置变化不会替换正在编辑的 DOM。
-
-标签草稿、工作区、Markdown 写作设置和其他编辑器设置写入应用数据目录的 `state.json`，旧 localStorage 数据可迁移。编辑器实例、完整撤销栈和临时浮层不写入该文件。
-
-| 平台 | 状态文件 |
-| --- | --- |
-| macOS | `~/Library/Application Support/com.deditor.app/state.json` |
-| Windows | `%APPDATA%\com.deditor.app\state.json` |
-| Linux | `~/.local/share/com.deditor.app/state.json` |
-
-核心编辑与本地文件处理不要求联网。PlantUML、文档中的远程图片或其他外部资源可能访问网络；主动下载图片和 PicGo 图床上传需要相应服务可用。
-
-## 日志、维护与协作
-
-macOS 日志位于 `~/Library/Logs/com.deditor.app/deditor.log`，Windows 位于 `%LOCALAPPDATA%\com.deditor.app\logs\deditor.log`；实际目录由平台日志插件决定。Rust panic、前端异常和文件操作错误会记录到滚动日志。提供问题日志前请检查是否包含文档路径或内容。
-
-构建清理使用 `scripts/clean.sh` / `scripts/clean.ps1`，先用 `--dry-run` / 相应脚本帮助查看范围。`--all` 会额外删除依赖与 npm 锁文件，应谨慎使用。
-
-协作规则与项目上下文见 [AGENTS.md](AGENTS.md)，Markdown 设计见[架构上下文](docs/markdown-visual-editing-context-2026-09-11.md)。新增能力应保护其他文件类型，补齐中英文文案，使用自建样例完成不同维度测试，并记录未验证范围。
-
-仓库目前没有独立的项目 `LICENSE` 文件，不应将其视为已明确采用 MIT 授权；第三方资源的授权说明按其目录中的文件保留。
+项目尚未声明独立开源许可证，第三方资源按各自授权说明使用。

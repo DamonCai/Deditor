@@ -75,6 +75,54 @@ const mode = async name => run(()=>document.querySelector(`.md-diagram-modes [da
 const cmView = () => CMView.findFromDOM(document.querySelector('.md-code-editor .cm-editor'));
 const diagramSource = (lang, code='graph LR\n A-->B') => `Before\n\n\`\`\`${lang}\n${code}\n\`\`\`\n\nTail\n`;
 try {
+await test('UX diagram deletion works in all modes, including sole block and aliases; one undo',async()=>{
+ for(const lang of ['mermaid','plantuml','puml','uml']) for(const display of ['edit','split','preview']) {
+  const original=diagramSource(lang);await reset(original);await mode(display);
+  await run(()=>document.querySelector('.md-diagram-delete').click());assert.equal(document.querySelector('.md-diagram-block'),null);assert.ok(content().includes('Before'));assert.ok(content().includes('Tail'));await exactHistory(original);await run(()=>app.markdownHistory());assert.ok(document.querySelector('.md-diagram-block'));
+ }
+ const only='```mermaid\ngraph LR\n A-->B\n```';await reset(only);await run(()=>document.querySelector('.md-diagram-delete').click());assert.ok(view.state.doc.firstChild.isTextblock);await exactHistory(only);
+});
+await test('UX localized context menu, keyboard dismissal, readonly and diagram actions',async()=>{
+ for(const [language,removeLabel,copyLabel] of [['zh','删除图表','复制'],['en','Delete diagram','Copy']]) {
+  store.setState({language});const original=diagramSource('mermaid');await reset(original);
+  await run(()=>document.querySelector('.md-code-preview').dispatchEvent(new window.MouseEvent('contextmenu',{bubbles:true,cancelable:true})));
+  let menu=document.querySelector('.md-editor-menu');assert.ok(menu);assert.ok(menu.textContent.includes(copyLabel));assert.ok(menu.textContent.includes(removeLabel));
+  await run(()=>menu.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true})));assert.equal(document.querySelector('.md-editor-menu'),null);
+  await run(()=>document.querySelector('.md-code-preview').dispatchEvent(new window.MouseEvent('contextmenu',{bubbles:true,cancelable:true})));
+  await run(()=>[...document.querySelectorAll('.md-editor-menu button')].find(b=>b.textContent===removeLabel).click());assert.equal(document.querySelector('.md-diagram-block'),null);await exactHistory(original);
+  await reset(original);await render(true);assert.equal(document.querySelector('.md-diagram-delete').hidden,true);
+  await run(()=>view.dom.dispatchEvent(new window.KeyboardEvent('keydown',{key:'F10',shiftKey:true,bubbles:true,cancelable:true})));
+  menu=document.querySelector('.md-editor-menu');assert.ok(menu);assert.ok(menu.querySelectorAll('button:disabled').length>=4);
+ }store.setState({language:'en'});
+});
+await test('UX ordinary code stays open while its keyboard menu is focused and dismisses safely',async()=>{
+ store.setState({language:'en'});await reset(diagramSource('typescript','const value = 1;'));
+ await run(()=>document.querySelector('.md-code-preview').dispatchEvent(new window.MouseEvent('mousedown',{bubbles:true,cancelable:true})));
+ const cm=cmView();assert.ok(cm);await run(()=>cm.contentDOM.dispatchEvent(new window.KeyboardEvent('keydown',{key:'F10',shiftKey:true,bubbles:true,cancelable:true})));
+ assert.equal(document.querySelector('.md-code-editor').hidden,false);assert.ok(document.querySelector('.md-editor-menu'));
+ await run(()=>document.querySelector('.md-editor-menu').dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true})));
+ assert.equal(document.querySelector('.md-code-editor').hidden,false);assert.ok(cm.hasFocus);
+});
+await test('UX nested source context clipboard is local, undoable and safe on denied access',async()=>{
+ const original=diagramSource('mermaid');await reset(original);await mode('edit');
+ const cm=cmView();await run(()=>cm.dispatch({selection:{anchor:0,head:cm.state.doc.length}}));
+ let copied='';Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{copied=text;},readText:async()=>'graph LR\n C-->D'},configurable:true});
+ const open=async()=>run(()=>cm.contentDOM.dispatchEvent(new window.MouseEvent('contextmenu',{bubbles:true,cancelable:true})));
+ const click=async label=>run(()=>[...document.querySelectorAll('.md-editor-menu button')].find(b=>b.textContent===label).click());
+ await open();await click('Copy');assert.equal(copied,'graph LR\n A-->B');assert.equal(content(),original);
+ await open();await click('Paste');assert.ok(content().includes('C-->D'));assert.ok(content().includes('Before'));await exactHistory(original);
+ await reset(original);await mode('edit');const deny=cmView();await run(()=>deny.dispatch({selection:{anchor:0,head:deny.state.doc.length}}));
+ Object.defineProperty(navigator,'clipboard',{value:{writeText:async()=>{throw new Error('denied');}},configurable:true});
+ await run(()=>deny.contentDOM.dispatchEvent(new window.MouseEvent('contextmenu',{bubbles:true,cancelable:true})));await click('Cut');assert.equal(content(),original);
+ for(const change of ['selection','readonly']) {
+  await reset(original);await mode('edit');const current=cmView();let resolve;
+  Object.defineProperty(navigator,'clipboard',{value:{readText:()=>new Promise(done=>{resolve=done;})},configurable:true});
+  await run(()=>current.contentDOM.dispatchEvent(new window.MouseEvent('contextmenu',{bubbles:true,cancelable:true})));await click('Paste');
+  if(change==='selection')await run(()=>current.dispatch({selection:{anchor:current.state.doc.length}}));else await render(true);
+  await act(async()=>{resolve('stale paste');await pause(40);});assert.equal(content(),original);
+ }
+
+});
 await test('split round 1: mode labels reuse document labels in both languages',async()=>{
  for(const [language,labels] of [['zh',['编辑','实时预览','阅读']],['en',['Edit','Live Preview','Reading']]]) {
   store.setState({language});await reset(diagramSource('mermaid'));
@@ -189,6 +237,13 @@ await test('round 4: read-only transition closes source and disables edit contro
  assert.equal(document.querySelector('.md-code-block').dataset.diagramMode,'preview');
  assert.equal(document.querySelector('.md-diagram-modes').hidden,true);
  assert.ok([...document.querySelectorAll('.md-diagram-modes button')].every(b=>b.disabled));
+});
+await test('round 5: diagram modes have no copy action; ordinary code retains it',async()=>{
+ for(const lang of ['mermaid','plantuml','puml','uml']){
+  await reset(diagramSource(lang));
+  for(const value of ['preview','edit','split']){await mode(value);assert.ok(![...document.querySelectorAll('.md-code-bar button')].some(button=>button.textContent==='Copy'));}
+ }
+ await reset(diagramSource('typescript','const x = 1;'));assert.ok([...document.querySelectorAll('.md-code-bar button')].some(button=>button.textContent==='Copy'));
 });
 await test('round 5: ordinary code and math retain existing editing behavior',async()=>{
  for (const lang of ['typescript','latex','flow','sequence']) {

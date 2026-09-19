@@ -45,6 +45,7 @@ interface Props {
   dataUrl: string;
   filePath: string | null;
   tabId?: string;
+  active?: boolean;
 }
 interface DocumentRevision {
   doc: XmindDocument;
@@ -69,7 +70,8 @@ useEditorStore.subscribe((state) => {
   for (const id of sessionCache.keys())
     if (!open.has(id)) sessionCache.delete(id);
 });
-export default function XmindView({ dataUrl, tabId }: Props) {
+export default function XmindView({ dataUrl, tabId, active = true }: Props) {
+  const activeRef = useRef(active); activeRef.current = active;
   const t = useT();
   const [session, setSession] = useState<Session | null>(null),
     [error, setError] = useState("");
@@ -105,6 +107,7 @@ export default function XmindView({ dataUrl, tabId }: Props) {
     };
   }, []);
   const flush = useCallback(() => {
+    if (!activeRef.current) return;
     // Blur also commits a properties-panel text field before fileio snapshots it.
     const active = document.activeElement as HTMLElement | null;
     if (
@@ -132,7 +135,7 @@ export default function XmindView({ dataUrl, tabId }: Props) {
       flush();
       const live =
         tabId && useEditorStore.getState().tabs.find((tab) => tab.id === tabId);
-      if (live && current.current)
+      if (live && current.current && live.content === echo.current)
         sessionCache.set(tabId!, {
           content: live.content,
           session: current.current,
@@ -150,9 +153,13 @@ export default function XmindView({ dataUrl, tabId }: Props) {
         current.current = cached.session;
         setSession(cached.session);
         echo.current = dataUrl;
-        setSheetId(cached.sheetId);
-        setSelected(cached.selected);
-        cameras.current = new Map(cached.cameras);
+        if (!sheetId) {
+          setSheetId(cached.sheetId); setSelected(cached.selected);
+          cameras.current = new Map(cached.cameras);
+        } else {
+          const sheet = cached.session.sheets.find(s => s.id === sheetId) ?? cached.session.sheets[0];
+          setSheetId(sheet.id); setSelected(ids => ids.filter(id => !!findTopic(sheet.rootTopic, id)));
+        }
         setError("");
         return;
       }
@@ -206,6 +213,7 @@ export default function XmindView({ dataUrl, tabId }: Props) {
       echo.current = url;
       current.current = next;
       setSession(next);
+      sessionCache.set(tabId, { content: url, session: next, ...viewState.current, cameras: new Map(cameras.current) });
       useEditorStore.getState().setContent(url, tabId);
       setError("");
     },
@@ -284,7 +292,7 @@ export default function XmindView({ dataUrl, tabId }: Props) {
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if(e.defaultPrevented || e.isComposing || e.keyCode === 229 || !(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z" ||
-        !tabId || useEditorStore.getState().activeId !== tabId) return;
+        !activeRef.current || !tabId || useEditorStore.getState().activeId !== tabId) return;
       const target=e.target instanceof Element ? e.target : null;
       if(target?.closest('input,textarea,select,[contenteditable="true"],[role="dialog"]')) return;
       e.preventDefault();e.stopPropagation();

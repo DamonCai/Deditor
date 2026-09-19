@@ -1,5 +1,6 @@
+import { rememberTextState, recordTextUpdate, textHistory, textProjectionSync } from "../lib/textHistory";
 import { documentImageDirectory, markdownImageReference } from "../lib/markdownImageSettings";
-import { markdownSession, sourceChange } from "../lib/markdownSession";
+import { markdownSession, markdownViewState, sourceChange } from "../lib/markdownSession";
 import { installMarkdownComposition } from "../lib/markdownComposition";
 import { markdownHistory } from "../lib/markdownHistory";
 import { showError } from "../lib/feedback";
@@ -46,7 +47,7 @@ import {
 import { islandDark } from "../lib/islandDarkTheme";
 import { islandLight } from "../lib/islandLightTheme";
 import { detectLang, isMarkdown, isImageFile, isPdfFile, isAudioFile, isVideoFile, isHexFile, isXmindFile } from "../lib/lang";
-import { useEditorStore, type DiffSpec } from "../store/editor";
+import { useEditorPaneId, paneViewKey, useEditorStore, type DiffSpec } from "../store/editor";
 import DiffView from "./DiffView";
 // XmindView loads the local SVG canvas and lossless XMind document model.
 // Only mounted when a .xmind file is open — lazy-load so non-XMind users
@@ -115,16 +116,15 @@ interface Props {
   /** Active tab id. Used to look up / save the per-tab CodeMirror state JSON
    *  so undo/redo history survives switching to another tab and back. */
   tabId?: string;
-  /** True when this is the visible Editor inside its host (EditorHost keeps
+  /** True when this is the focused Editor inside its host (EditorHost keeps
    *  many Editors mounted; only one is active at a time). The active Editor
    *  registers itself with editorBridge so toolbar buttons + undo target the
    *  correct view. Without this flag, the last-mounted Editor would win
    *  forever — buttons would silently mutate a hidden tab. */
   active?: boolean;
-  /** When true, skip the per-tab state cache entirely. Used by the secondary
-   *  Editor in split-view so it doesn't collide with the primary on cache
-   *  reads/writes. Trade-off: secondary view's undo doesn't carry across
-   *  tab switches. */
+  visible?: boolean;
+  /** Skip the cache for ephemeral embedded views. Normal editor groups use
+   * separate cache keys while sharing document history. */
   noStateCache?: boolean;
   /** When set, the active tab is a side-by-side file comparison; we short-
    *  circuit and render DiffView, ignoring CodeMirror entirely. */
@@ -185,7 +185,7 @@ export default function Editor(props: Props) {
   if (isXmindFile(filePath) && value.startsWith("data:")) {
     return (
       <Suspense fallback={<div style={{ padding: 16, color: "var(--text-soft)" }}>Loading…</div>}>
-        <XmindView dataUrl={value} filePath={filePath} tabId={tabId} />
+        <XmindView dataUrl={value} filePath={filePath} tabId={tabId} active={props.active} />
       </Suspense>
     );
   }
@@ -207,6 +207,7 @@ function TextEditor({
   fontSize,
   tabId,
   active,
+  visible = active,
   noStateCache,
   initialCursor,
   initialScrollLine,
@@ -215,6 +216,8 @@ function TextEditor({
   onScroll,
   onPositionChange,
 }: Props) {
+  const paneId = useEditorPaneId();
+  const cacheKey = tabId ? paneViewKey(tabId, paneId) : undefined;
   const t = useT();
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const effectiveFontSize = useEditorStore((s) => s.tabs.find((tab) => tab.id === tabId)?.zoomFontSize ?? fontSize);
@@ -244,7 +247,7 @@ function TextEditor({
   // file that was ~200 KB of allocation per keystroke; now zero.
   const lastEmittedRef = useRef<string | null>(null);
   const deferredMarkdown = useRef(false);
-  deferredMarkdown.current = active === false && isMarkdown(filePath);
+  deferredMarkdown.current = visible === false && isMarkdown(filePath);
   const onScrollRef = useRef(onScroll);
   const onPositionChangeRef = useRef(onPositionChange);
   // Suppress outgoing scroll events for this many ms after a programmatic scroll,
@@ -341,6 +344,11 @@ function TextEditor({
           ...(isMarkdown(filePath) ? markdownTableKeymap : []),
           ...closeBracketsKeymap,
           ...defaultKeymap,
+          ...(tabId && !isMarkdown(filePath) ? [
+            { key: "Mod-z", run: (view: EditorView) => textHistory(tabId, view) },
+            { key: "Mod-Shift-z", run: (view: EditorView) => textHistory(tabId, view, true) },
+            { key: "Mod-y", run: (view: EditorView) => textHistory(tabId, view, true) },
+          ] : []),
           ...historyKeymap,
           ...searchKeymap,
           ...foldKeymap,
@@ -365,6 +373,7 @@ function TextEditor({
         bookmarkExtension(),
         inspectionMarkers(),
         EditorView.updateListener.of((u) => {
+          if (tabId && !isMarkdown(filePath)) recordTextUpdate(tabId, u);
           if (u.docChanged) {
             const next = u.state.doc.toString();
             // Stash before notifying upstream so the resulting React render
@@ -375,8 +384,8 @@ function TextEditor({
             onChangeRef.current(next);
           }
           if (u.selectionSet && !u.docChanged && getActiveView() === u.view) notifyActiveEditor();
-          if (u.selectionSet && getActiveView() === u.view && tabId && isMarkdown(filePath)) {
-            markdownSession(tabId, useEditorStore.getState().tabs.find(t => t.id === tabId)?.content ?? u.state.doc.toString()).sourceCursor = u.state.selection.main.head;
+          if ((u.selectionSet || u.docChanged) && !deferredMarkdown.current && tabId && isMarkdown(filePath)) {
+            markdownViewState(tabId, useEditorStore.getState().tabs.find(t => t.id === tabId)?.content ?? u.state.doc.toString(), paneId).sourceCursor = u.state.selection.main.head;
           }
           if (u.selectionSet || u.docChanged) {
             positionRef.current.cursor = u.state.selection.main.head;
@@ -420,7 +429,7 @@ function TextEditor({
     // (e.g. file was reloaded externally), bail and start fresh — restoring
     // a stale doc would let the user "undo" into content that doesn't exist
     // on disk anymore.
-    const cachedJSON = tabId && !noStateCache ? getEditorStateCache(tabId) : undefined;
+    const cachedJSON = tabId && !noStateCache ? getEditorStateCache(cacheKey!) : undefined;
     let state: EditorState;
     if (cachedJSON instanceof EditorState && cachedJSON.doc.toString() === value) {
       state = cachedJSON.update({ effects: StateEffect.reconfigure.of(extensions) }).state;
@@ -453,13 +462,15 @@ function TextEditor({
     }
 
     const view = new EditorView({ state, parent: hostRef.current });
+    if (tabId && !isMarkdown(filePath)) rememberTextState(tabId, view.state);
     const removeFontZoom = installEditorFontZoom(view.scrollDOM, tabId, () => setFontZoomRevision((n) => n + 1));
     viewRef.current = view;
     // Capture native menu/gesture history before CodeMirror's own history plugin.
     const beforeNativeHistory = (event: InputEvent) => {
-      if (!tabId || !isMarkdown(filePath) || !["historyUndo", "historyRedo"].includes(event.inputType)) return;
+      if (!tabId || !["historyUndo", "historyRedo"].includes(event.inputType) || getActiveView() !== view) return;
       event.preventDefault(); event.stopPropagation();
-      markdownHistory(event.inputType === "historyRedo", tabId);
+      if (isMarkdown(filePath)) markdownHistory(event.inputType === "historyRedo", tabId);
+      else textHistory(tabId, view, event.inputType === "historyRedo");
     };
     view.contentDOM.addEventListener("beforeinput", beforeNativeHistory, true);
     if (active !== false) setActiveView(view, tabId);
@@ -546,8 +557,8 @@ function TextEditor({
       if (tabId && !noStateCache) {
         try {
           if (useEditorStore.getState().tabs.some((t) => t.id === tabId)) {
-            setEditorStateCache(tabId, view.state);
-            if (!deferredMarkdown.current) useEditorStore.getState().setTabPosition(tabId, { ...positionRef.current });
+            setEditorStateCache(cacheKey!, view.state);
+            if (!deferredMarkdown.current) useEditorStore.getState().setTabPosition(cacheKey!, { ...positionRef.current });
           }
         } catch {
           /* defensive: never block unmount on a serialization error */
@@ -570,14 +581,14 @@ function TextEditor({
   // visible Editor wins. Skipped for the split-view secondary (active is
   // undefined there) so the primary tab keeps owning the toolbar even when
   // the user's focus is on the split clone.
-  useEffect(() => {
+  useLayoutEffect(() => {
     const view = viewRef.current;
     if (!view) return;
     if (active === false) { if (getActiveView() === view) setActiveView(null); return; }
     if (active === undefined) return;
     setActiveView(view, tabId);
     if (tabId && isMarkdown(filePath)) {
-      const cursor = markdownSession(tabId, useEditorStore.getState().tabs.find(t => t.id === tabId)?.content ?? view.state.doc.toString()).sourceCursor;
+      const cursor = markdownViewState(tabId, useEditorStore.getState().tabs.find(t => t.id === tabId)?.content ?? view.state.doc.toString(), paneId).sourceCursor;
       if (cursor !== null) view.dispatch({ selection: { anchor: Math.min(view.state.doc.length, cursor) }, scrollIntoView: true });
     }
     view.requestMeasure();
@@ -658,8 +669,11 @@ function TextEditor({
     if (isMarkdown(filePath)) {
       const change = sourceChange(view.state.doc.toString(), value);
       view.dispatch({ changes: { from: change.from, to: change.from + change.removed.length, insert: change.inserted }, annotations: Transaction.addToHistory.of(false) });
-    } else view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value } });
-  }, [value, active, filePath]);
+    } else {
+      const change = sourceChange(view.state.doc.toString(), value);
+      view.dispatch({ changes: { from: change.from, to: change.from + change.removed.length, insert: change.inserted }, annotations: [textProjectionSync.of(true), Transaction.addToHistory.of(false)] });
+    }
+  }, [value, active, visible, filePath]);
 
   useEffect(() => {
     viewRef.current?.dispatch({

@@ -1,4 +1,5 @@
 import type { ExportSnapshot } from "../lib/markdownExport/document";
+import MarkdownClipboardMenu from "./MarkdownClipboardMenu";
 import MarkdownWritingSettings from "./MarkdownWritingSettings";
 import { getVisualEditor, subscribeVisualEditor } from "../lib/markdownVisualBridge";
 import { markdownHistory } from "../lib/markdownHistory";
@@ -21,8 +22,9 @@ import {
   FiRotateCw,
   FiTerminal,
   FiChevronDown,
+  FiArrowLeft,
 } from "react-icons/fi";
-import { undo, redo } from "@codemirror/commands";
+import { undo, redo, indentLess } from "@codemirror/commands";
 import {
   captureEditorTarget,
   getActiveEditorState,
@@ -69,7 +71,8 @@ export default function MarkdownToolbar() {
   const run = (action: () => void) => {
     if (disabled) return;
     action();
-    if (visual) visual.focus(); else getActiveView()?.focus();
+    const currentVisual = getVisualEditor();
+    if (currentVisual) currentVisual.focus(); else getActiveView()?.focus();
   };
   const openInsert = (kind: InsertKind) => {
     if (disabled) return;
@@ -208,6 +211,7 @@ export default function MarkdownToolbar() {
               <FiCheckSquare />,
             )}
             {item("md.quote", () => prefixLines("> "), <FiMessageSquare />)}
+            {item("md.outdent", () => { if (visual) visual.outdent?.(); else { const view = getActiveView(); if (view) indentLess(view); } }, <FiArrowLeft />)}
           </div>
           <div className="md-tool-group md-toolbar-colors">
             <MarkdownColorPicker
@@ -290,6 +294,7 @@ export default function MarkdownToolbar() {
             </Tool>
           </div>
           <div className="md-tool-group">
+            <MarkdownClipboardMenu visual={visual} />
             <Button className="md-toolbar-action" variant="ghost" size="icon" title={t("export.title")} onClick={() => {
               const current = useEditorStore.getState();
               const tab = current.tabs.find(tab => tab.id === current.activeId);

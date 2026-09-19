@@ -41,6 +41,7 @@ export {default as Visual} from './src/components/MarkdownVisualEditor';
 export {useEditorStore} from './src/store/editor';
 export {getVisualEditor} from './src/lib/markdownVisualBridge';
 export {markdownHistory} from './src/lib/markdownHistory';
+export {markdownViewState} from './src/lib/markdownSession';
 export {saveFile} from './src/lib/fileio';
 `,resolveDir:process.cwd()},outfile:output,bundle:true,format:'esm',platform:'node',packages:'external',loader:{'.css':'empty'},plugins:[{name:'isolated-io',setup(b){
  b.onResolve({filter:/.*/},a=>(/\.css(?:\?raw)?$/.test(a.path))?{path:'css',namespace:'stub'}:stubs[a.path]?{path:a.path,namespace:'stub'}:a.path.endsWith('/feedback')?{path:'feedback',namespace:'stub'}:undefined);
@@ -71,6 +72,37 @@ const button=label=>{const item=[...document.querySelectorAll('button')].find(b=
 
 const {EditorView:CMView,runScopeHandlers}=await import('@codemirror/view');
 try {
+await test('I02 initial fenced HTML stays rendered until the user enters its source',async()=>{
+ const original='```HTML\n<section><svg viewBox="0 0 20 10"><rect width="20" height="10" fill="red"/></svg></section>\n```\n\nTail\n';
+ await act(async()=>root.render(null));await act(async()=>store.getState().setContent(original,'a','command'));
+ app.markdownViewState('a',original,null).sourceCursor=original.indexOf('<section>')+5;
+ await render();const visual=app.getVisualEditor();assert.equal(typeof visual?.restoreFocus,'function');
+ await act(async()=>{visual.restoreFocus();await pause(60);});const block=document.querySelector('.md-code-block');assert.ok(block);
+ assert.equal(block.querySelector('.md-code-preview').hidden,false);
+ assert.equal(block.querySelector('.md-code-editor').hidden,true);
+ assert.ok(block.querySelector('.md-code-preview .html-render-block svg rect'));
+ assert.equal(block.querySelector('.md-code-editor .cm-editor'),null);
+ assert.equal(content(),original);
+});
+await test('I02 malformed escaped HTML fences render and retain their exact marker',async()=>{
+ const samples=[
+  {source:'Before\n\n``` ` ```html\n<section>visible</section>\n```\n\nTail\n',language:'html'},
+  {source:'Before\n\n\\``` ` ``\\`HTML\n<SECTION>visible</SECTION>\n\\```\n\nTail\n',language:'HTML'},
+  {source:'Before\n\n```Html\n<Section>visible</Section>\n```\n\nTail\n',language:'Html'},
+  {source:'Before\n\n```hTmL\n<SECTION>visible</SECTION>\n```\n\nTail\n',language:'hTmL'},
+ ];
+ for(const sample of samples){const original=sample.source;
+  await reset(original);const block=document.querySelector('.md-code-block');assert.ok(block);assert.equal(block.querySelector('input')?.value,sample.language);assert.equal(block.querySelector('.md-code-preview .html-render-block section')?.textContent,'visible');assert.equal(block.querySelector('.md-code-preview pre.shiki'),null);
+  await run(()=>block.querySelector('.md-code-preview').dispatchEvent(new window.MouseEvent('mousedown',{bubbles:true,button:0})));const cm=CMView.findFromDOM(block.querySelector('.md-code-editor .cm-editor'));assert.ok(cm);const at=cm.state.doc.toString().indexOf('visible')+7;
+  await run(()=>cm.dispatch({changes:{from:at,insert:'!'},selection:{anchor:at+1}}));await run(()=>runScopeHandlers(cm,new window.KeyboardEvent('keydown',{key:'Escape'}),'editor'));
+  assert.ok(content().includes(original.split('\n')[2]));assert.match(content(),/<section>visible!<\/section>/i);assert.ok(content().includes(sample.language));await exactHistory(original);
+ }
+});
+await test('I02 fenced HTML renders sanitized SVG and active content in reading',async()=>{
+ const original='Before\n\n```html\n<svg viewBox="0 0 20 10"><rect width="20" height="10" fill="red" onclick="bad()"/><script>bad()</script></svg><button type="button">Action</button>\n```\n\nTail\n';
+ await reset(original);const block=document.querySelector('.md-code-block');assert.ok(block);const rendered=block.querySelector('.md-code-preview .html-render-block');assert.ok(rendered);assert.ok(rendered.querySelector('svg rect'));assert.equal(rendered.querySelector('script'),null);assert.equal(rendered.querySelector('rect').hasAttribute('onclick'),false);assert.equal(rendered.querySelector('button')?.textContent,'Action');assert.equal(content(),original);
+ await act(async()=>root.render(null));await render(true);const readonly=document.querySelector('.md-code-preview .html-render-block');assert.ok(readonly?.querySelector('svg rect'));assert.equal(readonly.querySelector('script'),null);assert.equal(content(),original);
+});
 await test('I06 preserved block: Tab indents within its editor and Shift Tab removes indentation',async()=>{
  const original='<details>\n<summary>Details</summary>\n\nBody\n</details>\n\nTail\n';await reset(original);
  await run(()=>document.querySelector('.md-raw-edit').click());const cm=CMView.findFromDOM(document.querySelector('.md-raw-source .cm-editor'));assert.ok(cm);const initialRaw=cm.state.doc.toString();

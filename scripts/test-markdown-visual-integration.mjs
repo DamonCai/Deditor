@@ -268,7 +268,7 @@ await test('reported editing bug: a closed or open search never steals the caret
    assert.equal(app.getVisualEditor().selected,'');assert.ok(content().includes('Bottom target'));
  };
  await editTop('Top while searching');
- await act(async()=>document.querySelector('[role="search"] button:last-child').click());
+ await act(async()=>document.querySelector('[role="search"] button[name=close]').click());
  await editTop('Top after closing search');
 });
 await test('search: Unicode offsets and reopening after long-document edits use current positions',async()=>{
@@ -282,27 +282,27 @@ await test('search: Unicode offsets and reopening after long-document edits use 
  });
  await query();assert.equal(app.getVisualEditor().selected,'target');
  assert.match(document.querySelector('[role="search"]').textContent,/1 \/ 100/);
- await act(async()=>document.querySelector('[role="search"] button:last-child').click());
+ await act(async()=>document.querySelector('[role="search"] button[name=close]').click());
  await act(async()=>app.getVisualEditor().navigate(1,4));
  await act(async()=>app.getVisualEditor().insert('prefix',false));
  await act(async()=>app.getVisualEditor().find());
  assert.equal(app.getVisualEditor().selected,'target');
  await act(async()=>app.markdownHistory(false,'a'));assert.equal(content(),original);
- await act(async()=>document.querySelector('[role="search"] button:last-child').click());
+ await act(async()=>document.querySelector('[role="search"] button[name=close]').click());
 });
 await test('search replace: capture groups, styles, undo/redo and invalid regex',async()=>{
  const original='# Search\n\n**item12** item34 scatter cat Cat\n';
  await act(async()=>{root.render(null);store.getState().setContent(original,'a','command');});await render();
  await act(async()=>app.getVisualEditor().find());
- const input=async(index,value)=>act(async()=>{const element=document.querySelectorAll('[role="search"] input')[index];Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(element,value);element.dispatchEvent(new Event('input',{bubbles:true}));});
- const button=label=>[...document.querySelectorAll('[role="search"] button')].find(button=>button.textContent===label);
+ const input=async(index,value)=>act(async()=>{const element=document.querySelectorAll('[role="search"] input:not([type="checkbox"])')[index];Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(element,value);element.dispatchEvent(new Event('input',{bubbles:true}));});
+ const button=label=>document.querySelector('[role=search] '+({'Regex':'input[name=re]','Match case':'input[name=case]','Whole word':'input[name=word]','Replace All':'button[name=replaceAll]','Replace current':'button[name=replace]'}[label]));
  await input(0,'item(\\d+)');await act(async()=>button('Regex').click());await input(1,'value$1');
  await act(async()=>button('Replace All').click());
  assert.match(content(),/\*\*value12\*\* value34/);
  await act(async()=>app.markdownHistory(false,'a'));assert.equal(content(),original);
  await act(async()=>app.markdownHistory(true,'a'));assert.match(content(),/value34/);
- await input(0,'[');assert.ok(document.querySelector('[role="search"] [role="alert"]'));assert.equal(button('Replace All').disabled,true);
- await act(async()=>document.querySelector('[role="search"] button:last-child').click());
+ await input(0,'[');assert.ok(document.querySelector('[role="search"] [role="alert"]:not([hidden])'));assert.equal(button('Replace All').disabled,true);
+ await act(async()=>document.querySelector('[role="search"] button[name=close]').click());
 });
 await test('search keyboard: repeated Find focuses the existing query through shortcut and bridge',async()=>{
  await act(async()=>{root.render(null);store.getState().setContent('Body target\n','a','command');});await render();
@@ -313,15 +313,15 @@ await test('search keyboard: repeated Find focuses the existing query through sh
   await act(async()=>shortcut==='bridge' ? app.getVisualEditor().find() : document.activeElement.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'f',[shortcut]:true,bubbles:true,cancelable:true})));
   assert.equal(document.activeElement,input,shortcut);
  }
- await act(async()=>document.querySelector('[role="search"] button:last-child').click());
+ await act(async()=>document.querySelector('[role="search"] button[name=close]').click());
 });
 await test('search keyboard: Escape from replacement and buttons, or close click, restores editing focus',async()=>{
  const original='Body target\n';
  await act(async()=>{root.render(null);store.getState().setContent(original,'a','command');});await render();
  for(const target of ['replacement','button','close']) {
   await act(async()=>app.getVisualEditor().find());
-  const element=target==='replacement' ? document.querySelectorAll('[role="search"] input')[1] : document.querySelector('[role="search"] button');
-  await act(async()=>{element.focus();if(target==='close')document.querySelector('[role="search"] button:last-child').click();else element.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));});
+  const element=target==='replacement' ? document.querySelectorAll('[role="search"] input:not([type="checkbox"])')[1] : document.querySelector('[role="search"] button');
+  await act(async()=>{element.focus();if(target==='close')document.querySelector('[role="search"] button[name=close]').click();else element.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));});
   assert.equal(document.querySelector('[role="search"]'),null,target);
   assert.equal(document.activeElement,document.querySelector('.ProseMirror'),target);
   assert.equal(content(),original);
@@ -342,7 +342,7 @@ await test('search keyboard: candidate Enter and Escape do not navigate or close
  assert.match(document.querySelector('[role="search"]').textContent,/2 \/ 2/);
  await act(async()=>input.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Enter',shiftKey:true,bubbles:true,cancelable:true})));
  assert.match(document.querySelector('[role="search"]').textContent,/1 \/ 2/);
- await act(async()=>document.querySelector('[role="search"] button:last-child').click());
+ await act(async()=>document.querySelector('[role="search"] button[name=close]').click());
 });
 await test('links: editable body follows modifier-click only, including malformed anchors',async()=>{
  await act(async()=>{root.render(null);store.getState().setContent('# Destination\n\n[Jump](#destination) [Malformed](#%broken)\n','a','command');});await render();
@@ -421,10 +421,10 @@ await test('outline: shared preview presentation, pin and Escape keep document u
 });
 await test('menu search: find and replace focus the visible editor, close and preserve history',async()=>{
  const original='Before target after\n';await act(async()=>store.getState().setContent(original,'a','command'));
- await act(async()=>app.openEditorSearch());assert.equal(document.activeElement,document.querySelector('.md-visual-search input'));
- await act(async()=>app.openEditorSearch(true));assert.equal(document.activeElement.getAttribute('aria-label'),'Replace with…');
+ await act(async()=>app.openEditorSearch());assert.equal(document.activeElement,document.querySelector('.md-visual-shell [role=search] input[name=search]'));
+ await act(async()=>app.openEditorSearch(true));assert.equal(document.activeElement.getAttribute('name'),'replace');
  await act(async()=>{document.activeElement.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));await pause(20);});
- assert.equal(document.querySelector('.md-visual-search'),null);assert.equal(content(),original);
+ assert.equal(document.querySelector('.md-visual-shell [role=search]'),null);assert.equal(content(),original);
  await act(async()=>root.render(null));
  const {EditorView}=await import('@codemirror/view');const {EditorState}=await import('@codemirror/state');const host=document.createElement('div');document.body.append(host);
  const cm=new EditorView({parent:host,state:EditorState.create({doc:original})});app.setActiveView(cm,'a');

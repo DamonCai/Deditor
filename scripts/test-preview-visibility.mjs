@@ -34,7 +34,7 @@ try {
   if(baselinePath)b.onLoad({filter:/components\/Preview\.tsx$/},()=>({loader:'tsx',contents:fs.readFileSync(baselinePath,'utf8'),resolveDir:path.resolve('src/components')}));
   b.onResolve({filter:/.*/},a=>{
    if(a.importer.endsWith('/Preview.tsx')&&a.path==='../lib/markdown')return {path:'renderer',namespace:'stub'};
-   if(a.importer.endsWith('/Preview.tsx')&&a.path==='../lib/markdownDisplay')return {path:'display',namespace:'stub'};
+   if(a.importer.endsWith('/Preview.tsx')&&a.path==='../lib/markdownDisplay' || a.importer.endsWith('/markdownPreviewDocument.ts')&&a.path==='./markdownDisplay')return {path:'display',namespace:'stub'};
    if(a.path.endsWith('.css'))return {path:'empty',namespace:'stub'};
    if(stubs[a.path])return {path:a.path,namespace:'stub'};
   });
@@ -57,7 +57,7 @@ try {
    diagram.setAttribute(attr,'1');
    (entry.pending??=[]).push(diagram);
   }
-  return Object.assign(ctrl,{done:Promise.resolve()});
+  return Object.assign(ctrl,{done:new Promise(resolve=>ctrl.signal.addEventListener('abort',resolve,{once:true}))});
  };
  const reset=async(tabs=[{id:'a',filePath:'/test/a.md',content:'initial',savedContent:'initial'}])=>{
   await act(async()=>{root.render(null);store.setState({...initial,tabs,activeId:tabs[0].id,tocVisible:false});});
@@ -70,6 +70,22 @@ try {
  const check=(name)=>{checked++;console.log(`PASS ${name}`);};
 
  if(!measureOnly){
+ await reset();const outgoing=[];await show({onScroll:line=>outgoing.push(line)});await settle();
+ const scrollRoot=document.querySelector('.preview');
+ Object.defineProperty(scrollRoot,'scrollHeight',{configurable:true,get:()=>5000});
+ Object.defineProperty(scrollRoot,'clientHeight',{configurable:true,get:()=>600});
+ await act(async()=>pause(220));
+ const scroll=async()=>act(async()=>{scrollRoot.scrollTop=1200;scrollRoot.dispatchEvent(new window.Event('scroll'));await pause(30);});
+ await scroll();assert.equal(outgoing.length,0,'layout scroll never drives the source');
+ scrollRoot.dispatchEvent(new window.WheelEvent('wheel',{bubbles:true,deltaY:100}));await scroll();assert.equal(outgoing.length,1,'real wheel navigation still synchronizes');
+ await content('new rendered document');await settle();await act(async()=>pause(220));await scroll();assert.equal(outgoing.length,1,'HTML replacement scroll is ignored even after the timing guard expires');
+ scrollRoot.dispatchEvent(new window.MouseEvent('pointerdown',{bubbles:true}));await scroll();assert.equal(outgoing.length,2,'scrollbar/selection drag still synchronizes');
+ await act(async()=>{scrollRoot.dispatchEvent(new window.Event('scroll'));document.body.dispatchEvent(new window.InputEvent('beforeinput',{bubbles:true,inputType:'insertText',data:'x'}));await pause(30);});
+ assert.equal(outgoing.length,2,'queued preview scroll cannot run after source input');
+ scrollRoot.dispatchEvent(new window.KeyboardEvent('keydown',{bubbles:true,key:'PageDown'}));await scroll();assert.equal(outgoing.length,3,'keyboard preview scrolling still synchronizes');
+ await show({onScroll:line=>outgoing.push(line),scrollLine:2});await act(async()=>pause(220));await scroll();assert.equal(outgoing.length,3,'incoming source navigation is not echoed');
+ check('WebKit layout scrolls cannot move source; wheel, drag and keyboard navigation remain active');
+
  await reset(); await show(); await settle();
  assert.equal(calls.length,1); assert.match(text(),/initial/); check('omitted active defaults to visible');
  await show({active:false}); await content('hidden latest'); await settle();
@@ -120,6 +136,14 @@ try {
  first.pending[0].innerHTML='<svg></svg>';first.pending[1].innerHTML='<div class="error">failure</div>';
  await show({active:true});await settle();assert.equal(hydrates.at(-1),first);assert.equal(calls.length,1);assert.ok(document.querySelector('.mermaid-diagram svg'));assert.match(text(),/failure/);
  check('hidden theme does not rehydrate or abort retained pending diagrams; completion survives reactivation');
+
+ await reset();renderImpl=s=>Promise.resolve(`<p data-line="1">${s}</p><div class="mermaid-diagram" data-line="${s==='newline'?4:3}" data-mermaid-source="graph TD;A-->B"></div><table data-line="${s==='newline'?8:7}"><tbody><tr><td>unchanged</td></tr></tbody></table>`);
+ await show({active:true});await settle();const retainedDiagram=document.querySelector('.mermaid-diagram'),retainedTable=document.querySelector('table'),pending=hydrates.at(-1);
+ retainedDiagram.innerHTML='<svg><text>rendered once</text></svg>';
+ await content('edited');await settle();assert.equal(document.querySelector('.mermaid-diagram'),retainedDiagram);assert.equal(document.querySelector('table'),retainedTable);assert.equal(pending.ctrl.signal.aborted,false);assert.ok(retainedDiagram.querySelector('svg'));assert.equal(hydrates.at(-1).pending,undefined);
+ await content('newline');await settle();assert.equal(document.querySelector('.mermaid-diagram'),retainedDiagram);assert.equal(retainedDiagram.dataset.line,'4');assert.equal(retainedTable.dataset.line,'8');assert.ok(retainedDiagram.querySelector('svg'));
+ await show({active:true,theme:'dark'});await settle();assert.notEqual(document.querySelector('.mermaid-diagram'),retainedDiagram);assert.equal(pending.ctrl.signal.aborted,true);
+ check('typing and line insertion retain diagram/table DOM and pending rendering; theme rebuilds it');
 
  await reset();await show({active:true});await settle();const before=hydrates.at(-1);await content('superseding source');await settle();assert.equal(before.ctrl.signal.aborted,true);assert.match(text(),/superseding source/);
  await act(async()=>root.render(null));assert.equal(hydrates.at(-1).ctrl.signal.aborted,true);check('rendered HTML replacement and unmount keep display cleanup');

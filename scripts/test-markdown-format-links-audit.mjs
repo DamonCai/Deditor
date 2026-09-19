@@ -23,20 +23,23 @@ const {flushSync}=await import('react-dom');
 const runtimeErrors=[];window.addEventListener('error',event=>runtimeErrors.push(event.error));
 const output=path.resolve('node_modules/.cache/deditor-markdown-format-links-audit.mjs');
 fs.mkdirSync(path.dirname(output),{recursive:true});
-const writes=[];let failed=false,persistedState='';
+const writes=[], reads=[], externalLinks=[];globalThis.mdOpenUrl=async href=>externalLinks.push(href);let failed=false,persistedState='';
 globalThis.mdInvoke=async(command,args)=>{
  if(command==='read_app_state')return persistedState;
  if(command==='write_app_state'){persistedState=args.content;return;}
  if(command==='write_text_file'){if(failed)throw new Error('generated disk failure');writes.push(args);}
- if(command==='read_text_file')return '';
+ if(command==='read_text_file'){reads.push(args.path);return '# Local destination\n';}
 };
 const stubs={
  '@tauri-apps/api/core':'export const invoke=(...a)=>globalThis.mdInvoke(...a); export const convertFileSrc=p=>p;',
  '@tauri-apps/plugin-dialog':'export const save=async()=>"/generated/renamed.md"; export const open=async()=>null;',
- '@tauri-apps/plugin-opener':'export const openUrl=async()=>{}; export const openPath=async()=>{}; export const revealItemInDir=async()=>{};',
+ '@tauri-apps/plugin-opener':'export const openUrl=(href)=>globalThis.mdOpenUrl(href); export const openPath=async()=>{}; export const revealItemInDir=async()=>{};',
 };
 await build({stdin:{contents:`
 export {default as Toolbar} from './src/components/MarkdownToolbar';
+export {renderMarkdown} from './src/lib/markdown';
+export {markdownDisplayHtml} from './src/lib/markdownDisplay';
+export {default as Preview} from './src/components/Preview';
 export {default as Visual} from './src/components/MarkdownVisualEditor';
 export {useEditorStore} from './src/store/editor';
 export {getVisualEditor} from './src/lib/markdownVisualBridge';
@@ -69,6 +72,39 @@ const range=async(text,start,end)=>{let at;view.state.doc.descendants((node,pos)
 const run=async(fn)=>act(async()=>{fn();await pause(40);});
 const button=label=>{const item=[...document.querySelectorAll('button')].find(b=>b.getAttribute('aria-label')===label || b.getAttribute('aria-label')?.startsWith(label+' ('));assert.ok(item,label);return item;};
 try {
+await test('D01 outdent: only the selected continuation leaves lists or quotes',async()=>{
+ for(const marker of ['*','1.','- [ ]','- [x]'])for(const heading of ['', '## ']){
+  const indent=marker.startsWith('1.')?'   ':'  ';
+  const original=`Before\n\n${marker} keep\n\n${indent}${heading}target\n\n${indent}following\n\nAfter\n`;
+  await reset(original);await select('target');
+  await run(()=>button('Decrease indent').click());
+  let targetDepth,keepDepth,followingDepth;
+  view.state.doc.descendants((n,p)=>{if(!n.isTextblock)return;const depth=view.state.doc.resolve(p+1).depth;if(n.textContent==='target')targetDepth=depth;if(n.textContent==='keep')keepDepth=depth;if(n.textContent==='following')followingDepth=depth;});
+  assert.equal(targetDepth,1,marker+' target moved to document');assert.ok(keepDepth>1,marker+' previous paragraph remains in list');assert.ok(followingDepth>1,marker+' following paragraph remains in list');
+  assert.equal(view.state.selection.$from.parent.type.name,heading?'heading':'paragraph');
+  await exactHistory(original);
+ }
+});
+await test('D01 outdent: nested quotes/lists, heading Backspace and table boundaries',async()=>{
+ for(const original of ['> keep\n>\n> ## target\n>\n> following\n','> > keep\n> >\n> > ## target\n','* outer\n  * keep\n\n    ## target\n']){
+  await reset(original);await select('target');let count=0;
+  while(view.state.selection.$from.depth>1 && count++<5){const before=content();await key('Tab',{shiftKey:true});await exactHistory(before);await act(async()=>pause(100));await select('target');}
+  assert.equal(view.state.selection.$from.depth,1);assert.equal(view.state.selection.$from.parent.type.name,'heading',JSON.stringify({original,content:content(),doc:view.state.doc.toJSON()}));assert.ok(view.state.doc.textContent.includes('keep'));
+ }
+ const original='* keep\n\n  ## target\n';await reset(original);await select('target',0);await key('Backspace');assert.equal(view.state.selection.$from.depth,1);assert.equal(view.state.selection.$from.parent.type.name,'heading');await exactHistory(original);
+ const table='| A | B |\n| --- | --- |\n| target | other |\n';await reset(table);await select('target');await run(()=>button('Decrease indent').click());assert.equal(content(),table);
+});
+await test('D01 outdent: consecutive continuation headings and range selection',async()=>{
+ for(const selectedRange of [false,true]){
+  const original='* keep\n\n  ## target\n\n  ### next\n\n  following\n';
+  await reset(original);await select('target');
+  if(selectedRange){let end;view.state.doc.descendants((n,p)=>{if(n.isTextblock && n.textContent==='next')end=p+1+n.content.size;});await run(()=>view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc,view.state.selection.from,end))));}
+  await run(()=>button('Decrease indent').click());
+  assert.equal(view.state.selection.$from.depth,1,'selected heading leaves list');
+  assert.equal(view.state.selection.$from.parent.type.name,'heading');
+  assert.ok(view.state.doc.textContent.includes('next'));await exactHistory(original);
+ }
+});
 await test('D01 toolbar: paragraph and all heading levels roundtrip and undo',async()=>{
  for(let n=1;n<=6;n++){
  const original='Before\n\nHeading\n\nTail\n';await reset(original);await select('Heading');
@@ -109,6 +145,40 @@ await test('G02 links: ordinary click edits; modifier clicks navigate document a
  const original='# Destination\n\n[Jump](#destination) [Malformed](#%broken)\n';await reset(original);let jumps=0;const heading=document.querySelector('.ProseMirror h1');heading.scrollIntoView=()=>jumps++;
  let link=document.querySelector('.ProseMirror a');await run(()=>link.dispatchEvent(new window.MouseEvent('click',{bubbles:true,cancelable:true})));assert.equal(jumps,0);
  await run(()=>link.dispatchEvent(new window.MouseEvent('click',{bubbles:true,cancelable:true,metaKey:true})));assert.equal(jumps,1);await run(()=>document.querySelectorAll('.ProseMirror a')[1].dispatchEvent(new window.MouseEvent('click',{bubbles:true,cancelable:true,ctrlKey:true})));assert.equal(content(),original);
+});
+await test('G02a file links: preview renders filename links and keeps unsafe protocols rejected',async()=>{
+ const original='[中文 文件.md](file:///generated/%E4%B8%AD%E6%96%87%20%E6%96%87%E4%BB%B6.md) [引用][f] <file:///generated/auto.md>\n\n[f]: file:///generated/ref.md\n';
+ const html=await app.renderMarkdown(original,{theme:'light'}), box=document.createElement('div');box.innerHTML=app.markdownDisplayHtml(html);
+ assert.deepEqual([...box.querySelectorAll('a')].map(a=>a.textContent),['中文 文件.md','引用','file:///generated/auto.md']);
+ assert.equal(box.querySelector('a').getAttribute('href'),'file:///generated/%E4%B8%AD%E6%96%87%20%E6%96%87%E4%BB%B6.md');
+ box.innerHTML=await app.renderMarkdown('[bad](javascript:alert%281%29) [data](data:text/html,bad)',{theme:'light'});assert.equal(box.querySelectorAll('a').length,0);
+});
+await test('G02a preview click: sanitized local links open a DEditor tab',async()=>{
+ const original='[预览文件](file:///generated/preview%20file.md)\n';await reset(original);await act(async()=>root.render(null));
+ await act(async()=>{root.render(React.createElement(app.Preview,{tabId:'a',active:true,theme:'light'}));});
+ await act(async()=>pause(150));const link=document.querySelector('.preview a');assert.equal(link.textContent,'预览文件');const event=new window.MouseEvent('click',{bubbles:true,cancelable:true});await run(()=>link.dispatchEvent(event));
+ assert.equal(event.defaultPrevented,true);assert.equal(reads.at(-1),'/generated/preview file.md');assert.equal(store.getState().tabs.find(t=>t.id===store.getState().activeId).filePath,'/generated/preview file.md');assert.equal(content(),original);await run(()=>store.setState({activeId:'a'}));
+ const box=document.createElement('div');box.innerHTML=app.markdownDisplayHtml('<a href="javascript:alert(1)">bad</a><iframe src="file:///private/test"></iframe>');assert.equal(box.querySelector('a').getAttribute('href'),null);assert.equal(box.querySelector('iframe'),null);
+});
+await test('G02b file links: reading modifier click opens decoded file in DEditor and preserves source',async()=>{
+ const original='[本地文件](file:///generated/click%20%23%2520.md) [bad](javascript:alert%281%29)\n';await reset(original);
+ const link=document.querySelector('.ProseMirror a');assert.equal(link.getAttribute('href'),'file:///generated/click%20%23%2520.md');
+ const before=externalLinks.length;await run(()=>link.dispatchEvent(new window.MouseEvent('click',{bubbles:true,cancelable:true,metaKey:true})));
+ assert.equal(reads.at(-1),'/generated/click #%20.md');assert.equal(store.getState().tabs.find(t=>t.id===store.getState().activeId).filePath,'/generated/click #%20.md');
+ assert.equal(externalLinks.length,before);assert.equal(content(),original);assert.equal(document.querySelectorAll('.ProseMirror a')[1].getAttribute('href'),'');
+ await run(()=>store.setState({activeId:'a'}));
+});
+await test('G02c file links: actual link popup routes local files internally and HTTPS externally',async()=>{
+ for(const [href,expected] of [['file:///generated/popup%20file.md','/generated/popup file.md'],['/generated/absolute%20file.md','/generated/absolute file.md'],['./near.md','/generated/near.md'],['../parent.md','/parent.md'],['https://example.test/docs',null]]){
+  const original='前文\n\n[打开链接]('+href+')\n';await reset(original);await select('前文',1);const link=document.querySelector('.ProseMirror a');
+  let at;view.state.doc.descendants((n,pos)=>{if(n.isText&&n.marks.some(m=>m.type.name==='link'))at=pos;});const oldCoords=view.posAtCoords;view.posAtCoords=()=>({pos:at,inside:at-1});
+  await act(async()=>{view.focus();link.dispatchEvent(new window.MouseEvent('mousemove',{bubbles:true,clientX:1,clientY:1}));await pause(140);});
+  view.posAtCoords=oldCoords;const popup=document.querySelector('.milkdown-link-preview a.link-display');assert.equal(popup.textContent,href);
+  const e=new window.MouseEvent('click',{bubbles:true,cancelable:true});await run(()=>popup.dispatchEvent(e));assert.equal(e.defaultPrevented,true);
+  if(expected){assert.equal(reads.at(-1),expected);assert.equal(store.getState().tabs.find(t=>t.id===store.getState().activeId).filePath,expected);}
+  else assert.equal(externalLinks.at(-1),href);
+  assert.equal(content(),original);await run(()=>store.setState({activeId:'a'}));
+ }
 });
 await test('G03-G04 footnote: repeated reference, rich popup Tab/Escape and return focus',async()=>{
  const original='Text[^note] repeated[^note].\n\n[^note]: **Rich** and `code`.\n\n    second paragraph\n';await reset(original);assert.equal(document.querySelectorAll('.ProseMirror .footnote-ref').length,2);

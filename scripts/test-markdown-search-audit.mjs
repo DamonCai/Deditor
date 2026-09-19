@@ -69,11 +69,64 @@ const range=async(text,start,end)=>{let at;view.state.doc.descendants((node,pos)
 const run=async(fn)=>act(async()=>{fn();await pause(40);});
 const button=label=>{const item=[...document.querySelectorAll('button')].find(b=>b.getAttribute('aria-label')===label || b.getAttribute('aria-label')?.startsWith(label+' ('));assert.ok(item,label);return item;};
 
-const input=async(index,value)=>run(()=>{const el=document.querySelectorAll('[role="search"] input')[index];Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}));});
-const searchButton=text=>{const b=[...document.querySelectorAll('[role="search"] button')].find(b=>b.textContent===text);assert.ok(b,text);return b;};
+const input=async(index,value)=>run(()=>{const el=document.querySelectorAll('[role="search"] input:not([type="checkbox"])')[index];Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}));});
+const searchButton=text=>{const names={'Whole word':'input[name=word]','Match case':'input[name=case]','Regex':'input[name=re]','Replace current':'button[name=replace]','Replace All':'button[name=replaceAll]'};const b=document.querySelector('[role=search] '+names[text]);assert.ok(b,text);return b;};
 const count=()=>document.querySelector('[role="search"]').textContent;
 const open=async()=>run(()=>app.getVisualEditor().find());
 try {
+await test('Reading mounts the stock CodeMirror panel with its original control structure',async()=>{
+ await reset('cat cat\n');await open();
+ const {EditorState}=await import('@codemirror/state'),{EditorView}=await import('@codemirror/view');
+ const {search,openSearchPanel}=await import('@codemirror/search');
+ const host=document.createElement('div');document.body.append(host);
+ const native=new EditorView({parent:host,state:EditorState.create({extensions:[search()]})});
+ try {
+ openSearchPanel(native);
+ const structure=el=>[...el.children].map(child=>[child.tagName,child.getAttribute('name'),child.tagName==='BUTTON'||child.tagName==='LABEL'?child.textContent:null]);
+ assert.deepEqual(structure(document.querySelector('[role=search] .cm-search')),structure(host.querySelector('.cm-search')));
+ assert.equal(document.querySelector('[role=search] .cm-content').getAttribute('contenteditable'),'false');
+ assert.equal(document.querySelector('[role=search] .cm-scroller').style.display,'none');
+ assert.equal(document.querySelector('[role=search] button[name=select]').disabled,true);
+ } finally {native.destroy();host.remove();}
+});
+await test('Footer search keeps all highlights visible while focus stays in the input, including repeated single-match Enter',async()=>{
+ const original='Start unchanged.\n\n查找目标 **alpha**\n\nMiddle\n\n查找目标 alpha\n';
+ await reset(original);await open();await input(0,'查找目标');
+ const field=document.querySelector('[role=search] input[name=search]'), footer=document.querySelector('.deditor-search-footer');
+ assert.equal(footer.previousElementSibling.classList.contains('md-visual-layout'),true);
+ assert.equal(document.activeElement,field);assert.equal(document.querySelectorAll('.preview-search-match').length,2);
+ const first=view.state.selection.from;
+ await run(()=>field.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true})));
+ assert.ok(view.state.selection.from>first);assert.equal(document.activeElement,field);
+ assert.equal(document.querySelectorAll('.preview-search-match.current').length,1);
+ assert.equal(document.querySelector('.preview-search-match.current').parentElement.textContent,'查找目标 alpha');
+ await input(0,'Middle');
+ let scrolls=0;const scroller=document.querySelector('.md-visual-scroll'), scroll=scroller.scrollTo;
+ scroller.scrollTo=()=>scrolls++;
+ await run(()=>field.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true})));
+ assert.equal(scrolls,1);scroller.scrollTo=scroll;
+ await input(0,'missing');assert.equal(document.querySelectorAll('.preview-search-match').length,0);assert.equal(document.querySelector('[name=next]').disabled,true);
+ await input(0,'alpha');assert.equal(document.querySelectorAll('.preview-search-match').length,2);
+ await run(()=>field.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true})));
+ assert.equal(document.querySelectorAll('.preview-search-match').length,0);assert.equal(document.activeElement,view.dom);assert.equal(content(),original);
+});
+await test('Footer replacement Enter, read-only controls and search close preserve exact undo',async()=>{
+ const original='cat **cat**\n';await reset(original);await open();await input(0,'cat');await input(1,'dog');
+ await run(()=>document.querySelector('[name=replace]').dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true})));
+ assert.equal(content(),'dog **cat**\n');await exactHistory(original);
+ await render(true);await open();assert.equal(document.querySelector('[role=search] input[name=replace]'),null);
+ await input(0,'cat');assert.equal(document.querySelector('.preview-search-match.current').textContent,'cat');
+ await render(false);
+});
+await test('Search highlights survive editor recreation on a theme change without another keypress',async()=>{
+ await reset('cat **cat**\n');await open();await input(0,'cat');
+ assert.equal(document.querySelectorAll('.preview-search-match').length,2);
+ const outside=document.createElement('button');document.body.append(outside);outside.focus();
+ await act(async()=>{root.render(React.createElement(React.Fragment,null,React.createElement(app.Toolbar),React.createElement(app.Visual,{tabId:'a',theme:'dark'})));await pause(120);});
+ await act(async()=>pause(60));
+ assert.equal(document.querySelectorAll('.preview-search-match').length,2);assert.equal(document.querySelectorAll('.preview-search-match.current').length,1);
+ assert.equal(content(),'cat **cat**\n');assert.equal(document.activeElement,outside);outside.remove();
+});
 await test('J01 whole-word and case toggles respect Unicode letters, accents and surrogate pairs',async()=>{
  await reset('Alpha alpha ALPHA alphabet\n\ncat scatter cat_ cat-cat café CAFÉ İ 😀 é\n\n𐐀cat cat𐐀 cat😀 😀cat\n');await open();await input(0,'alpha');assert.match(count(),/1 \/ 4/);await run(()=>searchButton('Whole word').click());assert.match(count(),/1 \/ 3/);await run(()=>searchButton('Match case').click());assert.match(count(),/1 \/ 1/);assert.equal(app.getVisualEditor().selected,'alpha');
  await input(0,'cat');assert.match(count(),/1 \/ 5/);assert.equal(app.getVisualEditor().selected,'cat');
@@ -96,10 +149,31 @@ await test('J02 zero-width expressions cannot mutate content, then named capture
 });
 
 await test('J02-J03 invalid regex recovery, Unicode replacement and post-close editing keep independent undo',async()=>{
- const original='İ 😀 before\n\nTarget remains.\n';await reset(original);await open();await run(()=>searchButton('Regex').click());await input(0,'[');assert.ok(document.querySelector('[role="search"] [role="alert"]'));assert.equal(searchButton('Replace current').disabled,true);
- await input(0,'😀');assert.equal(!!document.querySelector('[role="search"] [role="alert"]'),false);assert.equal(app.getVisualEditor().selected,'😀');await input(1,'X');await run(()=>searchButton('Replace current').click());const replaced='İ X before\n\nTarget remains.\n';assert.equal(content(),replaced);
- const field=document.querySelectorAll('[role="search"] input')[1];await run(()=>{field.focus();field.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));});assert.equal(!!document.querySelector('[role="search"]'),false);assert.equal(document.activeElement,view.dom);
+ const original='İ 😀 before\n\nTarget remains.\n';await reset(original);await open();await run(()=>searchButton('Regex').click());await input(0,'[');assert.ok(document.querySelector('[role="search"] [role="alert"]:not([hidden])'));assert.equal(searchButton('Replace current').disabled,true);
+ await input(0,'😀');assert.equal(!!document.querySelector('[role="search"] [role="alert"]:not([hidden])'),false);assert.equal(app.getVisualEditor().selected,'😀');await input(1,'X');await run(()=>searchButton('Replace current').click());const replaced='İ X before\n\nTarget remains.\n';assert.equal(content(),replaced);
+ const field=document.querySelectorAll('[role="search"] input:not([type="checkbox"])')[1];await run(()=>{field.focus();field.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));});assert.equal(!!document.querySelector('[role="search"]'),false);assert.equal(document.activeElement,view.dom);
  await run(()=>app.getVisualEditor().navigate(3,1));await run(()=>view.dispatch(view.state.tr.insertText('Z')));assert.equal(content(),'İ X before\n\nZTarget remains.\n');await exactHistory(replaced);await run(()=>app.markdownHistory());await run(()=>app.markdownHistory());assert.equal(content(),original);
+});
+await test('Unmodified CodeMirror footer retains Enter/Shift+Enter, select-all, regex and replace commands',async()=>{
+ await act(async()=>root.render(null));
+ const {EditorState}=await import('@codemirror/state'),{EditorView,keymap}=await import('@codemirror/view');
+ const {search,searchKeymap,openSearchPanel,getSearchQuery,SearchQuery,setSearchQuery}=await import('@codemirror/search');
+ const host=document.createElement('div');document.body.append(host);
+ const cm=new EditorView({parent:host,state:EditorState.create({doc:'cat cat item12',extensions:[search(),keymap.of(searchKeymap),EditorState.allowMultipleSelections.of(true)]})});
+ try {
+ openSearchPanel(cm);const panel=host.querySelector('.cm-search');assert.ok(panel.closest('.cm-panels-bottom'));
+ const field=panel.querySelector('[name=search]');field.focus();field.value='cat';field.dispatchEvent(new Event('change',{bubbles:true}));
+ field.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',keyCode:13,bubbles:true,cancelable:true}));assert.equal(cm.state.selection.main.from,0);
+ field.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',keyCode:13,bubbles:true,cancelable:true}));assert.equal(cm.state.selection.main.from,4);
+ field.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',keyCode:13,shiftKey:true,bubbles:true,cancelable:true}));assert.equal(cm.state.selection.main.from,0);
+ assert.equal(document.activeElement,field);
+ panel.querySelector('[name=select]').click();assert.equal(cm.state.selection.ranges.length,2);
+ cm.dispatch({effects:setSearchQuery.of(new SearchQuery({search:'item(\\d+)',regexp:true,replace:'row$1'}))});
+ assert.equal(field.value,'item(\\d+)');assert.equal(panel.querySelector('[name=re]').checked,true);
+ panel.querySelector('[name=replaceAll]').click();assert.equal(cm.state.doc.toString(),'cat cat row12');
+ field.value='[';field.dispatchEvent(new Event('change',{bubbles:true}));assert.equal(getSearchQuery(cm.state).valid,false);assert.equal(cm.state.doc.toString(),'cat cat row12');
+ field.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));assert.equal(host.querySelector('.cm-search'),null);
+ } finally {cm.destroy();host.remove();}
 });
 } finally {await act(async()=>root.unmount());}
 assert.deepEqual(runtimeErrors,[]);console.log(`Passed ${passed} search audit groups`);

@@ -8,10 +8,19 @@
 .md-image-host summary { cursor: pointer; font-size: 12px; }
 .md-writing-panel input[aria-invalid="true"] { border-color: var(--danger, #c33); }
 
-.md-history-overlay { position: fixed; inset: 0; z-index: 200; background: #0005; display: grid; place-items: center; }
+.md-history-overlay { position: fixed; inset: 0; z-index: 200; background: var(--modal-backdrop); display: grid; place-items: center; }
 .md-history-dialog { width: min(960px, 92vw); height: min(700px, 90vh); padding: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); display: flex; flex-direction: column; gap: 12px; }
+.md-history-dialog--overview { width: 100vw; height: 100vh; border: 0; border-radius: 0; }
+.md-history-error { max-height: 18vh; overflow: auto; flex-shrink: 0; }
+.dark .md-history-dialog { color-scheme: dark; }
+.md-history-window-actions { display: flex; align-items: center; gap: 8px; }
 .md-history-actions { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
 .md-history-body { display: flex; flex: 1; min-height: 0; gap: 12px; }
 .md-history-list { width: 35%; overflow: auto; }
-.md-history-list .deditor-btn { width: 100%; display: block; white-space: normal; overflow-wrap: anywhere; text-align: left; margin-bottom: 6px; }
+.md-history-list .deditor-btn { width: 100%; display: block; white-space: normal !important; overflow-wrap: anywhere; text-align: left; margin-bottom: 6px; }
 .md-history-body textarea { flex: 1; min-width: 0; resize: none; padding: 12px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-family: monospace; }
+.md-history-preview { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+.md-history-preview > .deditor-btn { align-self: flex-start; }
+.md-history-diff { flex: 1; min-height: 0; overflow: hidden; border: 1px solid var(--border); }
+@media (max-width: 760px) { .md-history-body { flex-direction: column; } .md-history-list { width: 100%; max-height: 120px; flex-shrink: 0; } .md-history-actions { flex-wrap: wrap; } }
+@media (max-width: 760px) and (max-height: 600px) { .md-history-list { max-height: 56px; } }

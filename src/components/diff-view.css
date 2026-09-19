@@ -1,0 +1,16 @@
+.diff-view { min-width: 0; min-height: 0; }
+.diff-navigation { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; padding: 6px 8px; border-bottom: 1px solid var(--border); background: var(--bg-soft); }
+.diff-navigation-steps { display: flex; align-items: center; gap: 6px; }
+.diff-position { color: var(--text-soft); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.diff-identical { padding: 8px; color: var(--text-soft); font-size: 12px; }
+.diff-body { display: flex; flex: 1; min-height: 0; min-width: 0; }
+.diff-scroll { min-width: 0; overscroll-behavior: contain; }
+.diff-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.diff-fold { background: var(--bg-soft); text-align: center; }
+.diff-fold td { padding: 4px; border-block: 1px solid var(--border); }
+.diff-row-active td { box-shadow: inset 0 1px var(--accent), inset 0 -1px var(--accent); }
+.diff-overview { position: relative; flex: 0 0 28px; margin: 4px 2px; border-left: 1px solid var(--border); background: var(--bg-soft); }
+.diff-overview-marker { position: absolute; left: 2px; }
+.diff-overview-marker span { width: 14px; height: 4px; border-radius: 2px; background: var(--accent); pointer-events: none; }
+.diff-overview-marker span[data-change="add"] { background: var(--success-text); }
+.diff-overview-marker span[data-change="del"] { background: var(--error-text); }

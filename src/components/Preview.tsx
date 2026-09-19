@@ -1,8 +1,12 @@
+import ContextMenu from "./ContextMenu";
+import { writeMarkdownClipboard } from "../lib/markdownClipboard";
+import { showError } from "../lib/feedback";
 import { outlineActiveIndex } from "../lib/markdownOutline";
+import { PreviewScrollIntent } from "../lib/previewScrollIntent";
 import MarkdownOutline from "./MarkdownOutline";
 import { decodeAnchor, openMarkdownFileLink } from "../lib/markdownLinks";
 import MarkdownDocumentSurface from "./MarkdownDocumentSurface";
-import { markdownDisplayHtml, hydrateMarkdownDisplay } from "../lib/markdownDisplay";
+import { MarkdownPreviewCache, MarkdownPreviewDocument, type PreviewBlock } from "../lib/markdownPreviewDocument";
 import { installFootnotePreview } from "../lib/markdownFootnotePreview";
 import { Button } from "./ui/Button";
 import { FiX, FiChevronLeft, FiChevronRight } from "react-icons/fi";
@@ -80,6 +84,8 @@ export default function Preview({
   // Self-subscribed per tab — each PreviewHost slot only re-renders for its
   // own tab's content / filePath / dirty flips.
   const source = useTabContent(tabId);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; text: string; html: string } | null>(null);
+  useEffect(() => { setContextMenu(null); }, [tabId, active, source]);
   const footnoteLanguage = useEditorStore(s => s.language);
   useEffect(() => { if (containerRef.current) return installFootnotePreview(containerRef.current, footnoteLanguage); }, [footnoteLanguage]);
   const mathAutoNumber = useEditorStore(s => s.markdownSettings.mathAutoNumber);
@@ -87,11 +93,26 @@ export default function Preview({
   const fontSize = useEditorStore(s => s.tabs.find(tab => tab.id === tabId)?.zoomFontSize ?? s.editorFontSize);
   const filePath = useTabFilePath(tabId);
   const [rendered, setRendered] = useState<{
-    html: string; source: string; filePath: string | null;
+    blocks: PreviewBlock[]; source: string; filePath: string | null;
     theme: "light" | "dark"; mathAutoNumber: boolean;
   } | null>(null);
-  const html = retainDom ? rendered?.html ?? "" : "";
+  // Commit identity also changes when only source-line markers move.
+  const html = retainDom ? rendered : null;
   const containerRef = useRef<HTMLDivElement>(null);
+  const previewCache = useRef(new MarkdownPreviewCache());
+  const previewDocument = useRef<MarkdownPreviewDocument | null>(null);
+  useLayoutEffect(() => {
+    if (!containerRef.current) return;
+    const document = new MarkdownPreviewDocument(containerRef.current);
+    previewDocument.current = document;
+    return () => { document.destroy(); previewDocument.current = null; previewCache.current.clear(); };
+  }, []);
+  const committedImageRoot = rendered && isMarkdown(rendered.filePath) ? documentImageRoot(rendered.source, rendered.filePath) : null;
+  useLayoutEffect(() => {
+    previewDocument.current?.update(retainDom ? rendered?.blocks ?? [] : [], {
+      theme: rendered?.theme ?? theme, filePath: rendered?.filePath ?? filePath, imageRoot: committedImageRoot,
+    });
+  }, [html, retainDom, rendered?.theme, rendered?.filePath, committedImageRoot]);
   const scrollIndexRef = useRef<PreviewScrollIndex | null>(null);
   useLayoutEffect(() => {
     if (!containerRef.current) return;
@@ -112,6 +133,14 @@ export default function Preview({
   // Suppress outgoing scroll events for this many ms after a programmatic scroll
   // (set when applying incoming scrollLine from editor).
   const suppressOutgoingUntil = useRef(0);
+  const scrollIntentRef = useRef<PreviewScrollIntent | null>(null);
+  useLayoutEffect(() => {
+    if (!containerRef.current) return;
+    const intent = new PreviewScrollIntent(containerRef.current, () => { suppressOutgoingUntil.current = 0; });
+    scrollIntentRef.current = intent;
+    return () => { intent.destroy(); scrollIntentRef.current = null; };
+  }, []);
+  useLayoutEffect(() => { scrollIntentRef.current?.reset(); }, [html]);
   const onScrollRef = useRef(onScroll);
   onScrollRef.current = onScroll;
   // Last known fractional source-line at the top of the preview viewport.
@@ -128,8 +157,10 @@ export default function Preview({
       const out = isMd
         ? await renderMarkdown(source, { theme, mathAutoNumber })
         : await renderCode(source, filePath, { theme });
-      if (!cancelled) setRendered({
-        html: isMd ? markdownDisplayHtml(out) : out,
+      if (cancelled) return;
+      const blocks = isMd ? previewCache.current.prepare(out) : [{ html: out, lines: [] }];
+      setRendered({
+        blocks,
         source, filePath, theme, mathAutoNumber,
       });
     }, 80);
@@ -138,17 +169,6 @@ export default function Preview({
       clearTimeout(id);
     };
   }, [source, filePath, theme, isMd, mathAutoNumber, renderEnabled, renderCurrent]);
-
-  // Hydrate the committed result's theme. Hidden source/theme changes retain
-  // this result, so they neither start new diagram work nor abort in-flight
-  // hydration on the retained DOM. A newly rendered result keeps the existing
-  // replacement/unmount cleanup behavior.
-  const renderedTheme = rendered?.theme ?? theme;
-  useEffect(() => {
-    if (!containerRef.current || !html) return;
-    const display = hydrateMarkdownDisplay(containerRef.current, { theme: renderedTheme, filePath, imageRoot });
-    return () => display.abort();
-  }, [html, renderedTheme]);
 
   // Local images: rewrite `<img>` src to a Tauri asset:// URL so the WebView
   // can load files outside its own origin. Relative paths resolve against the
@@ -206,6 +226,7 @@ export default function Preview({
       }
     }
     suppressOutgoingUntil.current = Date.now() + 200;
+    scrollIntentRef.current?.reset();
     root.scrollTo({ top: Math.max(0, top), behavior: "auto" });
     return true;
   };
@@ -386,10 +407,12 @@ export default function Preview({
     let rafId = 0;
     const handler = () => {
       if (Date.now() < suppressOutgoingUntil.current) return;
+      if (!scrollIntentRef.current?.active) return;
       if (!onScrollRef.current) return;
       if (rafId) return;
       rafId = requestAnimationFrame(() => {
         rafId = 0;
+        if (Date.now() < suppressOutgoingUntil.current || !scrollIntentRef.current?.active) return;
         const markers = scrollIndexRef.current?.read();
         if (!markers || markers.lines.length === 0) return;
         const { lines, tops } = markers;
@@ -733,7 +756,14 @@ export default function Preview({
           fontSize={fontSize} customStyleEnabled={isMd} documentTheme={isMd ? documentTheme : "default"}
           className={`preview${readingMode ? " preview-fullwidth" : ""}`}
           style={{ flex: 1 }}
-          dangerouslySetInnerHTML={{ __html: html }}
+          onContextMenu={event => {
+            if (!isMd) return;
+            event.preventDefault();
+            const selection = window.getSelection(), root = containerRef.current;
+            const selected = selection && root?.contains(selection.anchorNode) && root.contains(selection.focusNode) && selection.rangeCount;
+            const fragment = document.createElement('div'); if (selected) fragment.append(selection.getRangeAt(0).cloneContents());
+            setContextMenu({ x: event.clientX, y: event.clientY, text: selected ? selection.toString() : '', html: fragment.innerHTML });
+          }}
         />
         {readingMode && (
           <MarkdownOutline items={tocItems} current={activeTocId} navigate={handleTocJump} active={active} />
@@ -802,6 +832,10 @@ export default function Preview({
           </div>
         )}
       </div>
+      {contextMenu && <ContextMenu x={contextMenu.x} y={contextMenu.y} onClose={() => setContextMenu(null)} items={[
+        { label: t('editor.copy'), disabled: !contextMenu.text, onClick: () => { void writeMarkdownClipboard({ markdown: contextMenu.text, text: contextMenu.text, html: contextMenu.html }, 'rich').catch(() => showError(t('md.clipboardError'))); } },
+        { label: t('editor.selectAll'), onClick: () => { const root = containerRef.current; if (!root) return; const range = document.createRange(); range.selectNodeContents(root); const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range); } },
+      ]} />}
     </div>
   );
 }

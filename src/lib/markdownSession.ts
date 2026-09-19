@@ -117,4 +117,13 @@ export function markdownSession(id: string, source: string) {
   else session.sync(source);
   return session;
 }
-export function dropMarkdownSession(id: string) { sessions.delete(id); }
+interface ViewPosition { visualSelection: { anchor: number; head: number }; visualScroll: number; sourceCursor: number | null }
+const rightPositions = new Map<string, ViewPosition>();
+export function markdownViewState(id: string, source: string, pane: string | null): ViewPosition {
+  const session = markdownSession(id, source);
+  if (pane !== "right") return session;
+  let position = rightPositions.get(id);
+  if (!position) { position = { visualSelection: { ...session.visualSelection }, visualScroll: session.visualScroll, sourceCursor: session.sourceCursor }; rightPositions.set(id, position); }
+  return position;
+}
+export function dropMarkdownSession(id: string) { sessions.delete(id); rightPositions.delete(id); }

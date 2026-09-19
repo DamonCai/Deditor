@@ -1,15 +1,10 @@
-/** Editors with an in-place text field finish that transaction before save/close.
- * Registrations are per tab: background editors never intercept global keys. */
-const flushers = new Map<string, () => void>();
+/** Multiple projections may share a document. Only the focused projection
+ * flushes, but every registration must survive another projection unmounting. */
+const flushers = new Map<string, Set<() => void>>();
 export function registerDocumentFlush(id: string, flush: () => void) {
-  flushers.set(id, flush);
-  return () => {
-    if (flushers.get(id) === flush) flushers.delete(id);
-  };
+  const group = flushers.get(id) ?? new Set<() => void>();
+  group.add(flush); flushers.set(id, group);
+  return () => { group.delete(flush); if (!group.size) flushers.delete(id); };
 }
-export function flushDocument(id: string) {
-  flushers.get(id)?.();
-}
-export function flushDocuments() {
-  for (const flush of flushers.values()) flush();
-}
+export function flushDocument(id: string) { for (const flush of flushers.get(id) ?? []) flush(); }
+export function flushDocuments() { for (const id of flushers.keys()) flushDocument(id); }

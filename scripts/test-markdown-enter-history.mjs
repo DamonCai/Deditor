@@ -148,5 +148,31 @@ try {
   assert.equal(view.state.selection.anchor,4);assert.equal(view.state.selection.head,2);
   await act(async()=>{app.markdownHistory(true,'a');await pause(60);});assert.equal(content(),edited);
  });
- assert.equal(runtimeErrors.length,0);console.log(`${passed} Enter history checks passed`);
+ await test('Structure history: operation boundaries are independent of typing speed across containers',async()=>{
+  const cases=[
+   ['table-last-cell-Tab','| A | B |\n| --- | --- |\n| one | two |\n','two','Tab',{}],
+   ['list-indent','- alpha\n- beta\n','beta','Tab',{}],
+   ['task-indent','- [ ] alpha\n- [ ] beta\n','beta','Tab',{}],
+   ['list-outdent','- alpha\n  - beta\n','beta','Tab',{shiftKey:true}],
+   ['quote-split','> alpha\n','alpha','Enter',{}],
+  ];
+  const clock=Date.now;let now=clock();const failures=[];
+  Date.now=()=>now;
+  try {
+   for(const [name,initial,anchor,operation,modifiers] of cases)for(const gap of [0,1000]){
+    await reset(initial);await select(anchor);const before=content();
+    await key(operation,modifiers);const afterStructure=content();assert.notEqual(afterStructure,before,name+' changes structure');
+    now+=gap;
+    await act(async()=>{view.dispatch(view.state.tr.insertText('X'));await pause(20);});const afterInput=content();
+    await act(async()=>app.markdownHistory(false,'a'));const afterUndo=content();
+    const independent=afterUndo===afterStructure;
+    console.log('HISTORY_TIMING '+JSON.stringify({name,gap,independent,before,afterStructure,afterInput,afterUndo}));
+    if(!independent)failures.push({name,gap});
+    await act(async()=>app.markdownHistory(true,'a'));assert.equal(content(),afterInput,name+' redo');
+    await act(async()=>view.dispatch(view.state.tr.insertText('Y')));assert.ok(view.state.selection.$head.parent.textContent.endsWith('XY'),name+' continued typing after redo');
+   }
+  }finally{Date.now=clock;}
+  assert.deepEqual(failures,[],'structural operations must remain separate from subsequent typing');
+ });
+ assert.equal(runtimeErrors.length,0);console.log(`${passed} Enter/structure history checks passed`);
 } finally {MilkdownEditor.make=make;await act(async()=>root.render(null));window.close();}

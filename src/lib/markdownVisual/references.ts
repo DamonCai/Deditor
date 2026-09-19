@@ -27,7 +27,15 @@ export const faithfulLink = linkSchema.extendSchema(previous => ctx => {
   const base = previous(ctx);
   return { ...base, attrs: { ...base.attrs, reference: { default: null } },
     // Do not leak reference bookkeeping into HTML attributes.
-    toDOM: mark => base.toDOM!(Object.assign(Object.create(mark), { attrs: { href: mark.attrs.href, title: mark.attrs.title } }), false),
+    toDOM: mark => {
+      const spec = base.toDOM!(Object.assign(Object.create(mark), { attrs: { href: mark.attrs.href, title: mark.attrs.title } }), false);
+      // Milkdown strips file: by default; DEditor intercepts these anchors to
+      // open local documents. Keep its sanitization for all other protocols.
+      if (Array.isArray(spec) && spec[1] && typeof spec[1] === "object" && /^file:/i.test(mark.attrs.href)) {
+        (spec[1] as Record<string, unknown>).href = mark.attrs.href;
+      }
+      return spec;
+    },
     parseMarkdown: { ...base.parseMarkdown, runner: (state, node, type) => {
       state.openMark(type, { href: node.url, title: node.title ?? null, reference: node.reference ?? null });
       state.next(node.children); state.closeMark(type);

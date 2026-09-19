@@ -2,8 +2,6 @@
 .md-visual-layout { display: flex; flex: 1; min-height: 0; }
 .md-visual-scroll { flex: 1; overflow: auto; min-width: 0; overscroll-behavior: contain; container-type: inline-size; }
 .md-visual-content { width: 100%; min-height: 100%; }
-.md-visual-search { display: flex; align-items: center; gap: 5px; padding: 6px 10px; border-bottom: 1px solid var(--border); flex-wrap: wrap; font-size: 12px; }
-.md-visual-search input { width: min(250px, 50%); }
 .md-visual-shell .milkdown {
   --crepe-color-background: var(--bg);
   --crepe-color-on-background: var(--text);
@@ -51,7 +49,8 @@
 .md-diagram-family { color: var(--text-soft); font-size: 11px; margin-right: auto; }
 .md-diagram-block .md-code-bar {
   position: relative; inset: auto; width: 100%; max-width: 100%; flex-wrap: wrap;
-  opacity: 1; pointer-events: auto; margin-bottom: 8px;
+  opacity: 1; pointer-events: auto; margin-bottom: 0;
+  border: 0; border-bottom: 1px solid var(--border); border-radius: 0;
 }
 /* Match the document toolbar; only override Milkdown's button padding reset. */
 .md-diagram-block .md-diagram-modes .deditor-segment { padding: 0 10px !important; }
@@ -76,6 +75,7 @@
 .md-visual-shell .milkdown .md-diagram-block .md-code-editor .cm-editor { flex: 1; min-width: 0; min-height: 0; border: 0; border-radius: 0; }
 .md-visual-shell .milkdown .md-diagram-block .md-code-preview { max-height: 60vh; background: var(--bg); }
 .md-visual-shell .milkdown .md-diagram-block .md-code-preview > :is(.mermaid-diagram, .plantuml-diagram) { border: 0; border-radius: 0; min-height: 100%; }
+.md-visual-shell .milkdown .md-diagram-block[data-diagram-mode="preview"] .md-code-preview > :is(.mermaid-diagram, .plantuml-diagram):not(.error) { justify-content: center; }
 .md-visual-shell[data-readonly="true"] .md-code-toggle { display: none; }
 
 /* Markdown has no standard persisted resize ratio. Keep image alt text semantic. */
@@ -86,6 +86,11 @@
 /* Table font is .9em in the shared sheet: retain its 1.4em outer spacing. */
 .md-visual-shell .milkdown .md-document .milkdown-table-block { margin: calc(var(--md-table-font-scale) * var(--md-block-space)) 0; }
 .md-visual-shell .milkdown .md-document .milkdown-table-block table { margin: 0; }
+/* Crepe's text selection color overrides ProseMirror's hidden selection.
+   WebKit then paints the preceding cell's blank area for a CellSelection.
+   Keep the native range for clipboard/keyboard handling; only cells paint it. */
+.md-visual-shell .milkdown .ProseMirror-hideselection .milkdown-table-block *::selection { background: transparent; }
+.md-visual-shell .milkdown .ProseMirror-hideselection .milkdown-table-block *::-moz-selection { background: transparent; }
 .md-visual-shell .milkdown .md-document :is(td, th) > p { margin: 0; }
 .md-visual-shell .milkdown .md-document .milkdown-list-item-block { margin: var(--md-list-item-space) 0; padding: 0; }
 .md-visual-shell .milkdown .md-document .list-item { display: block; position: relative; gap: 0; padding-left: var(--md-list-item-indent); margin: 0; }
@@ -219,3 +224,69 @@
 .md-visual-shell .milkdown .milkdown-table-block .cell-handle .button-group[data-placement="above"]::after {
   top: auto; bottom: -8px;
 }
+
+/* One frame includes the diagram toolbar and all three display modes. */
+.md-visual-shell .milkdown .md-document .md-code-block.md-diagram-block {
+  border: 1px solid var(--border); border-radius: 8px;
+}
+.md-diagram-block > .md-code-bar { border-radius: 7px 7px 0 0; }
+.md-diagram-block > .md-code-body { border-radius: 0 0 7px 7px; }
+
+:is(.md-table-menu, .md-editor-menu) {
+  position: fixed; z-index: 2000; display: flex; flex-direction: column;
+  min-width: 168px; padding: 4px; border: 1px solid var(--border); border-radius: 6px;
+  max-height: calc(100vh - 8px); overflow-y: auto;
+  background: var(--bg); color: var(--text); box-shadow: var(--shadow-popup);
+  /* This is application UI, independent of the document's zoom and font. */
+  font-family: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 13px; line-height: 20px;
+}
+:is(.md-table-menu, .md-editor-menu) .deditor-btn {
+  display: flex; align-items: center; justify-content: flex-start; gap: 8px;
+  min-height: 28px; padding: 4px 10px; border-radius: 3px;
+  font-size: inherit; line-height: 20px; font-weight: 400;
+  text-align: left; white-space: nowrap;
+}
+:is(.md-table-menu, .md-editor-menu) .deditor-btn[data-variant="ghost"] { color: var(--text); }
+:is(.md-table-menu, .md-editor-menu) .deditor-btn:focus-visible { outline-offset: -2px; }
+:is(.md-table-menu, .md-editor-menu) svg {
+  width: 16px; height: 16px; flex: none; color: var(--text-soft);
+  fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;
+}
+.md-table-menu-separator { height: 1px; margin: 4px 6px; background: var(--border); }
+
+.md-clipboard { position: relative; }
+.md-clipboard-menu, .md-quick-insert {
+  z-index: 100; padding: 4px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); color: var(--text); box-shadow: 0 4px 16px #0002;
+  font: 13px/1.5 var(--font-ui, sans-serif);
+}
+.md-clipboard-menu { position: fixed; z-index: 3000; max-height: calc(100vh - 16px); overflow-y: auto; width: 240px; max-width: calc(100vw - 16px); }
+.md-quick-insert { position: fixed; width: 240px; max-width: calc(100vw - 8px); max-height: min(340px, calc(100vh - 8px)); overflow-y: auto; }
+.md-clipboard-menu button, .md-quick-insert button { display: block; width: 100%; min-height: 28px; padding: 4px 8px; border: 0; border-radius: 3px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.md-clipboard-menu button:hover:not(:disabled), .md-quick-insert button:hover, .md-quick-insert button[aria-selected=true] { background: var(--hover-bg); }
+.md-clipboard-menu button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.md-clipboard-menu button:disabled { opacity: .4; cursor: default; }
+.md-clipboard-menu [role=separator] { margin: 4px; border-top: 1px solid var(--border); }
+.md-clipboard-menu p, .md-quick-insert p { margin: 5px 8px; font-size: 11px; color: var(--text-soft); }
+.md-clipboard-menu [role=alert] { color: var(--danger, #d14444); }
+
+/* Compact controls keep a batch insertion and cell alignment in one menu. */
+:is(.md-table-menu, .md-editor-menu) { max-height: calc(100vh - 8px); overflow-y: auto; }
+.md-table-count { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 8px; font-size: 12px; color: var(--text-soft); }
+.md-table-count input { width: 64px; }
+.md-table-count input[aria-invalid="true"] { border-color: var(--error-text); }
+.md-table-align { display: grid; grid-template-columns: 62px repeat(3, 1fr); align-items: center; gap: 2px; padding: 2px 6px; }
+.md-table-align > span { font-size: 11px; color: var(--text-soft); }
+.md-table-align .deditor-btn { justify-content: center; padding: 0 5px; font-size: 12px; }
+.md-table-align svg { display: none; }
+.md-table-align .deditor-btn[aria-pressed="true"] { background: var(--selection-bg); color: var(--accent); }
+
+.md-diagram-block > .md-code-bar { min-height: 36px; padding: 5px 8px; gap: 8px; background: var(--bg-soft); }
+.md-diagram-family.deditor-btn { display: inline-flex; align-items: center; gap: 7px; margin-right: auto; padding: 2px 6px; font-size: 12px; font-weight: 500; color: var(--text-soft); }
+.md-diagram-family svg, .md-diagram-delete svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.md-diagram-family svg { color: var(--accent); }
+.md-diagram-delete.deditor-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 26px; min-height: 0; padding: 4px; color: var(--text-soft); }
+.md-diagram-delete.deditor-btn:hover { color: var(--error-text); background: var(--error-bg); }
+.md-diagram-block .md-diagram-modes { margin-left: 0; }
+.md-diagram-block [hidden] { display: none !important; }

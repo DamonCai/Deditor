@@ -1,12 +1,14 @@
-import { memo, useEffect, useState } from "react";
+import { getActiveView, getActiveViewTabId, subscribeActiveEditor } from "../lib/editorBridge";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/shallow";
-import { useEditorStore } from "../store/editor";
+import { useEditorPaneId, useEditorStore } from "../store/editor";
 import EditorSlot from "./EditorSlot";
 import { useRetainedTabs } from "../lib/retainedTabs";
 import { isBinaryRenderable } from "../lib/lang";
 
 interface Props {
   activeId: string | null;
+  focused?: boolean;
   theme: "light" | "dark";
   fontSize: number;
   initialCursor?: number;
@@ -21,6 +23,7 @@ interface Props {
  * Media/XMind remain mounted to preserve playback and their editing sessions. */
 const EditorHost = memo(function EditorHost({
   activeId,
+  focused = true,
   theme,
   fontSize,
   initialCursor,
@@ -33,6 +36,24 @@ const EditorHost = memo(function EditorHost({
   // keystroke (which mutates one tab's content, not the id list) doesn't
   // wake EditorHost. useShallow does an element-wise compare on the array.
   const tabIds = useEditorStore(useShallow((s) => s.tabs.map((t) => t.id)));
+  const paneId = useEditorPaneId();
+  const previousId = useRef(paneId === "right" ? null : activeId);
+  useLayoutEffect(() => {
+    const changed = previousId.current !== activeId;
+    previousId.current = activeId;
+    if (!focused || !changed || !activeId) return;
+    let done = false;
+    const control = document.activeElement;
+    const focus = () => {
+      const current = useEditorStore.getState();
+      if (current.activeId !== activeId || current.activePane !== (paneId ?? "left") || document.activeElement !== control) { done = true; return; }
+      if (done || getActiveViewTabId() !== activeId) return;
+      const view = getActiveView(); if (!view) return;
+      done = true; view.focus();
+    };
+    const unsubscribe = subscribeActiveEditor(focus); focus();
+    return unsubscribe;
+  }, [activeId, focused, paneId]);
 
   const recent = useRetainedTabs(activeId, tabIds);
   const pinned = useEditorStore(useShallow((s) => s.tabs.filter((t) => isBinaryRenderable(t.filePath)).map((t) => t.id)));
@@ -80,7 +101,8 @@ const EditorHost = memo(function EditorHost({
           >
             <EditorSlot
               tabId={id}
-              active={visible}
+              active={visible && focused}
+              visible={visible}
               theme={theme}
               fontSize={fontSize}
               // initial cursor / scroll line only meaningful on first mount,

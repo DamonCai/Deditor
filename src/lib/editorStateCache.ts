@@ -13,4 +13,5 @@ export function setEditorStateCache(tabId: string, state: unknown): void {
 
 export function dropEditorStateCache(tabId: string): void {
   editorStateCache.delete(tabId);
+  editorStateCache.delete(`${tabId}::right`);
 }

@@ -1,3 +1,4 @@
+import { dropTextHistory } from "./lib/textHistory";
 import { dropMarkdownSession } from "./lib/markdownSession";
 import React from "react";
 import ReactDOM from "react-dom/client";
@@ -36,7 +37,7 @@ useEditorStore.subscribe((next, prev) => {
   const liveIds = new Set<string>();
   for (const t of a) liveIds.add(t.id);
   for (const t of b) {
-    if (!liveIds.has(t.id)) { dropEditorStateCache(t.id); dropMarkdownSession(t.id); }
+    if (!liveIds.has(t.id)) { dropEditorStateCache(t.id); dropMarkdownSession(t.id); dropTextHistory(t.id); }
   }
 });
 

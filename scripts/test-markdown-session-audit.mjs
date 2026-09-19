@@ -44,6 +44,7 @@ export {saveFile} from './src/lib/fileio';
 export {default as Toolbar} from './src/components/MarkdownToolbar';
 export {setVisualEditor} from './src/lib/markdownVisualBridge';
 export {setActiveView} from './src/lib/editorBridge';
+export {default as ClipboardMenu} from './src/components/MarkdownClipboardMenu';
 export {default as HistoryDialog} from './src/components/MarkdownHistoryDialog';
 export {default as VisualSlot} from './src/components/MarkdownVisualSlot';
 export {flushDocument} from './src/lib/documentFlush';
@@ -73,6 +74,30 @@ const button=text=>[...document.querySelectorAll('button')].find(b=>b.textConten
 const fixtureEntry={id:'saved-one',path:'/generated/a.md',timestamp:1000,draft:false,bytes:20};
 const renderHistory=async()=>{await act(async()=>{root.render(React.createElement(app.HistoryDialog,{tabId:'a',onClose:()=>{}}));await pause(40);});};
 try {
+ await test('K07 clipboard menu handles denied access, retry, disabled table action and mode changes',async()=>{
+  await reset('copy source\n');const bridge=app.getVisualEditor();await act(async()=>root.render(null));app.setVisualEditor(bridge);
+  let copied='';Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async()=>{throw Error('denied');}}});
+  // Capture a payload before the editor is unmounted; the menu owns this snapshot.
+  const visual={...bridge,clipboard:()=>({markdown:'copy source\n',text:'copy source',html:'<p>copy source</p>'}),focus:()=>{}};app.setVisualEditor(visual);
+  await act(async()=>root.render(React.createElement(app.ClipboardMenu,{visual})));
+  const trigger=()=>document.querySelector('[aria-label="Copy and paste formats"]');await act(async()=>trigger().click());assert.equal(button('Copy for Excel').disabled,true);
+  await act(async()=>button('Copy as Markdown').click());assert.match(document.querySelector('[role=alert]').textContent,/Clipboard access failed/);
+  Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{copied=text;}}});await act(async()=>button('Copy as Markdown').click());assert.equal(copied,'copy source\n');assert.equal(document.querySelector('[role=menu]'),null);
+  await act(async()=>trigger().click());await act(async()=>document.querySelector('[role=menu]').dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Tab',bubbles:true,cancelable:true})));assert.equal(document.querySelector('[role=menu]'),null);assert.equal(document.activeElement,trigger());
+  await act(async()=>trigger().click());await act(async()=>root.render(React.createElement(app.ClipboardMenu,{visual:null})));assert.equal(document.querySelector('[role=menu]'),null);await act(async()=>root.render(null));app.setVisualEditor(null);
+ });
+ await test('K06 history comparison shows saved versus unsaved text and restores with one undo',async()=>{
+  const original='Current unsaved\n\nTail\n';await reset(original);await act(async()=>root.render(null));const previous=globalThis.mdInvoke;
+  globalThis.mdInvoke=async(command,args)=>{if(command==='list_markdown_history')return [fixtureEntry,{...fixtureEntry,id:'second',timestamp:2000}];if(command==='read_markdown_history')return args.id==='second'?'Second version\n':'Old saved\n\nTail\n';return previous(command,args);};
+  try{
+   await renderHistory();assert.equal(button('Compare with current content').disabled,true);
+   await act(async()=>{document.querySelector('.md-history-list button').click();await pause(20);});
+   await act(async()=>button('Compare with current content').click());const diff=document.querySelector('.md-history-diff');assert.ok(diff);assert.match(diff.textContent,/Old saved/);assert.match(diff.textContent,/Current unsaved/);assert.equal(content(),original);
+   await act(async()=>{document.querySelectorAll('.md-history-list button')[1].click();await pause(20);});assert.match(document.querySelector('.md-history-diff').textContent,/Second version/);assert.doesNotMatch(document.querySelector('.md-history-diff').textContent,/Old saved/);
+   await act(async()=>button('View version content').click());assert.equal(document.querySelector('textarea').value,'Second version\n');
+   await act(async()=>button('Restore in editor (undoable)').click());assert.equal(content(),'Second version\n');await act(async()=>root.render(null));await render();await act(async()=>app.markdownHistory());assert.equal(content(),original);
+  }finally{globalThis.mdInvoke=previous;await act(async()=>root.render(null));}
+ });
  await test('K01 loading toolbar does not expose history buttons that ignore clicks',async()=>{
   await act(async()=>{root.render(null);store.getState().setContent('Changed before mount\n','a','command');app.setVisualEditor(null);app.setActiveView(null);root.render(React.createElement(app.Toolbar));});
   assert.equal(document.querySelector('[aria-label="Undo"]').disabled,true,'Undo must reflect the unavailable editing bridge');

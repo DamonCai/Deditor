@@ -1,3 +1,5 @@
+import { beginPaneResize } from "./lib/paneResize";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import { openEditorSearch } from "./lib/editorSearch";
 import { useEffect, useRef, useState } from "react";
 // @tauri-apps/api/webview transitively imports the full Window class (~62 KB).
@@ -21,30 +23,18 @@ interface TauriDragDropPayload {
 // Heavier deps that show up rarely (mermaid, katex, prettier, xmind,
 // the diff/log virtual tabs, export-as-HTML/PDF) stay lazy AND are
 // idle-prefetched in the background — see scheduleIdlePrefetch() below.
-import EditorHost from "./components/EditorHost";
-import EditorSlot from "./components/EditorSlot";
-import PreviewHost from "./components/PreviewHost";
-import MarkdownVisualSlot from "./components/MarkdownVisualSlot";
-import HtmlPreview from "./components/HtmlPreview";
-import HtmlToolbar from "./components/HtmlToolbar";
 import TitleBar from "./components/TitleBar";
 import StatusBar from "./components/StatusBar";
 import FileTree from "./components/FileTree";
 import ConfirmDialog from "./components/ConfirmDialog";
 import PromptDialog from "./components/PromptDialog";
-import TabBar from "./components/TabBar";
-import MarkdownToolbar from "./components/MarkdownToolbar";
-import JsonToolbar from "./components/JsonToolbar";
-import SqlToolbar from "./components/SqlToolbar";
 import GotoAnything from "./components/GotoAnything";
 import GotoSymbol from "./components/GotoSymbol";
 import FindInFiles from "./components/FindInFiles";
 import SettingsDialog from "./components/SettingsDialog";
 import CommandPalette from "./components/CommandPalette";
-import { useT } from "./lib/i18n";
 import { isEnabled, SHORTCUTS } from "./lib/shortcuts";
-import { useEditorStore, useActiveTabMeta } from "./store/editor";
-import { isMarkdown, isJson, isSql, isHtml } from "./lib/lang";
+import { useEditorStore } from "./store/editor";
 import {
   openFile,
   openFileByPath,
@@ -62,56 +52,22 @@ import { loadPersisted, schedulePersist } from "./lib/persistence";
 import { useFileWatch } from "./lib/fileWatch";
 import { scheduleIdlePrefetch } from "./lib/idlePrefetch";
 import { logError } from "./lib/logger";
-import { Button } from "./components/ui/Button";
+import EditorGroups from "./components/EditorGroups";
 
-type DragKind = "sidebar" | "preview" | null;
+type DragKind = "sidebar" | "preview";
 
 export default function App() {
   // Per-field selectors only — destructuring the whole store re-renders App
   // on every store change (every keystroke, every cursor move). Slicing per
   // field keeps App quiet unless these specific values change.
   const theme = useEditorStore((s) => s.theme);
-  const htmlShowPreview = useEditorStore((s) => s.showPreview);
-  const markdownMode = useEditorStore(s => s.markdownMode);
-  const htmlPreviewMaximized = useEditorStore((s) => s.previewMaximized);
-  const showSidebar = useEditorStore((s) => s.showSidebar);
-  const editorFontSize = useEditorStore((s) => s.editorFontSize);
-  const language = useEditorStore((s) => s.language);
-  // Only structural metadata at this level. Content lives in EditorHost /
-  // EditorSlot / Preview, which subscribe directly. App no longer re-renders
-  // on every keystroke.
-  const activeMeta = useActiveTabMeta();
-  const filePath = activeMeta?.filePath ?? null;
-  const isDiffTab = !!activeMeta?.isDiff;
-  const htmlFile = isHtml(filePath);
-  const showPreview = isMarkdown(filePath) ? markdownMode !== "source" : htmlShowPreview;
-  const previewMaximized = isMarkdown(filePath) ? markdownMode === "visual" : htmlPreviewMaximized;
-  const previewEnabled = !isDiffTab && showPreview && (isMarkdown(filePath) || htmlFile);
-  // Initial caret + scroll for the active tab. Read imperatively so subscribing
-  // components don't re-render every cursor move; Editor only consumes these
-  // on mount (a fresh instance is created via `key={tab.id}` per active tab).
-  const initialPos = activeMeta
-    ? useEditorStore.getState().tabPositions[activeMeta.id]
-    : undefined;
-
+  const showSidebar = useEditorStore(s => s.showSidebar);
+  const language = useEditorStore(s => s.language);
   const [sidebarPx, setSidebarPx] = useState(240);
   const [previewPct, setPreviewPct] = useState(50);
-  // Editor↔Preview scroll sync. We track the latest line + which side originated
-  // the scroll so each side only reacts to scrolls coming from the OTHER side.
-  // `tabId` is required: scrollSync state is global across tabs, but a scroll
-  // value emitted while tab A was active must not be applied to tab B after a
-  // tab switch (Preview's [scrollLine, html] effect re-runs on html change and
-  // would otherwise scroll B's preview to A's line).
-  const [scrollSync, setScrollSync] = useState<
-    { line: number; from: "editor" | "preview"; tabId: string } | null
-  >(null);
-  const activeTabId = activeMeta?.id ?? null;
-  const scrollSyncForActive =
-    scrollSync && scrollSync.tabId === activeTabId ? scrollSync : null;
   const [hydrated, setHydrated] = useState(false);
   const zenMode = useEditorStore((s) => s.zenMode);
   const autoSave = useEditorStore((s) => s.autoSave);
-  const splitEditor = useEditorStore((s) => s.splitEditor);
   const gotoOpen = useEditorStore((s) => s.gotoAnythingOpen);
   const setGotoOpen = useEditorStore((s) => s.setGotoAnythingOpen);
   const settingsOpen = useEditorStore((s) => s.settingsOpen);
@@ -123,7 +79,7 @@ export default function App() {
   const findInFilesOpen = useEditorStore((s) => s.findInFilesOpen);
   const setFindInFilesOpen = useEditorStore((s) => s.setFindInFilesOpen);
   const shortcuts = useEditorStore((s) => s.shortcuts);
-  const dragRef = useRef<DragKind>(null);
+  const stopResize = useRef<(() => void) | null>(null);
   const uiRef = useRef({ sidebarPx, previewPct });
   uiRef.current = { sidebarPx, previewPct };
 
@@ -398,33 +354,25 @@ export default function App() {
     };
   }, []);
 
-  useEffect(() => {
-    const onMove = (e: MouseEvent) => {
-      const kind = dragRef.current;
-      if (!kind) return;
+  useEffect(() => () => stopResize.current?.(), []);
+  // A mode/tab change can remove the active divider before pointerup arrives.
+  useEffect(() => { stopResize.current?.(); }, [showSidebar, zenMode]);
+  const startResize = (kind: DragKind, event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || event.isPrimary === false) return;
+    stopResize.current?.();
+    stopResize.current = beginPaneResize(event.currentTarget, event.nativeEvent, e => {
       if (kind === "sidebar") {
         setSidebarPx(Math.min(500, Math.max(140, e.clientX)));
       } else {
-        const sidebar = showSidebar ? sidebarPx : 0;
+        const sidebar = !zenMode && showSidebar ? sidebarPx : 0;
         const remaining = window.innerWidth - sidebar;
         const editorWidth = e.clientX - sidebar;
         const pct = (editorWidth / remaining) * 100;
         setPreviewPct(100 - Math.min(85, Math.max(15, pct)));
       }
-    };
-    const onUp = () => {
-      dragRef.current = null;
-      document.body.style.cursor = "";
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-  }, [sidebarPx, showSidebar]);
+    });
+  };
 
-  const editorPct = 100 - previewPct;
 
   return (
     <div className="flex flex-col h-full">
@@ -440,134 +388,11 @@ export default function App() {
             </div>
             <div
               className="splitter"
-              onMouseDown={() => {
-                dragRef.current = "sidebar";
-                document.body.style.cursor = "col-resize";
-              }}
+              onPointerDown={event => startResize("sidebar", event)}
             />
           </>
         )}
-        <div className="flex flex-col flex-1 min-w-0">
-          {!zenMode && <TabBar />}
-          {/* Markdown toolbar is lifted out of the editor pane so it spans the
-              full editor+preview row (still shown when preview is maximized). */}
-          {!isDiffTab && isMarkdown(filePath) && <MarkdownToolbar />}
-          {!isDiffTab && htmlFile && <HtmlToolbar />}
-          {!isDiffTab && htmlFile && activeMeta?.hasExternalChange && (
-            <ExternalChangeBanner tabId={activeMeta.id} />
-          )}
-          {isMarkdown(filePath) && activeMeta?.hasExternalChange && <ExternalChangeBanner tabId={activeMeta.id} />}
-          {/* Editor + Preview row. Editor pane is ALWAYS mounted (display:none
-              in reading mode) — not for memory but for sync correctness: when
-              the user navigates preview to a section while in reading mode,
-              the active editor's externalScrollLine effect needs to fire so
-              the editor follows. Unmounting+remounting the editor pane on
-              every reading-mode toggle would also re-mount EditorHost and
-              every visited tab's editor, undoing all the warm CodeMirror
-              state. Consistent with EditorHost's existing "keep visited
-              editors alive" pattern. */}
-          <div className="flex flex-1 min-h-0">
-            <div
-              key="editor-pane"
-              className="min-w-0 flex-1 flex flex-col"
-              style={{
-                width: previewEnabled
-                  ? previewMaximized
-                    ? 0
-                    : `${editorPct}%`
-                  : "100%",
-                display:
-                  previewEnabled && previewMaximized ? "none" : undefined,
-              }}
-            >
-                {!isDiffTab && isJson(filePath) && <JsonToolbar />}
-                {!isDiffTab && isSql(filePath) && <SqlToolbar />}
-                {!htmlFile && !isMarkdown(filePath) && activeMeta?.hasExternalChange && (
-                  <ExternalChangeBanner tabId={activeMeta.id} />
-                )}
-                <div className="flex-1 min-h-0 flex">
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <EditorHost
-                      activeId={activeTabId}
-                      theme={theme}
-                      fontSize={editorFontSize}
-                      initialCursor={initialPos?.cursor}
-                      initialScrollLine={initialPos?.scrollTopLine}
-                      externalScrollLine={
-                        scrollSyncForActive?.from === "preview"
-                          ? scrollSyncForActive.line
-                          : undefined
-                      }
-                      onScroll={(line) => {
-                        if (activeTabId)
-                          setScrollSync({ line, from: "editor", tabId: activeTabId });
-                      }}
-                      onPositionChange={(pos) => {
-                        if (activeMeta) {
-                          useEditorStore
-                            .getState()
-                            .setTabPosition(activeMeta.id, pos);
-                        }
-                      }}
-                    />
-                  </div>
-                  {splitEditor && !isDiffTab && activeMeta && (
-                    <>
-                      <div style={{ width: 1, background: "var(--border)", flexShrink: 0 }} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <EditorSlot
-                          key={activeMeta.id + "::split"}
-                          tabId={activeMeta.id}
-                          noStateCache
-                          theme={theme}
-                          fontSize={editorFontSize}
-                        />
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-            {previewEnabled && !previewMaximized && (
-              <div
-                key="splitter"
-                className="splitter"
-                onMouseDown={() => {
-                  dragRef.current = "preview";
-                  document.body.style.cursor = "col-resize";
-                }}
-              />
-            )}
-            {isMarkdown(filePath) && !isDiffTab && activeTabId && <MarkdownVisualSlot key={activeTabId} tabId={activeTabId} active={previewEnabled && markdownMode === "visual"} theme={theme} />}
-            {previewEnabled && !(isMarkdown(filePath) && markdownMode === "visual") && (
-              <div
-                key="preview-pane"
-                className="min-w-0"
-                style={{
-                  width: previewMaximized ? "100%" : `${previewPct}%`,
-                  flex: previewMaximized ? "1 1 0" : undefined,
-                }}
-              >
-                {htmlFile && activeTabId ? (
-                  <HtmlPreview key={activeTabId} tabId={activeTabId} />
-                ) : (
-                  <PreviewHost
-                    activeId={activeTabId}
-                    theme={theme}
-                    scrollLine={
-                      scrollSyncForActive?.from === "editor"
-                        ? scrollSyncForActive.line
-                        : undefined
-                    }
-                    onScroll={(line) => {
-                      if (activeTabId)
-                        setScrollSync({ line, from: "preview", tabId: activeTabId });
-                    }}
-                  />
-                )}
-              </div>
-            )}
-          </div>
-        </div>
+        <EditorGroups initialPreviewPct={previewPct} onPreviewPctChange={setPreviewPct} />
       </div>
       {!zenMode && <StatusBar />}
       <ConfirmDialog />
@@ -583,48 +408,6 @@ export default function App() {
       {gotoSymbolOpen && <GotoSymbol open onClose={() => setGotoSymbolOpen(false)} />}
       {findInFilesOpen && <FindInFiles open onClose={() => setFindInFilesOpen(false)} />}
       {settingsOpen && <SettingsDialog open onClose={() => setSettingsOpen(false)} />}
-    </div>
-  );
-}
-
-function ExternalChangeBanner({ tabId }: { tabId: string }) {
-  const t = useT();
-  const reload = () => {
-    const tab = useEditorStore.getState().tabs.find((x) => x.id === tabId);
-    if (!tab || tab.externalChange == null) return;
-    const fresh = tab.externalChange;
-    useEditorStore.setState({
-      tabs: useEditorStore.getState().tabs.map((x) =>
-        x.id === tabId ? { ...x, content: fresh, savedContent: fresh, externalChange: undefined } : x,
-      ),
-    });
-  };
-  const dismiss = () => {
-    useEditorStore.setState({
-      tabs: useEditorStore.getState().tabs.map((x) =>
-        x.id === tabId ? { ...x, externalChange: undefined } : x,
-      ),
-    });
-  };
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 12,
-        padding: "8px 12px",
-        background: "var(--warning-bg)",
-        borderBottom: "1px solid var(--border)",
-        fontSize: 12,
-      }}
-    >
-      <span style={{ flex: 1, color: "var(--text)" }}>{t("watch.externalChanged")}</span>
-      <Button variant="primary" size="sm" onClick={reload}>
-        {t("watch.reload")}
-      </Button>
-      <Button variant="secondary" size="sm" onClick={dismiss}>
-        {t("watch.keepMine")}
-      </Button>
     </div>
   );
 }

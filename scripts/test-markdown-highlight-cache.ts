@@ -19,6 +19,11 @@ const expected = (code: string, lang: string, theme = 'github-light', line = 1) 
   original(code, { lang, theme }).replace(/^<pre/, `<pre data-line="${line}"`);
 
 try {
+  const htmlOnly = await renderMarkdown('```HTML\n<SVG><RECT width="10" height="10"/></SVG>\n```', { theme: 'light' });
+  assert.match(htmlOnly, /html-render-block/);
+  assert.equal(calls, 0, 'HTML fences never enter syntax highlighting');
+  console.log('PASS HTML-only fences bypass syntax highlighting');
+
   // Round 1: identical code is reused while each document retains its own lines.
   const code = 'const cachedValue: number = 731;';
   assert.equal(await renderMarkdown(fence(code), { theme: 'light' }), expected(code, 'typescript'));

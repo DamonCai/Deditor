@@ -15,9 +15,11 @@ import { ensureLanguage, getHighlighter } from "./highlight";
 import { MarkdownHighlightCache } from "./markdownHighlightCache";
 import { detectLang } from "./lang";
 import { tStatic } from "./i18n";
+import { normalizeMarkdownFences } from "./markdownFence";
 
 const PLANTUML_LANGS = new Set(["plantuml", "puml", "uml"]);
 const MERMAID_LANGS = new Set(["mermaid"]);
+const HTML_PREVIEW_LANGS = new Set(["html"]);
 const fenceHighlightCache = new MarkdownHighlightCache();
 
 // Lazy loaders for the two heavy plugins:
@@ -104,6 +106,13 @@ function renderPlantumlPlaceholder(source: string, line: number, encoded: string
   );
 }
 
+function renderHtmlPlaceholder(source: string, line: number): string {
+  // Keep fenced HTML inert until the shared display sanitizer mounts it. This
+  // lets Preview and the visual editor render the same markup without letting
+  // a closing tag escape this placeholder before sanitization.
+  return `<div class="html-render-block" data-line="${line}" data-html-source="${escapeAttr(source)}"></div>`;
+}
+
 const md = new MarkdownIt({
   // Allow inline HTML so `<span style="color:…">` / `<mark>` / `<sup>` etc.
   // emitted by the toolbar's Color / Highlight buttons render as expected.
@@ -113,6 +122,10 @@ const md = new MarkdownIt({
   breaks: false,
   typographer: false,
 });
+// Local documents are opened by the host's link handler, just like relative paths.
+// Retain markdown-it's checks for every other protocol.
+const validateMarkdownLink = md.validateLink.bind(md);
+md.validateLink = href => /^file:/i.test(href) || validateMarkdownLink(href);
 
 md.use(anchor, { permalink: false });
 md.use(markdownTableLists);
@@ -205,25 +218,32 @@ export async function renderMarkdown(
   source: string,
   opts: RenderOptions,
 ): Promise<string> {
+  const parsedSource = normalizeMarkdownFences(source);
   // Lazy-load KaTeX only if the source LOOKS like it might have math.
   // Wrong positives (a `$` in code) are harmless — the plugin just won't
   // find valid expressions to render. The real win is on the 99% of docs
   // that have no math: we skip 628 KB of parse + load.
-  if (sourceMaybeHasKatex(source)) {
+  if (sourceMaybeHasKatex(parsedSource)) {
     await loadKatex();
   }
-  const hl = await getHighlighter();
   const env: Record<string, unknown> = {__mathSource:opts.documentSource ?? source, __mathAutoNumber:opts.mathAutoNumber, __mathBlockIndex:opts.mathOrdinal ?? 0};
-  const tokens = md.parse(source, env);
-  // Pre-scan for plantuml — if any fence is plantuml, load the encoder once
-  // before the synchronous render pass below.
+  const tokens = md.parse(parsedSource, env);
+  // Load optional engines only when a fence needs them. HTML, diagrams and
+  // documents without ordinary code should not wait for Shiki startup.
   let needsPlantuml = false;
+  let needsHighlighter = false;
   for (const t of tokens) {
     if (t.type !== "fence") continue;
     const lang = (t.info || "").trim().split(/\s+/)[0].toLowerCase();
-    if (PLANTUML_LANGS.has(lang)) { needsPlantuml = true; break; }
+    if (PLANTUML_LANGS.has(lang)) needsPlantuml = true;
+    else if (lang !== "flow" && lang !== "sequence"
+      && !MERMAID_LANGS.has(lang) && !HTML_PREVIEW_LANGS.has(lang)) needsHighlighter = true;
   }
-  const plantumlEnc = needsPlantuml ? (await loadPlantumlEncoder()).default : null;
+  const [plantumlModule, hl] = await Promise.all([
+    needsPlantuml ? loadPlantumlEncoder() : Promise.resolve(null),
+    needsHighlighter ? getHighlighter() : Promise.resolve(null),
+  ]);
+  const plantumlEnc = plantumlModule?.default ?? null;
 
   const highlighted = new Map<number, string>();
   const shikiTheme = opts.theme === "dark" ? "one-dark-pro" : "github-light";
@@ -259,6 +279,12 @@ export async function renderMarkdown(
       highlighted.set(i, renderMermaid(t.content, line));
       continue;
     }
+    if (HTML_PREVIEW_LANGS.has(lang)) {
+      const line = t.map ? t.map[0] + 1 : 0;
+      highlighted.set(i, renderHtmlPlaceholder(t.content, line));
+      continue;
+    }
+    if (!hl) throw new Error("Missing Markdown code highlighter");
     const resolved = await ensureLanguage(hl, lang);
     // markdown-it terminates fence content with a newline. It separates the
     // final body line from the closing fence; Shiki would count it as another
