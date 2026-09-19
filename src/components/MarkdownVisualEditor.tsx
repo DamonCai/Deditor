@@ -505,6 +505,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
     const rt = runtime.current; if (!rt) return;
     if (!active || readonly) rt.view.dom.dispatchEvent(new Event("deditor-image-paste-cancel"));
     if (!active) {
+      rt.view.dom.dispatchEvent(new Event("deditor-diagram-overview-close"));
       if (wasActive.current) {
         rt.closeInline(); rt.view.dom.blur(); rt.session.endComposition(); rt.session.breakGroup();
         setSearchOpen(false);

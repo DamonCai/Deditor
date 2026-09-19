@@ -27,6 +27,8 @@ export function useModalFocus(
   useEffect(() => {
     const panel = ref.current;
     if (!open || !panel) return;
+    // Release a diagram in the native top layer before focusing an app dialog.
+    document.dispatchEvent(new window.Event("deditor-close-diagram-overview"));
     const previous =
       document.activeElement instanceof HTMLElement
         ? document.activeElement

@@ -88,7 +88,7 @@ export const markdownContextMenu = (tabId: string, enabled: () => boolean) => $p
           items[(at + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
         }
       };
-      view.dom.closest('.md-visual-shell')?.append(menu);
+      (target.closest('dialog.md-diagram-overview[open]') ?? view.dom.closest('.md-visual-shell'))?.append(menu);
       const rect = target.getBoundingClientRect(), bounds = menu.getBoundingClientRect();
       const x = keyboard ? rect.left : (event as MouseEvent).clientX, y = keyboard ? rect.bottom : (event as MouseEvent).clientY;
       menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - bounds.width - 4))}px`;

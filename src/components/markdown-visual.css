@@ -56,13 +56,17 @@
 .md-diagram-block .md-diagram-modes .deditor-segment { padding: 0 10px !important; }
 .md-diagram-block .md-code-body {
   display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr);
-  height: var(--md-diagram-height, auto); min-height: 180px; max-height: 60vh; overflow: hidden;
+  height: auto; min-height: 0; overflow: hidden;
 }
 .md-diagram-block .md-code-body > * { min-width: 0; min-height: 0; }
 
 .md-code-block[data-diagram-mode="split"] .md-code-body { display: grid; grid-template-columns: minmax(0, var(--md-diagram-source-width, 50fr)) 1px minmax(0, var(--md-diagram-preview-width, 50fr)); align-items: stretch; min-height: 180px; }
 .md-code-block[data-diagram-mode="split"] .md-code-body > * { min-width: 0; }
-.md-code-block:is([data-diagram-mode="edit"], [data-diagram-mode="split"]) .cm-scroller { max-height: 60vh; overflow: auto; }
+.md-code-block[data-diagram-mode="edit"] .md-code-body { min-height: 180px; max-height: 60vh; }
+.md-code-block[data-diagram-mode="edit"] .cm-scroller { max-height: 60vh; overflow: auto; }
+/* Let the SVG determine live-preview height; source scrolls within its own pane. */
+.md-code-block[data-diagram-mode="split"] .md-code-editor { contain: size; }
+.md-code-block[data-diagram-mode="split"] .cm-scroller { overflow: auto; }
 .md-code-block .md-diagram-modes .deditor-segment:focus-visible { outline-offset: -2px; }
 .md-code-block .md-diagram-modes .deditor-segment[data-selected="true"]:focus-visible { outline-color: var(--on-accent); }
 .md-diagram-divider { position: relative; background: var(--border); cursor: col-resize; touch-action: none; z-index: 1; }
@@ -73,8 +77,10 @@
 .md-diagram-resizing, .md-diagram-resizing * { cursor: col-resize !important; user-select: none; }
 .md-diagram-block .md-code-editor { display: flex; background: var(--preview-code-bg); }
 .md-visual-shell .milkdown .md-diagram-block .md-code-editor .cm-editor { flex: 1; min-width: 0; min-height: 0; border: 0; border-radius: 0; }
-.md-visual-shell .milkdown .md-diagram-block .md-code-preview { max-height: 60vh; background: var(--bg); }
-.md-visual-shell .milkdown .md-diagram-block .md-code-preview > :is(.mermaid-diagram, .plantuml-diagram) { border: 0; border-radius: 0; min-height: 100%; }
+.md-visual-shell .milkdown .md-diagram-block .md-code-preview { overflow: visible; background: var(--bg); }
+.md-visual-shell .milkdown .md-diagram-block .md-code-preview > :is(.mermaid-diagram, .plantuml-diagram) { border: 0; border-radius: 0; margin: 0; min-height: 0; }
+/* PlantUML can carry a fixed inline height; keep its viewBox aspect ratio when narrowed. */
+.md-visual-shell .milkdown .md-diagram-block .md-code-preview > :is(.mermaid-diagram, .plantuml-diagram) > svg { height: auto !important; }
 .md-visual-shell .milkdown .md-diagram-block[data-diagram-mode="preview"] .md-code-preview > :is(.mermaid-diagram, .plantuml-diagram):not(.error) { justify-content: center; }
 .md-visual-shell[data-readonly="true"] .md-code-toggle { display: none; }
 
@@ -290,3 +296,23 @@
 .md-diagram-delete.deditor-btn:hover { color: var(--error-text); background: var(--error-bg); }
 .md-diagram-block .md-diagram-modes { margin-left: 0; }
 .md-diagram-block [hidden] { display: none !important; }
+
+/* The top layer fills the app window without changing the inline diagram size. */
+.md-diagram-block dialog.md-diagram-overview {
+  position: fixed; inset: 0; margin: 0; padding: 0; width: 100vw; height: 100vh;
+  max-width: none; max-height: none; border: 0; border-radius: 0; overflow: hidden;
+  color: var(--text); background: var(--bg); font: inherit;
+}
+.md-diagram-block dialog.md-diagram-overview[open] { display: flex; flex-direction: column; }
+.md-diagram-overview::backdrop { background: var(--modal-backdrop); }
+.md-diagram-block .md-diagram-overview > .md-code-bar { flex-shrink: 0; min-height: 40px; padding: 6px 10px !important; background: var(--bg-soft); }
+.md-diagram-block .md-diagram-overview > .md-code-body { flex: 1; min-height: 0; height: 0; max-height: none; border-radius: 0; }
+.md-visual-shell .milkdown .md-diagram-block .md-diagram-overview .md-code-preview { overflow: auto; max-height: none; }
+.md-diagram-block .md-diagram-overview .md-code-editor { contain: size; }
+.md-diagram-block .md-diagram-overview .cm-scroller { max-height: none; }
+.md-visual-shell .milkdown .md-diagram-block .md-diagram-overview .md-code-preview > :is(.mermaid-diagram, .plantuml-diagram):not(.error) {
+  width: max-content; min-width: 100%; min-height: 100%; display: flex; align-items: center; justify-content: center;
+}
+.md-diagram-block .md-diagram-overview .md-code-preview > :is(.mermaid-diagram, .plantuml-diagram) > svg { flex: none; }
+.md-diagram-zoom { display: inline-flex; align-items: center; gap: 2px; }
+.md-diagram-zoom .deditor-btn { min-width: 28px; }

@@ -1,3 +1,4 @@
+import { diagramOverview } from "./diagramOverview";
 import { exitBlockSource } from "./blockExit";
 import { diagramSplit } from "./diagramSplit";
 import { markdownMathContext } from "../markdownMath";
@@ -75,6 +76,10 @@ export function codeView(tabId: string, theme: "light" | "dark") {
     const body = document.createElement("div"); body.className = "md-code-body";
     const split = diagramSplit(body); body.append(editor, split.separator, preview);
     dom.append(selectBlock, bar, body);
+    const overview = diagramOverview(dom, bar, body, preview);
+    bar.insertBefore(overview.controls, remove); bar.insertBefore(overview.button, remove);
+    const closeOverview = () => overview.close(false);
+    view.dom.addEventListener("deditor-diagram-overview-close", closeOverview);
     function setDiagramMode(mode: DiagramMode) {
       if (!view.editable || !hasDiagramModes()) return;
       const pos = getPos();
@@ -157,15 +162,10 @@ export function codeView(tabId: string, theme: "light" | "dark") {
       const diagram = ["mermaid", "plantuml", "puml", "uml", "latex", "flow", "sequence"].includes(lang);
       dom.dataset.kind = lang === "latex" ? "math" : diagram ? "diagram" : "code";
       const threeModes = hasDiagramModes();
-      // Keep the viewport chosen on the first switch. Source wrapping and SVG
-      // aspect ratios must not move the following paragraph between modes.
-      if (threeModes && dom.dataset.diagramMode && dom.dataset.diagramMode !== diagramMode
-        && !body.style.getPropertyValue("--md-diagram-height")) {
-        const height = body.getBoundingClientRect().height;
-        if (height > 0) body.style.setProperty("--md-diagram-height", `${height}px`);
-      }
+      // Diagram previews stay in document flow and follow the rendered SVG height,
+      // including after mode switches, source edits and split-pane resizing.
       dom.classList.toggle("md-diagram-block", threeModes);
-      if (!threeModes) body.style.removeProperty("--md-diagram-height");
+      overview.setEnabled(threeModes);
       split.setEnabled(threeModes && diagramMode === "split" && view.editable);
       dom.dataset.diagramMode = threeModes ? diagramMode : "";
       if (threeModes) expanded = diagramMode !== "preview";
@@ -188,6 +188,7 @@ export function codeView(tabId: string, theme: "light" | "dark") {
       if (threeModes) editor.style.minHeight = "";
       editor.hidden = !expanded; preview.hidden = expanded && (!threeModes || diagramMode === "edit");
       if (expanded) ensureEditor();
+      overview.refresh();
       toggle.hidden = threeModes || !diagram || !view.editable;
       toggle.textContent = tStatic(expanded ? "md.hideSource" : "md.editSourceBlock");
       language.readOnly = !view.editable;
@@ -240,7 +241,7 @@ export function codeView(tabId: string, theme: "light" | "dark") {
       });
     }
     preview.onmousedown = event => {
-      if (!view.editable || event.button !== 0) return;
+      if (!view.editable || event.button !== 0 || overview.isOpen) return;
       event.preventDefault();
       if (hasDiagramModes()) { selectNode(); return; }
       expanded = true; render();
@@ -324,7 +325,7 @@ export function codeView(tabId: string, theme: "light" | "dark") {
         if (languageChanged) { loadLanguage(); loadPresentation(); }
         if (textChanged || languageChanged || language.readOnly === view.editable) render(textChanged && !languageChanged);
         return true;
-      }, destroy() { split.destroy(); view.dom.removeEventListener("deditor-contextmenu-close", menuClosed); view.dom.removeEventListener("deditor-writing-change", settingsChanged); view.dom.removeEventListener("deditor-document-change", documentChanged); view.dom.removeEventListener("deditor-editable-change", modeChanged); view.dom.removeEventListener("deditor-restore-focus", restoreFocus); dom.removeEventListener("focusout", collapse); destroyed = true; generation++; if (renderTimer) clearTimeout(renderTimer); controllers.forEach(controller => controller.abort()); cm?.destroy(); },
+      }, destroy() { overview.destroy(); view.dom.removeEventListener("deditor-diagram-overview-close", closeOverview); split.destroy(); view.dom.removeEventListener("deditor-contextmenu-close", menuClosed); view.dom.removeEventListener("deditor-writing-change", settingsChanged); view.dom.removeEventListener("deditor-document-change", documentChanged); view.dom.removeEventListener("deditor-editable-change", modeChanged); view.dom.removeEventListener("deditor-restore-focus", restoreFocus); dom.removeEventListener("focusout", collapse); destroyed = true; generation++; if (renderTimer) clearTimeout(renderTimer); controllers.forEach(controller => controller.abort()); cm?.destroy(); },
     };
   };
 }

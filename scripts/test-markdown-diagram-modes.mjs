@@ -17,6 +17,8 @@ window.Range.prototype.getBoundingClientRect=()=>({left:0,right:0,top:0,bottom:0
 HTMLElement.prototype.scrollIntoView=function(){};
 HTMLElement.prototype.scrollTo=function({top=0}){this.scrollTop=top;};
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
+window.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};
+window.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');this.dispatchEvent(new Event('close'));};
 // React DOM must detect the installed DOM before choosing its input event implementation.
 const {createRoot}=await import('react-dom/client');
 const {flushSync}=await import('react-dom');
@@ -37,6 +39,7 @@ const stubs={
  '@tauri-apps/plugin-opener':'export const openUrl=async()=>{}; export const openPath=async()=>{}; export const revealItemInDir=async()=>{};',
 };
 await build({stdin:{contents:`
+export {default as Confirm, chooseAction} from './src/components/ConfirmDialog';
 export {default as Toolbar} from './src/components/MarkdownToolbar';
 export {default as Visual} from './src/components/MarkdownVisualEditor';
 export {useEditorStore} from './src/store/editor';
@@ -52,7 +55,7 @@ const store=app.useEditorStore, root=createRoot(document.getElementById('root'))
 const source='# Test\n\nOriginal paragraph\n\n+ [ ] todo\n\n[ref]: https://example.com\n';
 store.setState({tabs:[{id:'a',filePath:'/generated/a.md',content:source,savedContent:source},{id:'b',filePath:'/generated/b.html',content:'<h1>HTML</h1>',savedContent:'<h1>HTML</h1>'}],activeId:'a',language:'en',markdownMode:'visual',autoSave:'off'});
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-const render=async(readonly=false)=>{await act(async()=>{root.render(React.createElement(React.Fragment,null,React.createElement(app.Toolbar),React.createElement(app.Visual,{tabId:'a',readonly,theme:'light'})));await pause(120);});};
+const render=async(readonly=false)=>{await act(async()=>{root.render(React.createElement(React.Fragment,null,React.createElement(app.Toolbar),React.createElement(app.Visual,{tabId:'a',readonly,theme:'light'}),React.createElement(app.Confirm)));await pause(120);});};
 const content=()=>store.getState().tabs.find(t=>t.id==='a').content;
 let passed=0;
 const testFilter=process.env.DEDITOR_TEST_FILTER ? new RegExp(process.env.DEDITOR_TEST_FILTER) : null;
@@ -75,6 +78,63 @@ const mode = async name => run(()=>document.querySelector(`.md-diagram-modes [da
 const cmView = () => CMView.findFromDOM(document.querySelector('.md-code-editor .cm-editor'));
 const diagramSource = (lang, code='graph LR\n A-->B') => `Before\n\n\`\`\`${lang}\n${code}\n\`\`\`\n\nTail\n`;
 try {
+await test('overview round 1: full view retains the same source editor through all modes and Escape returns inline',async()=>{
+ const original=diagramSource('mermaid');await reset(original);await mode('split');const cm=cmView(),block=document.querySelector('.md-diagram-block');
+ await run(()=>block.querySelector('.md-diagram-overview-toggle').click());assert.ok(block.querySelector('dialog[open]'));assert.equal(cmView(),cm);
+ for(const value of ['edit','preview','split']){await mode(value);assert.ok(block.querySelector('dialog[open]'));assert.equal(cmView(),cm);assert.equal(content(),original);}
+ await run(()=>cm.contentDOM.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true})));
+ assert.equal(block.querySelector('dialog'),null);assert.equal(cmView(),cm);assert.equal(block.dataset.diagramMode,'split');assert.equal(block.style.height,'');
+ assert.equal(document.activeElement,block.querySelector('.md-diagram-overview-toggle'));assert.equal(content(),original);
+ await run(()=>block.querySelector('.md-diagram-overview-toggle').click());const reopened=block.querySelector('dialog');await run(()=>reopened.dispatchEvent(new Event('close')));assert.ok(reopened.open,'A delayed close event from an earlier session cannot close the new session');
+ await run(()=>block.querySelector('.md-diagram-overview-toggle').click());
+});
+await test('overview round 2: Mermaid and PlantUML zoom, fit, edits and one-step undo never persist display state',async()=>{
+ for(const lang of ['mermaid','plantuml']) {
+  const original=diagramSource(lang);await reset(original);const block=document.querySelector('.md-diagram-block'),preview=block.querySelector('.md-code-preview');
+  // Isolated SVG geometry: browser coverage exercises actual Mermaid rendering and PlantUML fixtures.
+  preview.innerHTML=`<div class="${lang}-diagram"><svg viewBox="0 0 200 1000" style="width:200px;height:1000px"></svg></div>`;
+  const svg=preview.querySelector('svg'),style=svg.getAttribute('style');
+  Object.defineProperty(preview,'clientWidth',{configurable:true,value:800});Object.defineProperty(preview,'clientHeight',{configurable:true,value:600});
+  await run(()=>block.querySelector('.md-diagram-overview-toggle').click());assert.equal(svg.style.height,'568px');
+  await run(()=>button('Zoom in').click());assert.equal(svg.style.height,'710px');await run(()=>button('Actual size (100%)').click());assert.equal(svg.style.height,'1000px');
+  await run(()=>button('Fit to view').click());assert.equal(svg.style.height,'568px');assert.equal(content(),original);
+  const wheel=new window.WheelEvent('wheel',{ctrlKey:true,deltaY:-100,cancelable:true,bubbles:true});await run(()=>preview.dispatchEvent(wheel));assert.equal(wheel.defaultPrevented,true);assert.ok(parseFloat(svg.style.height)>568);
+  await mode('edit');const cm=cmView();await run(()=>cm.dispatch({changes:{from:cm.state.doc.length,insert:'\n%% new'}}));
+  assert.ok(block.querySelector('dialog[open]'));await run(()=>app.saveFile());assert.equal(writes.at(-1).content,content());await run(()=>app.markdownHistory());assert.equal(content(),original);
+  await run(()=>block.querySelector('.md-diagram-overview-toggle').click());assert.equal(block.querySelector('dialog'),null);assert.equal(svg.getAttribute('style'),style);
+ }
+});
+await test('overview round 3: context menu stays inside the modal and its Escape only dismisses the menu',async()=>{
+ await reset(diagramSource('mermaid'));await mode('edit');const block=document.querySelector('.md-diagram-block');
+ await run(()=>block.querySelector('.md-diagram-overview-toggle').click());
+ await run(()=>cmView().contentDOM.dispatchEvent(new window.KeyboardEvent('keydown',{key:'F10',shiftKey:true,bubbles:true,cancelable:true})));
+ const menu=block.querySelector('dialog .md-editor-menu');assert.ok(menu);
+ await run(()=>menu.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true})));assert.equal(document.querySelector('.md-editor-menu'),null);assert.ok(block.querySelector('dialog[open]'));
+ await run(()=>block.querySelector('.md-diagram-overview-toggle').click());
+});
+await test('overview round 4: readonly allows viewing, empty/error disables zoom, deletion and unmount close the modal',async()=>{
+ await reset(diagramSource('mermaid',''));await render(true);const block=document.querySelector('.md-diagram-block');
+ await run(()=>block.querySelector('.md-diagram-overview-toggle').click());assert.ok(block.querySelector('dialog[open]'));assert.equal(block.querySelector('.md-diagram-modes').hidden,true);assert.equal(button('Zoom in').disabled,true);
+ await run(()=>document.dispatchEvent(new Event('deditor-close-diagram-overview')));assert.equal(document.querySelector('dialog[open]'),null);
+ await reset(diagramSource('mermaid'));await run(()=>document.querySelector('.md-diagram-overview-toggle').click());
+ await run(()=>document.querySelector('.md-diagram-delete').click());assert.equal(document.querySelector('dialog[open]'),null);await run(()=>app.markdownHistory());assert.ok(document.querySelector('.md-diagram-block'));
+ await run(()=>document.querySelector('.md-diagram-overview-toggle').click());await act(async()=>root.render(null));assert.equal(document.querySelector('dialog[open]'),null);
+});
+await test('overview round 5: background tabs release top layer and labels follow language',async()=>{
+ for(const language of ['zh','en']) {
+  store.setState({language});await reset(diagramSource('mermaid'));const block=document.querySelector('.md-diagram-block');
+  const label=language==='zh'?'全览':'Full view';assert.equal(block.querySelector('.md-diagram-overview-toggle').textContent,label);
+  await run(()=>block.querySelector('.md-diagram-overview-toggle').click());assert.ok(block.querySelector('dialog[open]'));
+  await act(async()=>{root.render(React.createElement(React.Fragment,null,React.createElement(app.Toolbar),React.createElement(app.Visual,{tabId:'a',active:false,theme:'light'}),React.createElement(app.Confirm)));await pause(40);});assert.equal(document.querySelector('dialog[open]'),null);
+ }
+ store.setState({language:'en'});
+});
+await test('overview round 5: an app confirmation releases the native top layer before taking focus',async()=>{
+ await reset(diagramSource('mermaid'));await run(()=>document.querySelector('.md-diagram-overview-toggle').click());assert.ok(document.querySelector('dialog[open]'));
+ let answer;await run(()=>{answer=app.chooseAction({title:'Generated save failure',message:'Generated message',buttons:[{label:'Close generated error',value:'close'}]});});
+ assert.equal(document.querySelector('dialog[open]'),null);assert.equal(document.activeElement.textContent,'Close generated error');
+ await run(()=>document.activeElement.click());assert.equal(await answer,'close');assert.equal(document.querySelector('[role="dialog"]'),null);
+});
 await test('UX diagram deletion works in all modes, including sole block and aliases; one undo',async()=>{
  for(const lang of ['mermaid','plantuml','puml','uml']) for(const display of ['edit','split','preview']) {
   const original=diagramSource(lang);await reset(original);await mode(display);
