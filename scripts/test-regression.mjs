@@ -1357,6 +1357,23 @@ test(
   },
 );
 
+test(3, "workspace search closes its modal and focuses the exact Unicode match in the source editor", async () => {
+  const original = "first line\n😀 prefix 定位目标 suffix\nlast line";
+  reset([tab("a", original)]);store.setState({workspaces:["/test"]});
+  globalThis.__invoke = async cmd => cmd === "find_in_files" ? {hits:[{path:"/test/a.txt",line:2,col:11,text:"😀 prefix 定位目标 suffix"}],truncated:false,files_scanned:1} : undefined;
+  await withToolbarEditor(original, async view => {
+    function SearchHarness() {const [open,setOpen]=React.useState(true);return React.createElement(app.FindInFiles,{open,onClose:()=>setOpen(false)});}
+    await render(React.createElement(SearchHarness));
+    await act(async()=>setInput(document.querySelector('input'),'定位目标'));
+    await act(async()=>pause(350));
+    const result=document.querySelector('[role="button"]');assert.ok(result);
+    await act(async()=>{result.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));});
+    await act(async()=>pause(40));
+    assert.equal(document.querySelector('[role="dialog"]'),null);
+    assert.equal(view.state.sliceDoc(view.state.selection.main.from,view.state.selection.main.to),'定位目标');
+    assert.equal(document.activeElement,view.contentDOM);assert.equal(view.state.doc.toString(),original);
+  });
+});
 test(3, "clearing search discards an older in-flight response", async () => {
   reset();
   store.setState({ workspaces: ["/test"] });

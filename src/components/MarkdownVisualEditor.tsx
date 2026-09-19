@@ -256,11 +256,27 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
             insertPlainText(view, text); return true;
           };
           bridge.find = openSearch;
-          bridge.navigate = (line, column = 1) => {
+          bridge.navigate = (line, column = 1, options) => {
             const lines = document.source.split("\n");
-            const offset = lines.slice(0, Math.max(0, line - 1)).reduce((n, text) => n + text.length + 1, 0) + column - 1;
+            const index = Math.max(0, Math.min(lines.length - 1, line - 1));
+            const start = lines.slice(0, index).reduce((n, text) => n + text.length + 1, 0);
+            const offset = start + Math.max(0, Math.min(lines[index].length, column - 1));
             const pos = document.positionAtSource(offset);
-            view.dispatch(view.state.tr.setSelection(Selection.near(view.state.doc.resolve(pos))).scrollIntoView()); view.focus();
+            const end = document.positionAtSource(Math.min(start + lines[index].length, offset + (options?.length ?? 0)));
+            const selection = options?.length
+              ? TextSelection.between(view.state.doc.resolve(pos), view.state.doc.resolve(end))
+              : Selection.near(view.state.doc.resolve(pos));
+            const tr = view.state.tr.setSelection(selection);
+            view.dispatch(options?.center ? tr : tr.scrollIntoView()); view.focus();
+            if (options?.center) {
+              const center = () => {
+                if (cancelled || !activeRef.current || !scroller.current || !view.state.selection.eq(selection)) return;
+                scrollSearchMatch(view, scroller.current, { from: selection.from, to: selection.to }, false);
+              };
+              center();
+              // Embedded editors finish focus/selection layout on the next frame.
+              requestAnimationFrame(center);
+            }
           };
           setVisualEditor(bridge);
           position.sourceCursor = document.sourceOffset(view.state.selection.head);

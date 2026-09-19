@@ -1,3 +1,4 @@
+import { EditorView } from "@codemirror/view";
 import { getVisualEditor } from "../lib/markdownVisualBridge";
 import { useModalFocus } from "../lib/useModalFocus";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -158,22 +159,23 @@ export default function FindInFiles({ open, onClose }: Props) {
     await openFileByPath(path);
     const target = useEditorStore.getState().tabs.find((tab) => tab.filePath === path);
     if (!target) return;
+    onClose();
     let attempts = 0;
     const jump = () => {
       if (useEditorStore.getState().activeId !== target.id) return;
       const visual = getVisualEditor();
-      if (visual?.tabId === target.id && visual.navigate) { visual.navigate(line, col); return; }
+      if (visual?.tabId === target.id && visual.navigate) { visual.navigate(line, col, { length: query.length, center: true }); return; }
       const view = getActiveView();
       if (!view || getActiveViewTabId() !== target.id) {
         if (++attempts < 120) requestAnimationFrame(jump);
         return;
       }
       try {
-        const lineInfo = view.state.doc.line(Math.min(line, view.state.doc.lines));
+        const lineInfo = view.state.doc.line(Math.max(1, Math.min(line, view.state.doc.lines)));
         const pos = lineInfo.from + Math.min(lineInfo.length, Math.max(0, col - 1));
         view.dispatch({
-          selection: { anchor: pos },
-          scrollIntoView: true,
+          selection: { anchor: pos, head: Math.min(lineInfo.to, pos + query.length) },
+          effects: EditorView.scrollIntoView(pos, { y: "center", x: "nearest" }),
         });
         view.focus();
       } catch {
@@ -344,6 +346,9 @@ export default function FindInFiles({ open, onClose }: Props) {
               {hits.map((h, i) => (
                 <div
                   key={i}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); void openHit(h.path, h.line, h.col); } }}
                   onClick={() => void openHit(h.path, h.line, h.col)}
                   style={{
                     display: "flex",

@@ -154,6 +154,21 @@ await test('J02-J03 invalid regex recovery, Unicode replacement and post-close e
  const field=document.querySelectorAll('[role="search"] input:not([type="checkbox"])')[1];await run(()=>{field.focus();field.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));});assert.equal(!!document.querySelector('[role="search"]'),false);assert.equal(document.activeElement,view.dom);
  await run(()=>app.getVisualEditor().navigate(3,1));await run(()=>view.dispatch(view.state.tr.insertText('Z')));assert.equal(content(),'İ X before\n\nZTarget remains.\n');await exactHistory(replaced);await run(()=>app.markdownHistory());await run(()=>app.markdownHistory());assert.equal(content(),original);
 });
+await test('Workspace navigation selects exact UTF-16 text and centers reading content without modifying it',async()=>{
+ const original='# Heading\n\n😀 prefix 定位目标 suffix\n\nLast paragraph\n';await reset(original);
+ let calls=0;const scroller=document.querySelector('.md-visual-scroll');const previous=scroller.scrollTo;scroller.scrollTo=function(options){calls++;previous.call(this,options);};
+ await run(()=>app.getVisualEditor().navigate(3,11,{length:4,center:true}));
+ assert.equal(app.getVisualEditor().selected,'定位目标');assert.equal(document.activeElement,view.dom);assert.ok(calls>0);assert.equal(content(),original);
+ await run(()=>app.getVisualEditor().navigate(999,999,{length:100,center:true}));assert.equal(content(),original);
+});
+await test('Workspace navigation centers the inner code match rather than the outer block and keeps source exact',async()=>{
+ const original='before\n\n```js\n'+Array.from({length:60},(_,i)=>`const line${i} = "${i===44?'定位目标':'generated'}";`).join('\n')+'\n```\n\nafter\n';await reset(original);
+ const scroller=document.querySelector('.md-visual-scroll'), scrolls=[];scroller.scrollTo=options=>scrolls.push(options.top);
+ const oldRect=window.Range.prototype.getBoundingClientRect;
+ window.Range.prototype.getBoundingClientRect=()=>({left:0,right:40,top:1200,bottom:1220,width:40,height:20});
+ try {await run(()=>app.getVisualEditor().navigate(48,17,{length:4,center:true}));assert.equal(window.getSelection().toString(),'定位目标');assert.ok(scrolls.some(top=>top===1210),'Scroll uses the inner selected range, not the outer node bounds');assert.equal(content(),original);}
+ finally {window.Range.prototype.getBoundingClientRect=oldRect;}
+});
 await test('Unmodified CodeMirror footer retains Enter/Shift+Enter, select-all, regex and replace commands',async()=>{
  await act(async()=>root.render(null));
  const {EditorState}=await import('@codemirror/state'),{EditorView,keymap}=await import('@codemirror/view');

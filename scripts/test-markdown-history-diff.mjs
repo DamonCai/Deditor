@@ -10,6 +10,7 @@ for(const key of ['window','document','Node','HTMLElement','Element','MutationOb
 Object.defineProperty(globalThis,'navigator',{value:dom.window.navigator,configurable:true});
 globalThis.getComputedStyle=window.getComputedStyle.bind(window);
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
+globalThis.requestAnimationFrame=window.requestAnimationFrame.bind(window);
 window.matchMedia=()=>({matches:false,addEventListener(){},removeEventListener(){}});
 const resizeObservers=new Set();
 globalThis.ResizeObserver=class { constructor(callback){this.callback=callback;} observe(){resizeObservers.add(this.callback);} disconnect(){resizeObservers.delete(this.callback);} };
@@ -76,8 +77,17 @@ try {
   await click(button('Full view'));assert.ok(document.querySelector('.md-history-dialog--overview'));await click(document.querySelector('.md-history-list button'));await click(button('Compare with current content'));await click(button('Next difference'));
   const diffBeforeExit=document.querySelector('.diff-view');
   assert.equal(button('Collapse unchanged content').getAttribute('aria-pressed'),'true');
+  await click(button('Comparison full view'));await act(async()=>new Promise(r=>setTimeout(r,30)));
+  assert.ok(document.querySelector('.md-history-dialog--comparison-overview'));
+  assert.equal(document.querySelector('.md-history-list').hidden,true);assert.equal(document.activeElement,button('Close'));
+  assert.equal(document.querySelector('.diff-view'),diffBeforeExit);
+  await act(async()=>document.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+  await act(async()=>new Promise(r=>setTimeout(r,30)));
+  assert.equal(closed,0);assert.ok(document.querySelector('.md-history-dialog--overview'));assert.equal(document.querySelector('.md-history-dialog--comparison-overview'),null);
+  assert.equal(document.activeElement,button('Comparison full view'));assert.equal(document.querySelector('.md-history-list').hidden,false);
   await act(async()=>document.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
   assert.equal(closed,0);assert.equal(document.querySelector('.md-history-dialog--overview'),null);assert.equal(document.querySelector('.diff-view'),diffBeforeExit);assert.match(document.querySelector('.diff-position').textContent,/2 \/ 3/);assert.equal(button('Collapse unchanged content').getAttribute('aria-pressed'),'true');assert.equal(document.querySelector('.md-history-list button').getAttribute('aria-pressed'),'true');
+  await click(button('Comparison full view'));await click(button('Close'));assert.equal(closed,0);assert.equal(document.querySelector('.md-history-dialog--overview'),null);assert.equal(document.querySelector('.diff-view'),diffBeforeExit);
   await click(button('Full view'));await click(button('Close'));assert.equal(closed,0);assert.equal(document.querySelector('.md-history-dialog--overview'),null);assert.equal(document.querySelector('.diff-view'),diffBeforeExit);
   await click(button('Full view'));
   await click(document.querySelectorAll('.md-history-list button')[1]);assert.match(document.querySelector('.diff-position').textContent,/0 \/ 0/);assert.equal(document.querySelectorAll('[data-diff-row]').length,0);assert.equal(button('Collapse unchanged content').getAttribute('aria-pressed'),'true');await click(button('Recover drafts'));assert.equal(button('Open as new document').disabled,true);await click(document.querySelector('.md-history-list button'));assert.match(document.querySelector('.diff-position').textContent,/1 \/ 3/);assert.equal(button('Restore in editor (undoable)').disabled,true);

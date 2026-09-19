@@ -80,9 +80,14 @@ export const markdownSearchHighlights = $prose(() => new Plugin({
 const highlightOwners = new WeakMap<Document, Map<object, { ranges: Range[]; current: Range[] }>>();
 
 /** ProseMirror's native scroll path is skipped when focus is in the search input. */
-export function scrollSearchMatch(view: EditorView, scroller: HTMLElement, match: MarkdownMatch) {
-  const target = view.dom.querySelector<HTMLElement>(".preview-search-match.current, [data-search-current]");
-  const rect = target?.getBoundingClientRect() ?? view.coordsAtPos(match.from);
+export function scrollSearchMatch(view: EditorView, scroller: HTMLElement, match: MarkdownMatch, useHighlight = true) {
+  const target = useHighlight ? view.dom.querySelector<HTMLElement>(".preview-search-match.current, [data-search-current]") : null;
+  // Source navigation can focus an embedded CodeMirror. ProseMirror only knows
+  // the outer code block's box, whereas the DOM range locates the actual match.
+  const selection = !useHighlight ? view.dom.ownerDocument.getSelection() : null;
+  const selectedRect = selection?.rangeCount && view.dom.contains(selection.anchorNode)
+    ? selection.getRangeAt(0).getBoundingClientRect() : null;
+  const rect = target?.getBoundingClientRect() ?? (selectedRect?.height ? selectedRect : view.coordsAtPos(match.from));
   const viewport = scroller.getBoundingClientRect();
   scroller.scrollTo({ top: Math.max(0, scroller.scrollTop + rect.top - viewport.top - scroller.clientHeight / 2 + (rect.bottom - rect.top) / 2), behavior: "auto" });
 }
