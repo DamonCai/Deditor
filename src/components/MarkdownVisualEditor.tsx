@@ -1,4 +1,4 @@
-import { markdownSearchHighlights, searchHighlightsKey, scrollSearchMatch } from "../lib/markdownVisual/searchHighlights";
+import { markdownSearchHighlights, searchHighlightsKey, navigationHighlightMeta, scrollSearchMatch } from "../lib/markdownVisual/searchHighlights";
 import { stableTableView } from "../lib/markdownVisual/tableView";
 import { installEditorSearch } from "../lib/editorSearch";
 import { outlineActiveIndex } from "../lib/markdownOutline";
@@ -121,7 +121,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
   };
   const showMatches = (found: MarkdownMatch[], current: number, navigate = false) => {
     const view = runtime.current?.view; if (!view) return;
-    if (!found.length && !searchHighlightsKey.getState(view.state)?.find().length) return;
+    if (!found.length && !searchHighlightsKey.getState(view.state)?.search.find().length) return;
     const tr = view.state.tr.setMeta(searchHighlightsKey, { matches: found, current });
     if (navigate && found[current]) tr.setSelection(TextSelection.create(tr.doc, found[current].from, found[current].to));
     view.dispatch(tr);
@@ -267,6 +267,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
               ? TextSelection.between(view.state.doc.resolve(pos), view.state.doc.resolve(end))
               : Selection.near(view.state.doc.resolve(pos));
             const tr = view.state.tr.setSelection(selection);
+            tr.setMeta(navigationHighlightMeta, options?.length ? { from: selection.from, to: selection.to } : null);
             view.dispatch(options?.center ? tr : tr.scrollIntoView()); view.focus();
             if (options?.center) {
               const center = () => {

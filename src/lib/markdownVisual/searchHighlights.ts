@@ -1,37 +1,52 @@
+import { EditorView as CodeMirrorView } from "@codemirror/view";
 import { $prose } from "@milkdown/kit/utils";
 import { Plugin, PluginKey } from "@milkdown/kit/prose/state";
 import { Decoration, DecorationSet, type EditorView } from "@milkdown/kit/prose/view";
 import type { MarkdownMatch } from "./search";
 
 type Highlights = { matches: MarkdownMatch[]; current: number };
-export const searchHighlightsKey = new PluginKey<DecorationSet>("deditor-search-highlights");
+type HighlightState = { search: DecorationSet; navigation: DecorationSet };
+export const searchHighlightsKey = new PluginKey<HighlightState>("deditor-search-highlights");
+export const navigationHighlightMeta = "deditor-search-navigation-highlight";
 
-/** Decorations survive input focus leaving the document and never enter its history. */
+function decorations(doc: import("@milkdown/kit/prose/model").Node, update: Highlights) {
+  const marks: Decoration[] = [];
+  const code = new Map<number, { end: number; matches: { from: number; to: number; current: boolean }[] }>();
+  update.matches.forEach((match, index) => {
+    if (match.from < 0 || match.to > doc.content.size || match.from >= match.to) return;
+    const pos = doc.resolve(match.from), current = index === update.current;
+    if (["code_block", "deditor_raw"].includes(pos.parent.type.name)) {
+      const from = pos.before(), item = code.get(from) ?? { end: pos.after(), matches: [] };
+      item.matches.push({ from: match.from - pos.start(), to: match.to - pos.start(), current }); code.set(from, item);
+    } else marks.push(Decoration.inline(match.from, match.to, { class: `preview-search-match${current ? " current" : ""}` }));
+  });
+  for (const [from, item] of code) marks.push(Decoration.node(from, item.end, {
+    "data-search-ranges": JSON.stringify(item.matches),
+    ...(item.matches.some(match => match.current) ? { "data-search-current": "true" } : {}),
+  }));
+  return DecorationSet.create(doc, marks);
+}
+
+/** Workspace matches stay painted independently of native focus and the footer search. */
 export const markdownSearchHighlights = $prose(() => new Plugin({
   key: searchHighlightsKey,
   state: {
-    init: () => DecorationSet.empty,
-    apply(tr, previous) {
+    init: (): HighlightState => ({ search: DecorationSet.empty, navigation: DecorationSet.empty }),
+    apply(tr, previous): HighlightState {
       const update = tr.getMeta(searchHighlightsKey) as Highlights | undefined;
-      if (!update) return previous.map(tr.mapping, tr.doc);
-      const decorations: Decoration[] = [];
-      const code = new Map<number, { end: number; matches: { from: number; to: number; current: boolean }[] }>();
-      update.matches.forEach((match, index) => {
-        if (match.from < 0 || match.to > tr.doc.content.size) return;
-        const pos = tr.doc.resolve(match.from), current = index === update.current;
-        if (["code_block", "deditor_raw"].includes(pos.parent.type.name)) {
-          const from = pos.before(), item = code.get(from) ?? { end: pos.after(), matches: [] };
-          item.matches.push({ from: match.from - pos.start(), to: match.to - pos.start(), current }); code.set(from, item);
-        } else decorations.push(Decoration.inline(match.from, match.to, { class: `preview-search-match${current ? " current" : ""}` }));
-      });
-      for (const [from, item] of code) decorations.push(Decoration.node(from, item.end, {
-        "data-search-ranges": JSON.stringify(item.matches),
-        ...(item.matches.some(match => match.current) ? { "data-search-current": "true" } : {}),
-      }));
-      return DecorationSet.create(tr.doc, decorations);
+      const navigation = tr.getMeta(navigationHighlightMeta) as MarkdownMatch | null | undefined;
+      return {
+        search: navigation ? DecorationSet.empty : update ? decorations(tr.doc, update) : previous.search.map(tr.mapping, tr.doc),
+        navigation: navigation !== undefined
+          ? navigation ? decorations(tr.doc, { matches: [navigation], current: 0 }) : DecorationSet.empty
+          : tr.docChanged || update?.matches.length ? DecorationSet.empty : previous.navigation.map(tr.mapping, tr.doc),
+      };
     },
   },
-  props: { decorations: state => searchHighlightsKey.getState(state) },
+  props: { decorations: state => {
+    const value = searchHighlightsKey.getState(state);
+    return value?.search.add(state.doc, value.navigation.find());
+  } },
   view(view) {
     // Custom code node views own their DOM, so paint their text without wrapping
     // Shiki spans or feeding DOM mutations back into the document model.
@@ -45,12 +60,23 @@ export const markdownSearchHighlights = $prose(() => new Plugin({
       frame = 0; ranges.length = 0; current.length = 0;
       if (!registry || !win.Highlight) return;
       for (const block of view.dom.querySelectorAll<HTMLElement>("[data-search-ranges]")) {
+        const matches = JSON.parse(block.dataset.searchRanges!) as {from: number; to: number; current: boolean}[];
+        const editor = block.querySelector<HTMLElement>(".cm-editor");
+        const cm = editor?.getClientRects().length ? CodeMirrorView.findFromDOM(editor) : null;
+        if (cm) {
+          for (const match of matches) {
+            if (match.to > cm.state.doc.length) continue;
+            const from = cm.domAtPos(match.from), to = cm.domAtPos(match.to), range = doc.createRange();
+            range.setStart(from.node, from.offset); range.setEnd(to.node, to.offset);
+            ranges.push(range); if (match.current) current.push(range);
+          }
+          continue;
+        }
         const content = block.querySelector<HTMLElement>(".md-code-preview pre code");
         if (!content || !content.getClientRects().length) continue;
         const texts: { node: Text; from: number; to: number }[] = [];
         const walker = doc.createTreeWalker(content, NodeFilter.SHOW_TEXT); let size = 0;
         while (walker.nextNode()) { const node = walker.currentNode as Text; texts.push({node, from: size, to: size + node.length}); size += node.length; }
-        const matches = JSON.parse(block.dataset.searchRanges!) as {from: number; to: number; current: boolean}[];
         for (const match of matches) {
           const start = texts.find(text => text.to > match.from), end = texts.find(text => text.to >= match.to);
           if (!start || !end) continue;
@@ -64,8 +90,15 @@ export const markdownSearchHighlights = $prose(() => new Plugin({
       registry.set("deditor-search-current", new win.Highlight(...Array.from(owners.values()).flatMap(value => value.current)));
     };
     const schedule = () => { if (!frame) frame = win.requestAnimationFrame(paint); };
-    const observer = new MutationObserver(schedule); observer.observe(view.dom, { childList: true, subtree: true });
+    const observer = new MutationObserver(schedule); observer.observe(view.dom, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden", "data-search-ranges"] });
+    const clearNavigation = () => {
+      if (searchHighlightsKey.getState(view.state)?.navigation.find().length) view.dispatch(view.state.tr.setMeta(navigationHighlightMeta, null));
+    };
+    view.dom.addEventListener("mousedown", clearNavigation, true);
+    view.dom.addEventListener("keydown", clearNavigation, true);
     return { update: schedule, destroy() {
+      view.dom.removeEventListener("mousedown", clearNavigation, true);
+      view.dom.removeEventListener("keydown", clearNavigation, true);
       observer.disconnect(); win.cancelAnimationFrame(frame);
       const owners = highlightOwners.get(doc); owners?.delete(owner);
       if (registry && win.Highlight) {

@@ -81,11 +81,16 @@ try {
   await waitFor(()=>app.getVisualEditor()?.tabId===store.getState().activeId);await run(()=>app.getVisualEditor().focus());
   await search('quickstart');await hit();await waitFor(()=>app.getVisualEditor()?.tabId===store.getState().activeId);await run(()=>{},300);
   assert.equal(app.getVisualEditor().selected,'quickstart');assert.equal(window.getSelection().toString(),'quickstart');
+  assert.ok(document.querySelector('[data-search-current]'),'reading code has a persistent search highlight');
+  await run(()=>document.activeElement.blur());assert.ok(document.querySelector('[data-search-current]'),'code highlight survives blur/collapse');
  });
  await test('Round 1: first-open reading result survives startup longer than 120 frames',async()=>{
   files={'/generated/slow.md':'# Generated\n\n😀 prefix 定位目标 suffix\n'};await reset('visual',2400);await search('定位目标');await hit();
   await waitFor(()=>app.getVisualEditor()?.tabId===store.getState().activeId);await run(()=>{},150);
   assert.equal(app.getVisualEditor().selected,'定位目标');assert.equal(window.getSelection().toString(),'定位目标');
+  assert.equal(document.querySelector('.preview-search-match.current')?.textContent,'定位目标','new reading document paints the match');
+  await run(()=>window.getSelection().removeAllRanges());assert.equal(document.querySelector('.preview-search-match.current')?.textContent,'定位目标','native selection loss does not clear painted match');
+  await run(()=>document.querySelector('.ProseMirror').dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));assert.equal(document.querySelector('.preview-search-match.current'),null,'manual document interaction clears navigation highlight');
  });
  await test('Round 2: new Unicode/code result and already-open result via Enter/Space',async()=>{
   files={'/generated/code.md':'before\n\n```js\nconst value = "😀定位目标";\n```\n\nafter\n'};await reset();await search('😀定位目标');await hit(0,'Enter');
