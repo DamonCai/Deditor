@@ -33,6 +33,7 @@ export {default as FindInFiles} from './src/components/FindInFiles';
 export {default as EditorGroups} from './src/components/EditorGroups';
 export {default as EditorSlot} from './src/components/EditorSlot';
 export {getActiveView} from './src/lib/editorBridge';
+export {highlightSourceHit} from './src/lib/previewSearch';
 export {default as Visual} from './src/components/MarkdownVisualEditor';
 export {useEditorStore} from './src/store/editor';
 export {getVisualEditor} from './src/lib/markdownVisualBridge';
@@ -64,7 +65,7 @@ const run=async(fn,ms=40)=>{await act(async()=>{fn();await pause(ms);});};
 const waitFor=async(fn,timeout=5000)=>{const start=Date.now();while(!fn()){assert.ok(Date.now()-start<timeout,'timed out waiting for editor/result');await run(()=>{},30);}};
 async function reset(mode='visual',delay=0){
  await run(()=>root.render(null)); startupDelay=delay;
- store.setState({tabs:[],activeId:null,panes:null,activePane:'left',language:'en',markdownMode:mode,autoSave:'off',workspaces:['/generated']});
+ store.setState({tabs:[],activeId:null,panes:null,activePane:'left',language:'en',markdownMode:mode,csvMode:'source',showPreview:false,previewMaximized:false,autoSave:'off',workspaces:['/generated']});
  await run(()=>root.render(React.createElement(Harness)));
 }
 async function search(query){
@@ -76,6 +77,16 @@ async function hit(index=0,key){await run(()=>{const item=document.querySelector
 let passed=0;
 async function test(name,fn){await fn();assert.equal(store.getState().tabs.every(tab=>tab.content===files[tab.filePath]),true,'source stays exact');passed++;console.log('PASS '+name);}
 try {
+ await test('Audit: preview mapping preserves token spans and avoids source-only or Unicode offset mistakes',async()=>{
+  await reset();
+  const preview=document.createElement('div');
+  preview.innerHTML='<pre data-line="1"><code><span>const </span><span>target</span><span> = 1;</span>\n</code></pre>';
+  assert.equal(app.highlightSourceHit(preview,'```target\nconst target = 1;\n```',2,7,6).map(x=>x.textContent).join(''),'target');
+  preview.innerHTML='<p data-line="1"><strong>İ中</strong><em>文目标</em></p>';
+  assert.equal(app.highlightSourceHit(preview,'**İ中**文目标',1,7,3).map(x=>x.textContent).join(''),'文目标');
+  preview.innerHTML='<p data-line="1"><a href="target">label</a> target target</p>';
+  assert.deepEqual(app.highlightSourceHit(preview,'[label](target) target target',1,9,6),[],'a hidden URL must not highlight a different visible occurrence');
+ });
  await test('Actual panes: search a never-opened code file from an existing focused reading tab',async()=>{
   files={'/generated/starter.md':'# Open document\n\nCurrent paragraph\n','/generated/new.md':'before\n\n```sh\nopenclaw onboard --flow quickstart\n```\n\nafter\n'};await reset();await run(()=>store.getState().openTab('/generated/starter.md',files['/generated/starter.md']));
   await waitFor(()=>app.getVisualEditor()?.tabId===store.getState().activeId);await run(()=>app.getVisualEditor().focus());
@@ -112,6 +123,49 @@ try {
   files={'/generated/source.md':'first\n\n😀 prefix 定位目标 suffix\n'};await reset('source');await search('定位目标');await hit();
   await waitFor(()=>app.getActiveView()?.state.sliceDoc(app.getActiveView().state.selection.main.from,app.getActiveView().state.selection.main.to)==='定位目标');
   await search('prefix');await hit(0,'Enter');await waitFor(()=>app.getActiveView()?.state.sliceDoc(app.getActiveView().state.selection.main.from,app.getActiveView().state.selection.main.to)==='prefix');
+ });
+ await test('Audit: split preview paints the requested repeated code occurrence',async()=>{
+  files={'/generated/split.md':'before target\n\n```js\nconst target = 1;\nconst target = 2;\n```\n'};await reset('split');await search('target');await hit(2);
+  await waitFor(()=>app.getActiveView()?.state.selection.main.from===files['/generated/split.md'].lastIndexOf('target'));
+  await run(()=>{},500);
+  const mark=document.querySelector('.preview .preview-search-match.current');
+  assert.equal(mark?.textContent,'target','split preview must paint the result');
+  assert.equal(mark.closest('.line').textContent,'const target = 2;','only requested code line is marked');
+  await run(()=>store.setState({theme:'dark'}));await waitFor(()=>document.querySelector('.preview .preview-search-match.current')?.textContent==='target');
+  await run(()=>app.getActiveView().dom.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+  assert.equal(document.querySelector('.preview .preview-search-match.current'),null,'manual editing clears preview marker');
+  await search('target');await hit(2);await waitFor(()=>document.querySelector('.preview .preview-search-match.current'));
+  await run(()=>app.getActiveView().dom.dispatchEvent(new window.WheelEvent('wheel',{deltaY:100,bubbles:true})));
+  assert.equal(document.querySelector('.preview .preview-search-match.current'),null,'manual source scrolling releases centering');
+ });
+ await test('Audit: HTML and CSV reading results reveal source, including attributes and escaped cells',async()=>{
+  for (const [ext,source] of [['html','<main data-test="attribute-target">visible content</main>'],['csv','name,value\nrow,"quoted ""cell-target"""\n']]) {
+   files={[`/generated/new.${ext}`]:source};await reset();await run(()=>store.setState({showPreview:true,previewMaximized:true,csvMode:'read'}));
+   const query=ext==='html'?'attribute-target':'cell-target';await search(query);await hit();
+   await waitFor(()=>app.getActiveView()?.state.sliceDoc(app.getActiveView().state.selection.main.from,app.getActiveView().state.selection.main.to)===query);
+   assert.equal(app.getActiveView().dom.closest('[style*="display: none"]'),null,'source result is visible');
+   assert.equal(ext==='html'?store.getState().previewMaximized:store.getState().csvMode,ext==='html'?false:'split');
+   await search(query);await hit(0,'Enter');assert.equal(store.getState().tabs.length,1);
+  }
+ });
+ await test('Audit: plain text and first/last-line Unicode results',async()=>{
+  files={'/generated/plain.txt':'首行😀目标\nsecond\n末行目标'};await reset();await search('首行😀目标');await hit();
+  await waitFor(()=>app.getActiveView()?.state.selection.main.from===0 && app.getActiveView()?.state.selection.main.to===6);
+  await search('末行目标');await hit();await waitFor(()=>app.getActiveView()?.state.selection.main.to===files['/generated/plain.txt'].length);
+ });
+ await test('Audit: right-pane reading result does not steal the left source selection',async()=>{
+  files={'/generated/shared.md':'left content\n','/generated/right.md':'# Heading\n\n| Name | Value |\n| --- | --- |\n| 数据 | 中文目标 |\n'};await reset('source');
+  await run(()=>store.getState().openTab('/generated/shared.md',files['/generated/shared.md']));await waitFor(()=>app.getActiveView());
+  const left=app.getActiveView();await run(()=>left.dispatch({selection:{anchor:0,head:4}}));
+  await run(()=>store.getState().splitRight());await run(()=>store.setState({markdownMode:'visual'}));await waitFor(()=>app.getVisualEditor());
+  await search('中文目标');await hit();await waitFor(()=>app.getVisualEditor()?.selected==='中文目标');
+  assert.equal(store.getState().activePane,'right');assert.equal(left.state.selection.main.to,4);
+  assert.equal(document.querySelector('[data-editor-pane="right"] .preview-search-match.current')?.textContent,'中文目标');
+  assert.equal(document.querySelector('[data-editor-pane="left"] .preview-search-match.current'),null);
+  await run(()=>store.setState({markdownMode:'split'}));await waitFor(()=>app.getActiveView()?.state.doc.toString()===files['/generated/right.md']);
+  await search('中文目标');await hit();await waitFor(()=>document.querySelector('[data-editor-pane="right"] .preview .preview-search-match.current'));
+  assert.equal(document.querySelector('[data-editor-pane="left"] .preview-search-match.current'),null);
+  await run(()=>store.getState().activatePane('left'));assert.equal(document.querySelector('.preview .preview-search-match.current'),null,'switching focus retires the preview navigation');
  });
 } finally {await run(()=>root.unmount());}
 assert.deepEqual(runtimeErrors,[]);console.log(`Passed ${passed} global search navigation groups`);

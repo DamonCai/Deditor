@@ -21,6 +21,7 @@ import { openFileByPath } from "../lib/fileio";
 import {
   useEditorStore,
   useTabContent,
+  useEditorPaneId,
   useTabFilePath,
 } from "../store/editor";
 import {
@@ -30,11 +31,14 @@ import {
 import { useT } from "../lib/i18n";
 import {
   applySearch,
+  highlightSourceHit,
   clearHighlights,
   setCurrentMatch,
 } from "../lib/previewSearch";
 
 import { PreviewScrollIndex, markerFloor } from "../lib/previewScrollIndex";
+
+import { usePreviewSearchHit, clearPreviewSearchHit } from "../lib/previewSearchNavigation";
 
 interface TocItem {
   id: string;
@@ -84,6 +88,9 @@ export default function Preview({
   // Self-subscribed per tab — each PreviewHost slot only re-renders for its
   // own tab's content / filePath / dirty flips.
   const source = useTabContent(tabId);
+  const pane = useEditorPaneId() ?? "left";
+  const workspaceHit = usePreviewSearchHit();
+  const navigationMarks = useRef<HTMLSpanElement[]>([]);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; text: string; html: string } | null>(null);
   useEffect(() => { setContextMenu(null); }, [tabId, active, source]);
   const footnoteLanguage = useEditorStore(s => s.language);
@@ -203,6 +210,13 @@ export default function Preview({
   const scrollContainerToLine = (targetLine: number): boolean => {
     const root = containerRef.current;
     if (!root) return false;
+    const mark = navigationMarks.current.find(mark => mark.isConnected);
+    if (mark) {
+      const rect = mark.getBoundingClientRect(), viewport = root.getBoundingClientRect();
+      suppressOutgoingUntil.current = Date.now() + 200;
+      root.scrollTo({ top: root.scrollTop + rect.top + rect.height / 2 - viewport.top - root.clientHeight / 2, behavior: "auto" });
+      return true;
+    }
     const markers = scrollIndexRef.current?.read();
     if (!markers || markers.lines.length === 0) return false;
     const { lines, tops } = markers;
@@ -580,6 +594,29 @@ export default function Preview({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchQuery, html, searchOpen, retainDom]);
+
+  useEffect(() => {
+    const root = containerRef.current;
+    if (!root) return;
+    if (!active || !retainDom || !renderCurrent || workspaceHit?.tabId !== tabId || workspaceHit.pane !== pane || workspaceHit.source !== source) return;
+    const { line, column, length } = workspaceHit;
+    navigationMarks.current = highlightSourceHit(root, source, line, column, length);
+    lastTopLineRef.current = line;
+    const center = () => scrollContainerToLine(line);
+    center();
+    const frame = requestAnimationFrame(center);
+    root.addEventListener("mousedown", clearPreviewSearchHit, true);
+    root.addEventListener("keydown", clearPreviewSearchHit, true);
+    root.addEventListener("wheel", clearPreviewSearchHit, { passive: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      navigationMarks.current = [];
+      clearHighlights(root);
+      root.removeEventListener("mousedown", clearPreviewSearchHit, true);
+      root.removeEventListener("keydown", clearPreviewSearchHit, true);
+      root.removeEventListener("wheel", clearPreviewSearchHit);
+    };
+  }, [workspaceHit, tabId, pane, source, active, retainDom, html, renderCurrent]);
 
   // Cmd/Ctrl+F to open the search bar. Bound at window level (capture phase)
   // so it intercepts before any WebView-native find handling.

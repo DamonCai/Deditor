@@ -111,3 +111,49 @@ export function setCurrentMatch(
     matches[idx].scrollIntoView({ block: "center", behavior: "auto" });
   }
 }
+
+/** Paint only the workspace result's block/occurrence, preserving syntax spans. */
+export function highlightSourceHit(root: HTMLElement, source: string, line: number, column: number, length: number): HTMLSpanElement[] {
+  clearHighlights(root);
+  const lines = source.split("\n"), query = lines[line - 1]?.slice(column - 1, column - 1 + length);
+  if (!query) return [];
+  const markers = [...root.querySelectorAll<HTMLElement>("[data-line]")];
+  let block: HTMLElement | undefined;
+  for (const marker of markers) {
+    const start = Number(marker.dataset.line);
+    if (start <= line && (!block || start >= Number(block.dataset.line))) block = marker;
+  }
+  if (!block || block.matches(".mermaid-diagram, .plantuml-diagram, .html-render-block, .legacy-diagram")) return [];
+  const startLine = Number(block.dataset.line) + (block.tagName === "PRE" ? 1 : 0);
+  const endLine = Math.min(lines.length + 1, ...markers.map(marker => Number(marker.dataset.line)).filter(value => value > line));
+  const prefix = lines.slice(startLine - 1, line - 1).join("\n") + "\n" + lines[line - 1].slice(0, column - 1);
+  let ordinal = 0, offset = 0;
+  while ((offset = prefix.indexOf(query, offset)) >= 0) { ordinal++; offset += query.length; }
+  const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT, {
+    acceptNode: node => node.parentElement?.closest("svg, script, style, iframe") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+  });
+  const nodes: {node: Text; from: number; to: number}[] = [];
+  let text = "";
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text;
+    nodes.push({node, from: text.length, to: text.length + node.length}); text += node.data;
+  }
+  // Source-only matches (URLs, formatting, attributes) have no visible range.
+  // Avoid assigning their occurrence number to another rendered occurrence.
+  const count = (value: string) => value.split(query).length - 1;
+  if (count(text) !== count(lines.slice(startLine - 1, endLine - 1).join("\n"))) return [];
+  let from = -query.length;
+  for (let i = 0; i <= ordinal; i++) {
+    from = text.indexOf(query, from + query.length);
+    if (from < 0) return [];
+  }
+  const marks: HTMLSpanElement[] = [];
+  for (const item of nodes) {
+    const start = Math.max(from, item.from) - item.from, end = Math.min(from + query.length, item.to) - item.from;
+    if (start >= end) continue;
+    const matching = item.node.splitText(start); matching.splitText(end - start);
+    const mark = document.createElement("span"); mark.className = `${MARK_CLASS} ${CURRENT_CLASS}`;
+    matching.replaceWith(mark); mark.append(matching); marks.push(mark);
+  }
+  return marks;
+}
