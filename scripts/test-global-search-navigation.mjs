@@ -24,11 +24,13 @@ const output=path.resolve('node_modules/.cache/deditor-global-search-navigation.
 fs.mkdirSync(path.dirname(output),{recursive:true});
 const stubs={
  '@tauri-apps/api/core':'export const invoke=(...a)=>globalThis.mdInvoke(...a); export const convertFileSrc=p=>p;',
+ '@tauri-apps/api/event':'export const listen=async()=>()=>{};',
  '@tauri-apps/plugin-dialog':'export const save=async()=>"/generated/renamed.md"; export const open=async()=>null;',
  '@tauri-apps/plugin-opener':'export const openUrl=async()=>{}; export const openPath=async()=>{}; export const revealItemInDir=async()=>{};',
 };
 await build({stdin:{contents:`
 export {default as FindInFiles} from './src/components/FindInFiles';
+export {default as EditorGroups} from './src/components/EditorGroups';
 export {default as EditorSlot} from './src/components/EditorSlot';
 export {getActiveView} from './src/lib/editorBridge';
 export {default as Visual} from './src/components/MarkdownVisualEditor';
@@ -55,7 +57,7 @@ function Harness(){
  const [open,setOpen]=React.useState(false);openSearch=()=>setOpen(true);
  const id=store(s=>s.activeId), mode=store(s=>s.markdownMode);
  return React.createElement(React.Fragment,null,
-   id && (mode==='visual'?React.createElement(app.Visual,{key:id,tabId:id,active:true,theme:'light'}):React.createElement(app.EditorSlot,{key:id,tabId:id,active:true,theme:'light',fontSize:14})),
+   React.createElement(app.EditorGroups,{initialPreviewPct:50}),
    open && React.createElement(app.FindInFiles,{open,onClose:()=>setOpen(false)}));
 }
 const run=async(fn,ms=40)=>{await act(async()=>{fn();await pause(ms);});};
@@ -74,6 +76,12 @@ async function hit(index=0,key){await run(()=>{const item=document.querySelector
 let passed=0;
 async function test(name,fn){await fn();assert.equal(store.getState().tabs.every(tab=>tab.content===files[tab.filePath]),true,'source stays exact');passed++;console.log('PASS '+name);}
 try {
+ await test('Actual panes: search a never-opened code file from an existing focused reading tab',async()=>{
+  files={'/generated/starter.md':'# Open document\n\nCurrent paragraph\n','/generated/new.md':'before\n\n```sh\nopenclaw onboard --flow quickstart\n```\n\nafter\n'};await reset();await run(()=>store.getState().openTab('/generated/starter.md',files['/generated/starter.md']));
+  await waitFor(()=>app.getVisualEditor()?.tabId===store.getState().activeId);await run(()=>app.getVisualEditor().focus());
+  await search('quickstart');await hit();await waitFor(()=>app.getVisualEditor()?.tabId===store.getState().activeId);await run(()=>{},300);
+  assert.equal(app.getVisualEditor().selected,'quickstart');assert.equal(window.getSelection().toString(),'quickstart');
+ });
  await test('Round 1: first-open reading result survives startup longer than 120 frames',async()=>{
   files={'/generated/slow.md':'# Generated\n\n😀 prefix 定位目标 suffix\n'};await reset('visual',2400);await search('定位目标');await hit();
   await waitFor(()=>app.getVisualEditor()?.tabId===store.getState().activeId);await run(()=>{},150);
