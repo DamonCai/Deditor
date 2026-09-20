@@ -56,7 +56,7 @@
     "test:markdown-format-links": "node scripts/test-markdown-format-links-audit.mjs",
     "test:markdown-images": "node scripts/test-markdown-image-audit.mjs",
     "test:markdown-special-blocks": "node scripts/test-markdown-special-blocks-audit.mjs",
-    "test:markdown-search": "node scripts/test-markdown-search-audit.mjs",
+    "test:markdown-search": "node scripts/test-markdown-search-audit.mjs && node scripts/test-global-search-navigation.mjs",
     "test:markdown-history-diff": "node scripts/test-markdown-history-diff.mjs",
     "test:markdown-session": "node scripts/test-markdown-session-audit.mjs",
     "test:markdown-navigation": "node scripts/test-markdown-navigation-audit.mjs",

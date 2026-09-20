@@ -1,11 +1,9 @@
-import { EditorView } from "@codemirror/view";
-import { getVisualEditor } from "../lib/markdownVisualBridge";
+import { cancelSearchNavigation, navigateSearchResult } from "../lib/searchNavigation";
 import { useModalFocus } from "../lib/useModalFocus";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useEditorStore } from "../store/editor";
 import { openFileByPath } from "../lib/fileio";
-import { getActiveView, getActiveViewTabId } from "../lib/editorBridge";
 import { useT, tStatic } from "../lib/i18n";
 import { logError, logInfo } from "../lib/logger";
 import { chooseAction } from "./ConfirmDialog";
@@ -50,6 +48,9 @@ export default function FindInFiles({ open, onClose }: Props) {
   const [replacing, setReplacing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const reqIdRef = useRef(0);
+  const navigationIdRef = useRef(0);
+  useEffect(() => () => { navigationIdRef.current++; }, []);
+  useEffect(() => { if (open) { navigationIdRef.current++; cancelSearchNavigation(); } }, [open]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [retry, setRetry] = useState(0);
@@ -156,33 +157,15 @@ export default function FindInFiles({ open, onClose }: Props) {
   };
 
   const openHit = async (path: string, line: number, col: number) => {
+    const id = ++navigationIdRef.current;
+    cancelSearchNavigation();
     await openFileByPath(path);
+    if (id !== navigationIdRef.current) return;
     const target = useEditorStore.getState().tabs.find((tab) => tab.filePath === path);
     if (!target) return;
     onClose();
-    let attempts = 0;
-    const jump = () => {
-      if (useEditorStore.getState().activeId !== target.id) return;
-      const visual = getVisualEditor();
-      if (visual?.tabId === target.id && visual.navigate) { visual.navigate(line, col, { length: query.length, center: true }); return; }
-      const view = getActiveView();
-      if (!view || getActiveViewTabId() !== target.id) {
-        if (++attempts < 120) requestAnimationFrame(jump);
-        return;
-      }
-      try {
-        const lineInfo = view.state.doc.line(Math.max(1, Math.min(line, view.state.doc.lines)));
-        const pos = lineInfo.from + Math.min(lineInfo.length, Math.max(0, col - 1));
-        view.dispatch({
-          selection: { anchor: pos, head: Math.min(lineInfo.to, pos + query.length) },
-          effects: EditorView.scrollIntoView(pos, { y: "center", x: "nearest" }),
-        });
-        view.focus();
-      } catch {
-        /* doc shorter than expected */
-      }
-    };
-    requestAnimationFrame(jump);
+    // The pending navigation outlives this dialog, which App unmounts on close.
+    navigateSearchResult(target.id, line, col, query.length);
   };
 
   return (
