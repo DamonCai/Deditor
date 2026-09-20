@@ -46,7 +46,7 @@ import {
 } from "@codemirror/language";
 import { islandDark } from "../lib/islandDarkTheme";
 import { islandLight } from "../lib/islandLightTheme";
-import { detectLang, isMarkdown, isImageFile, isPdfFile, isAudioFile, isVideoFile, isHexFile, isXmindFile } from "../lib/lang";
+import { detectLang, isMarkdown, isCsv, isImageFile, isPdfFile, isAudioFile, isVideoFile, isHexFile, isXmindFile } from "../lib/lang";
 import { useEditorPaneId, paneViewKey, useEditorStore, type DiffSpec } from "../store/editor";
 import DiffView from "./DiffView";
 // XmindView loads the local SVG canvas and lossless XMind document model.
@@ -665,12 +665,15 @@ function TextEditor({
     // Slow path: external source updated `value` (persistence reload,
     // external file watch, programmatic setContent). Diff doc against the
     // new value, replace if different.
-    if (view.state.doc.toString() === value) return;
+    // CodeMirror stores line breaks as LF. A CSV mode toggle must not diff
+    // that projection against raw CRLF offsets or rewrite an untouched file.
+    const incoming = isCsv(filePath) ? value.replace(/\r\n?/g, "\n") : value;
+    if (view.state.doc.toString() === incoming) return;
     if (isMarkdown(filePath)) {
-      const change = sourceChange(view.state.doc.toString(), value);
+      const change = sourceChange(view.state.doc.toString(), incoming);
       view.dispatch({ changes: { from: change.from, to: change.from + change.removed.length, insert: change.inserted }, annotations: Transaction.addToHistory.of(false) });
     } else {
-      const change = sourceChange(view.state.doc.toString(), value);
+      const change = sourceChange(view.state.doc.toString(), incoming);
       view.dispatch({ changes: { from: change.from, to: change.from + change.removed.length, insert: change.inserted }, annotations: [textProjectionSync.of(true), Transaction.addToHistory.of(false)] });
     }
   }, [value, active, visible, filePath]);

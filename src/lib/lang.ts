@@ -467,6 +467,10 @@ export function isJson(filePath: string | null): boolean {
   return e === "json" || e === "jsonc" || e === "json5";
 }
 
+export function isCsv(filePath: string | null): boolean {
+  return extOf(filePath) === "csv";
+}
+
 export function isHtml(filePath: string | null): boolean {
   const e = extOf(filePath);
   return e === "html" || e === "htm";

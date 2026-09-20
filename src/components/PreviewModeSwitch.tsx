@@ -5,9 +5,10 @@ import { useEffect, useState } from "react";
 import { getActiveView, getActiveViewTabId, subscribeActiveEditor } from "../lib/editorBridge";
 import { getVisualEditor, subscribeVisualEditor } from "../lib/markdownVisualBridge";
 
-/** Shared Markdown / HTML view selector, retaining the Markdown styling. */
-export default function PreviewModeSwitch({ markdown = false }: { markdown?: boolean }) {
+/** Shared Markdown / HTML / CSV view selector, retaining the Markdown styling. */
+export default function PreviewModeSwitch({ markdown = false, csv = false }: { markdown?: boolean; csv?: boolean }) {
   const t = useT();
+  const csvMode = useEditorStore(s => s.csvMode);
   const markdownMode = useEditorStore(s => s.markdownMode);
   const activeId = useEditorStore(s => s.activeId);
   const [focusRequest, setFocusRequest] = useState<{ tabId: string | null; mode: "source" | "split" | "visual"; control: Element | null } | null>(null);
@@ -53,6 +54,12 @@ export default function PreviewModeSwitch({ markdown = false }: { markdown?: boo
       useEditorStore.setState({ showPreview: true, previewMaximized: true });
     }
   };
+
+  if (csv) return <SegmentedControl value={csvMode} onChange={mode => useEditorStore.setState({ csvMode: mode })} label={t("common.viewMode")} options={[
+    { value: "source", label: t("md.viewEdit") },
+    { value: "split", label: t("md.viewSplit") },
+    { value: "read", label: t("md.viewPreview") },
+  ]} />;
 
   if (markdown) return <SegmentedControl value={markdownMode} onChange={setMarkdownMode} label={t("common.viewMode")} options={[
     { value: "source", label: t("md.viewEdit") },

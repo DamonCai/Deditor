@@ -5,13 +5,15 @@ import { useEditorStore, useActiveTabMeta, useEditorPaneId, paneViewKey } from "
 import { beginPaneResize } from "../lib/paneResize";
 import { flushDocument } from "../lib/documentFlush";
 import { useT } from "../lib/i18n";
-import { isMarkdown, isJson, isSql, isHtml } from "../lib/lang";
+import { isMarkdown, isJson, isSql, isHtml, isCsv } from "../lib/lang";
 import { Button } from "./ui/Button";
 import EditorHost from "./EditorHost";
 import PreviewHost from "./PreviewHost";
 import MarkdownVisualHost from "./MarkdownVisualHost";
 import HtmlPreview from "./HtmlPreview";
 import HtmlToolbar from "./HtmlToolbar";
+import CsvToolbar from "./CsvToolbar";
+import CsvPreview from "./CsvPreview";
 import TabBar from "./TabBar";
 import MarkdownToolbar from "./MarkdownToolbar";
 import JsonToolbar from "./JsonToolbar";
@@ -23,6 +25,7 @@ export default function EditorPane({ initialPreviewPct = 50, onPreviewPctChange 
   const theme = useEditorStore(s => s.theme);
   const zenMode = useEditorStore(s => s.zenMode);
   const htmlShowPreview = useEditorStore((s) => s.showPreview);
+  const csvMode = useEditorStore(s => s.csvMode);
   const markdownMode = useEditorStore(s => s.markdownMode);
   const htmlPreviewMaximized = useEditorStore((s) => s.previewMaximized);
   const editorFontSize = useEditorStore((s) => s.editorFontSize);
@@ -33,9 +36,10 @@ export default function EditorPane({ initialPreviewPct = 50, onPreviewPctChange 
   const filePath = activeMeta?.filePath ?? null;
   const isDiffTab = !!activeMeta?.isDiff;
   const htmlFile = isHtml(filePath);
-  const showPreview = isMarkdown(filePath) ? markdownMode !== "source" : htmlShowPreview;
-  const previewMaximized = isMarkdown(filePath) ? markdownMode === "visual" : htmlPreviewMaximized;
-  const previewEnabled = !isDiffTab && showPreview && (isMarkdown(filePath) || htmlFile);
+  const csvFile = isCsv(filePath);
+  const showPreview = isMarkdown(filePath) ? markdownMode !== "source" : csvFile ? csvMode !== "source" : htmlShowPreview;
+  const previewMaximized = isMarkdown(filePath) ? markdownMode === "visual" : csvFile ? csvMode === "read" : htmlPreviewMaximized;
+  const previewEnabled = !isDiffTab && showPreview && (isMarkdown(filePath) || htmlFile || csvFile);
   // Initial caret + scroll for the active tab. Read imperatively so subscribing
   // components don't re-render every cursor move; Editor only consumes these
   // on mount (a fresh instance is created via `key={tab.id}` per active tab).
@@ -84,7 +88,8 @@ export default function EditorPane({ initialPreviewPct = 50, onPreviewPctChange 
               full editor+preview row (still shown when preview is maximized). */}
           {!isDiffTab && isMarkdown(filePath) && <MarkdownToolbar />}
           {!isDiffTab && htmlFile && <HtmlToolbar />}
-          {!isDiffTab && htmlFile && activeMeta?.hasExternalChange && (
+          {!isDiffTab && csvFile && <CsvToolbar />}
+          {!isDiffTab && (htmlFile || csvFile) && activeMeta?.hasExternalChange && (
             <ExternalChangeBanner tabId={activeMeta.id} />
           )}
           {isMarkdown(filePath) && activeMeta?.hasExternalChange && <ExternalChangeBanner tabId={activeMeta.id} />}
@@ -113,7 +118,7 @@ export default function EditorPane({ initialPreviewPct = 50, onPreviewPctChange 
             >
                 {!isDiffTab && isJson(filePath) && <JsonToolbar />}
                 {!isDiffTab && isSql(filePath) && <SqlToolbar />}
-                {!htmlFile && !isMarkdown(filePath) && activeMeta?.hasExternalChange && (
+                {!htmlFile && !csvFile && !isMarkdown(filePath) && activeMeta?.hasExternalChange && (
                   <ExternalChangeBanner tabId={activeMeta.id} />
                 )}
                 <div className="flex-1 min-h-0 flex">
@@ -154,16 +159,19 @@ export default function EditorPane({ initialPreviewPct = 50, onPreviewPctChange 
               />
             )}
             <MarkdownVisualHost focused={focused} activeId={activeTabId} active={previewEnabled && markdownMode === "visual" && isMarkdown(filePath)} theme={theme} />
-            {previewEnabled && !(isMarkdown(filePath) && markdownMode === "visual") && (
+            {(previewEnabled || (!isDiffTab && csvFile)) && !(isMarkdown(filePath) && markdownMode === "visual") && (
               <div
                 key="preview-pane"
                 className="min-w-0"
+                hidden={!previewEnabled}
                 style={{
                   width: previewMaximized ? "100%" : `${previewPct}%`,
                   flex: previewMaximized ? "1 1 0" : undefined,
                 }}
               >
-                {htmlFile && activeTabId ? (
+                {csvFile && activeTabId ? (
+                  <CsvPreview key={activeTabId} tabId={activeTabId} visible={previewEnabled} />
+                ) : htmlFile && activeTabId ? (
                   <HtmlPreview key={activeTabId} tabId={activeTabId} />
                 ) : (
                   <PreviewHost

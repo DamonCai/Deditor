@@ -43,6 +43,7 @@ interface PersistedV3 {
   editorFontSize?: number;
   /** Legacy global zoom snapshot: migrate its configured baseline only. */
   editorBaseFontSize?: number;
+  csvMode?: "source" | "split" | "read";
   /** "read" is accepted only for migrating the removed Markdown mode. */
   markdownMode?: "source" | "split" | "visual" | "read";
   previewMaximized?: boolean;
@@ -278,6 +279,7 @@ export async function loadPersisted(): Promise<UiExtras | null> {
   }
 
   useEditorStore.setState({
+    csvMode: data.csvMode === "split" || data.csvMode === "read" ? data.csvMode : "source",
     markdownMode: data.markdownMode === "read" ? "visual"
       : data.markdownMode === "source" || data.markdownMode === "split" || data.markdownMode === "visual" ? data.markdownMode
       : !data.showPreview ? "source" : data.previewMaximized ? "visual" : "split",
@@ -395,6 +397,7 @@ function doSave(extras: UiExtras): Promise<void> {
     }),
     activeIndex,
     theme: s.theme,
+    csvMode: s.csvMode,
     markdownMode: s.markdownMode,
     showPreview: s.showPreview,
     showSidebar: s.showSidebar,

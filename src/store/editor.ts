@@ -1,6 +1,6 @@
 import { defaultMarkdownPreferences, type MarkdownPreferences } from "../lib/markdownPreferences";
 import { markdownSession, type MarkdownOrigin } from "../lib/markdownSession";
-import { isMarkdown } from "../lib/lang";
+import { isMarkdown, isCsv } from "../lib/lang";
 import { create } from "zustand";
 import { createContext, useContext } from "react";
 import { useShallow } from "zustand/shallow";
@@ -9,6 +9,7 @@ import { isBinaryRenderable } from "../lib/lang";
 
 export type Theme = "light" | "dark";
 export type Lang = "zh" | "en";
+export type CsvMode = "source" | "split" | "read";
 
 /** A closed tab snapshot, just enough state to bring it back via Cmd+Shift+T.
  *  We don't persist these across launches — the stack is a session feature. */
@@ -58,6 +59,7 @@ export type EditorPaneId = "left" | "right";
 export interface EditorPane {
   tabIds: string[];
   activeId: string | null;
+  csvMode: CsvMode;
   markdownMode: "source" | "split" | "visual";
   showPreview: boolean;
   previewMaximized: boolean;
@@ -82,6 +84,7 @@ interface EditorState {
   tabPositions: Record<string, TabPosition>;
   theme: Theme;
   language: Lang;
+  csvMode: CsvMode;
   markdownMode: "source" | "split" | "visual";
   showPreview: boolean;
   showSidebar: boolean;
@@ -382,7 +385,7 @@ function makeTab(filePath: string | null, content: string): Tab {
 const initial = makeTab(null, DEFAULT_CONTENT);
 
 function paneSnapshot(s: EditorState): EditorPane {
-  return { tabIds: s.tabs.map(t => t.id), activeId: s.activeId, markdownMode: s.markdownMode, showPreview: s.showPreview, previewMaximized: s.previewMaximized };
+  return { tabIds: s.tabs.map(t => t.id), activeId: s.activeId, csvMode: s.csvMode, markdownMode: s.markdownMode, showPreview: s.showPreview, previewMaximized: s.previewMaximized };
 }
 /** Keep legacy global commands pointed at the focused pane, atomically with
  * opens/closes and mode changes. Document objects remain shared by both panes. */
@@ -391,9 +394,9 @@ function normalizePanes(previous: EditorState, patch: Partial<EditorState>): Par
   if (!next.panes) return patch;
   if (patch.panes !== undefined || patch.activePane !== undefined) {
     const pane = next.panes[next.activePane];
-    return { ...patch, activeId: pane.activeId, markdownMode: pane.markdownMode, showPreview: pane.showPreview, previewMaximized: pane.previewMaximized, splitEditor: true };
+    return { ...patch, activeId: pane.activeId, csvMode: pane.csvMode, markdownMode: pane.markdownMode, showPreview: pane.showPreview, previewMaximized: pane.previewMaximized, splitEditor: true };
   }
-  if ((next.tabs === previous.tabs || next.tabs.length === previous.tabs.length && next.tabs.every((t, i) => t.id === previous.tabs[i].id)) && next.activeId === previous.activeId && next.markdownMode === previous.markdownMode && next.showPreview === previous.showPreview && next.previewMaximized === previous.previewMaximized) return patch;
+  if ((next.tabs === previous.tabs || next.tabs.length === previous.tabs.length && next.tabs.every((t, i) => t.id === previous.tabs[i].id)) && next.activeId === previous.activeId && next.csvMode === previous.csvMode && next.markdownMode === previous.markdownMode && next.showPreview === previous.showPreview && next.previewMaximized === previous.previewMaximized) return patch;
   const live = new Set(next.tabs.map(t => t.id));
   const panes = { ...next.panes };
   for (const key of ["left", "right"] as const) {
@@ -409,12 +412,12 @@ function normalizePanes(previous: EditorState, patch: Partial<EditorState>): Par
       }
       for (const tab of next.tabs) if (!previous.tabs.some(t => t.id === tab.id) && !tabIds.includes(tab.id)) { tabIds = [...tabIds, tab.id]; activeId = tab.id; }
     }
-    const modes = key === next.activePane ? { markdownMode: next.markdownMode, showPreview: next.showPreview, previewMaximized: next.previewMaximized } : old;
-    panes[key] = { tabIds, activeId, markdownMode: modes.markdownMode, showPreview: modes.showPreview, previewMaximized: modes.previewMaximized };
+    const modes = key === next.activePane ? { csvMode: next.csvMode, markdownMode: next.markdownMode, showPreview: next.showPreview, previewMaximized: next.previewMaximized } : old;
+    panes[key] = { tabIds, activeId, csvMode: modes.csvMode, markdownMode: modes.markdownMode, showPreview: modes.showPreview, previewMaximized: modes.previewMaximized };
   }
   if (!panes.left.tabIds.length || !panes.right.tabIds.length) {
     const surviving = panes.left.tabIds.length ? panes.left : panes.right;
-    return { ...patch, panes: null, activePane: "left", splitEditor: false, activeId: surviving.activeId, markdownMode: surviving.markdownMode, showPreview: surviving.showPreview, previewMaximized: surviving.previewMaximized };
+    return { ...patch, panes: null, activePane: "left", splitEditor: false, activeId: surviving.activeId, csvMode: surviving.csvMode, markdownMode: surviving.markdownMode, showPreview: surviving.showPreview, previewMaximized: surviving.previewMaximized };
   }
   return { ...patch, panes, activeId: panes[next.activePane].activeId };
 }
@@ -449,7 +452,7 @@ const editorStore = create<EditorState>((rawSet, get) => {
     const tabIds = group.tabIds.filter(t => t !== id);
     if (!tabIds.length) {
       const remaining = state.panes[other];
-      set({ panes: null, activePane: "left", splitEditor: false, activeId: remaining.activeId, markdownMode: remaining.markdownMode, showPreview: remaining.showPreview, previewMaximized: remaining.previewMaximized });
+      set({ panes: null, activePane: "left", splitEditor: false, activeId: remaining.activeId, csvMode: remaining.csvMode, markdownMode: remaining.markdownMode, showPreview: remaining.showPreview, previewMaximized: remaining.previewMaximized });
     } else set({ panes: { ...state.panes, [pane]: { ...group, tabIds, activeId: group.activeId === id ? tabIds[Math.min(group.tabIds.indexOf(id), tabIds.length - 1)] : group.activeId } } });
   },
   tabs: [initial],
@@ -462,6 +465,7 @@ const editorStore = create<EditorState>((rawSet, get) => {
       ? "dark"
       : "light",
   language: detectLang(),
+  csvMode: "source",
   markdownMode: "split",
   showPreview: true,
   showSidebar: true,
@@ -791,6 +795,7 @@ const editorStore = create<EditorState>((rawSet, get) => {
   togglePreview: () => {
     const tab = get().tabs.find(t => t.id === get().activeId);
     if (tab && !tab.diff && isMarkdown(tab.filePath)) { set({ markdownMode: get().markdownMode === "source" ? "split" : "source" }); return; }
+    if (tab && !tab.diff && isCsv(tab.filePath)) { set({ csvMode: get().csvMode === "source" ? "split" : "source" }); return; }
     const next = !get().showPreview;
     // turning preview off also exits maximized
     set({ showPreview: next, previewMaximized: next ? get().previewMaximized : false });
@@ -798,6 +803,7 @@ const editorStore = create<EditorState>((rawSet, get) => {
   togglePreviewMaximized: () => {
     const tab = get().tabs.find(t => t.id === get().activeId);
     if (tab && !tab.diff && isMarkdown(tab.filePath)) { set({ markdownMode: get().markdownMode === "visual" ? "split" : "visual" }); return; }
+    if (tab && !tab.diff && isCsv(tab.filePath)) { set({ csvMode: get().csvMode === "read" ? "split" : "read" }); return; }
     const next = !get().previewMaximized;
     // entering maximized also turns preview on
     set({ previewMaximized: next, showPreview: next ? true : get().showPreview });
@@ -838,7 +844,7 @@ function useScopedEditorStore<T>(selector: (state: EditorState) => T): T {
     const cache = paneSnapshots.get(state) ?? {};
     if (!cache[paneId]) {
       const documents = new Map(state.tabs.map(tab => [tab.id, tab]));
-      cache[paneId] = { ...state, tabs: pane.tabIds.map(id => documents.get(id)!).filter(Boolean), activeId: pane.activeId, markdownMode: pane.markdownMode, showPreview: pane.showPreview, previewMaximized: pane.previewMaximized };
+      cache[paneId] = { ...state, tabs: pane.tabIds.map(id => documents.get(id)!).filter(Boolean), activeId: pane.activeId, csvMode: pane.csvMode, markdownMode: pane.markdownMode, showPreview: pane.showPreview, previewMaximized: pane.previewMaximized };
       paneSnapshots.set(state, cache);
     }
     return selector(cache[paneId]!);
