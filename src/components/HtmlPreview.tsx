@@ -27,7 +27,9 @@ export default function HtmlPreview({ tabId }: { tabId: string }) {
     <iframe
       title={t("html.previewTitle")}
       srcDoc={result.html}
-      sandbox=""
+      // Scripts may render the document, but must not share the app's origin,
+      // access its DOM/native bridge, open popups or navigate the top window.
+      sandbox="allow-scripts"
       referrerPolicy="no-referrer"
       style={{ display: "block", width: "100%", height: "100%", border: 0, background: "#fff", colorScheme: "light" }}
     />

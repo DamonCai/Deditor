@@ -35,7 +35,10 @@ export function buildHtmlPreview(content: string, filePath: string): string {
 
   const policy = doc.createElement("meta");
   policy.httpEquiv = "Content-Security-Policy";
-  policy.content = "script-src 'none'; object-src 'none'; frame-src 'none'; form-action 'none'";
+  // Interactive HTML often builds its entire body in a script. Allow normal
+  // document scripts while the iframe's opaque origin isolates the app.
+  // Do not add allow-same-origin to the sandbox or enable eval here.
+  policy.content = "script-src 'unsafe-inline' http: https: asset:; object-src 'none'; frame-src 'none'; form-action 'none'";
   doc.head.prepend(policy, base);
   return "<!doctype html>\n" + doc.documentElement.outerHTML;
 }

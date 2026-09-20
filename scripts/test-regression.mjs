@@ -961,17 +961,31 @@ test(3, "HTML mode toggles preserve editor undo and preview follows edits and ta
   assert.match(document.querySelector("iframe").srcdoc, /<h1>A<\/h1>/);
 });
 
-test(4, "HTML reading isolates scripts, nested frames and refresh navigation", async () => {
+test(4, "HTML reading permits document scripts while retaining origin and navigation isolation", async () => {
   reset([tab("a", '<meta http-equiv="REFRESH" content="0;url=https://example.com"><script>parent.compromised=true</script><iframe src="https://example.com"></iframe><form action="https://example.com"></form>', "/test/a.html")]);
   await render(React.createElement(app.HtmlPreview, { tabId: "a" }));
   const frame = document.querySelector("iframe");
-  assert.equal(frame.getAttribute("sandbox"), "");
+  assert.equal(frame.getAttribute("sandbox"), "allow-scripts");
   const doc = new DOMParser().parseFromString(frame.srcdoc, "text/html");
   assert.equal(doc.querySelector('meta[http-equiv="REFRESH"]'), null);
-  assert.match(doc.querySelector("meta").content, /script-src 'none'/);
+  assert.match(doc.querySelector("meta").content, /script-src 'unsafe-inline' http: https: asset:/);
+  assert.doesNotMatch(doc.querySelector("meta").content, /unsafe-eval/);
   assert.match(doc.querySelector("meta").content, /frame-src 'none'/);
   assert.match(doc.querySelector("meta").content, /form-action 'none'/);
   assert.equal(window.compromised, undefined);
+});
+
+test(4, "HTML dynamic source, event handlers and authored CSP survive without changing saved content", async () => {
+  const content = `<meta http-equiv="Content-Security-Policy" content="connect-src 'none'"><div id="graph"></div><button onclick="draw()">重绘</button><script>function draw(){document.getElementById('graph').textContent='动态节点';}draw();</script><script src="./graph.js"></script>`;
+  reset([tab("dynamic", content, "/test/site/dynamic.html")]);
+  await render(React.createElement(app.HtmlPreview, { tabId: "dynamic" }));
+  const doc = new DOMParser().parseFromString(document.querySelector("iframe").srcdoc, "text/html");
+  assert.equal(doc.querySelectorAll("script").length, 2);
+  assert.match(doc.querySelector("script").textContent, /draw\(\);$/);
+  assert.equal(doc.querySelector("button").getAttribute("onclick"), "draw()");
+  assert.equal(doc.querySelectorAll('meta[http-equiv="Content-Security-Policy"]').length, 2);
+  assert.equal(new URL(doc.querySelector('script[src]').getAttribute('src'), doc.querySelector('base').href).pathname, '//test/site/graph.js');
+  assert.equal(store.getState().tabs[0].content, content);
 });
 
 test(
