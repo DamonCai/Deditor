@@ -98,10 +98,10 @@ await test('I02 malformed escaped HTML fences render and retain their exact mark
   assert.ok(content().includes(original.split('\n')[2]));assert.match(content(),/<section>visible!<\/section>/i);assert.ok(content().includes(sample.language));await exactHistory(original);
  }
 });
-await test('I02 fenced HTML renders sanitized SVG and active content in reading',async()=>{
+await test('I02 active fenced HTML runs in its own document and keeps an explicit source editor',async()=>{
  const original='Before\n\n```html\n<svg viewBox="0 0 20 10"><rect width="20" height="10" fill="red" onclick="bad()"/><script>bad()</script></svg><button type="button">Action</button>\n```\n\nTail\n';
- await reset(original);const block=document.querySelector('.md-code-block');assert.ok(block);const rendered=block.querySelector('.md-code-preview .html-render-block');assert.ok(rendered);assert.ok(rendered.querySelector('svg rect'));assert.equal(rendered.querySelector('script'),null);assert.equal(rendered.querySelector('rect').hasAttribute('onclick'),false);assert.equal(rendered.querySelector('button')?.textContent,'Action');assert.equal(content(),original);
- await act(async()=>root.render(null));await render(true);const readonly=document.querySelector('.md-code-preview .html-render-block');assert.ok(readonly?.querySelector('svg rect'));assert.equal(readonly.querySelector('script'),null);assert.equal(content(),original);
+ await reset(original);const block=document.querySelector('.md-code-block');assert.ok(block);const frame=block.querySelector('.md-code-preview .html-render-block iframe');assert.ok(frame);assert.match(frame.srcdoc, /onclick="bad\(\)"/);assert.match(frame.srcdoc, /<script>bad\(\)<\/script>/);assert.ok(frame.sandbox === undefined || !frame.sandbox.contains('allow-same-origin'));assert.equal(block.querySelector('.md-code-toggle').hidden,false);assert.equal(content(),original);
+ await act(async()=>root.render(null));await render(true);const readonly=document.querySelector('.md-code-preview .html-render-block iframe');assert.match(readonly.srcdoc, /<script>bad\(\)<\/script>/);assert.equal(content(),original);
 });
 await test('I06 preserved block: Tab indents within its editor and Shift Tab removes indentation',async()=>{
  const original='<details>\n<summary>Details</summary>\n\nBody\n</details>\n\nTail\n';await reset(original);
@@ -109,6 +109,17 @@ await test('I06 preserved block: Tab indents within its editor and Shift Tab rem
  const event=new window.KeyboardEvent('keydown',{key:'Tab',bubbles:true,cancelable:true});let handled;await run(()=>{handled=runScopeHandlers(cm,event,'editor');});assert.equal(handled,true);assert.ok(cm.state.doc.toString().startsWith('  <details>'));
  await run(()=>runScopeHandlers(cm,new window.KeyboardEvent('keydown',{key:'Tab',shiftKey:true}),'editor'));assert.equal(cm.state.doc.toString(),initialRaw);
  await run(()=>runScopeHandlers(cm,new window.KeyboardEvent('keydown',{key:'Escape'}),'editor'));assert.equal(!!document.querySelector('.md-raw-source .cm-editor'),false);assert.equal(content(),original);
+});
+await test('I02 media controls remain interactive instead of opening the surrounding source editor',async()=>{
+ const original='<audio src="./tone.wav" controls></audio>\n\n```html\n<video src="./clip.mp4" controls></video>\n```\n';
+ await reset(original);
+ await run(()=>document.querySelector('.md-raw-preview audio').dispatchEvent(new window.MouseEvent('click',{bubbles:true,cancelable:true})));
+ assert.equal(document.querySelector('.md-raw-source .cm-editor'),null);
+ const video=document.querySelector('.md-code-preview video');assert.ok(video);
+ for(const event of [new window.MouseEvent('mousedown',{button:0,bubbles:true,cancelable:true}),new window.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true})]) {
+  await run(()=>video.dispatchEvent(event));assert.equal(event.defaultPrevented,false);assert.equal(document.querySelector('.md-code-editor .cm-editor'),null);
+ }
+ assert.equal(content(),original);
 });
 
 await test('I06 raw HTML and YAML: edit, Escape, save, undo and redo preserve neighboring text',async()=>{

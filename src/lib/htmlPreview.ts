@@ -1,19 +1,19 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { logError } from "./logger";
+import { resolveMarkdownImage } from "./markdownImageSettings";
 
-/** Build a separate document; never insert file HTML into the application's DOM.
- * The iframe sandbox is the security boundary, with CSP as defense in depth. */
-export function buildHtmlPreview(content: string, filePath: string): string {
+// Allow normal document interactions, retaining a separate origin from the
+// editor. New windows inherit this isolation; never add allow-same-origin.
+export const HTML_PREVIEW_SANDBOX = "allow-scripts allow-forms allow-modals allow-downloads allow-popups";
+
+/** Build a separate document; preserve the author's own policy and behavior. */
+export function buildHtmlPreview(content: string, filePath: string | null): string {
   const doc = new DOMParser().parseFromString(content, "text/html");
-  // A refresh could replace the reading view without the user's interaction.
-  doc.querySelectorAll("meta[http-equiv]").forEach((meta) => {
-    if (meta.getAttribute("http-equiv")?.toLowerCase() === "refresh") meta.remove();
-  });
 
   // Preserve an authored base (including relative bases), resolving it against
   // the source file. URL path separators must remain literal so ../ works on
   // both asset:// (macOS) and http://asset.localhost (Windows).
-  const fileUrl = convertFileSrc(filePath).replace(/%2f|%5c/gi, "/");
+  const fileUrl = filePath ? convertFileSrc(filePath).replace(/%2f|%5c/gi, "/") : "about:blank";
   const authoredBase = doc.querySelector("base[href]")?.getAttribute("href");
   const base = doc.createElement("base");
   base.href = fileUrl;
@@ -26,6 +26,17 @@ export function buildHtmlPreview(content: string, filePath: string): string {
   }
   doc.querySelectorAll("base").forEach((node) => node.remove());
 
+  // A <base> resolves relative URLs, but explicit file:/Windows references
+  // still need the native asset protocol, just like Markdown media.
+  for (const element of doc.querySelectorAll('[src],[href],[poster],[data]')) {
+    for (const attr of ['src', 'href', 'poster', 'data']) {
+      const raw = element.getAttribute(attr);
+      if (!raw || !/^(?:file:|[a-z]:[\\/])/i.test(raw)) continue;
+      const target = resolveMarkdownImage(raw, filePath);
+      if (target !== null) element.setAttribute(attr, convertFileSrc(target).replace(/%2f|%5c/gi, "/") + (raw.match(/[?#].*$/)?.[0] ?? ''));
+    }
+  }
+
   // With a file base, a bare #fragment would reload the saved file. Keep
   // in-page links inside the current (possibly unsaved) srcdoc instead.
   doc.querySelectorAll("a[href], area[href]").forEach((link) => {
@@ -33,12 +44,6 @@ export function buildHtmlPreview(content: string, filePath: string): string {
     if (href?.startsWith("#")) link.setAttribute("href", "about:srcdoc" + href);
   });
 
-  const policy = doc.createElement("meta");
-  policy.httpEquiv = "Content-Security-Policy";
-  // Interactive HTML often builds its entire body in a script. Allow normal
-  // document scripts while the iframe's opaque origin isolates the app.
-  // Do not add allow-same-origin to the sandbox or enable eval here.
-  policy.content = "script-src 'unsafe-inline' http: https: asset:; object-src 'none'; frame-src 'none'; form-action 'none'";
-  doc.head.prepend(policy, base);
+  doc.head.prepend(base);
   return "<!doctype html>\n" + doc.documentElement.outerHTML;
 }

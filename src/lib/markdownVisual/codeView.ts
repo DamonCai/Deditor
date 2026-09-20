@@ -189,7 +189,7 @@ export function codeView(tabId: string, theme: "light" | "dark") {
       editor.hidden = !expanded; preview.hidden = expanded && (!threeModes || diagramMode === "edit");
       if (expanded) ensureEditor();
       overview.refresh();
-      toggle.hidden = threeModes || !diagram || !view.editable;
+      toggle.hidden = threeModes || (!diagram && lang !== "html") || !view.editable;
       toggle.textContent = tStatic(expanded ? "md.hideSource" : "md.editSourceBlock");
       language.readOnly = !view.editable;
       selectBlock.hidden = !view.editable || threeModes;
@@ -229,7 +229,8 @@ export function codeView(tabId: string, theme: "light" | "dark") {
         if (renderedSource === null && !preview.hasChildNodes()) {
           preview.append(...Array.from(staging.cloneNode(true).childNodes));
         }
-        const display = hydrateMarkdownDisplay(staging, { theme });
+        const tab = useEditorStore.getState().tabs.find(tab => tab.id === tabId);
+        const display = hydrateMarkdownDisplay(staging, { theme, filePath: tab?.filePath });
         controllers = [display];
         await display.done;
         if (destroyed || token !== generation) return;
@@ -242,6 +243,7 @@ export function codeView(tabId: string, theme: "light" | "dark") {
     }
     preview.onmousedown = event => {
       if (!view.editable || event.button !== 0 || overview.isOpen) return;
+      if ((event.target as Element).closest("audio,video,iframe,button,input,select,textarea,summary,a")) return;
       event.preventDefault();
       if (hasDiagramModes()) { selectNode(); return; }
       expanded = true; render();
@@ -252,6 +254,7 @@ export function codeView(tabId: string, theme: "light" | "dark") {
     };
     preview.onkeydown = event => {
       if (!view.editable || event.key !== "Enter") return;
+      if ((event.target as Element).closest("audio,video,iframe,button,input,select,textarea,summary,a")) return;
       event.preventDefault(); event.stopPropagation();
       if (hasDiagramModes()) { setDiagramMode("split"); return; }
       expanded = true; render(); ensureEditor().focus();

@@ -4,6 +4,10 @@ import { hydrateMermaid } from "./mermaidHydrate";
 import { hydratePlantuml } from "./plantumlHydrate";
 import { hydrateLocalImages } from "./localImgHydrate";
 import { hydrateHtmlBlocks } from "./htmlBlockHydrate";
+import { HTML_PREVIEW_SANDBOX } from "./htmlPreview";
+import { needsHtmlDocument } from "./htmlDocument";
+import { hydrateHtmlFrames } from "./htmlFrameHydrate";
+import { tStatic } from "./i18n";
 
 let displayPurifier: typeof DOMPurify | undefined;
 function markdownPurifier() {
@@ -11,17 +15,42 @@ function markdownPurifier() {
     // Keep this exception local to Markdown display, not other HTML consumers.
     displayPurifier = DOMPurify(window);
     displayPurifier.addHook("uponSanitizeAttribute", (node, data) => {
-      if (node.nodeName === "A" && data.attrName === "href" && /^file:/i.test(data.attrValue)) data.forceKeepAttr = true;
+      const name = node.nodeName.toUpperCase();
+      if ((name === "A" && data.attrName === "href" ||
+        /^(IMG|AUDIO|VIDEO|SOURCE|TRACK|IFRAME)$/.test(name) && /^(src|poster)$/.test(data.attrName) ||
+        /^(IMAGE|USE)$/.test(name) && /^(href|xlink:href)$/.test(data.attrName)) &&
+        /^(?:file:|[a-z]:[\\/])/i.test(data.attrValue)) data.forceKeepAttr = true;
     });
   }
   return displayPurifier;
+}
+
+function sanitizedFragment(html: string | HTMLTemplateElement) {
+  const original = typeof html === "string" ? document.createElement("template") : html;
+  if (typeof html === "string") original.innerHTML = html;
+  const documents: (string | null)[] = [];
+  original.content.querySelectorAll("iframe").forEach((frame, index) => {
+    documents[index] = frame.getAttribute("srcdoc");
+    frame.removeAttribute("srcdoc");
+    frame.setAttribute("data-deditor-frame-index", String(index));
+  });
+  const clean = document.createElement("template");
+  clean.innerHTML = markdownPurifier().sanitize(original.innerHTML, {ADD_TAGS:["iframe", "use"], ADD_ATTR:["allowfullscreen"]});
+  clean.content.querySelectorAll("iframe").forEach(frame => {
+    const source = documents[Number(frame.getAttribute("data-deditor-frame-index"))];
+    frame.removeAttribute("data-deditor-frame-index");
+    // srcdoc is a separate document, not host markup. Restoring it as inert
+    // metadata avoids the host sanitizer stripping the embedded page's script.
+    if (source != null) frame.dataset.htmlDocument = source;
+  });
+  return clean;
 }
 
 /** Both hosts mount the same sanitized renderer output. Diagram source is inert
  * metadata: restore it after sanitization, which can reject arrows in attributes. */
 export function markdownDisplayHtml(html: string): string {
   const original = document.createElement("template"); original.innerHTML = html;
-  const clean = document.createElement("template"); clean.innerHTML = markdownPurifier().sanitize(html, {ADD_TAGS:["iframe"], FORBID_ATTR:["srcdoc"]});
+  const clean = sanitizedFragment(original);
   for (const kind of ["mermaid", "plantuml", "legacy"]) {
     const sources = original.content.querySelectorAll(`.${kind}-diagram`);
     clean.content.querySelectorAll(`.${kind}-diagram`).forEach((element, index) => {
@@ -39,15 +68,22 @@ export function markdownDisplayHtml(html: string): string {
   clean.content.querySelectorAll<HTMLElement>(".html-render-block").forEach(element => {
     const source = element.getAttribute("data-html-source") ?? "";
     element.removeAttribute("data-html-source");
-    element.innerHTML = markdownPurifier().sanitize(source, {ADD_TAGS:["iframe"], FORBID_ATTR:["srcdoc"]});
+    if (needsHtmlDocument(source)) {
+      const frame = document.createElement("iframe");
+      frame.className = "md-html-document";
+      frame.title = tStatic("html.previewTitle");
+      frame.dataset.htmlDocument = source;
+      element.replaceChildren(frame);
+    } else element.replaceChildren(sanitizedFragment(source).content);
   });
   for (const frame of clean.content.querySelectorAll("iframe")) {
     const src = frame.getAttribute("src") ?? "";
-    if (!/^https?:\/\//i.test(src)) {frame.remove();continue;}
-    frame.setAttribute("sandbox", "allow-scripts");
+    // Relative/local documents and authored srcdoc are valid embeds, too.
+    if (/^\s*(?:javascript|vbscript):/i.test(src)) {frame.remove();continue;}
+    frame.setAttribute("sandbox", HTML_PREVIEW_SANDBOX);
     frame.setAttribute("referrerpolicy", "no-referrer");
     frame.setAttribute("loading", "lazy");
-    frame.removeAttribute("allow");frame.removeAttribute("allowfullscreen");
+    frame.removeAttribute("allow");
   }
   return clean.innerHTML;
 }
@@ -62,6 +98,7 @@ export interface MarkdownDisplayOptions {
  * Hosts retain their own stale-result checks and editing-height reservations. */
 export function hydrateMarkdownDisplay(root: HTMLElement, options: MarkdownDisplayOptions) {
   hydrateLocalImages(root, options.filePath ?? null, options.imageRoot ?? null);
+  hydrateHtmlFrames(root, options.filePath ?? null);
   const children = [hydrateMermaid(root, options.theme), hydratePlantuml(root), hydrateLegacyDiagrams(root, options.theme)];
   const html = hydrateHtmlBlocks(root);
   const controller = new AbortController();

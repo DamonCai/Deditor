@@ -15,7 +15,7 @@ let isolated=false;try{parent.document.body.dataset.compromised='yes';}catch{iso
 document.getElementById('isolation').textContent='父页面隔离: '+isolated+' / 存储隔离: '+storageBlocked+' / 原生桥: '+typeof window.__TAURI_INTERNALS__;
 </script></body></html>`;
 const supplied = new URLSearchParams(location.search).has('supplied')
-  ? await fetch('./artifacts/html-preview-2026-09-20/gateway-traffic-flow.html').then(r=>r.text()) : null;
+  ? await fetch('./artifacts/html-preview-2026-09-20/gateway-traffic-flow.txt').then(r=>r.text()) : null;
 const make=(id:string,content:string)=>({id,filePath:`/generated/${id}.html`,content,savedContent:content});
 const samples=[...(supplied ? [make('gateway-traffic-flow',supplied)] : []),make('动态脚本',dynamic),make('静态边界','<h1>中文 &amp; 静态片段</h1><p>正常显示</p>'),make('空文件','')];
 useEditorStore.setState({panes:null,activePane:'left',tabs:samples,activeId:samples[0].id,showPreview:true,previewMaximized:true,language:'zh',theme:'light',autoSave:'off',formatOnSave:false});

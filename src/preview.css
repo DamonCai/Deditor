@@ -375,6 +375,20 @@
   color-scheme: light;
 }
 
+/* Interactive HTML owns a viewport; scrolling stays inside the document.
+   Static SVG keeps its existing intrinsic sizing above. */
+.md-html-document {
+  display: block;
+  width: 100%;
+  height: 420px;
+  min-height: 180px;
+  border: 0;
+  background: #fff;
+  color-scheme: light;
+  resize: vertical;
+  overflow: auto;
+}
+
 /* PlantUML diagram */
 :is(.preview, .milkdown .ProseMirror.md-document) .plantuml-diagram {
   display: flex;

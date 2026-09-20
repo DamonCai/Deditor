@@ -158,7 +158,7 @@ await test('G02a preview click: sanitized local links open a DEditor tab',async(
  await act(async()=>{root.render(React.createElement(app.Preview,{tabId:'a',active:true,theme:'light'}));});
  await act(async()=>pause(150));const link=document.querySelector('.preview a');assert.equal(link.textContent,'预览文件');const event=new window.MouseEvent('click',{bubbles:true,cancelable:true});await run(()=>link.dispatchEvent(event));
  assert.equal(event.defaultPrevented,true);assert.equal(reads.at(-1),'/generated/preview file.md');assert.equal(store.getState().tabs.find(t=>t.id===store.getState().activeId).filePath,'/generated/preview file.md');assert.equal(content(),original);await run(()=>store.setState({activeId:'a'}));
- const box=document.createElement('div');box.innerHTML=app.markdownDisplayHtml('<a href="javascript:alert(1)">bad</a><iframe src="file:///private/test"></iframe>');assert.equal(box.querySelector('a').getAttribute('href'),null);assert.equal(box.querySelector('iframe'),null);
+ const box=document.createElement('div');box.innerHTML=app.markdownDisplayHtml('<a href="javascript:alert(1)">bad</a><iframe src="file:///generated/test.html"></iframe>');assert.equal(box.querySelector('a').getAttribute('href'),null);assert.equal(box.querySelector('iframe').getAttribute('src'),'file:///generated/test.html');assert.doesNotMatch(box.querySelector('iframe').getAttribute('sandbox'),/allow-same-origin/);
 });
 await test('G02b file links: reading modifier click opens decoded file in DEditor and preserves source',async()=>{
  const original='[本地文件](file:///generated/click%20%23%2520.md) [bad](javascript:alert%281%29)\n';await reset(original);

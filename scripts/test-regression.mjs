@@ -961,17 +961,16 @@ test(3, "HTML mode toggles preserve editor undo and preview follows edits and ta
   assert.match(document.querySelector("iframe").srcdoc, /<h1>A<\/h1>/);
 });
 
-test(4, "HTML reading permits document scripts while retaining origin and navigation isolation", async () => {
+test(4, "HTML reading preserves document behavior while retaining editor origin isolation", async () => {
   reset([tab("a", '<meta http-equiv="REFRESH" content="0;url=https://example.com"><script>parent.compromised=true</script><iframe src="https://example.com"></iframe><form action="https://example.com"></form>', "/test/a.html")]);
   await render(React.createElement(app.HtmlPreview, { tabId: "a" }));
   const frame = document.querySelector("iframe");
-  assert.equal(frame.getAttribute("sandbox"), "allow-scripts");
+  assert.equal(frame.getAttribute("sandbox"), "allow-scripts allow-forms allow-modals allow-downloads allow-popups");
   const doc = new DOMParser().parseFromString(frame.srcdoc, "text/html");
-  assert.equal(doc.querySelector('meta[http-equiv="REFRESH"]'), null);
-  assert.match(doc.querySelector("meta").content, /script-src 'unsafe-inline' http: https: asset:/);
-  assert.doesNotMatch(doc.querySelector("meta").content, /unsafe-eval/);
-  assert.match(doc.querySelector("meta").content, /frame-src 'none'/);
-  assert.match(doc.querySelector("meta").content, /form-action 'none'/);
+  assert.ok(doc.querySelector('meta[http-equiv="REFRESH"]'));
+  assert.equal(doc.querySelector('meta[http-equiv="Content-Security-Policy"]'), null);
+  assert.ok(doc.querySelector('iframe'));
+  assert.ok(doc.querySelector('form'));
   assert.equal(window.compromised, undefined);
 });
 
@@ -983,7 +982,7 @@ test(4, "HTML dynamic source, event handlers and authored CSP survive without ch
   assert.equal(doc.querySelectorAll("script").length, 2);
   assert.match(doc.querySelector("script").textContent, /draw\(\);$/);
   assert.equal(doc.querySelector("button").getAttribute("onclick"), "draw()");
-  assert.equal(doc.querySelectorAll('meta[http-equiv="Content-Security-Policy"]').length, 2);
+  assert.equal(doc.querySelectorAll('meta[http-equiv="Content-Security-Policy"]').length, 1);
   assert.equal(new URL(doc.querySelector('script[src]').getAttribute('src'), doc.querySelector('base').href).pathname, '//test/site/graph.js');
   assert.equal(store.getState().tabs[0].content, content);
 });

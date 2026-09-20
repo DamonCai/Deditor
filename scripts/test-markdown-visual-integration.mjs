@@ -903,7 +903,7 @@ await test('P2 nested diagrams: preserved callouts retain inert diagram source a
  await act(async()=>store.getState().setContent(original,'a','command'));await render(true);await pause(120);
  const diagram=document.querySelector('.md-raw-preview .mermaid-diagram');
  assert.ok(diagram);assert.equal(diagram.dataset.mermaidSource,'flowchart TD\nA --> B\n');assert.equal(diagram.dataset.mermaidHydrated,'1');
- assert.equal(document.querySelector('.md-raw-preview img')?.getAttribute('onerror'),null);assert.equal(content(),original);
+ assert.equal(document.querySelector('.md-raw-preview img'),null);assert.match(document.querySelector('.md-raw-preview iframe.md-html-document').srcdoc,/onerror="window.bad=1"/);assert.equal(window.bad,undefined);assert.equal(content(),original);
  await render(false);
 });
 await test('P2 anchors: duplicate and nested headings have the same link destinations as Preview',async()=>{
@@ -1090,9 +1090,9 @@ await test('math: chemistry, document numbering and cross references share rende
  const clean=document.createElement('div');clean.innerHTML=app.markdownDisplayHtml(legacy);
  assert.equal(clean.querySelectorAll('.legacy-diagram').length,2);assert.equal(clean.querySelector('[data-legacy-kind="sequence"]').dataset.legacySource.trim(),'A->B: Hello');
 });
-await test('embedded HTML: iframe remains isolated and rejects local/script sources and srcdoc',async()=>{
+await test('embedded HTML: local pages and srcdoc remain usable inside isolated frames',async()=>{
  const html=app.markdownDisplayHtml('<iframe src="https://example.com/embed" sandbox="allow-same-origin allow-top-navigation" srcdoc="<script>alert(1)</script>" allow="camera"></iframe><iframe src="file:///private/test"></iframe><iframe src="javascript:alert(1)"></iframe>');
- const host=document.createElement('div');host.innerHTML=html;assert.equal(host.querySelectorAll('iframe').length,1);const frame=host.querySelector('iframe');assert.equal(frame.getAttribute('sandbox'),'allow-scripts');assert.equal(frame.getAttribute('srcdoc'),null);assert.equal(frame.getAttribute('allow'),null);assert.equal(frame.getAttribute('referrerpolicy'),'no-referrer');
+ const host=document.createElement('div');host.innerHTML=html;const frame=host.querySelector('iframe');assert.equal(frame.getAttribute('sandbox'),'allow-scripts allow-forms allow-modals allow-downloads allow-popups');assert.equal(frame.dataset.htmlDocument,'<script>alert(1)</script>');assert.equal(frame.getAttribute('allow'),null);assert.equal(frame.getAttribute('referrerpolicy'),'no-referrer');assert.ok(host.querySelector('iframe[src="file:///private/test"]'));assert.equal(host.querySelector('iframe[src^="javascript:"]'),null);
 });
 await test('P3 typewriter: default off, explicit centering and composition exclusion',async()=>{
  const element=document.createElement('div'),scroller=document.createElement('div');document.body.append(scroller);scroller.append(element);

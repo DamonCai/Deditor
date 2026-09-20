@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useShallow } from "zustand/shallow";
 import { useEditorStore } from "../store/editor";
-import { buildHtmlPreview } from "../lib/htmlPreview";
+import { buildHtmlPreview, HTML_PREVIEW_SANDBOX } from "../lib/htmlPreview";
 import { useT } from "../lib/i18n";
 import { logError } from "../lib/logger";
 
@@ -27,9 +27,7 @@ export default function HtmlPreview({ tabId }: { tabId: string }) {
     <iframe
       title={t("html.previewTitle")}
       srcDoc={result.html}
-      // Scripts may render the document, but must not share the app's origin,
-      // access its DOM/native bridge, open popups or navigate the top window.
-      sandbox="allow-scripts"
+      sandbox={HTML_PREVIEW_SANDBOX}
       referrerPolicy="no-referrer"
       style={{ display: "block", width: "100%", height: "100%", border: 0, background: "#fff", colorScheme: "light" }}
     />

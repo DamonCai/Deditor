@@ -117,7 +117,7 @@ export function rawView(filePath: string | null, tabId: string) {
           return;
         }
       }
-      if (view.editable && !(e.target as HTMLElement).closest("summary,button,input")) open();
+      if (view.editable && !(e.target as HTMLElement).closest("summary,button,input,select,textarea,audio,video,iframe")) open();
     });
     const modeChanged = () => { if (!view.editable) close(false); render(); };
     view.dom.addEventListener("deditor-editable-change", modeChanged);

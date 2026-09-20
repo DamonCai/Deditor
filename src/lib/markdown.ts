@@ -1,4 +1,5 @@
 import { loadMarkdownMath, markdownMathHtml } from "./markdownMath";
+import { needsHtmlDocument } from "./htmlDocument";
 import type { PluginSimple } from "markdown-it";
 import mark from "markdown-it-mark";
 import sub from "markdown-it-sub";
@@ -116,7 +117,7 @@ function renderHtmlPlaceholder(source: string, line: number): string {
 const md = new MarkdownIt({
   // Allow inline HTML so `<span style="color:…">` / `<mark>` / `<sup>` etc.
   // emitted by the toolbar's Color / Highlight buttons render as expected.
-  // Local editor on local content — no XSS surface to worry about.
+  // Active block HTML is rendered in a separate document by the display host.
   html: true,
   linkify: true,
   breaks: false,
@@ -126,6 +127,14 @@ const md = new MarkdownIt({
 // Retain markdown-it's checks for every other protocol.
 const validateMarkdownLink = md.validateLink.bind(md);
 md.validateLink = href => /^file:/i.test(href) || validateMarkdownLink(href);
+
+const originalHtmlBlock = md.renderer.rules.html_block!;
+md.renderer.rules.html_block = (tokens, index, options, env, renderer) => {
+  const token = tokens[index];
+  return needsHtmlDocument(token.content)
+    ? renderHtmlPlaceholder(token.content, token.map ? token.map[0] + 1 : 0)
+    : originalHtmlBlock(tokens, index, options, env, renderer);
+};
 
 md.use(anchor, { permalink: false });
 md.use(markdownTableLists);
