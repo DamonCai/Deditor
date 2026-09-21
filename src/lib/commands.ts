@@ -1,3 +1,4 @@
+import { newWindow } from "./editorWindows";
 import { getVisualEditor } from "./markdownVisualBridge";
 /** Command Palette registry. Each command is a discoverable, runnable action
  *  the user can find via Cmd+Shift+P. We keep the list small and focused: app
@@ -48,6 +49,7 @@ function runOnEditor(cmd: (v: import("@codemirror/view").EditorView) => boolean)
 
 export const COMMANDS: Command[] = [
   // File
+  { id: "cmd.file.newWindow", labelKey: "shortcut.file.newWindow", shortcut: "Cmd/Ctrl+Shift+N", group: "file", run: newWindow },
   { id: "cmd.file.new",          labelKey: "cmd.file.new",          shortcut: "Cmd/Ctrl+N",        group: "file", run: () => void newFile() },
   { id: "cmd.file.open",         labelKey: "cmd.file.open",         shortcut: "Cmd/Ctrl+O",        group: "file", run: () => void openFile() },
   { id: "cmd.file.openFolder",   labelKey: "cmd.file.openFolder",   shortcut: "Cmd/Ctrl+Shift+O",  group: "file", run: () => void openFolder() },

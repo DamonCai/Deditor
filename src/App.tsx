@@ -1,3 +1,6 @@
+import { installWindowLifecycle, windowEventTarget } from "./lib/editorWindows";
+import { showError } from "./lib/feedback";
+import { tStatic } from "./lib/i18n";
 import { beginPaneResize } from "./lib/paneResize";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { openEditorSearch } from "./lib/editorSearch";
@@ -99,6 +102,25 @@ export default function App() {
       disabledAccelerators: disabled,
     }).catch(() => {});
   }, [language, shortcuts]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    let disposed = false;
+    let cleanup: (() => void) | undefined;
+    installWindowLifecycle().then(fn => { if (disposed) fn(); else cleanup = fn; })
+      .catch(error => logError("Install window lifecycle failed", error));
+    return () => { disposed = true; cleanup?.(); };
+  }, [hydrated]);
+
+  useEffect(() => {
+    let disposed = false;
+    let cleanup: (() => void) | undefined;
+    listen<string>("new-window-error", event => {
+      logError("New window failed", event.payload);
+      void showError(tStatic("window.createFailed", { err: event.payload }));
+    }, windowEventTarget()).then(fn => { if (disposed) fn(); else cleanup = fn; }).catch(() => {});
+    return () => { disposed = true; cleanup?.(); };
+  }, []);
 
   // Restore the session before choosing which optional engines to prefetch.
   useEffect(() => {
@@ -252,7 +274,7 @@ export default function App() {
         case "file_save_as": saveFileAs(); break;
         case "file_close_tab": closeActiveTab(); break;
       }
-    })
+    }, windowEventTarget())
       .then((fn) => {
         if (cancelled) fn();
         else unlisten = fn;
@@ -291,7 +313,7 @@ export default function App() {
         }
       }
       if (filePaths.length > 0) await openMany(filePaths);
-    })
+    }, windowEventTarget())
       .then((fn) => {
         if (cancelled) fn();
         else unlisten = fn;
@@ -331,7 +353,7 @@ export default function App() {
     void drainAndOpen();
     listen("open-file", () => {
       void drainAndOpen();
-    })
+    }, windowEventTarget())
       .then((fn) => {
         if (cancelled) fn();
         else unlisten = fn;

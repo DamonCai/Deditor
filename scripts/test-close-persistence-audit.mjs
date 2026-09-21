@@ -24,7 +24,7 @@ const stubs = {
   './feedback': 'export const showError=()=>{};',
 };
 await build({
-  stdin: { contents: `export {closeActiveTab} from './src/lib/fileio'; export {schedulePersist,flushPersist,loadPersisted} from './src/lib/persistence'; export {useEditorStore} from './src/store/editor';`, resolveDir: process.cwd() },
+  stdin: { contents: `export {closeActiveTab} from './src/lib/fileio'; export {schedulePersist,flushPersist,loadPersisted,pausePersistence} from './src/lib/persistence'; export {useEditorStore} from './src/store/editor';`, resolveDir: process.cwd() },
   outfile: path.join(dir, 'app.mjs'), bundle: true, packages: 'external', format: 'esm', platform: 'node',
   plugins: [{ name: 'ipc-boundary', setup(b) {
     b.onResolve({ filter: /.*/ }, a => stubs[a.path] ? { path: a.path, namespace: 'stub' } : undefined);
@@ -127,6 +127,35 @@ try {
   await app.loadPersisted();
   assert.equal(store.getState().tabs[0].content, 'keep dirty');
   console.log('PASS cancellation and remaining dirty tabs are preserved');
+  reset();
+  window.__TAURI_INTERNALS__ = { metadata: { currentWindow: { label: 'editor-42' } } };
+  localStorage.setItem('deditor:state:v3', JSON.stringify({v:3,tabs:[{filePath:null,content:'PRIMARY PRIVATE DRAFT',savedContent:''}],workspaces:['/primary-only']}));
+  await app.loadPersisted();
+  assert.equal(store.getState().tabs.length, 1);
+  assert.equal(store.getState().tabs[0].content, '');
+  assert.equal(store.getState().tabs[0].filePath, null);
+  await app.flushPersist();
+  assert(localStorage.getItem('deditor:state:v3')?.includes('PRIMARY PRIVATE DRAFT'));
+  console.log('PASS secondary empty window neither restores nor sweeps primary legacy session');
+
+  diskState = JSON.stringify({v:3,tabs:[],workspaces:[],theme:'dark',language:'zh'});
+  store.setState({tabs:[{...tab}],activeId:tab.id});
+  await app.loadPersisted();
+  assert.equal(store.getState().tabs[0].content, '');
+  assert.equal(store.getState().theme, 'dark');
+  assert.equal(store.getState().language, 'zh');
+  console.log('PASS empty secondary session restores appearance but opens a blank document');
+
+  const resume = app.pausePersistence();
+  assert.equal(timers.size, 0);
+  app.schedulePersist(extras);
+  assert.equal(timers.size, 0);
+  await app.flushPersist();
+  resume();
+  app.schedulePersist(extras);
+  assert.equal(timers.size, 1);
+  console.log('PASS closing suppresses delayed writes; a cancelled close resumes persistence');
+
 } finally {
   unsubscribe();
   // Clear only this audit's fake persistence timers; no actual writes escape the IPC stub.

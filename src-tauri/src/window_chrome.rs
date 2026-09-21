@@ -1,7 +1,7 @@
 // macOS fullscreen chrome. AppKit draws the buttons in both window modes.
 // The detached fullscreen titlebar is hidden while our native button host is
 // visible, so revealing the menu bar cannot expose another row of controls.
-use std::cell::{Cell, RefCell};
+use std::{cell::RefCell, collections::HashMap};
 
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Bool};
@@ -19,8 +19,8 @@ const TITLEBAR_HEIGHT: f64 = 40.0;
 const BUTTON_LEFT: f64 = 14.0;
 
 thread_local! {
-    static CHROME: RefCell<Option<Chrome>> = const { RefCell::new(None) };
-    static TITLEBAR_VISIBLE: Cell<bool> = const { Cell::new(true) };
+    static CHROME: RefCell<HashMap<String, Chrome>> = RefCell::new(HashMap::new());
+    static TITLEBAR_VISIBLE: RefCell<HashMap<String, bool>> = RefCell::new(HashMap::new());
 }
 
 // Standard window buttons placed outside AppKit's titlebar need their own
@@ -97,7 +97,7 @@ define_class!(
         fn minimize_from_fullscreen(&self, _sender: Option<&AnyObject>) {
             let window = CHROME.with(|slot| {
                 let mut state = slot.borrow_mut();
-                let state = state.as_mut()?;
+                let state = state.values_mut().find(|state| std::ptr::eq(&*state.actions, self))?;
                 if state.minimize_after_exit { return None; }
                 state.minimize_after_exit = true;
                 Some(state.window.clone())
@@ -120,7 +120,7 @@ define_class!(
         fn finish_minimize(&self, _sender: Option<&AnyObject>) {
             let window = CHROME.with(|slot| {
                 let mut state = slot.borrow_mut();
-                let state = state.as_mut()?;
+                let state = state.values_mut().find(|state| std::ptr::eq(&*state.actions, self))?;
                 if !state.minimize_after_exit { return None; }
                 state.minimize_after_exit = false;
                 Some(state.window.clone())
@@ -136,6 +136,7 @@ define_class!(
 );
 
 struct Chrome {
+    label: String,
     window: Retained<NSWindow>,
     actions: Retained<WindowChromeActions>,
     host: Option<Retained<FullscreenButtonsView>>,
@@ -165,7 +166,7 @@ impl Chrome {
     }
 
     fn sync(&mut self, mtm: MainThreadMarker) {
-        if !TITLEBAR_VISIBLE.get()
+        if !TITLEBAR_VISIBLE.with(|visible| visible.borrow().get(&self.label).copied().unwrap_or(true))
             || !self
                 .window
                 .styleMask()
@@ -287,24 +288,25 @@ fn button_frame(index: usize, size: NSSize, spacing: f64) -> NSRect {
     )
 }
 
-pub fn schedule_sync(app: &tauri::AppHandle) {
-    schedule_update(app, None);
+pub fn schedule_sync(app: &tauri::AppHandle, label: &str) {
+    schedule_update(app, label, None);
 }
 
-pub fn set_visible(app: &tauri::AppHandle, visible: bool) {
-    schedule_update(app, Some(visible));
+pub fn set_visible(app: &tauri::AppHandle, label: &str, visible: bool) {
+    schedule_update(app, label, Some(visible));
 }
 
-fn schedule_update(app: &tauri::AppHandle, visible: Option<bool>) {
+fn schedule_update(app: &tauri::AppHandle, label: &str, visible: Option<bool>) {
+    let label = label.to_owned();
     let handle = app.clone();
     if let Err(err) = app.run_on_main_thread(move || {
         if let Some(visible) = visible {
-            TITLEBAR_VISIBLE.set(visible);
+            TITLEBAR_VISIBLE.with(|values| { values.borrow_mut().insert(label.clone(), visible); });
         }
         let Some(mtm) = MainThreadMarker::new() else {
             return;
         };
-        let Some(webview) = handle.get_webview_window("main") else {
+        let Some(webview) = handle.get_webview_window(&label) else {
             return;
         };
         let pointer = match webview.ns_window() {
@@ -322,7 +324,7 @@ fn schedule_update(app: &tauri::AppHandle, visible: Option<bool>) {
             let Ok(mut slot) = slot.try_borrow_mut() else {
                 return;
             };
-            if slot.is_none() {
+            if !slot.contains_key(&label) {
                 let kinds = [
                     NSWindowButton::CloseButton,
                     NSWindowButton::MiniaturizeButton,
@@ -356,7 +358,8 @@ fn schedule_update(app: &tauri::AppHandle, visible: Option<bool>) {
                         Some(&window),
                     );
                 }
-                *slot = Some(Chrome {
+                slot.insert(label.clone(), Chrome {
+                    label: label.clone(),
                     window,
                     actions,
                     host: None,
@@ -367,7 +370,7 @@ fn schedule_update(app: &tauri::AppHandle, visible: Option<bool>) {
                     minimize_after_exit: false,
                 });
             }
-            if let Some(chrome) = slot.as_mut() {
+            if let Some(chrome) = slot.get_mut(&label) {
                 chrome.sync(mtm);
             }
         });
@@ -376,10 +379,11 @@ fn schedule_update(app: &tauri::AppHandle, visible: Option<bool>) {
     }
 }
 
-pub fn clear() {
+pub fn clear(label: &str) {
+    TITLEBAR_VISIBLE.with(|values| { values.borrow_mut().remove(label); });
     CHROME.with(|slot| {
         if let Ok(mut slot) = slot.try_borrow_mut() {
-            if let Some(mut state) = slot.take() {
+            if let Some(mut state) = slot.remove(label) {
                 state.remove_host();
             }
         }

@@ -148,6 +148,8 @@ async function readRaw(): Promise<string | null> {
   } catch (err) {
     logWarn("read_app_state failed; falling back to localStorage", err);
   }
+  // Secondary windows must never inherit the primary window's legacy session.
+  if (typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__?.metadata?.currentWindow?.label?.startsWith("editor-")) return null;
   // Fallback / migration path: read whatever the previous (localStorage)
   // backend wrote. The very next save flushes it back into the file, after
   // which the localStorage keys get swept (see doSave).
@@ -163,6 +165,12 @@ async function readRaw(): Promise<string | null> {
 }
 
 export async function loadPersisted(): Promise<UiExtras | null> {
+  // Secondary windows start with an empty document even if no snapshot exists.
+  const secondary = typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__?.metadata?.currentWindow?.label?.startsWith("editor-");
+  if (secondary) {
+    const id = newId();
+    useEditorStore.getState().replaceTabs([{ id, filePath: null, content: "", savedContent: "" }], id);
+  }
   const raw = await readRaw();
   if (!raw) return null;
 
@@ -338,12 +346,21 @@ export async function loadPersisted(): Promise<UiExtras | null> {
   };
 }
 
+let persistencePaused = false;
+export function pausePersistence(): () => void {
+  persistencePaused = true;
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = null;
+  return () => { persistencePaused = false; };
+}
+
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let latestExtras: UiExtras | null = null;
 let pendingWrite: Promise<void> = Promise.resolve();
 
 export function schedulePersist(extras: UiExtras): void {
   latestExtras = extras;
+  if (persistencePaused) return;
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     saveTimer = null;
@@ -427,6 +444,7 @@ function doSave(extras: UiExtras): Promise<void> {
       // Sweep legacy localStorage once we know the file write succeeded —
       // otherwise an interrupted migration could lose the snapshot.
       try {
+        if ((window as any).__TAURI_INTERNALS__?.metadata?.currentWindow?.label?.startsWith("editor-")) return;
         localStorage.removeItem(KEY_V3);
         localStorage.removeItem(KEY_V2);
         localStorage.removeItem(KEY_V1);

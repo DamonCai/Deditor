@@ -1,5 +1,8 @@
 #[cfg(target_os = "macos")]
 mod window_chrome;
+mod editor_windows;
+#[cfg(target_os = "macos")]
+mod dock_menu;
 mod markdown_images;
 mod markdown_history;
 mod markdown_state;
@@ -17,7 +20,7 @@ use tauri_plugin_log::{Target, TargetKind};
 /// (Finder "Open With → DEditor" on macOS, double-click association on Windows).
 /// Tauri events are not buffered, so we hold paths here until the frontend
 /// drains the queue via `drain_pending_open_files`.
-struct PendingOpens(Mutex<Vec<String>>);
+struct PendingOpens(Mutex<std::collections::HashMap<String, Vec<String>>>);
 
 #[derive(serde::Serialize)]
 struct DirEntry {
@@ -368,10 +371,10 @@ fn create_dir(path: String) -> Result<(), String> {
 // localStorage. A file in `~/Library/Application Support/com.deditor.app/`
 // (macOS), `%APPDATA%\com.deditor.app\` (Windows), or
 // `~/.local/share/com.deditor.app/` (Linux) survives reinstalls cleanly.
-fn app_state_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+fn app_state_path(app: &tauri::AppHandle, label: &str) -> Result<PathBuf, String> {
     app.path()
         .app_data_dir()
-        .map(|d| d.join("state.json"))
+        .map(|d| editor_windows::state_path(&d, label))
         .map_err(|e| e.to_string())
 }
 
@@ -393,8 +396,8 @@ fn read_markdown_history(app: tauri::AppHandle, id: String) -> Result<String, St
 }
 
 #[tauri::command]
-fn read_app_state(app: tauri::AppHandle) -> Result<String, String> {
-    let path = app_state_path(&app)?;
+fn read_app_state(app: tauri::AppHandle, window: tauri::WebviewWindow) -> Result<String, String> {
+    let path = app_state_path(&app, window.label())?;
     if !path.exists() {
         return Ok(String::new());
     }
@@ -405,17 +408,19 @@ fn read_app_state(app: tauri::AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn write_app_state(app: tauri::AppHandle, content: String) -> Result<(), String> {
-    let path = app_state_path(&app)?;
+fn write_app_state(app: tauri::AppHandle, window: tauri::WebviewWindow, content: String) -> Result<(), String> {
+    let path = app_state_path(&app, window.label())?;
     markdown_state::write(&path, &content)
 }
 
 #[tauri::command]
-fn print_window(app: tauri::AppHandle) -> Result<(), String> {
-    let win = app
-        .get_webview_window("main")
-        .ok_or_else(|| "main window not found".to_string())?;
-    win.print().map_err(|e| {
+fn update_window_title(window: tauri::WebviewWindow, title: String) -> Result<(), String> {
+    window.set_title(&title).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn print_window(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.print().map_err(|e| {
         log::error!("print_window failed: {}", e);
         e.to_string()
     })
@@ -918,11 +923,11 @@ fn path_kind(path: String) -> String {
 
 /// Keep the native fullscreen controls in sync with the web titlebar / Zen mode.
 #[tauri::command]
-fn set_titlebar_visible(app: tauri::AppHandle, visible: bool) {
+fn set_titlebar_visible(app: tauri::AppHandle, window: tauri::WebviewWindow, visible: bool) {
     #[cfg(target_os = "macos")]
-    window_chrome::set_visible(&app, visible);
+    window_chrome::set_visible(&app, window.label(), visible);
     #[cfg(not(target_os = "macos"))]
-    let _ = (app, visible);
+    let _ = (app, window, visible);
 }
 
 /// Receive a log line from the frontend.
@@ -952,6 +957,7 @@ struct MenuLabels {
     quit: &'static str,
     // File submenu
     new: &'static str,
+    new_window: &'static str,
     open: &'static str,
     open_folder: &'static str,
     save: &'static str,
@@ -985,6 +991,7 @@ fn labels_for(lang: &str) -> MenuLabels {
             show_all: "全部显示",
             quit: "退出 DEditor",
             new: "新建",
+            new_window: "新建窗口",
             open: "打开…",
             open_folder: "打开文件夹…",
             save: "保存",
@@ -1013,6 +1020,7 @@ fn labels_for(lang: &str) -> MenuLabels {
             show_all: "Show All",
             quit: "Quit DEditor",
             new: "New",
+            new_window: "New Window",
             open: "Open…",
             open_folder: "Open Folder…",
             save: "Save",
@@ -1039,8 +1047,8 @@ fn labels_for(lang: &str) -> MenuLabels {
 /// menu IDs (e.g. "file_save") whose keyboard accelerator should be omitted —
 /// used by the in-app Settings dialog to free up conflicting shortcuts. The
 /// menu item itself stays clickable; only the keyboard binding is dropped.
-fn build_and_set_menu<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
+fn build_and_set_menu(
+    app: &tauri::AppHandle,
     lang: &str,
     disabled_accelerators: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -1097,6 +1105,7 @@ fn build_and_set_menu<R: tauri::Runtime>(
         Ok(item)
     };
     let new_item = build_file_item("file_new", l.new, "CmdOrCtrl+N")?;
+    let new_window_item = build_file_item("file_new_window", l.new_window, "CmdOrCtrl+Shift+N")?;
     let open_item = build_file_item("file_open", l.open, "CmdOrCtrl+O")?;
     let open_folder_item = build_file_item("file_open_folder", l.open_folder, "CmdOrCtrl+Shift+O")?;
     let save_item = build_file_item("file_save", l.save, "CmdOrCtrl+S")?;
@@ -1105,6 +1114,7 @@ fn build_and_set_menu<R: tauri::Runtime>(
 
     let file_menu = SubmenuBuilder::new(app, l.file)
         .item(&new_item)
+        .item(&new_window_item)
         .separator()
         .item(&open_item)
         .item(&open_folder_item)
@@ -1152,6 +1162,8 @@ fn build_and_set_menu<R: tauri::Runtime>(
         .items(&[&app_menu, &file_menu, &edit_menu, &window_menu])
         .build()?;
     app.set_menu(menu)?;
+    #[cfg(target_os = "macos")]
+    window_menu.set_as_windows_menu_for_nsapp()?;
 
     // macOS auto-injects items into any submenu containing cut:/copy:/paste:
     // ("Start Dictation…", "Emoji & Symbols", "AutoFill" on Sonoma+, plus
@@ -1161,7 +1173,10 @@ fn build_and_set_menu<R: tauri::Runtime>(
     // we walk the live NSMenu after AppKit has injected and remove anything
     // whose action is not a standard edit selector or our custom dispatcher.
     #[cfg(target_os = "macos")]
-    strip_macos_edit_menu_extras(l.edit);
+    {
+        strip_macos_edit_menu_extras(l.edit);
+        dock_menu::install(app, l.new_window)?;
+    }
 
     Ok(())
 }
@@ -1293,8 +1308,15 @@ fn install_app_menu(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
     // start with `file_`; predefined items (quit, copy, …) handle themselves.
     app.on_menu_event(|app_handle, event| {
         let id = event.id().0.as_str().to_string();
-        if id.starts_with("file_") || matches!(id.as_str(), "edit_find" | "edit_replace") {
-            let _ = app_handle.emit("menu-action", id);
+        if id == "file_new_window" {
+            let app = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(error) = editor_windows::new_window(app.clone()).await {
+                    if let Some(window) = editor_windows::target(&app) { let _ = app.emit_to(window.label(), "new-window-error", error); }
+                }
+            });
+        } else if id.starts_with("file_") || matches!(id.as_str(), "edit_find" | "edit_replace") {
+            if let Some(window) = editor_windows::target(app_handle) { let _ = app_handle.emit_to(window.label(), "menu-action", id); }
         }
     });
 
@@ -1304,9 +1326,12 @@ fn install_app_menu(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
 #[tauri::command]
 fn update_menu_state(
     app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
     lang: String,
     disabled_accelerators: Vec<String>,
 ) -> Result<(), String> {
+    app.state::<editor_windows::Windows>().0.lock().unwrap().menu.insert(window.label().into(), (lang.clone(), disabled_accelerators.clone()));
+    if editor_windows::target(&app).is_some_and(|target| target.label() != window.label()) { return Ok(()); }
     build_and_set_menu(&app, &lang, &disabled_accelerators).map_err(|e| {
         log::error!("update_menu_state failed: {}", e);
         e.to_string()
@@ -1318,11 +1343,11 @@ fn update_menu_state(
 /// the listener fires (signal-only emit) so the same code path handles both
 /// the cold-start race and the running-instance case.
 #[tauri::command]
-fn drain_pending_open_files(state: tauri::State<'_, PendingOpens>) -> Vec<String> {
+fn drain_pending_open_files(state: tauri::State<'_, PendingOpens>, window: tauri::WebviewWindow) -> Vec<String> {
     let out = state
         .0
         .lock()
-        .map(|mut q| std::mem::take(&mut *q))
+        .map(|mut q| q.remove(window.label()).unwrap_or_default())
         .unwrap_or_default();
     log::info!("drain_pending_open_files: returned {} path(s)", out.len());
     for p in &out {
@@ -1357,10 +1382,11 @@ pub fn run() {
     tauri::Builder::default()
         // macOS can deliver Opened before setup. Register the queue on the
         // builder so those early file requests have somewhere to wait.
-        .manage(PendingOpens(Mutex::new(Vec::new())))
+        .manage(PendingOpens(Mutex::new(std::collections::HashMap::new())))
+        .manage(editor_windows::Windows::default())
         // Persist window position / size / monitor / maximized state so
         // re-opens land where you left off — including across displays.
-        .plugin(tauri_plugin_window_state::Builder::new().build())
+        .plugin(tauri_plugin_window_state::Builder::new().with_filter(|label| label == "main").build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(
@@ -1411,25 +1437,49 @@ pub fn run() {
                 log::info!("seeded {} file(s) from argv for open-on-launch", initial.len());
             }
             if let Ok(mut queue) = app.state::<PendingOpens>().0.lock() {
-                queue.extend(initial);
+                queue.entry("main".into()).or_default().extend(initial);
             }
 
             install_app_menu(app)?;
             #[cfg(target_os = "macos")]
-            window_chrome::schedule_sync(app.handle());
+            window_chrome::schedule_sync(app.handle(), "main");
+            let root = app.path().app_data_dir()?;
+            for label in editor_windows::saved_labels(&root) {
+                if let Err(error) = editor_windows::create(app.handle(), &label) { log::error!("Restore window {label}: {error}"); }
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
-            #[cfg(target_os = "macos")]
-            if window.label() == "main" {
-                match event {
-                    tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Focused(_) | tauri::WindowEvent::ScaleFactorChanged { .. } => window_chrome::schedule_sync(window.app_handle()),
-                    tauri::WindowEvent::Destroyed => window_chrome::clear(),
-                    _ => {}
+            match event {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    api.prevent_close();
+                    editor_windows::request_close(window.app_handle(), window.label(), false);
                 }
+                tauri::WindowEvent::Focused(true) => {
+                    let state = window.state::<editor_windows::Windows>();
+                    let menu = {
+                        let mut state = state.0.lock().unwrap();
+                        state.active = window.label().into();
+                        state.menu.get(window.label()).cloned()
+                    };
+                    if let Some((lang, disabled)) = menu {
+                        if let Err(error) = build_and_set_menu(window.app_handle(), &lang, &disabled) { log::error!("Focus menu: {error}"); }
+                    }
+                }
+                tauri::WindowEvent::Destroyed => {
+                    let state = window.state::<editor_windows::Windows>();
+                    let mut state = state.0.lock().unwrap();
+                    state.menu.remove(window.label());
+                    state.pending.remove(window.label());
+                }
+                _ => {}
             }
-            #[cfg(not(target_os = "macos"))]
-            let _ = (window, event);
+            #[cfg(target_os = "macos")]
+            match event {
+                tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Focused(_) | tauri::WindowEvent::ScaleFactorChanged { .. } => window_chrome::schedule_sync(window.app_handle(), window.label()),
+                tauri::WindowEvent::Destroyed => window_chrome::clear(window.label()),
+                _ => {}
+            }
         })
         .invoke_handler(tauri::generate_handler![
             read_text_file,
@@ -1446,6 +1496,11 @@ pub fn run() {
             rename_path,
             delete_path,
             print_window,
+            update_window_title,
+            editor_windows::new_window,
+            editor_windows::window_ready,
+            editor_windows::finish_window_close,
+            editor_windows::cancel_window_close,
             frontend_log,
             set_titlebar_visible,
             update_menu_state,
@@ -1466,6 +1521,19 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = &event {
+                let windows = app.webview_windows();
+                let state = app.state::<editor_windows::Windows>();
+                let mut state = state.0.lock().unwrap();
+                if !state.allow_exit && !windows.is_empty() {
+                    api.prevent_exit();
+                    if state.quitting.is_none() {
+                        state.quitting = Some(windows.keys().cloned().collect());
+                        drop(state);
+                        for label in windows.keys() { editor_windows::request_close(app, label, true); }
+                    }
+                }
+            }
             // OS asked us to open these files (Finder "Open With…" / `open -a`
             // on macOS, drag-onto-Dock, etc.). We queue the paths and emit a
             // signal — the frontend drains the queue on mount AND on every
@@ -1484,19 +1552,21 @@ pub fn run() {
                     .collect();
                 if !paths.is_empty() {
                     log::info!("RunEvent::Opened -> queuing {} path(s)", paths.len());
+                    let win = editor_windows::target(app);
+                    let label = win.as_ref().map(|win| win.label()).unwrap_or("main");
                     if let Some(state) = app.try_state::<PendingOpens>() {
                         if let Ok(mut q) = state.0.lock() {
-                            q.extend(paths);
+                            q.entry(label.into()).or_default().extend(paths);
                         }
                     }
-                    let _ = app.emit("open-file", ());
+                    let _ = app.emit_to(label, "open-file", ());
 
-                    // Bring the main window to the foreground. When DEditor is
+                    // Bring the receiving window to the foreground. When DEditor is
                     // already running but backgrounded / minimized / on another
                     // Space, "Open With" otherwise silently appends a tab the
                     // user never sees. unminimize + show + set_focus together
                     // cover all three states (idempotent if already foreground).
-                    if let Some(win) = app.get_webview_window("main") {
+                    if let Some(win) = win {
                         let _ = win.unminimize();
                         let _ = win.show();
                         let _ = win.set_focus();

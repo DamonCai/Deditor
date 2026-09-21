@@ -70,6 +70,11 @@ function TitleBarImpl() {
     ? header.filePath.split(/[\\/]/).pop()
     : t("common.untitled");
   const dirty = header?.dirty ?? false;
+  useEffect(() => {
+    if (!isTauri()) return;
+    void invoke("update_window_title", { title: `${dirty ? "• " : ""}${name} — DEditor` })
+      .catch(error => logError("Update window title failed", error));
+  }, [name, dirty]);
 
   return (
     <div

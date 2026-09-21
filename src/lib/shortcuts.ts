@@ -19,6 +19,7 @@ export type ShortcutLayer = "menu" | "app" | "editor";
 export type ShortcutId =
   // menu
   | "file_new"
+  | "file_new_window"
   | "file_open"
   | "file_open_folder"
   | "file_save"
@@ -55,6 +56,7 @@ export interface ShortcutMeta {
 
 export const SHORTCUTS: ShortcutMeta[] = [
   // File
+  { id: "file_new_window", display: "Cmd/Ctrl+Shift+N", labelKey: "shortcut.file.newWindow", layer: "menu", group: "file" },
   { id: "file_new",          display: "Cmd/Ctrl+N",        labelKey: "shortcut.file.new",         layer: "menu",   group: "file" },
   { id: "file_open",         display: "Cmd/Ctrl+O",        labelKey: "shortcut.file.open",        layer: "menu",   group: "file" },
   { id: "file_open_folder",  display: "Cmd/Ctrl+Shift+O",  labelKey: "shortcut.file.openFolder",  layer: "menu",   group: "file" },
