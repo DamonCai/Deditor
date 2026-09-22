@@ -1,0 +1,17 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { build } from 'esbuild';
+const source=path.resolve(process.argv[2]??'dist');
+const output=path.resolve(process.argv[3]??'tests/artifacts/native-composition-diagnostic-2026-09-22');
+const fixtures=path.resolve('tests/artifacts');
+if(source===output||output.startsWith(source+path.sep))throw new Error('Diagnostic output must be outside source dist');
+if(fs.existsSync(output))throw new Error('Use a fresh output directory to preserve native evidence');
+const html=fs.readFileSync(path.join(source,'index.html'),'utf8');if(!html.includes('</body>'))throw new Error('Expected built HTML');
+const target=path.join(output,'frontend');fs.mkdirSync(output,{recursive:true});fs.cpSync(source,target,{recursive:true});
+await build({entryPoints:['tests/diagnostics/native-composition.ts'],outfile:path.join(target,'composition-diagnostic.js'),bundle:true,format:'esm',platform:'browser',define:{__COMPOSITION_LOG__:JSON.stringify(path.join(output,'events.json')),__COMPOSITION_FIXTURES__:JSON.stringify(fixtures)},logLevel:'silent'});
+fs.writeFileSync(path.join(target,'index.html'),html.replace('</body>','<script type="module" src="/composition-diagnostic.js"></script></body>'));
+const config=path.join(output,'tauri.compositiondiagnostic.json');
+fs.writeFileSync(config,JSON.stringify({productName:'DEditor Composition Diagnostic',identifier:'com.deditor.compositiondiagnostic20260922',build:{frontendDist:target,beforeBuildCommand:''}},null,2)+'\n');
+fs.writeFileSync(path.join(output,'manifest.json'),JSON.stringify({source,sourceIndexSha256:crypto.createHash('sha256').update(html).digest('hex'),output:target,fixtureRoot:fixtures,entry:'tests/diagnostics/native-composition.ts',created:new Date().toISOString()},null,2)+'\n');
+console.log(JSON.stringify({config,frontend:target,log:path.join(output,'events.json')},null,2));

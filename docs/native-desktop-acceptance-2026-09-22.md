@@ -54,3 +54,13 @@ Finder 仅成功连接到 Desktop，未执行实际文件或目录拖放。因�
 独立读取的日志确认 A 状态序列 false/true → true/true → true/false → true/true，随后退出为 false/true；B 在全部记录中 fullscreen=false，焦点随菜单选择往返。A 进入稳定采样为 2026-09-22 13:41:00.928 UTC，退出稳定采样为 13:42:30.964 UTC。日志未出现 getter/subscription 错误。
 
 证据位于被忽略的 `tests/artifacts/native-desktop-diagnostic-2026-09-22/`，主要为 `desktop-main-1790084435652.json`、`desktop-editor-1790084468928-1790084469182.json`；读取器生成的 `state-transitions.jsonlog` 可快速复核。结论限定为本次两窗口跨全屏 Space 往返、结束态布局、焦点与编辑归属，不声称逐帧动画、多显示器或任意窗口数验证。主端已将 A/B 自建文档还原保存后分别 Cmd+W 关闭，并 Cmd+Q 退出桌面诊断应用；末尾可能出现 Untitled，不影响之前的逐文件状态与保存证据。日常安装应用未替换。
+
+## MAC-01/02/03 后续入口核查
+
+再次尝试系统键盘聚焦 Dock：主端在普通 WK 探针发送 Control-F3，探针实际记录 trusted keydown、Control 为 true、key 为 F3，事件进入 textarea；截图未显示焦点转到 Dock。随后连接 `com.apple.dock` 仍返回 `timeoutReached`。这次有按键实际落点证据，不再仅是此前未聚焦状态的重复连接；仍不能判定是系统快捷键配置、控制通道行为还是其他原因，不据此认定产品 Dock 菜单缺陷。MAC-01 未新增成功结论。
+
+本地 Tauri 2.11.2 实现确认，WebviewWindow 原生 DragDrop 以 `EventTarget::labeled(window.label())` 分发，应用监听的 WebviewWindow label 与之匹配；文件依序 `openMany`，目录经 `path_kind`、路径解析、目录读取后加入当前窗口工作区。代码核查未发现已证实的跨窗分发缺陷。
+
+只读桌面诊断新增原生 `tauri://drag-enter/over/drop/leave` 观测，记录接收 label、路径和位置；状态快照同时保留各窗实际标签路径与工作区路径，便于区分“没有 OS drop”“投递错窗”“投递正确但未打开”。高频 over 事件写盘合并为 150ms，不拦截或发送事件。新副本位于 `tests/artifacts/native-desktop-drop-diagnostic-2026-09-22/`，保留此前全屏诊断证据。
+
+当前已公开 CUA 拖动 API 为单应用 `drag(from:[x,y],to:[x,y])`，坐标相对该应用窗口；没有独立 down/up/hold 或全局终点参数。AX 状态不提供窗口 frame，截图仅裁当前窗口，因此尚不能从这些证据唯一确定 Finder 的屏幕原点或合法跨应用终点。不能将两个不同窗口的相对坐标直接混用，也不能用假定并排位置、CG/AX 旁路或合成 drop 代替真实 Finder 拖放。MAC-02/03 的真正通过仍要求实际拖放事件及目标窗口结果。

@@ -12,11 +12,12 @@ for (const name of files) {
     if (!record.state) continue;
     const state = record.state;
     if (Object.values(state).some(value => value && typeof value === 'object' && 'error' in value)) errors.push(record);
-    const current = JSON.stringify([state.isFullscreen, state.isFocused, state.outerPosition, state.outerSize, state.innerSize, state.fileHeader]);
+    const current = JSON.stringify([state.isFullscreen, state.isFocused, state.outerPosition, state.outerSize, state.innerSize, state.fileHeader, state.tabs, state.workspaces]);
     if (current !== previous) {
       transitions.push({ seq: record.seq, at: record.sampleFinished, reason: record.reason, ...state });
       previous = current;
     }
   }
-  console.log(JSON.stringify({ file: name, label: log.label, samples: log.records.length, errors, transitions }, null, 2));
+  const dragEvents = log.records.filter(record => record.reason?.startsWith('native:tauri://drag-'));
+  console.log(JSON.stringify({ file: name, label: log.label, samples: log.records.length, errors, dragEvents, transitions }, null, 2));
 }

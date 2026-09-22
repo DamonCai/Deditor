@@ -2,6 +2,7 @@
 // Window APIs below are getters/event listeners only. This does not change
 // window state, move focus, send input, or edit an application document.
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 declare const __DESKTOP_DIAG_DIR__: string;
 const current = getCurrentWindow();
@@ -10,6 +11,7 @@ const logPath = `${__DESKTOP_DIAG_DIR__}/desktop-${current.label.replace(/[^a-zA
 const records: unknown[] = [];
 let seq = 0, disposed = false, pending = false, previous = '', writeError = '';
 let writing = Promise.resolve();
+let dragFlushTimer: ReturnType<typeof setTimeout> | undefined;
 const delayed = new Set<ReturnType<typeof setTimeout>>();
 const cleanups: (() => void)[] = [];
 const status = document.createElement('div');
@@ -37,7 +39,9 @@ async function sample(reason: string) {
     const state: Record<string, unknown> = { label: current.label, browserHasFocus: document.hasFocus(),
       viewport: { width: innerWidth, height: innerHeight, dpr: devicePixelRatio },
       documentTitle: document.title,
-      fileHeader: document.querySelector('.titlebar-filename')?.textContent ?? null };
+      fileHeader: document.querySelector('.titlebar-filename')?.textContent ?? null,
+      tabs: Array.from(document.querySelectorAll('[data-tab-id]'), element => ({ id: element.getAttribute('data-tab-id'), path: element.getAttribute('title') })),
+      workspaces: Array.from(document.querySelectorAll('.workspace-toggle'), element => element.getAttribute('title')) };
     results.forEach((result, index) => { state[keys[index]] = result.status === 'fulfilled' ? result.value : { error: String(result.reason) }; });
     const key = JSON.stringify(state);
     // Keep periodic observations only when state changed; actual events always
@@ -71,9 +75,25 @@ for (const [name, subscribe] of [
     records.push({ seq: ++seq, reason: 'subscription-error', name, error: String(error) }); flush();
   });
 }
+// Observe the same native target as App.tsx. Do not emit/dispatch a drop or
+// intercept browser drag defaults: these records must originate from the OS.
+for (const name of ['tauri://drag-enter', 'tauri://drag-over', 'tauri://drag-drop', 'tauri://drag-leave']) {
+  void listen(name, event => {
+    if (disposed) return;
+    records.push({ seq: ++seq, reason: 'native:' + name, at: new Date().toISOString(), label: current.label, payload: event.payload });
+    if (name === 'tauri://drag-over') {
+      if (!dragFlushTimer) dragFlushTimer = setTimeout(() => { dragFlushTimer = undefined; flush(); }, 150);
+    } else {
+      clearTimeout(dragFlushTimer); dragFlushTimer = undefined; flush();
+    }
+    if (name === 'tauri://drag-drop' || name === 'tauri://drag-leave') observed(name);
+  }, { target: { kind: 'WebviewWindow', label: current.label } }).then(stop => {
+    if (disposed) stop(); else cleanups.push(stop);
+  }, error => { records.push({ seq: ++seq, reason: 'subscription-error', name, error: String(error) }); flush(); });
+}
 const poll = setInterval(() => void sample('poll'), 1000);
 window.addEventListener('pagehide', () => {
-  disposed = true; clearInterval(poll); delayed.forEach(clearTimeout); cleanups.forEach(stop => stop());
+  disposed = true; clearInterval(poll); clearTimeout(dragFlushTimer); delayed.forEach(clearTimeout); cleanups.forEach(stop => stop());
   records.push({ seq: ++seq, reason: 'pagehide', at: new Date().toISOString() }); flush();
 }, { once: true });
 void sample('installed');

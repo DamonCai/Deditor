@@ -78,7 +78,7 @@ const domTextBatch=async(parts,{inputType='insertText',composing=false}={})=>{
   for(const text of parts){
    const event=new dom.window.InputEvent('beforeinput',{bubbles:true,cancelable:true,inputType,data:text,isComposing:composing});view.dom.dispatchEvent(event);
    assert.equal(event.defaultPrevented,false,'input tracking does not cancel native edits');
-   const selection=window.getSelection(),node=selection.anchorNode,offset=selection.anchorOffset;assert.equal(node.nodeType,3);
+   const selection=window.getSelection();if(!selection.isCollapsed)selection.deleteFromDocument();const node=selection.anchorNode,offset=selection.anchorOffset;assert.equal(node.nodeType,3);
    node.insertData(offset,text);selection.collapse(node,offset+text.length);
    view.dom.dispatchEvent(new dom.window.InputEvent('input',{bubbles:true,inputType,data:text,isComposing:composing}));
   }
@@ -266,5 +266,23 @@ try {
   const expected='Before **native'+'x'.repeat(257)+'****\n';assert.equal(content(),expected);
   await act(async()=>app.saveFile());assert.equal(writes.at(-1).content,expected);
  });
+ await test('coalesced marker matrix preserves closures and outside text',async()=>{
+  for(const marker of ['**','__','`','$','~~','==','^']){
+   await reset('Before\n');await select('Before');for(const c of ' '+marker)await input(c);await input('word');
+   await domTextBatch([...marker]);assert.equal(content(),'Before '+marker+'word'+marker+'\n',marker);
+   assert.equal(app.formatPairKey.getState(view.state),null,marker);await input(' outside');
+   assert.equal(content(),'Before '+marker+'word'+marker+' outside\n',marker+' continuation');
+  }
+ });
+ await test('coalesced selected body preserves history across observer delivery boundaries',async()=>{
+  for(const batches of [[['next','*','*']],[['next','*'],['*']],[['next'],['*','*']]]){
+   await reset('Before\n');await select('Before');for(const c of ' **word')await input(c);
+   const p=app.formatPairKey.getState(view.state);await act(async()=>view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc,p.open+p.width,p.close))));
+   for(const batch of batches)await domTextBatch(batch);
+   assert.equal(content(),'Before **next**\n');assert.equal(app.formatPairKey.getState(view.state),null);
+   await exactHistory('Before **word**\n');
+  }
+ });
+
 } finally {await act(async()=>root.unmount());dom.window.close();}
 assert.equal(runtimeErrors.length,0);assert.deepEqual(failedCases,[]);console.log(`Passed ${passed} formatting pair groups`);
