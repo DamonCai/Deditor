@@ -1,3 +1,5 @@
+import SpellingDictionaryDialog from "./SpellingDictionaryDialog";
+import { normalizeSpellingWord } from "../lib/spellingWords";
 import MarkdownHistoryDialog from "./MarkdownHistoryDialog";
 import { FiSettings } from "react-icons/fi";
 import { open as chooseDirectory } from "@tauri-apps/plugin-dialog";
@@ -13,6 +15,7 @@ import { collectMarkdownImages, type ImageTransfer } from "../lib/markdownImageC
 import { documentImageDirectory } from "../lib/markdownImageSettings";
 export default function MarkdownWritingSettings() {
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [dictionary, setDictionary] = useState<{tabId:string|null;word:string}|null>(null);
   const [open, setOpen] = useState(false), [position, setPosition] = useState({ left: 12, top: 100 });
   const host = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -51,6 +54,7 @@ export default function MarkdownWritingSettings() {
   const set = (patch: Partial<MarkdownPreferences>) => useEditorStore.setState(s => ({ markdownSettings: { ...s.markdownSettings, ...patch } }));
   return <div className="md-writing-settings" ref={host}>
     <Button className="md-toolbar-action" variant="ghost" size="icon" title={t.settings} aria-expanded={open} onClick={event => { const rect = event.currentTarget.getBoundingClientRect(); setPosition({ left: Math.max(12, Math.min(window.innerWidth - 312, rect.left)), top: rect.bottom + 4 }); setFolder(settings.imageDirectory); setEndpoint(settings.picgoEndpoint); setOpen(!open); }}><FiSettings size={14} aria-hidden="true" /></Button>
+    {dictionary && <SpellingDictionaryDialog tabId={dictionary.tabId} initialWord={dictionary.word} onClose={()=>setDictionary(null)} />}
     {historyOpen && tab && <MarkdownHistoryDialog tabId={tab.id} onClose={()=>setHistoryOpen(false)} />}
     {open && <div className="md-writing-panel" style={{ ...position, maxHeight: `calc(100vh - ${position.top + 12}px)` }} role="dialog" aria-label={t.settings} onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeAndFocus(); } }}>
       <label>{t.theme}<select aria-label={t.theme} value={settings.documentTheme} onChange={e => set({ documentTheme: e.target.value as MarkdownPreferences["documentTheme"] })}>{(["default", "compact"] as const).map(value => <option key={value} value={value}>{t[value]}</option>)}</select></label>
@@ -61,6 +65,7 @@ export default function MarkdownWritingSettings() {
       <label><input type="checkbox" checked={settings.mathAutoNumber} onChange={e => set({mathAutoNumber:e.target.checked})} />{language === "zh" ? "公式自动编号" : "Automatically number equations"}</label>
       <label><input type="checkbox" checked={settings.spellcheck} onChange={e => set({spellcheck:e.target.checked})} />{language === "zh" ? "系统拼写检查" : "System spellcheck"}</label>
       {settings.spellcheck && <small>{translate("md.spellcheckHelp")}</small>}
+      <Button onClick={()=>{const visual=getVisualEditor(),selection=visual&&visual.tabId===tab?.id?visual.selected:"";setOpen(false);setDictionary({tabId:tab?.id??null,word:normalizeSpellingWord(selection)??""});}}>{translate("spelling.title")}</Button>
       <label><input type="checkbox" checked={settings.pairBrackets !== false} disabled={!autoCloseBrackets} onChange={e => set({pairBrackets:e.target.checked})} />{translate("md.pairBrackets")}</label>
       <label><input type="checkbox" checked={settings.pairQuotes !== false} disabled={!autoCloseBrackets} onChange={e => set({pairQuotes:e.target.checked})} />{translate("md.pairQuotes")}</label>
       <label><input type="checkbox" checked={settings.wrapSelection !== false} disabled={!autoCloseBrackets} onChange={e => set({wrapSelection:e.target.checked})} />{translate("md.wrapSelection")}</label>

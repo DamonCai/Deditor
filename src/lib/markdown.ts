@@ -223,6 +223,22 @@ export interface RenderOptions {
   mathOrdinal?: number;
 }
 
+/** A TOC needs the full parser context (duplicate slugs, references and nested
+ * headings), but none of the unrelated table/code HTML or its DOM. */
+export async function renderMarkdownTocs(source: string, opts: RenderOptions): Promise<Map<number, string>> {
+  const parsedSource = normalizeMarkdownFences(source);
+  if (sourceMaybeHasKatex(parsedSource)) await loadKatex();
+  const env = { __mathSource: opts.documentSource ?? source, __mathAutoNumber: opts.mathAutoNumber, __mathBlockIndex: opts.mathOrdinal ?? 0 };
+  const tokens = md.parse(parsedSource, env);
+  const result = new Map<number, string>();
+  for (const token of tokens) {
+    if (token.type === "deditor_toc" && token.map) {
+      result.set(token.map[0] + 1, md.renderer.render([token], md.options, env).trimEnd());
+    }
+  }
+  return result;
+}
+
 export async function renderMarkdown(
   source: string,
   opts: RenderOptions,

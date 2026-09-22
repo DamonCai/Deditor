@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { computeDiff, diffDisplayRows, diffHunks, type DiffRow } from "../lib/diff";
 import { FiChevronUp, FiChevronDown } from "react-icons/fi";
 import { Button } from "./ui/Button";
@@ -140,7 +140,9 @@ export default function DiffView({ spec, navigation = false }: Props) {
   );
 }
 
-function Row({ row, index, active }: { row: DiffRow; index: number; active: boolean }) {
+// Navigation changes only the old/new active rows. Keep every other expanded
+// row mounted without rendering its cells again on each difference jump.
+const Row = memo(function Row({ row, index, active }: { row: DiffRow; index: number; active: boolean }) {
   const leftBg = bgFor(row, "left");
   const rightBg = bgFor(row, "right");
   return (
@@ -155,7 +157,7 @@ function Row({ row, index, active }: { row: DiffRow; index: number; active: bool
       </td>
     </tr>
   );
-}
+});
 
 function bgFor(row: DiffRow, side: "left" | "right"): string {
   if (row.changeType === "eq") return "transparent";

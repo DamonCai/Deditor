@@ -2,6 +2,7 @@
 mod window_chrome;
 mod editor_windows;
 mod recent_files;
+mod spelling_dictionary;
 #[cfg(target_os = "macos")]
 mod dock_menu;
 mod markdown_images;
@@ -1503,6 +1504,8 @@ pub fn run() {
             delete_path,
             print_window,
             update_window_title,
+            spelling_dictionary::read_spelling_dictionary,
+            spelling_dictionary::change_spelling_dictionary,
             recent_files::read_recent_files,
             recent_files::record_recent_file,
             editor_windows::new_window,
@@ -1760,6 +1763,32 @@ mod ipc_bench {
             r.total, r.files_changed, dt
         );
         assert!(r.files_changed > 0);
+    }
+
+    #[test]
+    fn find_in_files_5k_repeated_matrix() {
+        let scratch = Scratch::new("search_matrix");
+        for i in 0..5000 {
+            let term = if i % 40 == 0 { "needle" } else if i % 20 == 0 { "NeEdLe" } else { "absent" };
+            let content = format!("{}\nthe {} is here\n", "padding ".repeat(128), term);
+            fs::write(scratch.0.join(format!("f_{:05}.md", i)), content).unwrap();
+        }
+        for (query, sensitive, expected) in [("needle", true, 125), ("needle", false, 250), ("missing-token", false, 0)] {
+            let mut times = Vec::new();
+            let mut first = None;
+            for _ in 0..5 {
+                let started = Instant::now();
+                let result = find_in_files(vec![scratch.0.to_string_lossy().into_owned()], query.into(), sensitive).unwrap();
+                times.push(started.elapsed().as_secs_f64() * 1000.0);
+                assert_eq!(result.files_scanned, 5000);
+                assert_eq!(result.hits.len(), expected);
+                assert!(!result.truncated);
+                for hit in &result.hits { assert_eq!(hit.line, 2); assert_eq!(hit.col, 5); }
+                let ordering: Vec<_> = result.hits.iter().map(|hit| hit.path.clone()).collect();
+                if let Some(prior) = &first { assert_eq!(&ordering, prior); } else { first = Some(ordering); }
+            }
+            println!("[find_in_files matrix] query={} sensitive={} files=5000 hits={} rounds_ms={:?}", query, sensitive, expected, times);
+        }
     }
 
     #[test]

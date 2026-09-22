@@ -1,3 +1,5 @@
+import { initialNodeViews } from "../lib/markdownVisual/initialNodeViews";
+import { markdownSpelling } from "../lib/markdownVisual/spelling";
 import { isWindowCloseCommitted } from "../lib/windowCloseGuard";
 import { markdownSearchHighlights, searchHighlightsKey, navigationHighlightMeta, scrollSearchMatch } from "../lib/markdownVisual/searchHighlights";
 import { stableTableView } from "../lib/markdownVisual/tableView";
@@ -173,6 +175,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
     const clipboardImages = imageClipboard(upload, () => activeRef.current && !readonlyRef.current && !cancelled && !isWindowCloseCommitted(), () => session.breakGroup());
     const initialSource = sourceRef.current;
     const codeNodeView = codeView(tabId, theme);
+    let sourceDocument: MarkdownDocument | undefined;
     const crepe = new CrepeBuilder({ root: host, defaultValue: normalizeMarkdownFences(initialSource) })
       .addFeature(codeMirror)
       .addFeature(table, {
@@ -208,9 +211,16 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
         return true;
       } },
     })));
-    crepe.editor.use(indentedTasks).use(taskIndentDecorations).use(nativeMarkdownCursor).use(markdownSearchHighlights).use(markdownInputAssist).use(markdownQuickInsert).use(markdownListKeys).use(markdownCrossBlockInput);
+    crepe.editor.use(indentedTasks).use(taskIndentDecorations).use(nativeMarkdownCursor).use(markdownSearchHighlights).use(markdownInputAssist).use(markdownSpelling(tabId)).use(markdownQuickInsert).use(markdownListKeys).use(markdownCrossBlockInput);
     // A rendered ProseMirror may exist before asynchronous startup has installed
     // fidelity/history and restored the cursor. Accept input only after that boundary.
+    crepe.editor.use(initialNodeViews(originals => ({ ...originals,
+      ...(originals.table ? { table: stableTableView(originals.table) } : {}),
+      ...(originals["image-block"] ? { "image-block": accessibleImageView(originals["image-block"], language, tabId) } : {}),
+      ...(originals.image ? { image: rootAwareImageView(originals.image) } : {}),
+      math_inline: mathView(tabId), footnote_reference: footnoteNodeView, footnote_definition: footnoteNodeView,
+      deditor_raw: rawView(filePath, tabId, () => sourceDocument?.sourceContext()), code_block: codeNodeView,
+    })));
     crepe.setReadonly(true);
     const initialize = async () => {
       if (/\\(?:ce|pu)\{/.test(initialSource)) await loadKatex();
@@ -231,6 +241,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
         const view = ctx.get(editorViewCtx), parse = ctx.get(parserCtx), serialize = ctx.get(serializerCtx);
         const parseSource = (value: string) => parse(normalizeMarkdownFences(value));
         const document = new MarkdownDocument(initialSource, parseSource, serialize, mdx, view.state.doc);
+        sourceDocument = document;
         let inlineEditing: ReturnType<typeof installInlineSource> | undefined;
         let enterOperation = false;
         let selectionDeleteOperation = false;
@@ -306,10 +317,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
         const typewriter = installTypewriter(view, scroller.current!);
         cleanupTypewriter = typewriter.destroy;
         cleanupFootnotes = installFootnotePreview(view.dom, language);
-        const originalTableView = view.props.nodeViews?.table;
-        const originalImageView = view.props.nodeViews?.["image-block"];
-        const originalInlineImageView = view.props.nodeViews?.image;
-        view.setProps({ nodeViews: { ...view.props.nodeViews, ...(originalTableView ? { table: stableTableView(originalTableView) } : {}), ...(originalImageView ? { "image-block": accessibleImageView(originalImageView, language, tabId) } : {}), ...(originalInlineImageView ? { image: rootAwareImageView(originalInlineImageView) } : {}), math_inline: mathView(tabId), footnote_reference: footnoteNodeView, footnote_definition: footnoteNodeView, deditor_raw: rawView(filePath, tabId), code_block: codeNodeView },
+        view.setProps({
           handleScrollToSelection: () => compositionViewport.handleScroll(),
           dispatchTransaction: tr => {
             if (cancelled) return;

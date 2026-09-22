@@ -38,6 +38,8 @@ const stubs={
 const profile={};
 const record=(name,elapsed,count=1)=>{const item=profile[name]??={ms:0,calls:0};item.ms+=elapsed;item.calls+=count;};
 globalThis.mdProfile=record;
+const createElement=document.createElement.bind(document);
+document.createElement=(name,...args)=>{if(name.toLowerCase()==='table')record('DOM.tableElements',0);return createElement(name,...args);};
 const OriginalObserver=dom.window.MutationObserver;
 Object.defineProperty(globalThis,'MutationObserver',{configurable:true,value:class extends OriginalObserver {constructor(fn){const label=new Error().stack.split('\n').find(line=>line.includes('deditor-markdown-component-profile'))?.trim()??'observer';super((...args)=>{const begin=performance.now();try{fn(...args);}finally{record(label,performance.now()-begin);record('mutation records',0,args[0].length);}});}}});
 const {EditorView}=await import('@milkdown/kit/prose/view');
@@ -50,14 +52,23 @@ export {useEditorStore} from './src/store/editor';
 export {getVisualEditor} from './src/lib/markdownVisualBridge';
 export {markdownHistory} from './src/lib/markdownHistory';
 `,resolveDir:process.cwd()},outfile:output,bundle:true,format:'esm',platform:'node',packages:'external',loader:{'.css':'empty'},plugins:[{name:'isolated-io',setup(b){
- b.onLoad({filter:/tableView\.ts$/},async a=>({contents:(await fs.promises.readFile(a.path,'utf8')).replace('const result = create(node, view, getPos, decorations, innerDecorations);','const start=performance.now(); const result = create(node, view, getPos, decorations, innerDecorations); (globalThis as any).mdProfile("table NodeView create",performance.now()-start);'),loader:'ts'}));
- b.onLoad({filter:/(?:rawView|markdownFragments)\.ts$/},async a=>{
-  const baseline=process.env.DEDITOR_RAW_BASELINE;
-  const file=baseline ? path.join(baseline,path.relative(process.cwd(),a.path)) : a.path;
+ b.onLoad({filter:/\.(?:ts|tsx)$/},async a=>{
+  if (!a.path.startsWith(path.resolve('src')+path.sep)) return;
+  const relative=path.relative(process.cwd(),a.path);
+  const owned=['src/lib/markdownFragments.ts','src/lib/markdownVisual/rawView.ts','src/lib/markdown.ts','src/lib/markdownVisual/document.ts','src/lib/markdownVisual/initialNodeViews.ts'].includes(relative);
+  const baseline=process.env.DEDITOR_MARKDOWN_BASELINE ?? process.env.DEDITOR_RAW_BASELINE;
+  const base=owned ? baseline ?? process.env.DEDITOR_MARKDOWN_TARGET : process.env.DEDITOR_PROFILE_BASE;
+  const frozen=base ? path.join(base,relative) : null;
+  const component=relative==='src/components/MarkdownVisualEditor.tsx' && !baseline ? process.env.DEDITOR_PROFILE_COMPONENT : undefined;
+  const file=component ?? (frozen && fs.existsSync(frozen) ? frozen : a.path);
   let contents=await fs.promises.readFile(file,'utf8');
-  contents=contents.replace('const tree = sourceTree(source);','const treeStart=performance.now(); const tree = sourceTree(source); (globalThis as any).mdProfile("raw.sourceTree",performance.now()-treeStart);');
+  if(relative==='src/components/MarkdownVisualEditor.tsx' && process.env.DEDITOR_PROFILE_BASE && !baseline && !component) contents=contents.replace('deditor_raw: rawView(filePath, tabId),','deditor_raw: rawView(filePath, tabId, () => document.sourceContext()),');
+  contents=contents.replace('const result = create(node, view, getPos, decorations, innerDecorations);','const start=performance.now(); const result = create(node, view, getPos, decorations, innerDecorations); (globalThis as any).mdProfile("table NodeView create",performance.now()-start);');
+  contents=contents.replace('const indexed = documentContext?.();','const indexed = documentContext?.(); (globalThis as any).mdProfile(indexed?.source === source ? "raw.indexedReuse" : "raw.indexedMiss",0);');
+  contents=contents.replace('const tree = sourceTree(source);','const treeStart=performance.now(); const tree = sourceTree(source); (globalThis as any).mdProfile(' + JSON.stringify(relative.endsWith('/document.ts') ? 'model.editingTree' : relative.endsWith('/rawView.ts') ? 'raw.sourceTree' : 'math.sourceTree') + ',performance.now()-treeStart);');
+  contents=contents.replaceAll('const tokens = md.parse(parsedSource, env);','const parseStart=performance.now(); const tokens = md.parse(parsedSource, env); (globalThis as any).mdProfile("markdown.parse",performance.now()-parseStart);');
   contents=contents.replace('template.innerHTML = html;', 'const domStart=performance.now(); template.innerHTML = html; (globalThis as any).mdProfile("raw.contextDOM",performance.now()-domStart);');
-  return {contents,loader:'ts'};
+  return {contents,loader:a.path.endsWith('.tsx')?'tsx':'ts'};
  });
  b.onResolve({filter:/.*/},a=>a.path.endsWith('.css')?{path:'css',namespace:'stub'}:stubs[a.path]?{path:a.path,namespace:'stub'}:a.path.endsWith('/feedback')?{path:'feedback',namespace:'stub'}:undefined);
  b.onLoad({filter:/.*/,namespace:'stub'},a=>({contents:a.path==='css'?'':a.path==='feedback'?'export const showError=async()=>{};':stubs[a.path],loader:'js'}));

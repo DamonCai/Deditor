@@ -5,7 +5,7 @@ import { isLocalRef } from "../pathUtil";
 import { markdownDisplayHtml, hydrateMarkdownDisplay } from "../markdownDisplay";
 import { useEditorStore } from "../../store/editor";
 import { orderFootnoteTree } from "./footnoteOrder";
-import { sourceTree, range, type SourceNode } from "./document";
+import { sourceTree, range, type SourceNode, type MarkdownSourceContext } from "./document";
 import type { Node as ProseNode } from "@milkdown/kit/prose/model";
 import type { EditorView as ProseView, NodeView } from "@milkdown/kit/prose/view";
 import { EditorView, keymap } from "@codemirror/view";
@@ -36,7 +36,7 @@ function sourceContext(view: ProseView, source: string) {
   return context;
 }
 
-export function rawView(filePath: string | null, tabId: string) {
+export function rawView(filePath: string | null, tabId: string, documentContext?: () => MarkdownSourceContext | undefined) {
   return (initial: ProseNode, view: ProseView, getPos: () => number | undefined): NodeView => {
     let node = initial, cm: EditorView | null = null, updating = false, generation = 0, destroyed = false;
     let controllers: AbortController[] = [];
@@ -54,7 +54,8 @@ export function rawView(filePath: string | null, tabId: string) {
       preview.title = view.editable ? tStatic("md.editSourceBlock") : "";
       if (cm) return;
       const source = useEditorStore.getState().tabs.find(t => t.id === tabId)?.content ?? "";
-      const { ast, definitions } = sourceContext(view, source);
+      const indexed = documentContext?.();
+      const { ast, definitions } = indexed?.source === source ? indexed : sourceContext(view, source);
       let index = 0; view.state.doc.forEach((_node, offset, i) => { if (offset === getPos()) index = i; });
       const start = ast[index] ? range(ast[index])[0] : 0;
       const line = source.slice(0, start).split("\n").length;

@@ -5,6 +5,7 @@ import type { EditorView } from "@milkdown/kit/prose/view";
 import type { Node as ProseNode } from "@milkdown/kit/prose/model";
 import { useEditorStore } from "../../store/editor";
 import { emojiSuggestions } from "../markdownShorthand";
+import { deleteEmptyFormatPair, formatPairKey, handleFormatPairInput, isFormatCharacter, mapFormatPair, openFormatPair, type FormatPair } from "./formatPairs";
 
 const pairs: Record<string, string> = {"(": ")", "[": "]", "{": "}", '"': '"', "'": "'", "*": "*", "_": "_", "`": "`", "$": "$", "~": "~", "=": "=", "^": "^"};
 function pairingEnabled(character: string) {
@@ -22,6 +23,7 @@ function prose(view: EditorView) {
 
 /** Input helpers stay outside composition and never rebuild the article. */
 export const markdownInputAssist = $prose(() => {
+  let replaying = false;
   let choices: string[] = [], index = 0, from = 0, to = 0, hiddenAt = "";
   let hiddenDocument: ProseNode | null = null;
   let popup: HTMLElement | null = null;
@@ -32,7 +34,9 @@ export const markdownInputAssist = $prose(() => {
     choices = []; popup?.replaceChildren();
     view.dispatch(tr.setSelection(TextSelection.create(tr.doc, from + 1))); view.focus(); return true;
   };
-  return new Plugin({
+  return new Plugin<FormatPair | null>({
+    key: formatPairKey,
+    state: { init: () => null, apply: mapFormatPair },
     appendTransaction(transactions, oldState, state) {
       const language = useEditorStore.getState().markdownSettings.defaultCodeLanguage;
       if (!language || !transactions.some(tr => tr.docChanged) || transactions.some(tr => tr.getMeta("deditor-inline-projection"))) return null;
@@ -44,23 +48,31 @@ export const markdownInputAssist = $prose(() => {
     },
     props: {
       handleTextInput(view, from, to, text) {
-        if (!prose(view) || !useEditorStore.getState().autoCloseBrackets || text.length !== 1) return false;
+        if (replaying || !view.editable || view.composing || !useEditorStore.getState().autoCloseBrackets || text.length !== 1) return false;
+        if (handleFormatPairInput(view, from, to, text, value => {
+          replaying = true;
+          try {
+            const { from, to } = view.state.selection;
+            const defaultText = () => view.state.tr.insertText(value, from, to);
+            const handled = view.someProp("handleTextInput", handler => handler(view, from, to, value, defaultText));
+            if (!handled) view.dispatch(defaultText());
+          } finally { replaying = false; }
+        })) return true;
+        if (!prose(view)) return false;
         if (!pairingEnabled(text) || (from !== to && useEditorStore.getState().markdownSettings.wrapSelection === false)) return false;
         const next = view.state.doc.textBetween(to, Math.min(view.state.doc.content.size, to + 1));
         const previous = view.state.doc.textBetween(Math.max(0, from - 1), from);
-        // Only brackets/quotes are auto-inserted for a collapsed caret. Markdown
-        // delimiters must reach input rules even when the next character matches.
+        if (from === to && isFormatCharacter(text)) return openFormatPair(view, from, text);
         if (from === to && /[)\]}"']/.test(text) && next === text) {
           view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, to + 1))); return true;
         }
         const close = pairs[text]; if (!close) return false;
-        // Markdown delimiters wrap selections; ordinary typing still reaches mature input rules.
-        if (from === to && /[*_`$~=^]/.test(text)) return false;
         if (from === to && ((text === "'" || text === '"') && /[\p{L}\p{N}]/u.test(previous) || next && !/[\s)\]}.,!?;:]/.test(next))) return false;
         const tr = view.state.tr.insertText(close, to).insertText(text, from);
         view.dispatch(tr.setSelection(TextSelection.create(tr.doc, from + 1, to + 1))); return true;
       },
       handleKeyDown(view, event) {
+        if (view.editable && !view.composing && !event.isComposing && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && event.key === "Backspace" && useEditorStore.getState().autoCloseBrackets && deleteEmptyFormatPair(view)) return true;
         if (!prose(view) || event.isComposing || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return false;
         if (choices.length) {
           if (event.key === "Escape") { hiddenAt = `${from}:${to}`; hiddenDocument = view.state.doc; choices = []; popup?.replaceChildren(); return true; }

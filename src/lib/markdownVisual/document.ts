@@ -18,6 +18,7 @@ export interface SourceNode {
   type: string; value?: string; children?: SourceNode[];
   position?: { start: { offset?: number }; end: { offset?: number } };
 }
+export interface MarkdownSourceContext { source: string; ast: readonly SourceNode[]; definitions: string }
 const syntax = unified().use(remarkParse).use(remarkGfm, { singleTilde: false }).use(remarkMark).use(remarkShorthand).use(remarkMath).use(remarkFrontmatter, ["yaml", "toml"]);
 export function sourceTree(source: string): SourceNode { return syntax.parse(normalizeMarkdownFences(source)) as SourceNode; }
 function editingTree(source: string): SourceNode { const tree = sourceTree(source); editableBlockTree(tree, source); tableListTree(tree, source); taskIndentTree(tree); orderFootnoteTree(tree); return tree; }
@@ -131,6 +132,7 @@ export class MarkdownDocument {
   source: string;
   doc: ProseNode;
   private ast: SourceNode[] = [];
+  private rawContext: MarkdownSourceContext | undefined;
   private positions = new WeakMap<ProseNode, { ast: SourceNode; start: number; ranges: { from: number; to: number; pos: number; end: number }[] }>();
   private sourceOffsets: { doc: ProseNode; ast: SourceNode[]; source: string; values: Map<number, number> } | undefined;
   private parse: (source: string) => ProseNode;
@@ -145,6 +147,16 @@ export class MarkdownDocument {
     while (this.ast.length < this.doc.childCount) this.ast.push({ type: "paragraph", position: { start: { offset: this.source.length }, end: { offset: this.source.length } } });
   }
   snapshot(): MarkdownDocumentSnapshot { return { doc: this.doc, ast: this.ast }; }
+  /** Share the already indexed source with preserved blocks; never reparse it
+   * just to resolve a block's line or the document's reference definitions. */
+  sourceContext(): MarkdownSourceContext {
+    if (this.rawContext?.source !== this.source || this.rawContext.ast !== this.ast) {
+      this.rawContext = { source: this.source, ast: this.ast, definitions: this.ast
+        .filter(node => node.type === "definition")
+        .map(node => this.source.slice(...range(node))).join("\n") };
+    }
+    return this.rawContext;
+  }
   restore(source: string, snapshot: MarkdownDocumentSnapshot) {
     this.source = source;
     this.doc = snapshot.doc.type.schema === this.doc.type.schema ? snapshot.doc : this.doc.type.schema.nodeFromJSON(snapshot.doc.toJSON());
@@ -426,16 +438,20 @@ export class MarkdownDocument {
     if (!ast) return [];
     const cached = this.positions.get(node);
     if (cached?.ast === ast && cached.start === start) return cached.ranges;
-    const leaves: SourceNode[] = [], prose: { text: string; pos: number }[] = [];
+    const leaves: SourceNode[] = [], prose: { text: string; pos: number; trailing?: boolean }[] = [];
+    const closingEnds = new Map<SourceNode, number[]>();
     const emptySource: number[] = [], emptyProse: number[] = [];
-    const walk = (n: SourceNode) => {
+    const walk = (n: SourceNode, ends: number[] = []) => {
       if (["paragraph", "listItem"].includes(n.type) && !n.children?.length) emptySource.push(range(n)[1]);
-      if (["text", "inlineCode", "code", "math", "break"].includes(n.type)) leaves.push(n);
+      if (["text", "inlineCode", "code", "math", "break"].includes(n.type)) { leaves.push(n); closingEnds.set(n, ends); }
       else if (n.type === "html" && /^<br\s*\/?>$/i.test(n.value ?? "")) leaves.push({ ...n, type: "break" });
-      else n.children?.forEach(walk);
+      else {
+        const next = ["strong", "emphasis", "delete", "mark", "subscript", "superscript", "link"].includes(n.type) ? [range(n)[1], ...ends] : ends;
+        n.children?.forEach(child => walk(child, next));
+      }
     };
     walk(ast);
-    node.descendants((child, pos) => {
+    node.descendants((child, pos, parent, childIndex) => {
       if (child.type.name === "paragraph" && !child.content.size) emptyProse.push(start + pos + 2);
       if (child.type.name === "deditor_inline_source") {
         const from = Number(child.attrs.sourceFrom), to = from + child.textContent.length;
@@ -446,13 +462,28 @@ export class MarkdownDocument {
         }
         prose.push({ text: child.textContent, pos: start + pos + 2 }); return false;
       }
-      if (child.isText) prose.push({ text: child.text!, pos: start + pos + 1 });
+      if (child.isText) prose.push({ text: child.text!, pos: start + pos + 1, trailing: !!parent && ["paragraph", "heading"].includes(parent.type.name) && childIndex === parent.childCount - 1 });
       else if (child.type.name === "hardbreak") prose.push({ text: "\n", pos: start + pos + 1 });
     });
     const ranges: { from: number; to: number; pos: number; end: number }[] = [];
     // Marks split/merge ProseMirror text nodes independently of Markdown leaves.
     // Align the actual text stream instead of requiring equal leaf counts.
     const value = (leaf: SourceNode) => leaf.type === "break" ? "\n" : leaf.value ?? "";
+    const trailing: { text: string; pos: number }[] = [];
+    const leafText = leaves.map(value).join("");
+    if (leafText !== prose.map(run => run.text).join("")) {
+      // Parsed Markdown omits trailing horizontal whitespace from prose leaves,
+      // while the live editor retains freshly typed spaces. Match the remaining
+      // text first; only map the omitted suffix when its source bytes agree.
+      const trimmed = prose.map(run => {
+        const text = run.trailing ? run.text.replace(/[ \t]+$/, "") : run.text;
+        if (text.length !== run.text.length) trailing.push({ text: run.text.slice(text.length), pos: run.pos + text.length });
+        return { ...run, text };
+      });
+      if (leafText === trimmed.map(run => run.text).join("")) prose.splice(0, prose.length, ...trimmed);
+      else trailing.length = 0;
+    }
+    const endingOffsets = new Map<number, number[]>();
     if (leaves.map(value).join("") === prose.map(run => run.text).join("")) {
       let run = 0, inner = 0;
       for (const leaf of leaves) {
@@ -488,9 +519,19 @@ export class MarkdownDocument {
           rawAt += length;
         }
         // Unsupported normalization must not leave partially guessed offsets.
-        if (valid) ranges.push(...leafRanges);
+        if (valid) {
+          ranges.push(...leafRanges);
+          const last = leafRanges.at(-1);
+          // Prefer the outside edge: inline-code padding may contain the same
+          // space as a freshly typed gap after its closing backticks.
+          if (last) endingOffsets.set(last.end, [...(closingEnds.get(leaf) ?? [])].reverse().concat(to, last.to));
+        }
       }
     }
+    trailing.forEach(gap => {
+      const from = endingOffsets.get(gap.pos)?.find(at => this.source.slice(at, at + gap.text.length) === gap.text);
+      if (from !== undefined) ranges.push({ from, to: from + gap.text.length, pos: gap.pos, end: gap.pos + gap.text.length });
+    });
     if (emptySource.length === emptyProse.length) emptySource.forEach((from, i) => ranges.push({ from, to: from, pos: emptyProse[i], end: emptyProse[i] }));
     ranges.sort((a, b) => a.pos - b.pos);
     this.positions.set(node, { ast, start, ranges });

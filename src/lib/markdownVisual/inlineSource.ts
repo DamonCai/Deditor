@@ -2,6 +2,8 @@ import { $nodeSchema } from "@milkdown/kit/utils";
 import { TextSelection, Selection, type Transaction } from "@milkdown/kit/prose/state";
 import type { EditorView } from "@milkdown/kit/prose/view";
 import { sourceTree, type MarkdownDocument, type SourceNode } from "./document";
+import { Fragment } from "@milkdown/kit/prose/model";
+import { formatPairMeta, type FormatPairAction } from "./formatPairs";
 
 function inlineBody(raw: string) {
   const node = sourceTree(raw).children?.[0]?.children?.[0];
@@ -34,9 +36,10 @@ export const inlineSourceSchema = $nodeSchema("deditor_inline_source", () => ({
 
 /** A temporary document projection: entering/leaving never edits the source. */
 export function installInlineSource(view: EditorView, document: MarkdownDocument, boundary: () => void) {
-  let active: { from: number; sourceFrom: number; raw: string; initialRaw: string; emptyRaw: string | null; original: import("@milkdown/kit/prose/model").Fragment } | null = null;
+  let active: { from: number; sourceFrom: number; raw: string; initialRaw: string | null; emptyRaw: string | null; original: import("@milkdown/kit/prose/model").Fragment } | null = null;
   let queued = false, destroyed = false, suppressAt = -1;
   let enteringAfterInput = false;
+  let pairCommit = false;
   const find = () => {
     // Most calls come from typing or caret navigation inside this projection.
     // Resolve its ancestor directly instead of walking every paragraph.
@@ -62,7 +65,10 @@ export function installInlineSource(view: EditorView, document: MarkdownDocument
     const previous = active; active = null; boundary();
     const selection = view.state.selection;
     const tr = view.state.tr;
-    const restoreFragment = current && current.node.textContent === previous.initialRaw;
+    // Removing an empty generated pair must preserve surrounding live whitespace.
+    // Reparsing the paragraph here trims its trailing space and moves the caret
+    // before that still-authored byte, corrupting the position of the next edit.
+    const restoreFragment = current && (current.node.textContent === previous.initialRaw || previous.initialRaw === null && !current.node.content.size);
     if (restoreFragment) {
       // Caret-only navigation restores this fragment without reparsing the document.
       tr.replaceWith(current.pos, current.pos + current.node.nodeSize, previous.original);
@@ -115,6 +121,7 @@ export function installInlineSource(view: EditorView, document: MarkdownDocument
       if (destroyed || view.composing) return;
       const selection = view.state.selection;
       if (active) {
+        if (pairCommit) { pairCommit = false; close(); return; }
         const current = find();
         if (!current) { active = null; return; }
         if (!view.editable || !view.hasFocus()) { close(); return; }
@@ -176,8 +183,26 @@ export function installInlineSource(view: EditorView, document: MarkdownDocument
   view.dom.addEventListener("compositionend", update);
   return {
     get active() { return !!active; },
-    update, close, reset() { active = null; suppressAt = -1; enteringAfterInput = false; },
+    update, close, reset() { active = null; suppressAt = -1; enteringAfterInput = false; pairCommit = false; },
     apply(tr: Transaction) {
+      const pair = tr.getMeta(formatPairMeta) as FormatPairAction | undefined;
+      if (pair?.type === "open") {
+        const raw = pair.character.repeat(2);
+        const sourceFrom = document.sourceOffset(pair.from);
+        // The helper has no source model. Attach the exact source position before
+        // publishing cursor/history state for its newly generated projection.
+        view.updateState(view.state.apply(view.state.tr.setNodeAttribute(pair.from, "sourceFrom", sourceFrom)));
+        active = { from: pair.from, sourceFrom, raw, initialRaw: null, emptyRaw: null, original: Fragment.empty };
+        pairCommit = false;
+        document.editInline(sourceFrom, 0, raw, view.state.doc);
+        return true;
+      }
+      if (pair?.type === "release" && active) {
+        const previous = active; active = null; pairCommit = false;
+        document.editInline(previous.sourceFrom, previous.raw.length, pair.raw, view.state.doc);
+        return true;
+      }
+      if (pair?.type === "commit") pairCommit = true;
       if (tr.getMeta(inlineProjection)) { document.project(view.state.doc); return true; }
       if (!active) { enteringAfterInput = tr.docChanged && tr.selection.empty; return false; }
       // Selection/stored-mark changes have no source work. Inspect the final
