@@ -38,6 +38,19 @@ export function installInlineSource(view: EditorView, document: MarkdownDocument
   let queued = false, destroyed = false, suppressAt = -1;
   let enteringAfterInput = false;
   const find = () => {
+    // Most calls come from typing or caret navigation inside this projection.
+    // Resolve its ancestor directly instead of walking every paragraph.
+    const { $head } = view.state.selection;
+    for (let depth = $head.depth; depth > 0; depth--) {
+      const node = $head.node(depth);
+      if (node.type.name === "deditor_inline_source") return { node, pos: $head.before(depth) };
+    }
+    if (active && active.from <= view.state.doc.content.size) {
+      const node = view.state.doc.nodeAt(active.from);
+      if (node?.type.name === "deditor_inline_source") return { node, pos: active.from };
+    }
+    // Structural edits can move the projection while the selection is outside.
+    // Retain discovery for that uncommon case rather than guessing its position.
     let found: { node: import("@milkdown/kit/prose/model").Node; pos: number } | null = null;
     view.state.doc.descendants((node, pos) => { if (node.type.name === "deditor_inline_source") { found = { node, pos }; return false; } });
     return found as { node: import("@milkdown/kit/prose/model").Node; pos: number } | null;
@@ -167,6 +180,9 @@ export function installInlineSource(view: EditorView, document: MarkdownDocument
     apply(tr: Transaction) {
       if (tr.getMeta(inlineProjection)) { document.project(view.state.doc); return true; }
       if (!active) { enteringAfterInput = tr.docChanged && tr.selection.empty; return false; }
+      // Selection/stored-mark changes have no source work. Inspect the final
+      // document, since appendTransaction may edit after a selection-only tr.
+      if (view.state.doc === document.doc) return true;
       let current = find();
       if (!current) { active = null; return false; }
       const old = document.doc.nodeAt(active.from);

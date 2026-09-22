@@ -16,6 +16,11 @@ async function getMermaid(theme: "light" | "dark", forExport = false) {
     m.initialize({
       startOnLoad: false,
       securityLevel: "loose",
+      // Mermaid's web-embed defaults replace valid local diagrams above 50k
+      // characters or reject them above 500 edges. Keep the complete document;
+      // layout work remains serialized and obsolete queued renders cancellable.
+      maxTextSize: Number.MAX_SAFE_INTEGER,
+      maxEdges: Number.MAX_SAFE_INTEGER,
       htmlLabels: !forExport,
       flowchart: { htmlLabels: !forExport },
       theme: theme === "dark" ? "dark" : "default",

@@ -1,0 +1,57 @@
+import assert from 'node:assert/strict';
+import {build} from 'esbuild';
+import {JSDOM} from 'jsdom';
+import fs from 'node:fs';
+import path from 'node:path';
+import {pathToFileURL} from 'node:url';
+const dom=new JSDOM('<!doctype html><body></body>',{url:'http://localhost'});
+for(const name of ['window','document','HTMLElement','Node','DOMParser'])Object.defineProperty(globalThis,name,{value:dom.window[name],configurable:true});
+window.matchMedia=()=>({matches:false,addEventListener(){},removeEventListener(){}});
+Object.defineProperty(globalThis,'localStorage',{value:dom.window.localStorage,configurable:true});
+const output=path.resolve('node_modules/.cache/deditor-fragment-context.mjs');
+await build({entryPoints:['src/lib/markdownFragments.ts'],outfile:output,bundle:true,format:'esm',platform:'node',packages:'external',plugins:[{name:'controlled-render',setup(b){
+ b.onLoad({filter:/markdownFragments\.ts$/},a=>({contents:fs.readFileSync(a.path,'utf8').replace('from "./markdown"','from "test-fragment-render"'),loader:'ts'}));
+ b.onResolve({filter:/^test-fragment-render$/},()=>({path:'render',namespace:'test'}));
+ b.onLoad({filter:/.*/,namespace:'test'},()=>({contents:`import {renderMarkdown as actual} from ${JSON.stringify(path.resolve('src/lib/markdown.ts'))}; export const renderMarkdown=(...args)=>globalThis.fragmentRender ? globalThis.fragmentRender(...args) : actual(...args);`,resolveDir:process.cwd(),loader:'js'}));
+}}],logLevel:'silent'});
+const {renderMarkdownFragment:fragment,clearMarkdownFragmentContext:clear}=await import(pathToFileURL(output));
+let templates=0;
+const create=document.createElement.bind(document);
+document.createElement=(...args)=>{if(args[0]==='template')templates++;return create(...args);};
+const light={theme:'light'}, dark={theme:'dark'}, owner={};
+const source='[toc]\n\n# Header\n\nText [link][ref] and note[^n].\n\n[ref]: https://example.com/path\n\n[^n]: Footnote **bold**.\n';
+const [toc,heading,note,ref]=await Promise.all([
+ fragment('[toc]',source,1,light,owner),fragment('# Header',source,3,light,owner),
+ fragment('[^n]: Footnote **bold**.',source,9,light,owner),fragment('Text [link][ref] and note[^n].',source,5,light,owner),
+]);
+assert.equal(templates,1,'concurrent contextual blocks parse the full HTML once');
+assert.match(toc,/href="#header"/);assert.match(heading,/>Header<\/h1>/);assert.match(note,/Footnote <strong>bold<\/strong>/);assert.match(ref,/https:\/\/example.com\/path/);assert.match(ref,/footnote-ref/);
+const one=create('div'),two=create('div');one.innerHTML=heading;two.innerHTML=await fragment('# Header',source,3,light,owner);
+one.firstChild.remove();assert.match(two.textContent,/Header/);assert.match(await fragment('# Header',source,3,light,owner),/>Header<\/h1>/);assert.equal(templates,1);
+console.log('PASS real TOC/reference/footnote context and independent caller DOM');
+let renders=0;
+globalThis.fragmentRender=async(s,options)=>{renders++;return `<p data-line="1">${s}-${options.theme}</p>`;};
+assert.match(await fragment('[toc]','theme-test',1,light,owner),/theme-test-light/);
+assert.match(await fragment('[toc]','theme-test',1,dark,owner),/theme-test-dark/);assert.equal(renders,2);
+await fragment('[toc]','theme-test',1,dark,owner);assert.equal(renders,2);
+clear({});await fragment('[toc]','theme-test',1,dark,owner);assert.equal(renders,2,'unrelated editor disposal retains live owner');
+clear(owner);await fragment('[toc]','theme-test',1,dark,owner);assert.equal(renders,3,'owner disposal releases full context');
+console.log('PASS theme invalidation and owner cleanup');
+let attempts=0;
+globalThis.fragmentRender=async()=>{if(++attempts===1)throw new Error('temporary render failure');return '<p data-line="1">recovered</p>';};
+await assert.rejects(fragment('[toc]','retry-test',1,light,owner),/temporary render failure/);
+assert.match(await fragment('[toc]','retry-test',1,light,owner),/recovered/);assert.equal(attempts,2);
+console.log('PASS rejected context is retryable');
+const pending=new Map();renders=0;
+globalThis.fragmentRender=(s,options)=>{renders++;return new Promise((resolve,reject)=>pending.set(s+options.theme,{resolve,reject}));};
+const older=fragment('[toc]','old',1,light,owner), newer=fragment('[toc]','new',1,dark,owner);
+pending.get('newdark').resolve('<p data-line="1">new-dark</p>');assert.match(await newer,/new-dark/);
+pending.get('oldlight').resolve('<p data-line="1">old-light</p>');assert.match(await older,/old-light/);
+assert.match(await fragment('[toc]','new',1,dark,owner),/new-dark/);assert.equal(renders,2);
+const rejected=fragment('[toc]','reject-old',1,light,owner);const failure=assert.rejects(rejected,/old failure/);
+const current=fragment('[toc]','current',1,dark,owner);pending.get('currentdark').resolve('<p data-line="1">current</p>');await current;
+pending.get('reject-oldlight').reject(new Error('old failure'));await failure;
+await fragment('[toc]','current',1,dark,owner);assert.equal(renders,4,'late rejection must not clear newer cache');
+console.log('PASS out-of-order source/theme results and old rejection preserve current cache');
+clear(owner);delete globalThis.fragmentRender;dom.window.close();
+console.log('4 fragment context regression groups passed');

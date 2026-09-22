@@ -12,6 +12,10 @@
 
 const MARK_CLASS = "preview-search-match";
 const CURRENT_CLASS = "current";
+// A result set owns its current marker. Navigation only changes the previous
+// and next marker; scanning every hit makes repeated Enter expensive on long
+// documents. Weak keys release replaced/closed searches without cleanup hooks.
+const currentMatches = new WeakMap<HTMLSpanElement[], HTMLSpanElement | null>();
 
 /** Remove every highlight from `root` and merge the surrounding text nodes
  *  back together. Idempotent — safe to call when no highlights exist. */
@@ -94,6 +98,7 @@ export function applySearch(root: HTMLElement, query: string): SearchResult {
     }
     parent.removeChild(node);
   }
+  currentMatches.set(matches, null);
   return { total: matches.length, matches };
 }
 
@@ -104,12 +109,18 @@ export function setCurrentMatch(
   matches: HTMLSpanElement[],
   idx: number,
 ): void {
-  for (let i = 0; i < matches.length; i++) {
-    matches[i].classList.toggle(CURRENT_CLASS, i === idx);
+  if (!currentMatches.has(matches)) {
+    // Support independently supplied result sets, including pre-marked hits.
+    for (const match of matches) match.classList.remove(CURRENT_CLASS);
   }
-  if (idx >= 0 && idx < matches.length) {
-    matches[idx].scrollIntoView({ block: "center", behavior: "auto" });
+  const previous = currentMatches.get(matches);
+  const next = matches[idx] ?? null;
+  if (previous !== next) {
+    previous?.classList.remove(CURRENT_CLASS);
+    next?.classList.add(CURRENT_CLASS);
   }
+  currentMatches.set(matches, next);
+  next?.scrollIntoView({ block: "center", behavior: "auto" });
 }
 
 /** Paint only the workspace result's block/occurrence, preserving syntax spans. */

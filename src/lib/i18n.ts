@@ -286,6 +286,7 @@ const ZH: Record<string, string> = {
   "find.replaceDone": "已替换 {count} 处，修改 {files} 个文件。",
 
   "fileio.targetAlreadyOpen": "目标文件已在另一标签打开，请先关闭该标签或选择其他路径。",
+  "fileio.openFailed": "无法打开「{name}」。\n{err}",
   "fileio.saveFailed": "无法保存「{name}」。更改仍保留在编辑器中，请重试。\n{err}",
   // common
   "common.cancel": "取消",
@@ -1015,6 +1016,7 @@ const EN: Record<string, string> = {
   "find.replaceDone": "Replaced {count} occurrence(s) in {files} file(s).",
 
   "fileio.targetAlreadyOpen": "This file is already open in another tab. Close it or choose another path.",
+  "fileio.openFailed": "Could not open “{name}”.\n{err}",
   "fileio.saveFailed": "Could not save “{name}”. Your changes remain in the editor. Please try again.\n{err}",
   // common
   "common.cancel": "Cancel",

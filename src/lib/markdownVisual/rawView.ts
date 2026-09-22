@@ -5,7 +5,7 @@ import { isLocalRef } from "../pathUtil";
 import { markdownDisplayHtml, hydrateMarkdownDisplay } from "../markdownDisplay";
 import { useEditorStore } from "../../store/editor";
 import { orderFootnoteTree } from "./footnoteOrder";
-import { sourceTree, range } from "./document";
+import { sourceTree, range, type SourceNode } from "./document";
 import type { Node as ProseNode } from "@milkdown/kit/prose/model";
 import type { EditorView as ProseView, NodeView } from "@milkdown/kit/prose/view";
 import { EditorView, keymap } from "@codemirror/view";
@@ -13,7 +13,7 @@ import { EditorState, Prec } from "@codemirror/state";
 import { basicSetup } from "codemirror";
 import { indentWithTab } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
-import { renderMarkdownFragment } from "../markdownFragments";
+import { clearMarkdownFragmentContext, renderMarkdownFragment } from "../markdownFragments";
 import { hydrateLocalImages } from "../localImgHydrate";
 import { documentImageRoot } from "../markdownImageSettings";
 import { tStatic } from "../i18n";
@@ -21,6 +21,20 @@ import { markdownHistory } from "../markdownHistory";
 import { markdownSession } from "../markdownSession";
 import { logError } from "../logger";
 import { NodeSelection, TextSelection } from "@milkdown/kit/prose/state";
+
+// All preserved blocks in one view use the same immutable source context.
+// Keep only its latest version, and release it together with the editor view.
+const sourceContexts = new WeakMap<ProseView, { source: string; ast: SourceNode[]; definitions: string }>();
+function sourceContext(view: ProseView, source: string) {
+  const previous = sourceContexts.get(view);
+  if (previous?.source === source) return previous;
+  const tree = sourceTree(source); orderFootnoteTree(tree);
+  const ast = tree.children ?? [];
+  const definitions = ast.filter(n => n.type === "definition").map(n => source.slice(...range(n))).join("\n");
+  const context = { source, ast, definitions };
+  sourceContexts.set(view, context);
+  return context;
+}
 
 export function rawView(filePath: string | null, tabId: string) {
   return (initial: ProseNode, view: ProseView, getPos: () => number | undefined): NodeView => {
@@ -40,13 +54,11 @@ export function rawView(filePath: string | null, tabId: string) {
       preview.title = view.editable ? tStatic("md.editSourceBlock") : "";
       if (cm) return;
       const source = useEditorStore.getState().tabs.find(t => t.id === tabId)?.content ?? "";
-      const tree = sourceTree(source); orderFootnoteTree(tree);
-      const ast = tree.children ?? [];
-      const definitions = ast.filter(n => n.type === "definition").map(n => source.slice(...range(n))).join("\n");
+      const { ast, definitions } = sourceContext(view, source);
       let index = 0; view.state.doc.forEach((_node, offset, i) => { if (offset === getPos()) index = i; });
       const start = ast[index] ? range(ast[index])[0] : 0;
       const line = source.slice(0, start).split("\n").length;
-      void renderMarkdownFragment(node.textContent + "\n\n" + definitions, source, line, { theme: document.documentElement.classList.contains("dark") ? "dark" : "light" }).then(html => {
+      void renderMarkdownFragment(node.textContent + "\n\n" + definitions, source, line, { theme: document.documentElement.classList.contains("dark") ? "dark" : "light" }, view).then(html => {
         if (destroyed || version !== generation) return;
         preview.innerHTML = markdownDisplayHtml(html);
         const currentSource = useEditorStore.getState().tabs.find(t => t.id === tabId)?.content ?? source;
@@ -164,7 +176,7 @@ export function rawView(filePath: string | null, tabId: string) {
           updating = true; cm.dispatch({ changes: { from: 0, to: cm.state.doc.length, insert: next.textContent } }); updating = false;
         }
         if (changed) render(); return true;
-      }, destroy() { dom.removeEventListener("focusout", blur); controllers.forEach(controller => controller.abort()); view.dom.removeEventListener("deditor-document-change", documentChanged); view.dom.removeEventListener("deditor-editable-change", modeChanged); view.dom.removeEventListener("deditor-image-root-change", imageRootChanged); destroyed = true; generation++; cm?.destroy(); },
+      }, destroy() { dom.removeEventListener("focusout", blur); controllers.forEach(controller => controller.abort()); view.dom.removeEventListener("deditor-document-change", documentChanged); view.dom.removeEventListener("deditor-editable-change", modeChanged); view.dom.removeEventListener("deditor-image-root-change", imageRootChanged); clearMarkdownFragmentContext(view); destroyed = true; generation++; cm?.destroy(); },
     };
   };
 }

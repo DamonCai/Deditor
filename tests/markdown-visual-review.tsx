@@ -100,17 +100,22 @@ function Review() {
  }, []);
  React.useEffect(() => {
    if (!longReview) return;
-   let start = 0, events: string[] = [];
-   const stamp = (name: string) => events.push(`${name}:${(performance.now() - start).toFixed(1)}`);
+   // Each key owns its frame callbacks. Fast typing must not reset an earlier
+   // sample's start time or append its frame2 to the following key's events.
+   type InputSample = { start: number; events: string[] };
+   let activeSample: InputSample | null = null;
+   const stamp = (sample: InputSample, name: string) => sample.events.push(`${name}:${(performance.now() - sample.start).toFixed(1)}`);
    const key = (event: KeyboardEvent) => {
      if (event.key.length !== 1 || event.metaKey || event.ctrlKey || event.altKey) return;
-     start = performance.now(); timings.length = 0; events = [((event.target as Element)?.closest('.ProseMirror')) ? 'editor' : 'control'];
-     queueMicrotask(() => stamp('microtask'));
-     requestAnimationFrame(() => { stamp('frame1'); requestAnimationFrame(() => {
-       stamp('frame2'); setSamples(values => [...values.slice(-5), [...events, ...timings].join(' ')]);
+     const sample: InputSample = { start: performance.now(), events: [((event.target as Element)?.closest('.ProseMirror')) ? 'editor' : 'control'] };
+     activeSample = sample; timings.length = 0;
+     queueMicrotask(() => stamp(sample, 'microtask'));
+     requestAnimationFrame(() => { stamp(sample, 'frame1'); requestAnimationFrame(() => {
+       stamp(sample, 'frame2'); setSamples(values => [...values.slice(-29), [...sample.events, ...(activeSample === sample ? timings : [])].join(' ')]);
      }); });
    };
-   const before = () => stamp('beforeinput'), input = () => stamp('input'), up = () => stamp('keyup');
+   const record = (name: string) => { if (activeSample) stamp(activeSample, name); };
+   const before = () => record('beforeinput'), input = () => record('input'), up = () => record('keyup');
    document.addEventListener('keydown', key, true);
    document.addEventListener('beforeinput', before, true);
    document.addEventListener('input', input, true);

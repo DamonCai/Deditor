@@ -1,0 +1,26 @@
+import assert from 'node:assert/strict';
+import {build} from 'esbuild';
+import {JSDOM} from 'jsdom';
+const dom=new JSDOM('<!doctype html><body></body>');
+for(const name of ['window','document','Node','Element','HTMLElement','SVGElement','DOMParser'])globalThis[name]=dom.window[name];
+const mermaid=(await import('mermaid')).default;
+const source='flowchart LR\n'+Array.from({length:501},()=> 'A-->B').join('\n');
+mermaid.initialize({startOnLoad:false,securityLevel:'loose'});
+await assert.rejects(mermaid.mermaidAPI.getDiagramFromText(source),/Edge limit exceeded/);
+let config;
+globalThis.limitFixture={initialize:value=>config=value,render:async()=>({svg:'<svg></svg>'})};
+const bundle=await build({entryPoints:['src/lib/mermaidHydrate.ts'],bundle:true,write:false,format:'esm',platform:'node',plugins:[{name:'capture-config',setup(b){
+const stubs={mermaid:'export default globalThis.limitFixture;','./logger':'export const logWarn=()=>{};','./i18n':'export const tStatic=()=>"error";'};
+b.onResolve({filter:/.*/},a=>stubs[a.path]?{path:a.path,namespace:'stub'}:undefined);
+b.onLoad({filter:/.*/,namespace:'stub'},a=>({contents:stubs[a.path]}));}}]});
+const {hydrateMermaid}=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0].text).toString('base64'));
+const root=document.createElement('div');root.innerHTML='<div class="mermaid-diagram"></div>';root.firstChild.dataset.mermaidSource=source;
+await hydrateMermaid(root,'light').done;
+assert.ok(config.maxTextSize>50000,'local diagram source is not truncated at 50,000 characters');
+assert.ok(config.maxEdges>500,'local diagrams may exceed 500 edges');
+mermaid.initialize(config);
+const diagram=await mermaid.mermaidAPI.getDiagramFromText(source);
+assert.equal(diagram.db.getEdges().length,501);
+await assert.rejects(mermaid.mermaidAPI.getDiagramFromText('flowchart LR\nA-->['),'malformed syntax remains an error');
+console.log(JSON.stringify({status:'PASS',defaultRejects501:true,productionEdges:501,maxTextSize:config.maxTextSize,maxEdges:config.maxEdges,malformedRejected:true}));
+dom.window.close();

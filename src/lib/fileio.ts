@@ -59,35 +59,42 @@ function noteRecentDocument(path: string): void {
   invoke("add_recent_document", { path }).catch(() => {});
 }
 
-export async function openFileByPath(path: string) {
+interface OpenFileOptions {
+  /** A caller such as Recent Files already provides its own inline feedback. */
+  reportError?: boolean;
+}
+
+function reportOpenError(path: string, error: unknown, options: OpenFileOptions) {
+  if (options.reportError === false) return;
+  void showError(tStatic("fileio.openFailed", {
+    name: displayName(path),
+    err: error instanceof Error ? error.message : String(error),
+  }));
+}
+
+export async function openFileByPath(path: string, options: OpenFileOptions = {}) {
   if (isImageFile(path)) {
-    await openBinaryAsDataUrl(path, "image");
-    noteRecentDocument(path);
+    if (await openBinaryAsDataUrl(path, "image", options)) noteRecentDocument(path);
     return;
   }
   if (isPdfFile(path)) {
-    await openBinaryAsDataUrl(path, "pdf");
-    noteRecentDocument(path);
+    if (await openBinaryAsDataUrl(path, "pdf", options)) noteRecentDocument(path);
     return;
   }
   if (isAudioFile(path)) {
-    await openBinaryAsDataUrl(path, "audio");
-    noteRecentDocument(path);
+    if (await openBinaryAsDataUrl(path, "audio", options)) noteRecentDocument(path);
     return;
   }
   if (isVideoFile(path)) {
-    await openBinaryAsDataUrl(path, "video");
-    noteRecentDocument(path);
+    if (await openBinaryAsDataUrl(path, "video", options)) noteRecentDocument(path);
     return;
   }
   if (isHexFile(path)) {
-    await openBinaryAsDataUrl(path, "hex");
-    noteRecentDocument(path);
+    if (await openBinaryAsDataUrl(path, "hex", options)) noteRecentDocument(path);
     return;
   }
   if (isXmindFile(path)) {
-    await openBinaryAsDataUrl(path, "xmind");
-    noteRecentDocument(path);
+    if (await openBinaryAsDataUrl(path, "xmind", options)) noteRecentDocument(path);
     return;
   }
   const { tabs } = useEditorStore.getState();
@@ -103,6 +110,7 @@ export async function openFileByPath(path: string) {
     noteRecentDocument(path);
   } catch (err) {
     logError(`open failed for ${path}`, err);
+    reportOpenError(path, err, options);
   }
 }
 
@@ -196,18 +204,22 @@ export async function openCompare(leftPath: string, rightPath: string): Promise<
 export async function openBinaryAsDataUrl(
   path: string,
   kind: "image" | "pdf" | "audio" | "video" | "hex" | "xmind",
-): Promise<void> {
+  options: OpenFileOptions = {},
+): Promise<boolean> {
   const { openTab, tabs } = useEditorStore.getState();
   if (tabs.some((t) => t.filePath === path)) {
     openTab(path, "");
-    return;
+    return true;
   }
   try {
     const dataUrl = await readAsDataUrl(path);
     openTab(path, dataUrl);
     logInfo(`opened ${kind}: ${path}`);
+    return true;
   } catch (err) {
     logError(`open ${kind} failed for ${path}`, err);
+    reportOpenError(path, err, options);
+    return false;
   }
 }
 

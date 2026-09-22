@@ -39,7 +39,7 @@ export default function RecentFiles({ onClose }: { onClose: () => void }) {
     opening.current = true;
     setBusy(true); setError(false);
     try {
-      await openFileByPath(path);
+      await openFileByPath(path, { reportError: false });
       if (disposed.current) return;
       const target = useEditorStore.getState().tabs.find(tab => tab.filePath === path);
       if (target) { openedTab.current = target.id; onClose(); }
