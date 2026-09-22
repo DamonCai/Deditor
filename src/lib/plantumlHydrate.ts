@@ -153,9 +153,11 @@ export function hydratePlantuml(
           // Inline the raw SVG. The CSS in styles.css scopes `.preview
           // .plantuml-diagram svg { max-width: 100% }` so it shrinks to fit.
           el.innerHTML = svg;
+          el.classList.remove("error");
         })
         .catch((err) => {
           if (ctrl.signal.aborted) return;
+          delete el.dataset.plantumlHydrated;
           el.classList.add("error");
           el.innerHTML = failureMarkup(err, source);
         });

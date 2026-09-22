@@ -4,6 +4,7 @@
 
 | 已完成范围 | 记录 |
 | --- | --- |
+| PlantUML 失败后清理已加载标记，允许同节点重试；恢复后清理错误样式，5 秒超时及重试回归通过。真实远程超时仍列 EXT-04 | [重试状态修复](plantuml-retry-fix-2026-09-22.md) |
 | EXT-02：真实产品 HTML 预览中的远程 HTTPBin iframe 完成输入、选择、提交和服务器回显；内置 Chromium 验证 | [远程 iframe](external-iframe-2026-09-22.md) |
 | EXT-03：真实产品编码/hydrate 经默认 PlantUML 服务一次返回 100 消息 SVG，首尾及全部消息核对；Node fetch + JSDOM，不新增原生 UI 结论 | [远程 PlantUML](external-plantuml-2026-09-22.md) |
 | 修复 Markdown 组合结束后的目录定位回跳、XMind 标题 Enter/blur 重复提交；定向回归、107 阅读集成、119 XMind、生产/独立 macOS 构建和原生保存撤销重开通过。系统候选窗及物理快捷键仍留待办 | [中文输入第三轮整合](native-ime-final-2026-09-22.md) |
