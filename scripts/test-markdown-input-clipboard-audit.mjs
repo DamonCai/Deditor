@@ -95,6 +95,32 @@ const selectDocument=async()=>{
  assert.equal(view.state.selection.to,view.state.doc.content.size,'select all includes final block');
 };
 try {
+ await test('EXCEL headerless HTML keeps all sixteen cells without a synthetic blank header',async()=>{
+  const expected=[['Name','Count','Note','Empty'],['Alpha','12','中文',''],['Bravo','34','"quoted"','tail'],['Pipe|value','56','last','']];
+  const html='<html><body><table><tbody>'+expected.map(row=>'<tr>'+row.map(value=>'<td style="vertical-align:bottom">'+value+'</td>').join('')+'</tr>').join('')+'</tbody></table></body></html>';
+  await reset('');await paste(expected.map(row=>row.join('\t')).join('\n'),html);
+  const matrix=()=>{let table;view.state.doc.descendants(node=>{if(node.type.name==='table')table=node;});assert.ok(table);return table.content.content.map(row=>row.content.content.map(cell=>cell.textContent));};
+  assert.deepEqual(matrix(),expected);
+  const alignments=()=>{const result=[];view.state.doc.descendants(node=>{if(['table_header','table_cell'].includes(node.type.name))result.push(node.attrs.verticalAlignment);});return result;};
+  assert.deepEqual(alignments(),Array(16).fill('bottom'));
+  await exactHistory('');assert.deepEqual(matrix(),expected);assert.deepEqual(alignments(),Array(16).fill('bottom'));
+ });
+ await test('EXCEL genuine empty first row and authored header survive HTML paste',async()=>{
+  for(const tag of ['td','th']){
+   await reset('');await paste('\t\n**bold**\tsecond','<table><tr><'+tag+' style="vertical-align:middle"></'+tag+'><'+tag+'></'+tag+'></tr><tr><td><strong>bold</strong></td><td style="vertical-align:bottom">second</td></tr></table>');
+   let table;view.state.doc.descendants(node=>{if(node.type.name==='table')table=node;});assert.equal(table.childCount,2);
+   assert.deepEqual(table.content.content.map(row=>row.content.content.map(cell=>cell.textContent)),[['',''],['bold','second']]);
+   assert.equal(table.firstChild.firstChild.attrs.verticalAlignment,'middle');assert.equal(table.lastChild.lastChild.attrs.verticalAlignment,'bottom');assert.match(content(),/\*\*bold\*\*/);
+   await exactHistory('');
+  }
+ });
+ await test('EXCEL headerless HTML pastes into existing table without shifting data',async()=>{
+  const original='| H1 | H2 |\n| --- | --- |\n| target | old |\n| old | old |\n';
+  await reset(original);await select('target',0);
+  await paste('a\tb\nc\td','<table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td style="vertical-align:bottom">d</td></tr></table>');
+  const check=()=>{let table;view.state.doc.descendants(node=>{if(node.type.name==='table')table=node;});assert.deepEqual(table.content.content.map(row=>row.content.content.map(cell=>cell.textContent)),[['H1','H2'],['a','b'],['c','d']]);assert.equal(table.lastChild.lastChild.attrs.verticalAlignment,'bottom');};
+  check();await exactHistory(original);check();
+ });
  await test('UX vertical alignment survives rich copy, paste, editing and one undo',async()=>{
   const original='Before\n\n| A | B |\n| --- | --- |\n| <!-- deditor:valign=middle -->**bold** | <!-- deditor:valign=bottom -->tail |\n\nAfter\n';
   await reset(original);await select('Before');const payload=app.getVisualEditor().clipboard();

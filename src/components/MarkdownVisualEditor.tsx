@@ -195,7 +195,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
     crepe.editor.use(faithfulTableSelection).use(markdownContextMenu(tabId, () => !cancelled && activeRef.current)).use(clipboardImages.plugin).use(shorthandRemark).use(highlightRemark).use(shorthandMarks.flat()).use(emojiSchema).use(shorthandInputRules).config(configureShorthand).use(editableBlockquote).use(footnoteReference).use(footnoteDefinition).use(footnoteUpdates).use(footnoteOrder).use(inlineSourceSchema).use(absoluteHeadingInputRule).use(activeBlockHint).use(sharedHeadingIds).use(faithfulParagraph).use(faithfulLink).use(faithfulInlineHtml).use(faithfulImage).use(extendedTableCells.flat()).config(configureTableEditing).use(inlineSchemas.flat()).config(configureInlineSerialization).use(frontmatter).use(rawRemark(mdx)).use(rawSchema);
     crepe.editor.config(ctx => ctx.update(editorViewOptionsCtx, prev => ({ ...prev, attributes: { class: "md-document", "aria-label": t("md.visualEditor"), spellcheck: "false" },
       handleKeyDown: (view, event) => handleSelectedBlockExit(view, event) || handleTableKeys(view, event),
-      handlePaste: (view, event, slice) => clipboardImages.paste(view, event) || pasteTableClipboard(view, event) || pastePlainText(view, event, slice, ctx.get(parserCtx)),
+      handlePaste: (view, event, slice) => clipboardImages.paste(view, event) || pasteTableClipboard(view, event, slice) || pastePlainText(view, event, slice, ctx.get(parserCtx)),
       handleDOMEvents: { ...prev.handleDOMEvents,
       mousedown: (_view, event) => {
         if ((event.metaKey || event.ctrlKey) && (event.target as HTMLElement).closest("a")) { event.preventDefault(); return true; }

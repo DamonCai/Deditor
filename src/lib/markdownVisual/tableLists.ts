@@ -1,4 +1,5 @@
 import { accurateTableDrop } from "./tableDrag";
+import { spreadsheetTableHeaders } from "./tablePaste";
 import { tableMenuPlacement } from "./tableMenu";
 import type { Ctx } from "@milkdown/kit/ctx";
 import { hardbreakFilterNodes, paragraphSchema } from "@milkdown/kit/preset/commonmark";
@@ -71,4 +72,4 @@ const nonemptyTableHeader = tableHeaderRowSchema.extendSchema(previous => ctx =>
 const headerOnlyTable = tableSchema.extendSchema(previous => ctx => ({
   ...previous(ctx), content: "table_header_row table_row*",
 }));
-export const extendedTableCells = [...tableCellExtensions, nonemptyTableHeader, headerOnlyTable, tableMenuPlacement, accurateTableDrop];
+export const extendedTableCells = [...tableCellExtensions, nonemptyTableHeader, headerOnlyTable, tableMenuPlacement, accurateTableDrop, spreadsheetTableHeaders];
