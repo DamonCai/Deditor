@@ -7,6 +7,12 @@ import { useEditorStore } from "../../store/editor";
 import { emojiSuggestions } from "../markdownShorthand";
 
 const pairs: Record<string, string> = {"(": ")", "[": "]", "{": "}", '"': '"', "'": "'", "*": "*", "_": "_", "`": "`", "$": "$", "~": "~", "=": "=", "^": "^"};
+function pairingEnabled(character: string) {
+  const { markdownSettings } = useEditorStore.getState();
+  if (/[()\[\]{}]/.test(character)) return markdownSettings.pairBrackets !== false;
+  if (/["']/.test(character)) return markdownSettings.pairQuotes !== false;
+  return true;
+}
 function prose(view: EditorView) {
   const {$from, $to} = view.state.selection;
   if (!view.editable || view.composing || !$from.sameParent($to) || !$from.parent.isTextblock || $from.parent.type.spec.code) return false;
@@ -39,6 +45,7 @@ export const markdownInputAssist = $prose(() => {
     props: {
       handleTextInput(view, from, to, text) {
         if (!prose(view) || !useEditorStore.getState().autoCloseBrackets || text.length !== 1) return false;
+        if (!pairingEnabled(text) || (from !== to && useEditorStore.getState().markdownSettings.wrapSelection === false)) return false;
         const next = view.state.doc.textBetween(to, Math.min(view.state.doc.content.size, to + 1));
         const previous = view.state.doc.textBetween(Math.max(0, from - 1), from);
         // Only brackets/quotes are auto-inserted for a collapsed caret. Markdown
@@ -79,7 +86,7 @@ export const markdownInputAssist = $prose(() => {
         if (event.key !== "Backspace" || !view.state.selection.empty || !useEditorStore.getState().autoCloseBrackets) return false;
         const pos = view.state.selection.from;
         const before = view.state.doc.textBetween(Math.max(0, pos - 1), pos), after = view.state.doc.textBetween(pos, Math.min(view.state.doc.content.size, pos + 1));
-        if (!pairs[before] || pairs[before] !== after || /[*_`$~=^]/.test(before)) return false;
+        if (!pairs[before] || pairs[before] !== after || /[*_`$~=^]/.test(before) || !pairingEnabled(before)) return false;
         view.dispatch(view.state.tr.delete(pos - 1, pos + 1)); return true;
       },
     },

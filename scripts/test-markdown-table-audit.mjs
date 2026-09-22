@@ -177,6 +177,15 @@ try {
  const columnSource='Before unchanged\n\n| A | B | C |\n| :--- | :---: | ---: |\n| **甲** | 中间 | `代码` |\n| 一 | 二 | 三 |\n\nAfter unchanged\n';
  const openColumnMenu=async(cell)=>{await act(async()=>cell.dispatchEvent(new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:20,clientY:20})));const menu=document.querySelector('.md-table-menu');assert.ok(menu);return menu;};
  const deleteFromMenu=async(menu)=>{const button=[...menu.querySelectorAll('button')].find(b=>b.textContent==='Delete column');assert.ok(button);await act(async()=>button.click());assert.equal(document.querySelector('.md-table-menu'),null);assert.ok(view.hasFocus());};
+ await test('F00spell system spelling escape preserves cell selections and standard table menu',async()=>{
+  await reset(columnSource);await select('中间');view.dom.spellcheck=true;
+  const cell=view.dom.querySelector('td');await openColumnMenu(cell);const selection=view.state.selection,before=content();
+  const event=new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,altKey:true});
+  await act(async()=>cell.dispatchEvent(event));assert.equal(event.defaultPrevented,false);assert.equal(document.querySelector('.md-table-menu'),null);assert.equal(document.querySelector('.md-editor-menu'),null);assert.ok(view.state.selection.eq(selection));
+  const keyboard=await key('F10',{shiftKey:true,altKey:true});assert.equal(keyboard.defaultPrevented,false);assert.equal(document.querySelector('.md-table-menu'),null);assert.equal(document.querySelector('.md-editor-menu'),null);
+  view.dom.spellcheck=false;const disabled=new dom.window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,altKey:true});
+  await act(async()=>cell.dispatchEvent(disabled));assert.equal(disabled.defaultPrevented,true);assert.ok(document.querySelector('.md-table-menu'));assert.equal(content(),before);
+ });
  await test('F00col1 right-click deletes first, middle or last column, retaining marks and alignment',async()=>{
   for(const col of [0,1,2]){
    await reset(columnSource);const before=matrix(),attrs=Array.from({length:3},(_,i)=>table().node.firstChild.child(i).attrs.alignment);

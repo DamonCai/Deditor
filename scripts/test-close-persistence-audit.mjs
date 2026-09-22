@@ -151,10 +151,16 @@ try {
   app.schedulePersist(extras);
   assert.equal(timers.size, 0);
   await app.flushPersist();
+  store.setState(s => ({ tabs: s.tabs.map(t => t.id === s.activeId ? { ...t, content: 'edited while another window is closing' } : t) }));
+  assert.equal(timers.size, 0);
   resume();
-  app.schedulePersist(extras);
-  assert.equal(timers.size, 1);
-  console.log('PASS closing suppresses delayed writes; a cancelled close resumes persistence');
+  assert.equal(timers.size, 1, 'cancelling must schedule edits made while persistence was paused');
+  for (const [id, timer] of [...timers]) { timers.delete(id); timer(); }
+  await tick();
+  assert.equal(JSON.parse(diskState).tabs[0].content, 'edited while another window is closing');
+  resume();
+  assert.equal(timers.size, 0, 'duplicate cancellation does not schedule another write');
+  console.log('PASS cancelled close persists edits made while paused without requiring another edit');
 
 } finally {
   unsubscribe();

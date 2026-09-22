@@ -20,6 +20,7 @@ export type ShortcutId =
   // menu
   | "file_new"
   | "file_new_window"
+  | "file_recent"
   | "file_open"
   | "file_open_folder"
   | "file_save"
@@ -65,6 +66,7 @@ export const SHORTCUTS: ShortcutMeta[] = [
   { id: "file_close_tab",    display: "Cmd/Ctrl+W",        labelKey: "shortcut.file.closeTab",    layer: "menu",   group: "file" },
 
   // Navigation
+  { id: "file_recent", display: "Cmd/Ctrl+E", labelKey: "recent.title", layer: "menu", group: "nav" },
   { id: "app_goto_anything",   display: "Cmd/Ctrl+P",       labelKey: "shortcut.nav.gotoAnything",   layer: "app", group: "nav" },
   { id: "app_command_palette", display: "Cmd/Ctrl+Shift+P", labelKey: "shortcut.nav.commandPalette", layer: "app", group: "nav" },
   { id: "app_goto_symbol",     display: "Cmd/Ctrl+R",       labelKey: "shortcut.nav.gotoSymbol",     layer: "app", group: "nav" },

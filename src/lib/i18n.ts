@@ -3,6 +3,20 @@ import { useEditorStore } from "../store/editor";
 export type Lang = "zh" | "en";
 
 const ZH: Record<string, string> = {
+  "recent.title": "近期文件",
+  "recent.placeholder": "搜索文件名或路径…",
+  "recent.empty": "打开文件后，它们会显示在这里。",
+  "recent.noMatch": "没有匹配的近期文件",
+  "recent.current": "当前文件",
+  "recent.openFailed": "无法打开此文件。文件可能已移动、删除或无权访问。",
+  "recent.hint": "↑ ↓ 选择 · Enter 打开 · Esc 关闭",
+  "md.moveDiagram": "拖动图表调整顺序（Alt+↑/↓）",
+  "md.pairBrackets": "阅读编辑：自动配对括号",
+  "md.pairQuotes": "阅读编辑：自动配对引号",
+  "md.wrapSelection": "阅读编辑：用成对符号包裹选区",
+  "md.pairingHelp": "分别控制括号、引号与选区包裹；Markdown 格式符沿用现有输入规则。",
+  "md.pairingDisabled": "请先在设置 → 编辑器中开启自动闭合括号与引号。",
+  "md.spellcheckHelp": "按住 Alt / Option 右键点击正文或表格文字，可打开系统拼写菜单（也可按 Alt+Shift+F10）。",
   "md.addRow": "添加行",
   "md.addColumn": "添加列",
   "md.deleteRow": "删除行",
@@ -718,6 +732,20 @@ const ZH: Record<string, string> = {
 };
 
 const EN: Record<string, string> = {
+  "recent.title": "Recent Files",
+  "recent.placeholder": "Search file names or paths…",
+  "recent.empty": "Files you open will appear here.",
+  "recent.noMatch": "No matching recent files",
+  "recent.current": "Current file",
+  "recent.openFailed": "Could not open this file. It may have moved, been deleted, or be inaccessible.",
+  "recent.hint": "↑ ↓ Select · Enter Open · Esc Close",
+  "md.moveDiagram": "Drag to reorder diagram (Alt+↑/↓)",
+  "md.pairBrackets": "Reading editor: pair brackets",
+  "md.pairQuotes": "Reading editor: pair quotes",
+  "md.wrapSelection": "Reading editor: wrap selected text",
+  "md.pairingHelp": "Control brackets, quotes and selection wrapping separately. Markdown delimiters keep their existing input rules.",
+  "md.pairingDisabled": "Enable automatic bracket and quote closing in Settings → Editor first.",
+  "md.spellcheckHelp": "Alt / Option + right-click text or a table cell for the system spelling menu (or Alt+Shift+F10).",
   "md.addRow": "Add row",
   "md.addColumn": "Add column",
   "md.deleteRow": "Delete row",

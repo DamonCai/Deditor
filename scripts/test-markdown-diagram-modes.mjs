@@ -14,6 +14,7 @@ globalThis.IntersectionObserver=class{observe(){} unobserve(){} disconnect(){}};
 window.matchMedia=()=>({matches:false,addEventListener(){},removeEventListener(){}});
 window.Range.prototype.getClientRects=()=>[];
 window.Range.prototype.getBoundingClientRect=()=>({left:0,right:0,top:0,bottom:0,width:0,height:0});
+window.scrollBy=()=>{};
 HTMLElement.prototype.scrollIntoView=function(){};
 HTMLElement.prototype.scrollTo=function({top=0}){this.scrollTop=top;};
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
@@ -46,6 +47,7 @@ export {useEditorStore} from './src/store/editor';
 export {getVisualEditor} from './src/lib/markdownVisualBridge';
 export {markdownHistory} from './src/lib/markdownHistory';
 export {saveFile} from './src/lib/fileio';
+export {commitWindowClose} from './src/lib/windowCloseGuard';
 `,resolveDir:process.cwd()},outfile:output,bundle:true,format:'esm',platform:'node',packages:'external',loader:{'.css':'empty'},plugins:[{name:'isolated-io',setup(b){
  b.onResolve({filter:/.*/},a=>(/\.css(?:\?raw)?$/.test(a.path))?{path:'css',namespace:'stub'}:stubs[a.path]?{path:a.path,namespace:'stub'}:a.path.endsWith('/feedback')?{path:'feedback',namespace:'stub'}:undefined);
  b.onLoad({filter:/.*/,namespace:'stub'},a=>({contents:a.path==='css'?'export default "";':a.path==='feedback'?'export const showError=async()=>{};':stubs[a.path],loader:'js'}));
@@ -154,6 +156,20 @@ await test('UX localized context menu, keyboard dismissal, readonly and diagram 
   await run(()=>view.dom.dispatchEvent(new window.KeyboardEvent('keydown',{key:'F10',shiftKey:true,bubbles:true,cancelable:true})));
   menu=document.querySelector('.md-editor-menu');assert.ok(menu);assert.ok(menu.querySelectorAll('button:disabled').length>=4);
  }store.setState({language:'en'});
+});
+await test('UX system spelling escape preserves localized menus and excludes embedded code',async()=>{
+ await reset(diagramSource('mermaid'));await range('Before',0,6);
+ const prose=view.dom.querySelector('p');assert.ok(prose);
+ const context=async(target,altKey=false)=>{const event=new window.MouseEvent('contextmenu',{bubbles:true,cancelable:true,altKey});await run(()=>target.dispatchEvent(event));return event;};
+ const before=content();view.dom.spellcheck=true;
+ assert.equal((await context(prose)).defaultPrevented,true);assert.ok(document.querySelector('.md-editor-menu'));
+ const selection=view.state.selection;
+ assert.equal((await context(prose,true)).defaultPrevented,false);assert.equal(document.querySelector('.md-editor-menu'),null);assert.ok(view.state.selection.eq(selection));
+ const keyboard=new window.KeyboardEvent('keydown',{key:'F10',shiftKey:true,altKey:true,bubbles:true,cancelable:true});
+ await run(()=>view.dom.dispatchEvent(keyboard));assert.equal(keyboard.defaultPrevented,false);assert.equal(document.querySelector('.md-editor-menu'),null);
+ view.dom.spellcheck=false;assert.equal((await context(prose,true)).defaultPrevented,true);assert.ok(document.querySelector('.md-editor-menu'));
+ view.dom.spellcheck=true;await mode('edit');assert.equal((await context(cmView().contentDOM,true)).defaultPrevented,true);assert.ok(document.querySelector('.md-editor-menu'));
+ assert.equal(content(),before);
 });
 await test('UX ordinary code stays open while its keyboard menu is focused and dismisses safely',async()=>{
  store.setState({language:'en'});await reset(diagramSource('typescript','const value = 1;'));
@@ -313,6 +329,65 @@ await test('round 5: ordinary code and math retain existing editing behavior',as
   assert.equal(document.querySelector('.md-code-editor').hidden,false);
   assert.equal(document.querySelector('.md-code-preview').hidden,true);
   await run(()=>runScopeHandlers(cmView(),new window.KeyboardEvent('keydown',{key:'Escape'}),'editor'));assert.equal(document.querySelector('.md-code-editor').hidden,true);
+ }
+});
+
+const dragPointer=(target,type,x,y)=>{const event=new window.MouseEvent(type,{bubbles:true,cancelable:true,button:0,clientX:x,clientY:y});Object.defineProperty(event,'pointerId',{value:7});target.dispatchEvent(event);};
+const geometry=()=>{
+ const bounds={left:0,right:800,top:0,bottom:700,width:800,height:700};
+ document.querySelector('.md-visual-scroll').getBoundingClientRect=()=>bounds;
+ view.dom.getBoundingClientRect=()=>bounds;
+ view.state.doc.forEach((node,pos,index)=>{const element=view.nodeDOM(pos);if(element)element.getBoundingClientRect=()=>({left:20,right:760,top:30+index*90,bottom:100+index*90,width:740,height:70});});
+};
+await test('drag round 1: Mermaid and PlantUML pointer moves up/down with exact single undo and saved source',async()=>{
+ for(const lang of ['mermaid','plantuml']) {
+  const original=`Before\n\n${'```'}${lang}\n${lang==='mermaid'?'graph LR\n A --> B':'@startuml\nA -> B\n@enduml'}\n${'```'}\n\nAfter\n\nLast\n`;
+  await reset(original);geometry();let handle=document.querySelector('.md-diagram-drag');assert.equal(handle.hidden,false);
+  await run(()=>{dragPointer(handle,'pointerdown',35,140);dragPointer(window,'pointermove',35,390);});
+  assert.ok(document.querySelector('.md-diagram-drop-line:not([hidden])'));
+  await run(()=>dragPointer(window,'pointerup',35,390));assert.equal(view.state.doc.lastChild.type.name,'code_block');
+  await exactHistory(original);geometry();handle=document.querySelector('.md-diagram-drag');
+  await run(()=>{dragPointer(handle,'pointerdown',35,320);dragPointer(window,'pointermove',35,32);dragPointer(window,'pointerup',35,32);});
+  assert.equal(view.state.doc.firstChild.type.name,'code_block');assert.equal(document.querySelector('.md-diagram-drop-line'),null);
+ }
+});
+await test('drag round 2: cancel, outside, no-op and concurrent edits cannot move stale source',async()=>{
+ const original=diagramSource('mermaid');await reset(original);geometry();
+ const begin=()=>{const h=document.querySelector('.md-diagram-drag');dragPointer(h,'pointerdown',30,140);dragPointer(window,'pointermove',30,300);};
+ await run(begin);await key('Escape');assert.equal(content(),original);assert.equal(document.querySelector('.md-diagram-drop-line'),null);
+ await run(()=>{begin();dragPointer(window,'pointerup',900,300);});assert.equal(content(),original);
+ await run(()=>{const h=document.querySelector('.md-diagram-drag');dragPointer(h,'pointerdown',30,140);dragPointer(window,'pointerup',30,141);});assert.equal(content(),original);
+ await run(begin);await run(()=>view.dispatch(view.state.tr.insertText('Changed ',1)));const changed=content();
+ await run(()=>dragPointer(window,'pointerup',30,300));assert.equal(content(),changed);assert.equal(document.querySelector('.md-diagram-drop-line'),null);
+});
+await test('drag round 3: keyboard moves in all modes; aliases, nested blocks and readonly remain safe',async()=>{
+ for(const lang of ['mermaid','plantuml','puml','uml']) for(const value of ['preview','edit','split']) {
+  await reset(diagramSource(lang));await mode(value);
+  await run(()=>document.querySelector('.md-diagram-drag').dispatchEvent(new window.KeyboardEvent('keydown',{key:'ArrowUp',altKey:true,bubbles:true,cancelable:true})));
+  assert.equal(view.state.doc.firstChild.type.name,'code_block');
+  await run(()=>document.querySelector('.md-diagram-drag').dispatchEvent(new window.KeyboardEvent('keydown',{key:'ArrowDown',altKey:true,bubbles:true,cancelable:true})));
+  assert.equal(view.state.doc.firstChild.type.name,'paragraph');
+ }
+ await reset('> Before\n>\n> ```mermaid\n> graph LR\n> A --> B\n> ```\n>\n> After\n');
+ await run(()=>document.querySelector('.md-diagram-drag').dispatchEvent(new window.KeyboardEvent('keydown',{key:'ArrowDown',altKey:true,bubbles:true,cancelable:true})));
+ assert.equal(view.state.doc.firstChild.type.name,'blockquote');assert.equal(view.state.doc.firstChild.lastChild.type.name,'code_block');
+ await render(true);assert.equal(document.querySelector('.md-diagram-drag').hidden,true);
+});
+
+await test('drag round 4: list schema, close/readonly, capture loss and unmount reject late drops',async()=>{
+ const original='- First paragraph\n\n  ```mermaid\n  graph LR\n  A --> B\n  ```\n\n  Last paragraph\n';
+ await reset(original);
+ await run(()=>document.querySelector('.md-diagram-drag').dispatchEvent(new window.KeyboardEvent('keydown',{key:'ArrowUp',altKey:true,bubbles:true,cancelable:true})));
+ assert.equal(content(),original,'List item retains required leading paragraph');
+ const fixture=diagramSource('mermaid');
+ const begin=()=>{geometry();const h=document.querySelector('.md-diagram-drag');dragPointer(h,'pointerdown',30,140);dragPointer(window,'pointermove',30,300);return h;};
+ for(const cancel of ['close','readonly','capture','unmount']) {
+  await reset(fixture);let h;await run(()=>{h=begin();});let resume;
+  if(cancel==='close')resume=app.commitWindowClose();
+  if(cancel==='readonly')await render(true);
+  if(cancel==='capture')await run(()=>h.dispatchEvent(new window.Event('lostpointercapture')));
+  if(cancel==='unmount')await act(async()=>root.render(null));
+  await run(()=>dragPointer(window,'pointerup',30,300));resume?.();assert.equal(content(),fixture,cancel);assert.equal(document.querySelector('.md-diagram-drop-line'),null,cancel);
  }
 });
 } finally {await act(async()=>root.unmount());}

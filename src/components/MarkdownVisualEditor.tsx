@@ -1,3 +1,4 @@
+import { isWindowCloseCommitted } from "../lib/windowCloseGuard";
 import { markdownSearchHighlights, searchHighlightsKey, navigationHighlightMeta, scrollSearchMatch } from "../lib/markdownVisual/searchHighlights";
 import { stableTableView } from "../lib/markdownVisual/tableView";
 import { installEditorSearch } from "../lib/editorSearch";
@@ -157,16 +158,19 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
     const position = markdownViewState(tabId, sourceRef.current, paneId);
     const mdx = /\.mdx$/i.test(filePath ?? "");
     const upload = async (file: File) => {
+      if (isWindowCloseCommitted()) return '';
       const base = filePath ? dirname(filePath) : useEditorStore.getState().workspaces[0];
       if (!base) { const message = tStatic("editor.pasteImageNoTarget"); void showError(message); throw new Error(message); }
       const ext = ({ "image/jpeg": "jpg", "image/png": "png", "image/gif": "gif", "image/webp": "webp", "image/svg+xml": "svg" } as Record<string, string>)[file.type] ?? "png";
       const name = `image-${crypto.randomUUID()}.${ext}`;
-      const bytes = new Uint8Array(await file.arrayBuffer()); let binary = "";
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      if (isWindowCloseCommitted()) return "";
+      let binary = "";
       for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
-      try { const folder = documentImageDirectory(sourceRef.current, filePath, useEditorStore.getState().markdownSettings.imageDirectory); await saveImage(base, name, btoa(binary), folder); return markdownImageReference(folder, name); }
-      catch (err) { logError("Markdown image upload failed", err); void showError(String(err)); throw err; }
+      try { const folder = documentImageDirectory(sourceRef.current, filePath, useEditorStore.getState().markdownSettings.imageDirectory); await saveImage(base, name, btoa(binary), folder); if (isWindowCloseCommitted()) return ""; return markdownImageReference(folder, name); }
+      catch (err) { if (isWindowCloseCommitted()) return ""; logError("Markdown image upload failed", err); void showError(String(err)); throw err; }
     };
-    const clipboardImages = imageClipboard(upload, () => activeRef.current && !readonlyRef.current && !cancelled, () => session.breakGroup());
+    const clipboardImages = imageClipboard(upload, () => activeRef.current && !readonlyRef.current && !cancelled && !isWindowCloseCommitted(), () => session.breakGroup());
     const initialSource = sourceRef.current;
     const codeNodeView = codeView(tabId, theme);
     const crepe = new CrepeBuilder({ root: host, defaultValue: normalizeMarkdownFences(initialSource) })
@@ -252,7 +256,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
             inlineEditing?.close();
             const state = view.state;
             const text = await navigator.clipboard.readText();
-            if (cancelled || !activeRef.current || !view.editable || view.state.doc !== state.doc || !view.state.selection.eq(state.selection)) return false;
+            if (isWindowCloseCommitted() || cancelled || !activeRef.current || !view.editable || view.state.doc !== state.doc || !view.state.selection.eq(state.selection)) return false;
             insertPlainText(view, text); return true;
           };
           bridge.find = openSearch;

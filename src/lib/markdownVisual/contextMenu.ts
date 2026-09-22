@@ -1,3 +1,4 @@
+import { isWindowCloseCommitted } from "../windowCloseGuard";
 import { $prose } from '@milkdown/kit/utils';
 import { Plugin, AllSelection, Selection } from '@milkdown/kit/prose/state';
 import { EditorView as CodeView } from '@codemirror/view';
@@ -19,6 +20,10 @@ export const markdownContextMenu = (tabId: string, enabled: () => boolean) => $p
       if (event.target.closest('input,select,textarea') && !event.target.closest('.cm-editor')) return;
       const keyboard = event.type === 'keydown';
       const target = event.target, cmRoot = target.closest<HTMLElement>('.cm-editor');
+      // Keep normal right-click localized, but let the system offer spelling
+      // corrections for prose when explicitly requested with Option/Alt.
+      if (event.altKey && view.editable && view.dom.spellcheck && !cmRoot
+        && !target.closest('.md-code-block, .md-raw-block, [data-md-inline-source]')) { close(); return; }
       const cm = cmRoot ? CodeView.findFromDOM(cmRoot) : null;
       event.preventDefault(); event.stopPropagation(); close();
       // A right click outside the current range moves the insertion point.
@@ -30,12 +35,13 @@ export const markdownContextMenu = (tabId: string, enabled: () => boolean) => $p
       const unchanged = () => !disposed && view.state.doc === state.doc && view.state.selection.eq(state.selection)
         && (!cm || cm.state.doc === cmState!.doc && cm.state.selection.eq(cmState!.selection));
       const focus = () => cm ? cm.focus() : view.focus();
-      const guard = () => { if (!enabled() || !view.editable || cm?.state.readOnly || !unchanged()) throw new Error(tStatic('md.clipboardChanged')); };
+      const guard = () => { if (isWindowCloseCommitted()) return false; if (!enabled() || !view.editable || cm?.state.readOnly || !unchanged()) throw new Error(tStatic('md.clipboardChanged')); return true; };
       menu = document.createElement('div'); menu.className = 'md-editor-menu'; menu.setAttribute('role', 'menu');
+      const reportError = () => { if (!isWindowCloseCommitted()) void showError(tStatic('md.clipboardError')); };
       const action = (key: string, run: () => unknown, disabled = false) => {
         const button = document.createElement('button'); button.className = 'deditor-btn'; button.dataset.variant = 'ghost'; button.dataset.size = 'sm'; button.type = 'button';
         button.setAttribute('role', 'menuitem'); button.textContent = tStatic(key); button.disabled = disabled;
-        button.onclick = () => { close(); focus(); try { void Promise.resolve(run()).catch(() => showError(tStatic('md.clipboardError'))); } catch { void showError(tStatic('md.clipboardError')); } };
+        button.onclick = () => { close(); focus(); try { void Promise.resolve(run()).catch(reportError); } catch { reportError(); } };
         menu!.append(button);
       };
       const separator = () => { const line = document.createElement('div'); line.className = 'md-table-menu-separator'; line.setAttribute('role', 'separator'); menu!.append(line); };
@@ -47,10 +53,10 @@ export const markdownContextMenu = (tabId: string, enabled: () => boolean) => $p
         if (cm) {
           const { from, to } = cmState!.selection.main;
           await navigator.clipboard.writeText(cmState!.sliceDoc(from, to));
-          if (cut) { guard(); cm.dispatch({ changes: { from, to, insert: '' }, userEvent: 'delete.cut' }); }
+          if (cut) { if (!guard()) return; cm.dispatch({ changes: { from, to, insert: '' }, userEvent: 'delete.cut' }); }
         } else {
           await writeMarkdownClipboard(clipboardPayload(view, '', ctx.get(serializerCtx)), 'rich');
-          if (cut) { guard(); view.dispatch(view.state.tr.deleteSelection().setMeta('deditor-list-operation', true).scrollIntoView()); }
+          if (cut) { if (!guard()) return; view.dispatch(view.state.tr.deleteSelection().setMeta('deditor-list-operation', true).scrollIntoView()); }
         }
       };
       action('editor.cut', () => copy(true), readonly || empty);
@@ -65,7 +71,7 @@ export const markdownContextMenu = (tabId: string, enabled: () => boolean) => $p
             if (text || html) break;
           }
         } else text = await navigator.clipboard.readText();
-        guard(); focus();
+        if (!guard()) return; focus();
         if (cm && text) cm.dispatch({ changes: { from: cmState!.selection.main.from, to: cmState!.selection.main.to, insert: text }, selection: { anchor: cmState!.selection.main.from + text.length }, userEvent: 'input.paste' });
         else if (html) view.pasteHTML(html);
         else if (text) view.pasteText(text);

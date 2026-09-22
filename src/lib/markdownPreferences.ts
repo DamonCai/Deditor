@@ -3,6 +3,9 @@ export interface MarkdownPreferences {
   customCss: string;
   mathAutoNumber: boolean;
   spellcheck: boolean;
+  pairBrackets: boolean;
+  pairQuotes: boolean;
+  wrapSelection: boolean;
   codeLineNumbers: boolean;
   codeWrap: boolean;
   codeIndent: number;
@@ -14,7 +17,7 @@ export interface MarkdownPreferences {
   preserveImageTargets: boolean;
   exportTemplate: "default" | "report" | "compact";
 }
-export const defaultMarkdownPreferences: MarkdownPreferences = { documentTheme: "default", customCss: "", mathAutoNumber: false, spellcheck: false, codeLineNumbers: true, codeWrap: true, codeIndent: 2, defaultCodeLanguage: "", focusParagraph: false, typewriter: false, imageDirectory: "assets", picgoEndpoint: "http://127.0.0.1:36677/upload", preserveImageTargets: true, exportTemplate: "default" };
+export const defaultMarkdownPreferences: MarkdownPreferences = { documentTheme: "default", customCss: "", mathAutoNumber: false, spellcheck: false, pairBrackets: true, pairQuotes: true, wrapSelection: true, codeLineNumbers: true, codeWrap: true, codeIndent: 2, defaultCodeLanguage: "", focusParagraph: false, typewriter: false, imageDirectory: "assets", picgoEndpoint: "http://127.0.0.1:36677/upload", preserveImageTargets: true, exportTemplate: "default" };
 export function imageDirectory(value: string) {
   const normalized = value.trim().replace(/\\/g, "/").replace(/\/$/, "");
   const prefix = normalized.match(/^(?:[a-z]:\/|\/\/|\/)/i)?.[0] ?? "";
@@ -34,6 +37,9 @@ export function normalizeMarkdownPreferences(input: Partial<MarkdownPreferences>
     customCss: typeof input?.customCss === "string" ? input.customCss.slice(0,32768) : "",
     mathAutoNumber: input?.mathAutoNumber === true,
     spellcheck: input?.spellcheck === true,
+    pairBrackets: input?.pairBrackets !== false,
+    pairQuotes: input?.pairQuotes !== false,
+    wrapSelection: input?.wrapSelection !== false,
     codeLineNumbers: input?.codeLineNumbers !== false,
     codeWrap: input?.codeWrap !== false,
     codeIndent: [2, 4, 8].includes(input?.codeIndent ?? 2) ? input?.codeIndent ?? 2 : 2,

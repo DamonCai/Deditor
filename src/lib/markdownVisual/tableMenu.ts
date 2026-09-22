@@ -64,6 +64,9 @@ export const tableMenuPlacement = $prose(() => new Plugin({
         ? view.nodeDOM(selection.$headCell.pos) as HTMLElement | null
         : view.domAtPos(selection.head).node.parentElement?.closest('td,th') : event.target.closest('td,th');
       if (!cell || !view.dom.contains(cell)) return;
+      // Leave the same spelling-menu escape hatch as ordinary prose. Do not
+      // move the cell selection before the browser handles the native menu.
+      if (event.altKey && view.dom.spellcheck) { close(); return; }
       event.preventDefault(); event.stopPropagation(); close();
       const at = view.state.doc.resolve(view.posAtDOM(cell, 0));
       let depth = at.depth;

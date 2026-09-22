@@ -1,6 +1,7 @@
 #[cfg(target_os = "macos")]
 mod window_chrome;
 mod editor_windows;
+mod recent_files;
 #[cfg(target_os = "macos")]
 mod dock_menu;
 mod markdown_images;
@@ -960,6 +961,7 @@ struct MenuLabels {
     new_window: &'static str,
     open: &'static str,
     open_folder: &'static str,
+    recent_files: &'static str,
     save: &'static str,
     save_as: &'static str,
     close_tab: &'static str,
@@ -994,6 +996,7 @@ fn labels_for(lang: &str) -> MenuLabels {
             new_window: "新建窗口",
             open: "打开…",
             open_folder: "打开文件夹…",
+            recent_files: "近期文件…",
             save: "保存",
             save_as: "另存为…",
             close_tab: "关闭标签",
@@ -1023,6 +1026,7 @@ fn labels_for(lang: &str) -> MenuLabels {
             new_window: "New Window",
             open: "Open…",
             open_folder: "Open Folder…",
+            recent_files: "Recent Files…",
             save: "Save",
             save_as: "Save As…",
             close_tab: "Close Tab",
@@ -1107,6 +1111,7 @@ fn build_and_set_menu(
     let new_item = build_file_item("file_new", l.new, "CmdOrCtrl+N")?;
     let new_window_item = build_file_item("file_new_window", l.new_window, "CmdOrCtrl+Shift+N")?;
     let open_item = build_file_item("file_open", l.open, "CmdOrCtrl+O")?;
+    let recent_files_item = build_file_item("file_recent", l.recent_files, "CmdOrCtrl+E")?;
     let open_folder_item = build_file_item("file_open_folder", l.open_folder, "CmdOrCtrl+Shift+O")?;
     let save_item = build_file_item("file_save", l.save, "CmdOrCtrl+S")?;
     let save_as_item = build_file_item("file_save_as", l.save_as, "CmdOrCtrl+Shift+S")?;
@@ -1118,6 +1123,7 @@ fn build_and_set_menu(
         .separator()
         .item(&open_item)
         .item(&open_folder_item)
+        .item(&recent_files_item)
         .separator()
         .item(&save_item)
         .item(&save_as_item)
@@ -1497,6 +1503,8 @@ pub fn run() {
             delete_path,
             print_window,
             update_window_title,
+            recent_files::read_recent_files,
+            recent_files::record_recent_file,
             editor_windows::new_window,
             editor_windows::window_ready,
             editor_windows::finish_window_close,

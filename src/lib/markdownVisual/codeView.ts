@@ -1,3 +1,4 @@
+import { diagramDrag } from "./diagramDrag";
 import { diagramOverview } from "./diagramOverview";
 import { exitBlockSource } from "./blockExit";
 import { diagramSplit } from "./diagramSplit";
@@ -42,6 +43,8 @@ export function codeView(tabId: string, theme: "light" | "dark") {
     selectBlock.onmousedown = event => event.preventDefault();
     selectBlock.onclick = selectNode;
     const bar = document.createElement("div"); bar.className = "md-code-bar";
+    const dragHandle = document.createElement("button"); dragHandle.type = "button"; dragHandle.className = "deditor-btn md-diagram-drag"; dragHandle.dataset.variant = "ghost";
+    dragHandle.textContent = "⠿"; dragHandle.title = tStatic("md.moveDiagram"); dragHandle.setAttribute("aria-label", tStatic("md.moveDiagram"));
     const language = document.createElement("input"); language.className = "deditor-input deditor-input--compact";
     language.setAttribute("aria-label", tStatic("md.codeLanguage")); language.value = node.attrs.language ?? "";
     const toggle = document.createElement("button"); toggle.className = "deditor-btn md-code-toggle"; toggle.dataset.variant = "ghost";
@@ -71,12 +74,13 @@ export function codeView(tabId: string, theme: "light" | "dark") {
       button.onclick = () => setDiagramMode(mode);
       modes.append(button); return button;
     });
-    bar.append(language, family, toggle, modes, remove, copy);
+    bar.append(dragHandle, language, family, toggle, modes, remove, copy);
     const editor = document.createElement("div"), preview = document.createElement("div"); preview.className = "md-code-preview"; editor.className = "md-code-editor";
     const body = document.createElement("div"); body.className = "md-code-body";
     const split = diagramSplit(body); body.append(editor, split.separator, preview);
     dom.append(selectBlock, bar, body);
     const overview = diagramOverview(dom, bar, body, preview);
+    const drag = diagramDrag(view, dom, dragHandle, getPos);
     bar.insertBefore(overview.controls, remove); bar.insertBefore(overview.button, remove);
     const closeOverview = () => overview.close(false);
     view.dom.addEventListener("deditor-diagram-overview-close", closeOverview);
@@ -170,6 +174,8 @@ export function codeView(tabId: string, theme: "light" | "dark") {
       dom.dataset.diagramMode = threeModes ? diagramMode : "";
       if (threeModes) expanded = diagramMode !== "preview";
       modes.hidden = !threeModes || !view.editable;
+      dragHandle.hidden = !threeModes || !view.editable;
+      if (!threeModes || !view.editable) drag.cancel();
       family.hidden = !threeModes; family.disabled = !view.editable; remove.hidden = !threeModes || !view.editable;
       if (threeModes) copy.remove();
       else if (!copy.isConnected) bar.append(copy);
@@ -328,7 +334,7 @@ export function codeView(tabId: string, theme: "light" | "dark") {
         if (languageChanged) { loadLanguage(); loadPresentation(); }
         if (textChanged || languageChanged || language.readOnly === view.editable) render(textChanged && !languageChanged);
         return true;
-      }, destroy() { overview.destroy(); view.dom.removeEventListener("deditor-diagram-overview-close", closeOverview); split.destroy(); view.dom.removeEventListener("deditor-contextmenu-close", menuClosed); view.dom.removeEventListener("deditor-writing-change", settingsChanged); view.dom.removeEventListener("deditor-document-change", documentChanged); view.dom.removeEventListener("deditor-editable-change", modeChanged); view.dom.removeEventListener("deditor-restore-focus", restoreFocus); dom.removeEventListener("focusout", collapse); destroyed = true; generation++; if (renderTimer) clearTimeout(renderTimer); controllers.forEach(controller => controller.abort()); cm?.destroy(); },
+      }, destroy() { drag.destroy(); overview.destroy(); view.dom.removeEventListener("deditor-diagram-overview-close", closeOverview); split.destroy(); view.dom.removeEventListener("deditor-contextmenu-close", menuClosed); view.dom.removeEventListener("deditor-writing-change", settingsChanged); view.dom.removeEventListener("deditor-document-change", documentChanged); view.dom.removeEventListener("deditor-editable-change", modeChanged); view.dom.removeEventListener("deditor-restore-focus", restoreFocus); dom.removeEventListener("focusout", collapse); destroyed = true; generation++; if (renderTimer) clearTimeout(renderTimer); controllers.forEach(controller => controller.abort()); cm?.destroy(); },
     };
   };
 }

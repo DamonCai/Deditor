@@ -67,7 +67,9 @@ Three agents and the parent checked operation gaps and fixed seven distinct caus
 - 较早、尚未排除并行图表部分代码的包：代码整块删除→逐键abc→撤销，第一步只撤销续写，第二步恢复代码，保存原文逐字节核对通过。这不是最终范围明确副本的完整原生结论。
 - 同一较早包：自建review.md临时设为只读，原生“文件→保存”实际得到 Permission denied (os error 13)，错误弹窗包含文件名和原因；Esc后在代码中**粘贴**AfterError可直接续写。恢复写权限后保存为 `nativeCodeAfterError`，关闭重开与磁盘一致。文件权限已恢复0644。该结果证明真实失败反馈/粘贴续写/重试闭环，不能改写成真实IME或逐字输入全部通过。
 
-### 下次优先处理的未明异常
+### 历史异常（已于 2026-09-22 定位）
+
+更新：同一 WKWebView 纯 textarea 已复现，定位到本机自动化与拼音输入链；ABC 下普通代码/Mermaid/主源码保存撤销重开通过，最终包逐键输入、保存、撤销、重做和重开也通过。已移出当前缺陷待办，真实 IME、原生跨应用剪贴板仍保留。见 [定位证据](closeout-shortcuts-2026-09-22.md)、[最终包验收](closeout-2026-09-22.md)、[当前待办](pending-tasks.md)。以下为当时现场与排查计划。
 
 最终范围明确的包已经构建并启动；代码整块删除后快速调用实际按键a/b/c、Cmd+Z、Cmd+S，界面出现字面的z/s，没有可靠执行预期撤销和保存。早期画面还有带下划线的未确认文本；较早原生代码输入也出现过类似q/s异常。**原因未确定，不能直接归因输入法、自动化工具或产品，也不能计为已修复的新bug。**
 
@@ -83,6 +85,8 @@ Three agents and the parent checked operation gaps and fixed seven distinct caus
 4. 日志、1036项文件哈希清单、原生基线、成功恢复文件与暂停时review.md已归档到 `tests/artifacts/operation-gaps-handoff-2026-09-12/`，状态见run-status.json。该目录被Git忽略，跨机器须单独迁移；临时副本与应用也不随Git同步。原生应用包在 `/tmp/deditor-operation-gaps-native-mnvdvafg/DEditor Operations Review.app`。同名共享构建目录可能被其他任务更新，不要据名字认定版本。
 5. 三个agent均结束，已清理各自浏览器标签/服务。主agent的浏览器恢复测试标签/5186服务已关闭；原生测试应用已退出，最终完整测试进程也已结束。不停止其他任务的开发服务。
 
-### Pause handoff (English)
+### Historical pause handoff (English)
+
+Updated 2026-09-22: the shortcut symptom has been isolated to this machine’s automation/Pinyin input chain; ABC-input native save/undo/reopen and final-package typing passed. See the current pending list above; the following paragraph records the earlier handoff.
 
 The user explicitly requested a pause. Seven fixes are recorded. The scoped final snapshot completed test:all with exit code 0 (62 core, 107 visual integration, 145 general, 119 XMind, and 33 new targeted groups), plus frontend and native builds. Earlier native evidence covers real permission-denied recovery and paste-based continuation, but final native acceptance is incomplete: rapid typing followed by Cmd+Z/Cmd+S inserted literal z/s. The cause is unresolved. The generated document was saved through the native menu, archived, closed, and the isolated application exited. External commit ccd6a14 captured this task's earlier changes; this task did not commit or push. Preserve concurrent diagram work and transfer ignored artifacts separately if changing machines.

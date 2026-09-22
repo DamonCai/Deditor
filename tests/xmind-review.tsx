@@ -1,4 +1,5 @@
 import { richNestedSheet } from "./fixtures/xmind-rich-nested";
+import { closeoutSheets } from "./fixtures/xmind-closeout";
 import { clipboardArchive } from './fixtures/xmind-clipboard';
 import { foldableTopicIds, walkTopics } from "../src/lib/xmind/document";
 // Isolated manual review: only generated fixture data, no native IO or saved state.
@@ -35,6 +36,7 @@ const richNested = ['leftHeaded','rightHeaded'].map((side, i) => {
 });
 const clipboardProbe = ({'clipboard-source':'source','clipboard-missing':'missing','clipboard-collision':'collision'} as const)[probe as 'clipboard-source'|'clipboard-missing'|'clipboard-collision'];
 const archive = clipboardProbe ? clipboardArchive(clipboardProbe)
+  : probe === 'closeout' ? sampleArchive(closeoutSheets())
   : probe === 'performance' ? sampleArchive([{id:'performance',title:'性能验证 · 1001 节点',rootTopic:{id:'perf-root',title:'性能验证',children:{attached:Array.from({length:20},(_,i)=>({id:`perf-${i}`,title:`分支 ${i+1}`,children:{attached:Array.from({length:49},(_,j)=>({id:`perf-${i}-${j}`,title:`自建主题 ${i+1} / ${j+1}`}))}}))}}}])
   : probe === 'unicode-labels' ? sampleArchive([{id:'unicode-labels',title:'Unicode labels',rootTopic:{id:'unicode-root',title:'Labels',children:{attached:['👨‍👩‍👧‍👦','👍🏽','🇨🇳','e\u0301'].map((cluster,i)=>({id:`unicode-${i}`,title:`Label ${i+1}`,labels:[cluster.repeat(30)]}))}}}])
   : probe === "native-title-width" ? sampleArchive([{id:'native-width',title:'Default title width',rootTopic:{id:'width-root',title:'标签省略与超出三行',children:{attached:[{id:'width-main',title:'Native Review20 symmetric up',children:{attached:[{id:'width-detail',title:'中文标题宽度检查'.repeat(2)}]}},{id:'width-words',title:'alpha bravo charlie delta echo',style:{properties:{'fo:max-width':'130'}}},{id:'width-explicit',title:'标签省略与超出三行',style:{properties:{'fo:max-width':'130'}}}]}}}])

@@ -49,6 +49,7 @@ function runOnEditor(cmd: (v: import("@codemirror/view").EditorView) => boolean)
 
 export const COMMANDS: Command[] = [
   // File
+  { id: "cmd.file.recent", labelKey: "recent.title", shortcut: "Cmd/Ctrl+E", group: "nav", run: () => useEditorStore.getState().setRecentFilesOpen(true) },
   { id: "cmd.file.newWindow", labelKey: "shortcut.file.newWindow", shortcut: "Cmd/Ctrl+Shift+N", group: "file", run: newWindow },
   { id: "cmd.file.new",          labelKey: "cmd.file.new",          shortcut: "Cmd/Ctrl+N",        group: "file", run: () => void newFile() },
   { id: "cmd.file.open",         labelKey: "cmd.file.open",         shortcut: "Cmd/Ctrl+O",        group: "file", run: () => void openFile() },

@@ -2,10 +2,10 @@
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Sel};
 use objc2::{define_class, msg_send, sel, MainThreadMarker, MainThreadOnly};
-use objc2_app_kit::{NSApplication, NSMenu, NSMenuItem};
+use objc2_app_kit::{NSApplication, NSApplicationTerminateReply, NSMenu, NSMenuItem};
 use objc2_foundation::{NSObject, NSObjectProtocol, NSString};
 use std::cell::RefCell;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 thread_local! {
     static DOCK: RefCell<Option<(Retained<NSMenu>, Retained<DockActions>, tauri::AppHandle)>> = const { RefCell::new(None) };
@@ -39,6 +39,24 @@ extern "C-unwind" fn application_dock_menu(_: &AnyObject, _: Sel, _: &AnyObject)
     })
 }
 
+// AppKit's standard Quit menu and Dock Quit call terminate: directly. Tao only
+// observes applicationWillTerminate, which is too late to await WebView writes.
+// Defer that path into Tauri's cancellable ExitRequested handshake instead.
+extern "C-unwind" fn application_should_terminate(
+    _: &AnyObject,
+    _: Sel,
+    _: &AnyObject,
+) -> NSApplicationTerminateReply {
+    let app = DOCK.with(|slot| slot.borrow().as_ref().map(|(_, _, app)| app.clone()));
+    let Some(app) = app else { return NSApplicationTerminateReply::TerminateNow; };
+    if app.state::<crate::editor_windows::Windows>().0.lock().unwrap().allow_exit {
+        return NSApplicationTerminateReply::TerminateNow;
+    }
+    log::info!("Native quit waits for editor recovery snapshots");
+    app.exit(0);
+    NSApplicationTerminateReply::TerminateCancel
+}
+
 pub fn install(app: &tauri::AppHandle, label: &str) -> Result<(), Box<dyn std::error::Error>> {
     let app_handle = app.clone();
     let label = label.to_owned();
@@ -70,6 +88,20 @@ pub fn install(app: &tauri::AppHandle, label: &str) -> Result<(), Box<dyn std::e
                 if !added.as_bool() {
                     log::error!("Dock menu: applicationDockMenu already installed");
                     return;
+                }
+                let termination_added = unsafe {
+                    objc2::ffi::class_addMethod(
+                        class,
+                        sel!(applicationShouldTerminate:),
+                        std::mem::transmute::<
+                            extern "C-unwind" fn(&AnyObject, Sel, &AnyObject) -> NSApplicationTerminateReply,
+                            objc2::runtime::Imp,
+                        >(application_should_terminate),
+                        c"Q@:@".as_ptr(),
+                    )
+                };
+                if !termination_added.as_bool() {
+                    log::error!("Native quit: applicationShouldTerminate already installed");
                 }
             }
             let menu = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str("DEditor"));

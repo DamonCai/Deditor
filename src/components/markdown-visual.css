@@ -316,3 +316,10 @@
 .md-diagram-block .md-diagram-overview .md-code-preview > :is(.mermaid-diagram, .plantuml-diagram) > svg { flex: none; }
 .md-diagram-zoom { display: inline-flex; align-items: center; gap: 2px; }
 .md-diagram-zoom .deditor-btn { min-width: 28px; }
+
+/* Diagram ordering uses an explicit handle, leaving preview and source selection intact. */
+.md-diagram-drag.deditor-btn { flex: 0 0 24px; width: 24px; height: 24px; padding: 0 !important; display: inline-flex; align-items: center; justify-content: center; font-size: 18px; cursor: grab; touch-action: none; user-select: none; }
+.md-diagram-drag.deditor-btn:active { cursor: grabbing; }
+.md-diagram-dragging { outline: 2px solid var(--accent); }
+.md-diagram-drop-line { position: fixed; height: 3px; background: var(--accent); pointer-events: none; z-index: 3000; }
+.md-diagram-overview .md-diagram-drag { display: none; }

@@ -115,6 +115,8 @@ interface EditorState {
   /** Whether the Goto Anything palette is showing. Lifted to store so the
    *  Command Palette can dispatch it as a runnable action. */
   gotoAnythingOpen: boolean;
+  recentFilesOpen: boolean;
+  recentFiles: string[];
   /** Whether the Command Palette is showing. */
   commandPaletteOpen: boolean;
   gotoSymbolOpen: boolean;
@@ -172,6 +174,7 @@ interface EditorState {
   resetShortcuts: () => void;
   setSettingsOpen: (open: boolean) => void;
   setGotoAnythingOpen: (open: boolean) => void;
+  setRecentFilesOpen: (open: boolean) => void;
   setCommandPaletteOpen: (open: boolean) => void;
   setGotoSymbolOpen: (open: boolean) => void;
   setFindInFilesOpen: (open: boolean) => void;
@@ -479,6 +482,8 @@ const editorStore = create<EditorState>((rawSet, get) => {
   shortcuts: { ...DEFAULT_SHORTCUTS },
   settingsOpen: false,
   gotoAnythingOpen: false,
+  recentFilesOpen: false,
+  recentFiles: [],
   commandPaletteOpen: false,
   gotoSymbolOpen: false,
   findInFilesOpen: false,
@@ -576,11 +581,12 @@ const editorStore = create<EditorState>((rawSet, get) => {
   },
   setShortcuts: (next) => set({ shortcuts: { ...next } }),
   resetShortcuts: () => set({ shortcuts: { ...DEFAULT_SHORTCUTS } }),
-  setSettingsOpen: (open) => set({ settingsOpen: open }),
-  setGotoAnythingOpen: (open) => set({ gotoAnythingOpen: open }),
-  setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
-  setGotoSymbolOpen: (open) => set({ gotoSymbolOpen: open }),
-  setFindInFilesOpen: (open) => set({ findInFilesOpen: open }),
+  setSettingsOpen: (open) => set({ settingsOpen: open, ...(open ? { recentFilesOpen: false } : {}) }),
+  setGotoAnythingOpen: (open) => set({ gotoAnythingOpen: open, ...(open ? { recentFilesOpen: false } : {}) }),
+  setRecentFilesOpen: (open) => set({ recentFilesOpen: open, ...(open ? { settingsOpen: false, gotoAnythingOpen: false, commandPaletteOpen: false, gotoSymbolOpen: false, findInFilesOpen: false } : {}) }),
+  setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open, ...(open ? { recentFilesOpen: false } : {}) }),
+  setGotoSymbolOpen: (open) => set({ gotoSymbolOpen: open, ...(open ? { recentFilesOpen: false } : {}) }),
+  setFindInFilesOpen: (open) => set({ findInFilesOpen: open, ...(open ? { recentFilesOpen: false } : {}) }),
 
   setDirExpanded: (path, expanded) => {
     const cur = get().expandedDirs;

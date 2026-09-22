@@ -1,4 +1,6 @@
-import { installWindowLifecycle, windowEventTarget } from "./lib/editorWindows";
+import RecentFiles from "./components/RecentFiles";
+import { installRecentFiles, handleRecentFilesKey } from "./lib/recentFiles";
+import { installWindowLifecycle, isWindowCloseCommitted, windowEventTarget } from "./lib/editorWindows";
 import { showError } from "./lib/feedback";
 import { tStatic } from "./lib/i18n";
 import { beginPaneResize } from "./lib/paneResize";
@@ -71,6 +73,8 @@ export default function App() {
   const [hydrated, setHydrated] = useState(false);
   const zenMode = useEditorStore((s) => s.zenMode);
   const autoSave = useEditorStore((s) => s.autoSave);
+  const recentFilesOpen = useEditorStore(s => s.recentFilesOpen);
+  const setRecentFilesOpen = useEditorStore(s => s.setRecentFilesOpen);
   const gotoOpen = useEditorStore((s) => s.gotoAnythingOpen);
   const setGotoOpen = useEditorStore((s) => s.setGotoAnythingOpen);
   const settingsOpen = useEditorStore((s) => s.settingsOpen);
@@ -190,12 +194,19 @@ export default function App() {
     };
   }, [autoSave]);
 
+  useEffect(() => {
+    if (!hydrated) return;
+    return installRecentFiles();
+  }, [hydrated]);
+
   // File menu lives in the native macOS app menu (built in Rust). Accelerators
   // there (Cmd+N / Cmd+O / Cmd+S / etc.) are intercepted by the OS, so we
   // only handle the shortcuts the menu doesn't own here.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (isWindowCloseCommitted()) return;
       if (e.isComposing) return;
+      if (handleRecentFilesKey(e)) return;
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
       const prefs = useEditorStore.getState().shortcuts;
@@ -264,10 +275,12 @@ export default function App() {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     listen<string>("menu-action", (e) => {
+      if (isWindowCloseCommitted()) return;
       switch (e.payload) {
         case "edit_find": openEditorSearch(); break;
         case "edit_replace": openEditorSearch(true); break;
         case "file_new": newFile(); break;
+        case "file_recent": useEditorStore.getState().setRecentFilesOpen(!useEditorStore.getState().recentFilesOpen); break;
         case "file_open": openFile(); break;
         case "file_open_folder": openFolder(); break;
         case "file_save": saveFile(); break;
@@ -297,6 +310,7 @@ export default function App() {
     // those); listening directly to just DRAG_DROP is one event subscription
     // instead of four AND drops the webview barrel from the bundle.
     listen<TauriDragDropPayload>("tauri://drag-drop", async (event) => {
+      if (isWindowCloseCommitted()) return;
       const filePaths: string[] = [];
       for (const p of event.payload.paths) {
         let kind = "file";
@@ -306,6 +320,7 @@ export default function App() {
           // Treat probe failures as "file" so the existing openMany path
           // can surface a more useful error.
         }
+        if (isWindowCloseCommitted()) return;
         if (kind === "dir") {
           await setWorkspaceByPath(p).catch(() => {});
         } else {
@@ -336,9 +351,11 @@ export default function App() {
   useEffect(() => {
     if (!hydrated) return;
     let unlisten: (() => void) | undefined;
+    let unlistenCloseCancelled: (() => void) | undefined;
     let cancelled = false;
 
     const drainAndOpen = async () => {
+      if (isWindowCloseCommitted()) return;
       try {
         const paths = await invoke<string[]>("drain_pending_open_files");
         for (const p of paths) {
@@ -359,9 +376,19 @@ export default function App() {
         else unlisten = fn;
       })
       .catch(() => {});
+    // Paths received after the close snapshot stay queued. If another
+    // window cancels quitting, resume opening those files after all close
+    // cancellation listeners have released the editing guard.
+    listen("window-close-cancelled", () => {
+      queueMicrotask(() => { if (!cancelled) void drainAndOpen(); });
+    }, windowEventTarget()).then(fn => {
+      if (cancelled) fn();
+      else unlistenCloseCancelled = fn;
+    }).catch(() => {});
     return () => {
       cancelled = true;
       unlisten?.();
+      unlistenCloseCancelled?.();
     };
   }, [hydrated]);
 
@@ -423,6 +450,7 @@ export default function App() {
           flips. Modules are now eager so opening Cmd+P / Cmd+Shift+P / etc.
           shows the dialog on the same frame as the keystroke — no chunk
           fetch lag. */}
+      {recentFilesOpen && <RecentFiles onClose={() => setRecentFilesOpen(false)} />}
       {gotoOpen && <GotoAnything open onClose={() => setGotoOpen(false)} />}
       {commandPaletteOpen && (
         <CommandPalette open onClose={() => setCommandPaletteOpen(false)} />

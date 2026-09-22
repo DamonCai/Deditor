@@ -42,6 +42,7 @@ export {getVisualEditor} from './src/lib/markdownVisualBridge';
 export {markdownHistory} from './src/lib/markdownHistory';
 export {writeMarkdownClipboard} from './src/lib/markdownClipboard';
 export {saveFile} from './src/lib/fileio';
+export {normalizeMarkdownPreferences} from './src/lib/markdownPreferences';
 `,resolveDir:process.cwd()},outfile:output,bundle:true,format:'esm',platform:'node',packages:'external',loader:{'.css':'empty'},plugins:[{name:'isolated-io',setup(b){
  b.onResolve({filter:/.*/},a=>a.path.endsWith('.css')?{path:'css',namespace:'stub'}:stubs[a.path]?{path:a.path,namespace:'stub'}:a.path.endsWith('/feedback')?{path:'feedback',namespace:'stub'}:undefined);
  b.onLoad({filter:/.*/,namespace:'stub'},a=>({contents:a.path==='css'?'':a.path==='feedback'?'export const showError=async()=>{};':stubs[a.path],loader:'js'}));
@@ -185,6 +186,36 @@ try {
    const original='alpha beta gamma\n';await reset(original);await range('alpha beta gamma',6,10);await input(pair[0]);assert.equal(visible(),'alpha '+pair[0]+'beta'+pair[1]+' gamma');assert.equal(view.state.doc.textBetween(view.state.selection.from,view.state.selection.to),'beta');await exactHistory(original);
   }
   await reset('alpha\n');store.setState({autoCloseBrackets:false});await select('alpha');await input(' ');await input('(');assert.equal(visible(),'alpha (');store.setState({autoCloseBrackets:true});
+ });
+ await test('B05 separate bracket and quote preferences apply to insertion, skip and deletion',async()=>{
+  const originalSettings=store.getState().markdownSettings;
+  try {
+   for(const [setting,pair,other] of [['pairBrackets','()','""'],['pairQuotes','""','()']]) {
+    await act(async()=>store.setState({markdownSettings:{...originalSettings,[setting]:false}}));
+    await reset('alpha\n');await select('alpha');await input(' ');await input(pair[0]);assert.equal(visible(),'alpha '+pair[0]);
+    await reset('alpha\n');await select('alpha');await input(' ');await input(other[0]);assert.equal(visible(),'alpha '+other);
+    await reset('alpha '+pair+'\n');await select('alpha '+pair,7);await input(pair[1]);assert.equal(visible(),'alpha '+pair[0]+pair[1]+pair[1],'disabled option must not skip authored closer');
+    await reset('alpha '+pair+'\n');await select('alpha '+pair,7);const backspace=await key('Backspace');assert.equal(backspace.defaultPrevented,false,'disabled option leaves ordinary character deletion to the browser');assert.equal(visible(),'alpha '+pair,'jsdom does not perform native character deletion');
+   }
+  } finally {await act(async()=>store.setState({markdownSettings:originalSettings}));}
+ });
+ await test('B05 selection wrapping preference and live toggles preserve history and other pairing',async()=>{
+  const originalSettings=store.getState().markdownSettings;
+  try {
+   await act(async()=>store.setState({markdownSettings:{...originalSettings,wrapSelection:false}}));
+   for(const typed of ['(','"','*','`']) {
+    const original='alpha beta gamma\n';await reset(original);await range('alpha beta gamma',6,10);await input(typed);assert.equal(visible(),'alpha '+typed+' gamma');await exactHistory(original);
+   }
+   await reset('中文\n');await select('中文');await input(' ');await input('(');assert.equal(visible(),'中文 ()');
+   await act(async()=>store.setState({markdownSettings:{...originalSettings,pairBrackets:false}}));await input('[');assert.equal(visible(),'中文 ([)');
+   await act(async()=>store.setState({markdownSettings:originalSettings}));await input('{');assert.equal(visible(),'中文 ([{})');
+  } finally {await act(async()=>store.setState({markdownSettings:originalSettings}));}
+ });
+ await test('B05 old preferences preserve defaults and disabled options survive normalization',async()=>{
+  const defaults=app.normalizeMarkdownPreferences({});
+  assert.equal(defaults.pairBrackets,true);assert.equal(defaults.pairQuotes,true);assert.equal(defaults.wrapSelection,true);
+  const restored=app.normalizeMarkdownPreferences(JSON.parse(JSON.stringify({...defaults,pairBrackets:false,pairQuotes:false,wrapSelection:false})));
+  assert.equal(restored.pairBrackets,false);assert.equal(restored.pairQuotes,false);assert.equal(restored.wrapSelection,false);
  });
  await test('B06 emoji candidates select with arrows and Tab then exact undo',async()=>{
   const original='alpha\n';await reset(original);await select('alpha');await input(' ');await input(':sm');const names=suggestions();assert.ok(names.length>1);await key('ArrowDown');await key('Tab');assert.ok(content().includes(names[1]));await exactHistory(original);

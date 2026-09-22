@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { useEditorStore } from "../store/editor";
 import { imageDirectory, picgoEndpoint, markdownLabels, type MarkdownPreferences } from "../lib/markdownPreferences";
 import { Button } from "./ui/Button";
+import { useT } from "../lib/i18n";
 import { collectMarkdownImages, type ImageTransfer } from "../lib/markdownImageCollect";
 import { documentImageDirectory } from "../lib/markdownImageSettings";
 export default function MarkdownWritingSettings() {
@@ -23,6 +24,8 @@ export default function MarkdownWritingSettings() {
   }, [open]);
   const settings = useEditorStore(s => s.markdownSettings), language = useEditorStore(s => s.language);
   const t = markdownLabels[language];
+  const translate = useT();
+  const autoCloseBrackets = useEditorStore(s => s.autoCloseBrackets);
   const [folder, setFolder] = useState(settings.imageDirectory);
   const [collecting, setCollecting] = useState(false), [result, setResult] = useState("");
   const [endpoint, setEndpoint] = useState(settings.picgoEndpoint), [token, setToken] = useState("");
@@ -57,6 +60,11 @@ export default function MarkdownWritingSettings() {
       <Button onClick={()=>{setOpen(false);setHistoryOpen(true);}}>{language === "zh" ? "历史版本与草稿…" : "Versions and drafts…"}</Button>
       <label><input type="checkbox" checked={settings.mathAutoNumber} onChange={e => set({mathAutoNumber:e.target.checked})} />{language === "zh" ? "公式自动编号" : "Automatically number equations"}</label>
       <label><input type="checkbox" checked={settings.spellcheck} onChange={e => set({spellcheck:e.target.checked})} />{language === "zh" ? "系统拼写检查" : "System spellcheck"}</label>
+      {settings.spellcheck && <small>{translate("md.spellcheckHelp")}</small>}
+      <label><input type="checkbox" checked={settings.pairBrackets !== false} disabled={!autoCloseBrackets} onChange={e => set({pairBrackets:e.target.checked})} />{translate("md.pairBrackets")}</label>
+      <label><input type="checkbox" checked={settings.pairQuotes !== false} disabled={!autoCloseBrackets} onChange={e => set({pairQuotes:e.target.checked})} />{translate("md.pairQuotes")}</label>
+      <label><input type="checkbox" checked={settings.wrapSelection !== false} disabled={!autoCloseBrackets} onChange={e => set({wrapSelection:e.target.checked})} />{translate("md.wrapSelection")}</label>
+      <small>{translate(autoCloseBrackets ? "md.pairingHelp" : "md.pairingDisabled")}</small>
       <label><input type="checkbox" checked={settings.codeLineNumbers} onChange={e => set({codeLineNumbers:e.target.checked})} />{language === "zh" ? "代码块行号" : "Code block line numbers"}</label>
       <label><input type="checkbox" checked={settings.codeWrap} onChange={e => set({codeWrap:e.target.checked})} />{language === "zh" ? "代码块自动换行" : "Wrap code blocks"}</label>
       <label>{language === "zh" ? "代码缩进" : "Code indentation"}<select value={settings.codeIndent} onChange={e => set({codeIndent:Number(e.target.value)})}>{[2,4,8].map(n=><option key={n} value={n}>{n}</option>)}</select></label>

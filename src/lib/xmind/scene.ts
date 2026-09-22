@@ -1138,6 +1138,17 @@ export function calloutTailPath(parent: Box, bubble: Box): string {
   return `M${base.x},${y - half} L${tip.x},${tip.y} L${base.x},${y + half} Z`;
 }
 
+/** A translucent fill cannot hide a branch buried under the central title. */
+function translucentTopicFill(node: SceneNode): boolean {
+  const fill = node.fill.trim().toLowerCase();
+  if (node.fillOpacity < 1 || fill === "none" || fill === "transparent") return true;
+  const hex = /^#([\da-f]{4}|[\da-f]{8})$/.exec(fill)?.[1];
+  if (hex) return hex.length === 4 ? hex[3] !== "f" : hex.slice(6) !== "ff";
+  const alpha = /\/\s*([\d.]+)(%)?\s*\)$/.exec(fill)
+    ?? /^(?:rgba|hsla)\([^)]*,\s*([\d.]+)(%)?\s*\)$/.exec(fill);
+  return !!alpha && Number(alpha[1]) < (alpha[2] ? 100 : 1);
+}
+
 export function edgePath(edge: Edge, from: SceneNode, to: SceneNode): string {
   if (edge.callout) return calloutTailPath(from, to);
   if (edge.points?.length === 3 && edge.roundedCorner) {
@@ -1199,7 +1210,9 @@ export function edgePath(edge: Edge, from: SceneNode, to: SceneNode): string {
   if (from.depth === 0 && !vertical && from.direction === "side") {
     // The main branch emerges from underneath the central topic, easing into
     // the child's horizontal tangent instead of meeting at one exposed joint.
-    const start = cx(from) + ((d === "left" ? -1 : 1) * from.width) / 3;
+    // Without a fill there is no cover for that buried segment: begin at the
+    // side of the outline so the branch cannot cross the central title.
+    const start = translucentTopicFill(from) ? x1 : cx(from) + ((d === "left" ? -1 : 1) * from.width) / 3;
     return `M${start},${y1} Q${start + (x2 - start) * 0.2},${y2} ${x2},${y2}`;
   }
   return vertical

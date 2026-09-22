@@ -1,3 +1,4 @@
+import { isWindowCloseCommitted } from "../lib/windowCloseGuard";
 import { rememberTextState, recordTextUpdate, textHistory, textProjectionSync } from "../lib/textHistory";
 import { documentImageDirectory, markdownImageReference } from "../lib/markdownImageSettings";
 import { markdownSession, markdownViewState, sourceChange } from "../lib/markdownSession";
@@ -844,6 +845,7 @@ async function doCut(view: EditorView) {
   } catch {
     /* fall through */
   }
+  if (isWindowCloseCommitted()) return;
   view.dispatch({ changes: { from, to, insert: "" } });
   view.focus();
 }
@@ -855,7 +857,7 @@ async function doPaste(view: EditorView) {
   } catch {
     return;
   }
-  if (!text) return;
+  if (!text || isWindowCloseCommitted()) return;
   const { from, to } = view.state.selection.main;
   view.dispatch({
     changes: { from, to, insert: text },
@@ -900,9 +902,10 @@ async function handleImagePaste(blob: File, mime: string, view: EditorView) {
     logInfo(`pasted image saved: ${folder}/${name} (${buf.byteLength} bytes)`);
   } catch (err) {
     logError(`paste image save failed: ${folder}/${name}`, err);
-    void showError(tStatic("editor.saveImageFailed", { err: String(err) }));
+    if (!isWindowCloseCommitted()) void showError(tStatic("editor.saveImageFailed", { err: String(err) }));
     return;
   }
+  if (isWindowCloseCommitted()) return;
   const rel = isMd ? markdownImageReference(folder, name) : `${folder}/${name}`;
   const insert = isMd ? `![](${/[\s()]/.test(rel) ? `<${rel}>` : rel})` : rel;
   const pos = view.state.selection.main.from;

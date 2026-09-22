@@ -1,3 +1,4 @@
+import { isWindowCloseCommitted } from "../lib/windowCloseGuard";
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { FiClipboard } from 'react-icons/fi';
@@ -35,12 +36,14 @@ export default function MarkdownClipboardMenu({ visual }: { visual: VisualEditor
       else {
         const current = getVisualEditor();
         if (current?.owner !== snapshot.bridge.owner || current?.tabId !== snapshot.bridge.tabId || !await snapshot.bridge.pastePlain?.()) {
-          setError(t('md.clipboardChanged')); return;
+          if (isWindowCloseCommitted()) setSnapshot(null);
+          else setError(t('md.clipboardChanged'));
+          return;
         }
       }
       setSnapshot(null);
       if (getVisualEditor()?.owner === snapshot.bridge.owner) snapshot.bridge.focus();
-    } catch { setError(t('md.clipboardError')); }
+    } catch { if (isWindowCloseCommitted()) setSnapshot(null); else setError(t('md.clipboardError')); }
     finally { setBusy(false); }
   };
   return <div className="md-clipboard" ref={root}>

@@ -1,3 +1,4 @@
+import { isWindowCloseCommitted } from "./windowCloseGuard";
 import { saveMarkdownImage } from "./markdownImageStorage";
 import { invoke } from "@tauri-apps/api/core";
 import { useEditorStore } from "../store/editor";
@@ -32,7 +33,7 @@ async function transferImages(tabId: string, operation: ImageTransfer, cancelled
   };
   let stopped = false;
   for (const url of urls) {
-    if (cancelled() || !stillCurrent()) { stopped = true; break; }
+    if (isWindowCloseCommitted() || cancelled() || !stillCurrent()) { stopped = true; break; }
     const remote = /^(?:https?:)?\/\//i.test(url);
     const path = resolveMarkdownImage(url, filePath, imageRoot);
     if (operation.kind === "download" ? !remote : path === null) { skipped++; continue; }
@@ -67,6 +68,7 @@ async function transferImages(tabId: string, operation: ImageTransfer, cancelled
   }
   // Preserve edits made while the files were being copied, and never write into
   // another tab or into a document that has since moved or closed.
+  if (isWindowCloseCommitted()) return { copied: copies.size, skipped, failures, folder, stopped: true };
   const pending = useEditorStore.getState().tabs.find(t => t.id === tabId);
   // A source-mode or external replacement may still be waiting for React to
   // update the mounted editor. Do not flush an outdated view over that change.

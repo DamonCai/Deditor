@@ -68,7 +68,7 @@ const docs = [ { id: "md-review", filePath: "/generated/visual-review.md", conte
  { id: "xmind-review", filePath: "/generated/isolated.xmind", content: bytesToXmindDataUrl(sampleArchive(sampleSheets())), savedContent: bytesToXmindDataUrl(sampleArchive(sampleSheets())) },
  { id: "mdx-review", filePath: "/generated/component.mdx", content: 'import Card from "./Card"\n\n# MDX\n\n<Card value={1 + 2}>内容</Card>\n', savedContent: 'import Card from "./Card"\n\n# MDX\n\n<Card value={1 + 2}>内容</Card>\n' },
 ];
-useEditorStore.setState({ tabs: docs, activeId: docs[0].id, markdownMode: "visual", language: "zh", theme: dark ? "dark" : "light" });
+useEditorStore.setState({ tabs: docs, activeId: docs[0].id, markdownMode: "visual", language: new URLSearchParams(location.search).get("lang") === "en" ? "en" : "zh", autoCloseBrackets: !new URLSearchParams(location.search).has("no-auto-pairs"), theme: dark ? "dark" : "light" });
 document.documentElement.classList.toggle("dark", dark);
 function Review() {
  const id = useEditorStore(s => s.activeId)!;

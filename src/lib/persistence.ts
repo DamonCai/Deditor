@@ -351,7 +351,15 @@ export function pausePersistence(): () => void {
   persistencePaused = true;
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = null;
-  return () => { persistencePaused = false; };
+  let resumed = false;
+  return () => {
+    if (resumed) return;
+    resumed = true;
+    persistencePaused = false;
+    // Another window may fail its close after this one has already flushed.
+    // Capture edits made during that wait even if the user stops typing.
+    if (latestExtras) schedulePersist(latestExtras);
+  };
 }
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;

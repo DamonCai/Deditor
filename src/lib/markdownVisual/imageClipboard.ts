@@ -42,7 +42,7 @@ export function imageClipboard(upload: (file: File) => Promise<string>, enabled:
     const target = { from: view.state.selection.from, to: view.state.selection.to };
     pending.add(target);
     void Promise.all(files.map(upload)).then(urls => {
-      if (!pending.delete(target) || view.isDestroyed || !enabled()) return;
+      if (!pending.delete(target) || view.isDestroyed || !enabled() || urls.some(url => !url)) return;
       const image = view.state.schema.nodes["image-block"];
       if (!image) return;
       breakGroup();
