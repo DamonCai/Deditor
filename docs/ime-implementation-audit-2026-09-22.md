@@ -64,3 +64,20 @@ seq62 Cmd+S的meta=true、isComposing=false且没有字母s的文本input。主�
 ## 主端最终闭环与清理
 
 滚动提交后单次 Cmd+Z / Cmd+S 与2524字节baseline完全一致；Cmd+Shift+Z / Cmd+S后关闭并重开，与`scroll-chinese.saved.md`逐字节一致（2527字节，唯一新增“你”）。活动组合保存核查结束以Escape取消，最终`composition.md`仍精确等于该中文副本。普通对照页仅修改临时textarea值，HTML源文件未改。所有自建文档已关闭，普通与组合诊断测试包均退出，系统输入源读取确认为SCIM.ITABC；日常应用未替换。
+
+## 第二轮：候选坐标边界与官方可观察入口
+
+本轮单独复核 IN-03/04，未操作原生 UI，未改产品源码或待办清单。`compositionViewport.ts` 的坐标换算是 `当前 caret 的 viewport 坐标 + 当前 scrollTop - 组合起始 scrollTop`，用于判断起始视口是否已经能看到 caret；没有把文档坐标当屏幕坐标，也没有创建隐藏的输入代理。光标以 DOM selection 为准，用户 wheel/touchmove/pointerdown 会释放锚点；异步帧读取的是当前锚点，销毁取消帧并移除监听。本轮未找到可确定的 IN-03/04 产品反例，因此没有增加原生坐标刷新调用或调整延时。
+
+曾检查图片 alt/caption 原生字段是否会保留旧正文 DOM selection，使外层滚动误追踪正文。最小 DOM 实验中 `input.focus()` 后 selection 转向输入元素，起初的“必然保留正文旧光标”前提不成立；实验仅用于排除该推断，不能证明所有 WebKit 字段行为，也不能计作候选原生验收。未将此假设写成产品修复或增加人为字段限制。
+
+官方资料支持以下定位边界：
+
+- AppKit 的 [`firstRect(forCharacterRange:actualRange:)`](https://developer.apple.com/documentation/appkit/nstextinputclient/firstrect%28forcharacterrange%3Aactualrange%3A%29?language=objc) 给出屏幕坐标中的字符矩形；零长度范围表示插入点，多行范围返回第一行部分。DOM caret 矩形本身不是系统候选窗口矩形，二者不能混为同一证据。
+- [`invalidateCharacterCoordinates()`](https://developer.apple.com/documentation/appkit/nstextinputcontext/invalidatecharactercoordinates%28%29?language=objc) 用于告知输入系统先前查询的字符坐标需要更新。当前没有证明 WebKit 失效通知缺失，故不向产品盲加原生刷新钩子。
+- [WebKit 官方当前主干 `WebViewImpl.mm`](https://github.com/WebKit/WebKit/blob/main/Source/WebKit/UIProcess/mac/WebViewImpl.mm) 的实际异步 `firstRectForCharacterRange` 经页面查询后调用 `convertFromViewToScreen`；同步兼容方法返回 `NSZeroRect` 并标记不应调用。因此额外调用同步 getter 得到零矩形不能证明阅读编辑定位错误。当前主干源码也不等同本机系统 WebKit 的版本证据。
+- [`IMKCandidates.show(_:)`](https://developer.apple.com/documentation/inputmethodkit/imkcandidates/show%28_%3A%29) 属于输入法自身候选面板接口，显示提示用于使面板保持可见并靠近相关文字。贴近屏幕边缘时翻转方向不应判为错位；应用不应绕过 WebKit 创建自己的替代候选框。
+
+可在既有 CUA UI 范围内使用的新入口来自 [Apple《Use the candidate window》](https://support.apple.com/guide/chinese-input-method/use-the-candidate-window-cim12992/mac)：普通拼音输入代码自动显示候选；已经输入代码时，可选中代码，通过菜单栏输入菜单执行 **Show Substitution Candidates（显示替换候选字）**。后者可用于先判断 CUA 能否观察输入法候选面板；它不单独替代活动组合期间滚动/光标移动验收，也无需修改用户输入法设置。
+
+主端后续候选视觉核对最小矩阵：同一自建 `LEFT|RIGHT` 处开始拼音，候选出现时记录 caret 与面板；左右移动后再次记录；随后在 `START|END` 处组合并小幅滚动，使 caret 仍在可见区域，比较面板是否跟随新的屏幕位置；最后大幅滚动使 caret 离屏，记录系统隐藏/重定位行为而不预设必须显示在旧位置。所有截图必须来自 CUA 实际画面，不能以 DOM rect、合成 composition 事件、系统进程存在或提交文字正确代替候选位置。未使用 CG/AX 旁路，也未新增后台原生读取候选坐标的命令。
