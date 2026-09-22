@@ -24,6 +24,8 @@ function prose(view: EditorView) {
 /** Input helpers stay outside composition and never rebuild the article. */
 export const markdownInputAssist = $prose(() => {
   let replaying = false;
+  // null parts abandons this entire batch after overflow, including later events.
+  let pendingText: { doc: ProseNode; from: number; to: number; parts: string[] | null } | null = null;
   let choices: string[] = [], index = 0, from = 0, to = 0, hiddenAt = "";
   let hiddenDocument: ProseNode | null = null;
   let popup: HTMLElement | null = null;
@@ -47,7 +49,40 @@ export const markdownInputAssist = $prose(() => {
       return state.tr.setNodeMarkup(current.before(), undefined, {...current.parent.attrs, language});
     },
     props: {
+      handleDOMEvents: {
+        beforeinput(view, event) {
+          const input = event as InputEvent;
+          if (!view.editable || view.composing || input.isComposing || !useEditorStore.getState().autoCloseBrackets || input.inputType !== "insertText" || !input.data || !formatPairKey.getState(view.state)) {
+            pendingText = null; return false;
+          }
+          const { from, to } = view.state.selection;
+          if (pendingText?.doc !== view.state.doc || pendingText.from !== from || pendingText.to !== to) pendingText = { doc: view.state.doc, from, to, parts: [] };
+          if (pendingText.parts && pendingText.parts.length < 256) pendingText.parts.push(input.data);
+          else pendingText.parts = null;
+          return false;
+        },
+        compositionstart() { pendingText = null; return false; },
+        compositionend() { pendingText = null; return false; },
+        paste() { pendingText = null; return false; },
+        drop() { pendingText = null; return false; },
+        pointerdown() { pendingText = null; return false; },
+      },
       handleTextInput(view, from, to, text) {
+        const pending = pendingText; pendingText = null;
+        // A DOM observer flush may combine several actual key inputs. Preserve
+        // their order only when beforeinput proves the complete non-IME chain;
+        // arbitrary pasted/composed strings must keep their literal contents.
+        if (!replaying && view.editable && !view.composing && useEditorStore.getState().autoCloseBrackets && text.length > 1 &&
+            pending?.doc === view.state.doc && pending.from === from && pending.to === to && pending.parts && pending.parts.length > 1 &&
+            view.state.selection.from === from && view.state.selection.to === to &&
+            pending.parts.join("") === text && formatPairKey.getState(view.state)) {
+          for (const part of pending.parts) {
+            const selection = view.state.selection;
+            const defaultText = () => view.state.tr.insertText(part, selection.from, selection.to);
+            if (!view.someProp("handleTextInput", handler => handler(view, selection.from, selection.to, part, defaultText))) view.dispatch(defaultText());
+          }
+          return true;
+        }
         if (replaying || !view.editable || view.composing || !useEditorStore.getState().autoCloseBrackets || text.length !== 1) return false;
         if (handleFormatPairInput(view, from, to, text, value => {
           replaying = true;
@@ -108,6 +143,7 @@ export const markdownInputAssist = $prose(() => {
       view.dom.parentElement!.append(popup);
       const clear = () => {choices = []; popup?.replaceChildren();};
       const update = () => {
+        if (pendingText && (pendingText.doc !== view.state.doc || pendingText.from !== view.state.selection.from || pendingText.to !== view.state.selection.to)) pendingText = null;
         // Escape dismisses the current query until text changes. Position alone
         // would keep an equally long replacement (or a retyped query) hidden.
         if (hiddenDocument !== view.state.doc) { hiddenAt = ""; hiddenDocument = null; }

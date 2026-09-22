@@ -69,6 +69,24 @@ const input=async(text)=>{await act(async()=>{const {from,to}=view.state.selecti
 const range=async(text,a,b)=>{await select(text,a);await act(async()=>view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc,view.state.selection.from,view.state.selection.from+b-a))));};
 const visible=()=>view.state.doc.textBetween(0,view.state.doc.content.size,'\n','\n');
 
+// Emulate browser editing, not a direct handleTextInput call: several native
+// edits may be observed in one MutationObserver delivery. ProseMirror must read
+// the DOM and derive the combined input itself.
+const domTextBatch=async(parts,{inputType='insertText',composing=false}={})=>{
+ const observed=[];view.setProps({handleTextInput(_view,from,to,text){observed.push({from,to,text});return false;}});
+ await act(async()=>{
+  for(const text of parts){
+   const event=new dom.window.InputEvent('beforeinput',{bubbles:true,cancelable:true,inputType,data:text,isComposing:composing});view.dom.dispatchEvent(event);
+   assert.equal(event.defaultPrevented,false,'input tracking does not cancel native edits');
+   const selection=window.getSelection(),node=selection.anchorNode,offset=selection.anchorOffset;assert.equal(node.nodeType,3);
+   node.insertData(offset,text);selection.collapse(node,offset+text.length);
+   view.dom.dispatchEvent(new dom.window.InputEvent('input',{bubbles:true,inputType,data:text,isComposing:composing}));
+  }
+  await pause(80);
+ });
+ return observed;
+};
+
 try {
  await test('single formatting pairs preserve live Markdown, skip closers and undo',async()=>{
   for(const marker of ['*','_','`','$','~','^']) {
@@ -208,6 +226,45 @@ try {
    await input('*');assert.equal(content(),'Before **word**\n');await input('*');assert.equal(content(),'Before **word**\n');
    assert.equal(document.querySelector('[data-md-inline-source]'),null);await input('后');assert.equal(content(),'Before **word**后\n');
   }
+ });
+
+ await test('coalesced DOM edits skip only the generated closers and preserve exact history',async()=>{
+  for(const chunks of [['*','*'],['native','*','*'],['native','*','*',' ','outside']]){
+   const original='Pair testing paragraph.\n';await reset(original);await select('Pair testing paragraph.');for(const c of ' **')await input(c);
+   if(chunks.length===2)await input('native');
+   const observed=await domTextBatch(chunks);
+   assert.equal(observed[0].text,chunks.join(''),'ProseMirror really consumed one combined DOM diff');
+   assert.equal(content(),'Pair testing paragraph. **native**'+(chunks.length===5?' outside':'')+'\n');
+   assert.equal(app.formatPairKey.getState(view.state),null);assert.equal(document.querySelector('[data-md-inline-source]'),null);
+   // As with ordinary typing, text after a completed pair has its own undo boundary.
+   await exactHistory(chunks.length===5?'Pair testing paragraph. **native**\n':original);
+  }
+ });
+ await test('coalesced input preserves opening width and escaped closer semantics',async()=>{
+  await reset('Before\n');await select('Before');await input(' ');await input('*');
+  await domTextBatch(['*','word','*','*']);assert.equal(content(),'Before **word**\n');assert.equal(document.querySelector('[data-md-inline-source]'),null);
+  await reset('Before\n');await select('Before');await input(' ');await input('*');
+  await domTextBatch(['word','\\','*','*']);assert.equal(content(),'Before *word\\**\n');assert.equal(document.querySelector('[data-md-inline-source]'),null);
+ });
+ await test('composition, paste, disabled pairing and unobserved multi-character input stay literal',async()=>{
+  for(const mode of ['composition','paste','disabled','unobserved']){
+   await act(async()=>store.setState({autoCloseBrackets:true}));await reset('Before\n');await select('Before');for(const c of ' **native')await input(c);
+   if(mode==='composition')await domTextBatch(['*','*'],{inputType:'insertCompositionText',composing:true});
+   if(mode==='disabled'){await act(async()=>store.setState({autoCloseBrackets:false}));await domTextBatch(['*','*']);}
+   if(mode==='unobserved')await input('**');
+   if(mode==='paste')await act(async()=>{const event=new dom.window.Event('paste',{bubbles:true,cancelable:true});Object.defineProperty(event,'clipboardData',{value:{getData:type=>type==='text/plain'?'**':''}});view.dom.dispatchEvent(event);await pause(40);assert.equal(event.defaultPrevented,true);});
+   assert.equal(content(),'Before **native****\n',mode+' must not remove literal input');
+  }
+  await act(async()=>store.setState({autoCloseBrackets:true}));
+ });
+
+ await test('overflowed event batches fall back to complete literal input without replaying a suffix',async()=>{
+  await reset('Before\n');await select('Before');for(const c of ' **native')await input(c);
+  const parts=[...Array(257).fill('x'),'*','*'];
+  const observed=await domTextBatch(parts);
+  assert.deepEqual(observed.map(entry=>entry.text),[parts.join('')],'overflow must abandon the whole batch, not replay its final stars');
+  const expected='Before **native'+'x'.repeat(257)+'****\n';assert.equal(content(),expected);
+  await act(async()=>app.saveFile());assert.equal(writes.at(-1).content,expected);
  });
 } finally {await act(async()=>root.unmount());dom.window.close();}
 assert.equal(runtimeErrors.length,0);assert.deepEqual(failedCases,[]);console.log(`Passed ${passed} formatting pair groups`);
