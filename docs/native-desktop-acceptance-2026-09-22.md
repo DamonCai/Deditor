@@ -37,3 +37,20 @@ Finder 原生 `tauri://drag-drop` 监听明确使用当前 WebviewWindow label�
 Finder 仅成功连接到 Desktop，未执行实际文件或目录拖放。因此真实文件拖入的目标窗口归属、目录加入工作区仍待执行，不以实现审查或合成事件推断通过。
 
 待办保留为三项具体动作：Dock 菜单实际点击新建窗口；Finder 两文件/目录分别拖入指定窗口并核对归属；两窗口跨 Space 全屏进出、正文输入保存及撤销精确核对。本轮仅常规快捷键第二窗口打开自建文件、样例完整性与源码路径得到确认，未新增上述三项成功结论。未新增 Windows 或真实 IME 结论。
+
+## 后续真实窗口状态诊断：MAC-04 / MAC-05 已闭环
+
+本节替代上节中“全屏与焦点仍待验收”的状态；Dock、Finder 文件拖入和目录拖入仍保留 MAC-01/02/03。发现菜单文案固定为 Enter Full Screen / 进入全屏，而原生动作始终是 `toggleFullScreen:`；现改为 Toggle Full Screen / 切换全屏，避免用固定文字误判窗口状态。
+
+普通最终包已包含双语菜单文案修复。为得到实际状态，在同一份最终 dist 的独立副本注入 `tests/diagnostics/native-desktop.ts`，只调用 Tauri 当前窗口的 `isFullscreen`、`isFocused`、`outerPosition`、`outerSize`、`innerSize`，监听 resize/focus/blur 并在事件后复采。只读 overlay 不接受指针，独立应用 identifier 不覆盖日常安装；每窗写入各自的自建 JSON，不触发窗口操作或编辑文档。准备入口 `scripts/prepare-native-desktop-diagnostic.mjs`，读取转换记录使用 `scripts/read-native-desktop-diagnostic.mjs`。类型检查以及 getter 观测、日志隔离、被动 overlay 和监听清理检查通过。
+
+主端实际操作与保存核对如下：
+
+1. `main` 打开 `window-owner-a.md`，实际绿色按钮进入全屏。稳定原生采样为 `fullscreen=true, focused=true`，物理尺寸 3024×1898，CSS 1512×949，截图布局完整。标题追加 ` 1` 后 Cmd+S 保存。
+2. Cmd+Shift+N 创建 `editor-1790084468928`，普通窗口为 `fullscreen=false, focused=true`；打开 `finder-one.md`，标题追加 ` 2` 后 Cmd+S。`python3 scripts/native-desktop-fixtures.py --a-suffix ' 1' --one-suffix ' 2'` 三文件逐字节通过。
+3. Window 菜单在两窗间往返：A 始终全屏、B 始终普通；当前窗口 `focused=true`，另一窗为 false。分别 Cmd+Z / Cmd+S 恢复标题，三文件无参数基线校验通过。
+4. 回 A 实际点绿色按钮退出全屏。过渡采样先恢复 2560×1600 尺寸、`fullscreen` 暂仍 true；下一稳定采样为 false。最终截图布局完整。说明单次过渡尺寸/菜单状态不能替代动画结束后的原生状态。
+
+独立读取的日志确认 A 状态序列 false/true → true/true → true/false → true/true，随后退出为 false/true；B 在全部记录中 fullscreen=false，焦点随菜单选择往返。A 进入稳定采样为 2026-09-22 13:41:00.928 UTC，退出稳定采样为 13:42:30.964 UTC。日志未出现 getter/subscription 错误。
+
+证据位于被忽略的 `tests/artifacts/native-desktop-diagnostic-2026-09-22/`，主要为 `desktop-main-1790084435652.json`、`desktop-editor-1790084468928-1790084469182.json`；读取器生成的 `state-transitions.jsonlog` 可快速复核。结论限定为本次两窗口跨全屏 Space 往返、结束态布局、焦点与编辑归属，不声称逐帧动画、多显示器或任意窗口数验证。主端已将 A/B 自建文档还原保存后分别 Cmd+W 关闭，并 Cmd+Q 退出桌面诊断应用；末尾可能出现 Untitled，不影响之前的逐文件状态与保存证据。日常安装应用未替换。

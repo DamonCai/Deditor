@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Native WK input probe</title>
+<style>
+body{font:16px system-ui;margin:20px;background:#fff;color:#18212b}h1{font-size:21px}
+label{display:block;margin:12px 0 5px}textarea{box-sizing:border-box;width:100%;font:18px monospace;padding:9px}
+#trace{font-size:11px;height:280px}#summary{white-space:pre-wrap;font:13px monospace}button{margin:8px 10px 8px 0;padding:6px 12px}
+</style>
+<h1>Native WK input probe</h1>
+<p>Native textareas. This page only observes events; it does not inject keys, replace input, or prevent defaults. The last 96 events are retained.</p>
+<label for="plain">Plain native textarea</label>
+<textarea id="plain" rows="3" spellcheck="false" autocorrect="off" autocapitalize="off"></textarea>
+<label for="second">Second native textarea</label>
+<textarea id="second" rows="2" spellcheck="false" autocorrect="off" autocapitalize="off"></textarea>
+<button id="clear" type="button">Clear event log</button><button id="snapshot" type="button">Snapshot fields</button>
+<div id="summary" role="status" aria-label="Input event summary"></div>
+<label for="trace">Input event log (last 96)</label>
+<textarea id="trace" readonly spellcheck="false"></textarea>
+<script>
+(() => {
+  const targets = [document.getElementById('plain'), document.getElementById('second')];
+  const trace = document.getElementById('trace'), summary = document.getElementById('summary');
+  const rows = [], counts = {}; let sequence = 0, started = performance.now();
+  const limit = value => typeof value === 'string' && value.length > 180 ? value.slice(0,180)+'…' : value;
+  const state = field => ({field:field.id,value:limit(field.value),length:field.value.length,start:field.selectionStart,end:field.selectionEnd});
+  function append(row) {
+    rows.push({seq:++sequence,ms:Math.round(performance.now()-started),...row});
+    if(rows.length>96) rows.shift();
+    trace.value=rows.map(row=>JSON.stringify(row)).join('\n');
+    summary.textContent=JSON.stringify({events:sequence,counts,last:rows.at(-1)});
+  }
+  for(const field of targets) for(const type of ['focus','blur','keydown','keyup','beforeinput','input','textInput','compositionstart','compositionupdate','compositionend']) {
+    field.addEventListener(type,event=>{
+      counts[type]=(counts[type]||0)+1;
+      append({type,trusted:event.isTrusted,key:limit(event.key),code:event.code,keyCode:event.keyCode,
+        data:limit(event.data),inputType:event.inputType,composing:event.isComposing,
+        capsLock:typeof event.getModifierState==='function'?event.getModifierState('CapsLock'):undefined,
+        meta:event.metaKey,ctrl:event.ctrlKey,alt:event.altKey,shift:event.shiftKey,prevented:event.defaultPrevented,
+        ...state(field)});
+    });
+  }
+  document.getElementById('clear').onclick=()=>{rows.length=0;for(const key of Object.keys(counts))delete counts[key];sequence=0;started=performance.now();append({type:'cleared'});};
+  document.getElementById('snapshot').onclick=()=>append({type:'snapshot',fields:targets.map(state)});
+  append({type:'ready',agent:navigator.userAgent});
+})();
+</script>
+</html>

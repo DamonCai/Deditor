@@ -1011,7 +1011,7 @@ fn labels_for(lang: &str) -> MenuLabels {
             replace: "替换…",
             minimize: "最小化",
             maximize: "最大化",
-            fullscreen: "进入全屏",
+            fullscreen: "切换全屏",
         },
         _ => MenuLabels {
             file: "File",
@@ -1041,7 +1041,7 @@ fn labels_for(lang: &str) -> MenuLabels {
             replace: "Replace…",
             minimize: "Minimize",
             maximize: "Zoom",
-            fullscreen: "Enter Full Screen",
+            fullscreen: "Toggle Full Screen",
         },
     }
 }

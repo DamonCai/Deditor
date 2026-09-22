@@ -5,6 +5,7 @@ export function beginPaneResize(handle: HTMLElement, event: PointerEvent, move: 
   const doc = handle.ownerDocument, win = doc.defaultView!;
   const id = event.pointerId;
   let finished = false;
+  let capturedWithoutButtons = false;
   const preventSelection = (event: Event) => event.preventDefault();
   const finish = () => {
     if (finished) return;
@@ -21,7 +22,11 @@ export function beginPaneResize(handle: HTMLElement, event: PointerEvent, move: 
   };
   const onMove = (event: PointerEvent) => {
     if (event.pointerId !== id) return;
-    if (!(event.buttons & 1) || !handle.isConnected) { finish(); return; }
+    // Some native/assistive input sequences report zero buttons even on the
+    // initial primary down. Only trust that sequence while we own its capture;
+    // ordinary mouse drags still stop if the left-button state disappears.
+    const capturedZero = capturedWithoutButtons && event.buttons === 0 && handle.hasPointerCapture?.(id);
+    if ((!(event.buttons & 1) && !capturedZero) || !handle.isConnected) { finish(); return; }
     event.preventDefault();
     move(event);
   };
@@ -34,6 +39,12 @@ export function beginPaneResize(handle: HTMLElement, event: PointerEvent, move: 
   win.addEventListener('pointercancel', onEnd);
   win.addEventListener('blur', finish);
   handle.addEventListener('lostpointercapture', finish);
-  handle.setPointerCapture?.(id);
+  try {
+    handle.setPointerCapture?.(id);
+    capturedWithoutButtons = event.buttons === 0 && !!handle.hasPointerCapture?.(id);
+  } catch {
+    // A failed capture must not leave selection disabled or a half-started drag.
+    finish();
+  }
   return finish;
 }

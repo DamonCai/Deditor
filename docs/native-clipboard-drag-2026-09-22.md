@@ -95,8 +95,13 @@ DEDITOR_TEST_FILTER='EXCEL|UX vertical|C09|C05|C03' node scripts/test-markdown-i
 - **Excel 完整往返通过**：旧包工具栏实际复制 TSV → Excel 自建 Book1 A1:D4 → Excel Cmd+C → 修复包空白 `table-destination-fixed.md` Cmd+V/S。真实保存后为4行16格，无附加空头；Unicode、引号、竖线及空格值全部通过校验，bottom 对齐保留。一次 Cmd+Z/S 文件为0字节；重做、关闭、重开后与首次保存副本逐字节相同。
 - **Excel 既有表格粘贴通过**：实际选择 A2:B3 的 Alpha/12、Bravo/34，粘到自建3列表格 v11 单元格。保存后仍是一张4行3列表格，H1/H2/H3、v13/v23及末行v31/v32/v33保持，目标四格精确替换。一次撤销保存与97字节原文完全一致；重做、关闭后用 Cmd+Shift+T 重开，保存与405字节修改副本一致。
 - **Word 富文本往返通过**：工具栏复制富文本 → Word 新空文档普通粘贴，实际显示粗体、斜体及链接 → Word Cmd+A/C → DEditor 空目标粘贴保存。rich校验确认文字、粗斜体、URL、中文及emoji；一次撤销保存0字节，重做、关闭重开后内容保留。Word引入的NBSP、黑色span及尾空段如实保留，未宣称与原始Markdown字节相同。此路径在修复前基线包完成；本次产品修改仅针对表格。
-- **分隔线仍未通过**：1228px截图下 x614 拖至790产生预览文字选区而未改宽，清理选区后改用推算中线 x612 仍未观察到宽度变化。本次没有取得原生事件命中证据，不将其归因为确定产品缺陷或工具问题，保留待验。跨视口持续拖选、多显示器拖选本轮未执行。
+- **该批次分隔线未通过（后续已收口）**：1228px截图下 x614 拖至790产生预览文字选区而未改宽，清理选区后改用推算中线 x612 仍未观察到宽度变化。本次没有取得原生事件命中证据，不将其归因为确定产品缺陷或工具问题，保留待验。跨视口持续拖选、多显示器拖选本轮未执行。
 
 完整相关回归：26组剪贴板、34组表格、107项阅读集成全部通过；另7组定向、2组TSV、TypeScript检查及差异检查通过。本轮未跑完整 test:all 或 perf:all，不新增Windows、真实中文候选或钉钉验收。
 
 原生证据文件在上述 artifacts 目录，包括 `table-destination.md` 失败现场、`table-destination-fixed.md`、`table-fixed.saved.md`、`table-existing-fixed.md`、`table-existing.baseline.md`、`table-existing.saved.md`、`rich-destination.md`、`word-roundtrip.docx` 与 `ClipboardReview.xlsx`；日志为 `build.log`、`native-build.log`、`clipboard-all.log`、`table-all.log`、`integration.log`。这些本机证据被Git忽略，跨机需单独迁移。自建源文档与初始副本一致；测试文档已保存关闭，DEditor隔离实例、Excel及Word退出，输入源保留简体拼音。
+
+
+## 后续主实时预览分隔线闭环
+
+基线 `3a4e2db` 后借助独立原生事件诊断，确认命中与捕获成功，但实际投递的down/move.buttons均为0，触发现有提前松手保护。补已捕获手势的有界兼容后，12组专项通过；普通最终包两次正反向实际拖动改变边界约611→786→464px，没有新增正文选区，松手后真实正文拖选成功。Cmd+S/W/Q保存关闭退出，样例与原始副本逐字节一致（SHA-256 `2507db0a99c2f50da7104420a72e6498b9c4a6cf7d228fcdfb00a0a16b610918`）。CLIP-04已从待办移除，详见[原生分隔线完整证据及边界](native-pane-resize-diagnostic-2026-09-22.md)。未扩大到携带已有选区再拖、跨视口或跨显示器拖选。
