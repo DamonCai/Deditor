@@ -56,6 +56,8 @@ export function installCompositionViewport(editor: HTMLElement, scroller: HTMLEl
   const start = () => { composing = true; anchor = scroller.scrollTop; schedule(); };
   const end = () => { composing = false; settlingFrames = 2; schedule(); };
   // A deliberate scroll or a new mouse selection always wins over IME anchoring.
+  // Outline and other navigation controls live outside the scrolling editor;
+  // their explicit positioning must also survive composition's queued frames.
   const release = () => { anchor = null; };
   editor.addEventListener("compositionstart", start, true);
   editor.addEventListener("compositionend", end, true);
@@ -64,7 +66,7 @@ export function installCompositionViewport(editor: HTMLElement, scroller: HTMLEl
   scroller.addEventListener("scroll", schedule, { passive: true });
   scroller.addEventListener("wheel", release, { passive: true });
   scroller.addEventListener("touchmove", release, { passive: true });
-  scroller.addEventListener("pointerdown", release, true);
+  doc.addEventListener("pointerdown", release, true);
   return {
     handleScroll() {
       if (anchor === null) return false;
@@ -79,7 +81,7 @@ export function installCompositionViewport(editor: HTMLElement, scroller: HTMLEl
       scroller.removeEventListener("scroll", schedule);
       scroller.removeEventListener("wheel", release);
       scroller.removeEventListener("touchmove", release);
-      scroller.removeEventListener("pointerdown", release, true);
+      doc.removeEventListener("pointerdown", release, true);
     },
   };
 }

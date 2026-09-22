@@ -81,3 +81,13 @@ seq62 Cmd+S的meta=true、isComposing=false且没有字母s的文本input。主�
 可在既有 CUA UI 范围内使用的新入口来自 [Apple《Use the candidate window》](https://support.apple.com/guide/chinese-input-method/use-the-candidate-window-cim12992/mac)：普通拼音输入代码自动显示候选；已经输入代码时，可选中代码，通过菜单栏输入菜单执行 **Show Substitution Candidates（显示替换候选字）**。后者可用于先判断 CUA 能否观察输入法候选面板；它不单独替代活动组合期间滚动/光标移动验收，也无需修改用户输入法设置。
 
 主端后续候选视觉核对最小矩阵：同一自建 `LEFT|RIGHT` 处开始拼音，候选出现时记录 caret 与面板；左右移动后再次记录；随后在 `START|END` 处组合并小幅滚动，使 caret 仍在可见区域，比较面板是否跟随新的屏幕位置；最后大幅滚动使 caret 离屏，记录系统隐藏/重定位行为而不预设必须显示在旧位置。所有截图必须来自 CUA 实际画面，不能以 DOM rect、合成 composition 事件、系统进程存在或提交文字正确代替候选位置。未使用 CG/AX 旁路，也未新增后台原生读取候选坐标的命令。
+
+## 第三轮：目录导航被组合收尾帧覆盖的确定反例
+
+新切入点是滚动容器外的明确用户导航，不重复前两轮文字提交验证。阅读目录位于 `.md-visual-scroll` 的兄弟节点，点击后先更新选区并请求 `scrollIntoView`，随后显式将标题放到距视口顶端16px。原滚动保护仅捕获 scroller 内的 pointerdown，因而组合结束后的两个 rAF 仍保留旧锚点，覆盖目录的最终定位。
+
+新增独立 `scripts/test-markdown-composition-navigation.mjs`，以真实模块、DOM事件传播和受控布局复现相同调用顺序：组合开始→目录外部 pointerdown→compositionend→目标选区/滚动请求→标题距顶16px。修前指定 scrollTop2984 被异步改回2525，断言失败；修后仅把既有 pointerdown 释放监听移到该编辑器的 ownerDocument capture，并对应更新销毁移除。明确指针导航释放旧滚动锚点，不取消组合输入或修改正文；不同文档/窗口不共享监听。
+
+五组定向检查通过：目录最终定位不回跳、结束后待处理帧不覆盖用户导航、普通输入法自动滚动仍受保护、另一document隔离与新组合锚点恢复、销毁取消帧并移除document监听。使用独立缓存，未跑全量测试或构建。几何和事件均为组件控制，因此这是确定代码交互回归的修复证据，**不声称真实候选面板位置已验收**。本轮没有对候选坐标添加原生调用、轮询、延时或文本过滤。
+
+主端原生可用自建 `tests/artifacts/ime-navigation-2026-09-22/composition-outline.md`：顶部 `LEFT|RIGHT` 处拼音组词后实际点目录中的 `Bottom target`，观察最终标题是否保持视口顶部；若系统先提交预编辑，应按实际系统结果保存核对，不能预设点击目录必须取消组合。同目录 `.original.md` 保存原始自建内容。本子任务未操作UI、未修改pending/completed、未提交。

@@ -387,6 +387,9 @@ export default function XmindCanvas({
   };
   const commitEdit = useCallback(() => {
     if (editing && !cancelEditing.current) {
+      // Enter moves focus before React commits setEditing(null). Its blur must
+      // not submit this same draft a second time through the previous callback.
+      cancelEditing.current = true;
       onCommand({ type: "title", id: editing, title: draft });
       setEditing(null);
     }

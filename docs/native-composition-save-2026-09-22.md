@@ -39,3 +39,29 @@ Rust `src-tauri/src/lib.rs` 为 `file_save` 注册 `CmdOrCtrl+S`，菜单动作�
 同文档 `Candidate target: LEFTni|RIGHT` 是先前尝试连接系统候选进程时保留的自建对照文字；上述保存/撤销始终保持它不变，没有把其存在当成保存用例新增中文。中文快照另存 `menu-chinese.saved.md`。测试文档已关闭，普通测试包已退出，日常应用未替换。
 
 因此，原生菜单入口、活动候选保存快照、继续选词的dirty维护、历史与重开已闭环。IN-05只剩**物理 Command+S 到原生菜单动作之前的输入序列**需要实测；未用菜单点击冒充物理快捷键通过。新增 `npm run test:markdown-composition-save` 已接入 `test:all`，本轮不重复完整全量或构建，因为没有产品代码改动。
+
+## Command+S 前置路由再次复核（`b613403`）
+
+按新的输入类别收尾要求，再次只读检查 Rust 菜单构建/窗口路由、App 捕获监听器和快捷键偏好，没有重复上述四组回归：
+
+- `file_save` 默认原生 accelerator 为 `CmdOrCtrl+S`，只有该偏好被明确设为 false 才移除绑定；菜单项仍可点击。这是用户设置语义，不是组合输入判断。
+- App 的 DOM keydown 监听器确实在 `isComposing` 时返回，但它没有处理 `s`，保存由独立 `menu-action` 监听器执行。该 DOM 守卫不会把已经到达的原生 `file_save` 丢掉。
+- 原生菜单先找 focused WebView，再回退最近活动编辑窗口；`update_menu_state` 不允许后台窗口覆盖当前窗口的菜单偏好。此路由没有因组合状态而切换保存目标的分支。
+- `menu-action:file_save` 只在窗口关闭已经 commit 时拒绝，其他情况继续既有 `saveFile`。没有证据表明当前候选保存缺少一层 JS 快捷键；额外添加该层可能重复触发保存，而且无法撤回此前已写入组合文字的合法 `s`。
+
+本次没有得到新的可复现产品漏洞，不做猜测性改动。当前 CUA 原生 API 仅 `App.pressKey(key: string)`，使用 xdotool-style chord 字符串；没有独立 keyDown/keyUp/hold。因此不通过脚本、系统事件注入或未提供的接口制造“物理按键”证据。
+
+上述新入口对照已执行：CUA 接受显式左右 Command 写法 `Super_L+s` / `Super_R+s`，非组合对照的 keydown 均为 `meta=true`；活动 `ni` 下，两者均先把 `s` 写入组合文字，再送达 meta-keydown，没有形成可信的物理 Command+S 保存验收。不再重复尝试其他修饰键别名。真实菜单闭环保持已完成，剩余证据仍准确限制在 Command+S 的前置输入序列。
+
+## 显式左右 Command 与截图入口的最终结果
+
+归档 `tests/artifacts/native-ime-final-2026-09-22/modifier-events.json` 有 246 条记录，容量 600，`stopped=false`，本次没有因日志上限漏掉结尾。独立复核关键 capture 序号：
+
+- 非组合左右写法对照分别在 #63、#130 记录 `keydown key=s code=KeyS meta=true composing=false`。
+- 第一种写法活动组合：#99 `compositionupdate data="ni s"`，#101/#103 `beforeinput/input insertCompositionText`，到 #108 才是 `keydown key=s code=KeyS meta=true composing=true`。
+- 第二种写法活动组合：#165 `compositionupdate data="ni s"`，#167/#169 对应组合 beforeinput/input，到 #174 才是 meta=true、composing=true 的 `keydown s`。
+- 上述关键 capture 均为 `defaultPrevented=false`。这再次说明目标观察到字母时晚到的 JS keydown 拦截已经无法把它变回未发生的正常组合键；不通过过滤合法 `s` 改产品。
+
+候选窗口的新截图入口也实际尝试过：连接系统 Screenshot 应用超时；CUA `super+shift+3` 在活动组合中先形成 `ni#`（#33 compositionupdate，#35/#37 insertCompositionText），随后 #40 才到 `keydown key=# code=Digit3 meta=true composing=true`，未取得预期系统截图。Raise 窗口后仍只有应用画面，不能将候选窗口位置计为已看到或通过。没有通过 OS 事件注入等旁路继续尝试。
+
+主任务已取消临时组合、恢复本次自建 `native.md` 并保存关闭文档、退出诊断包。对照文件为同目录 `baseline.md`，最终字节一致；不要与前一轮保留中文的 `chinese-input-closeout-2026-09-22/native.md` 混淆。至此停止重复这些已验证无效的入口，保留真实菜单保存已通过与物理键盘/候选视觉证据仍未取得的准确边界。
