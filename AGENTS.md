@@ -2,6 +2,11 @@
 
 DEditor 项目的协作上下文。Codex 在这个目录工作时自动加载本文件。
 
+## 低额度外部服务收尾（2026-09-22）
+
+- EXT-02 实际产品 HtmlPreview 的远程 HTTPBin iframe 输入/选择/提交回显通过（内置 Chromium）；EXT-03 实际产品编码/hydrate 经默认 PlantUML 服务返回 100 消息大图，约3.8秒，首尾与全部消息通过（Node fetch + JSDOM）。无网络响应mock，不扩大为原生WebView或全站点验收。见[iframe记录](docs/external-iframe-2026-09-22.md)、[PlantUML记录](docs/external-plantuml-2026-09-22.md)。
+- 两项已移出待办，当前8类27项，排除Windows21项；外部服务仅剩图床上传及真实超时恢复。中文4项仍缺原生证据。临时页面与服务已关闭，未改产品源码，仅本地提交、不推送。
+
 ## 中文输入第三轮修复（2026-09-22）
 
 - 三 agent 修复 Markdown 组合结束后目录导航被旧滚动锚点覆盖、XMind Enter 后 blur 重复提交标题。后者模型原已去重，不声称复现丢字或双历史。新增组合导航和 XMind 输入目标专项接入 test:all；5 导航/7 Markdown 导航/4 保存、9 次输入目标更新、107 阅读集成、119 XMind 与 round21 两项、前端及独立 macOS 构建通过。
