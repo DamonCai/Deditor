@@ -45,3 +45,5 @@
 本 agent 未提交推送，未修改 AGENTS/package 测试总入口。
 
 整合 test:all 和前端/独立 macOS 包构建通过。主端原生操作被系统锁屏阻挡，已请求解锁；本轮原生 asset 协议未验收，保留上述边界。最终状态见[总记录](markdown-performance-audit-2026-09-22.md)。
+
+解锁接续：相同独立 macOS 包已实际打开自建 HTML，中文路径外链脚本/样式、srcset 和 SVG xlink 两张图片正常，按钮 42→43、表单和不同源隔离提示通过；亮色实时预览/暗色阅读切换正常。文件哈希未变，测试文档关闭、应用退出。原生 asset 协议待验状态已补齐，Windows、运行时动态 file URL 等边界不变，详见[原生接续](markdown-performance-audit-2026-09-22.md#解锁后原生接续2026-09-22)。
