@@ -4,7 +4,7 @@ import { Button } from "./ui/Button";
 import { useEditorStore } from "../store/editor";
 import { useT } from "../lib/i18n";
 
-export interface OutlineItem { id: string; level: number; text: string }
+export interface OutlineItem { id: string; level: number; text: string; key?: string }
 /** Shared preview outline: the rail peeks on hover; only pinning reserves space. */
 export default function MarkdownOutline({ items: tocItems, current: activeTocId, navigate: handleTocJump, active = true }: {
   items: OutlineItem[]; current: string; navigate: (id: string) => void; active?: boolean;
@@ -116,7 +116,7 @@ export default function MarkdownOutline({ items: tocItems, current: activeTocId,
                 ) : (
                   <ul className="preview-toc-list">
                     {tocItems.map((it) => (
-                      <li key={it.id}>
+                      <li key={it.key ?? it.id}>
                         <button
                           type="button"
                           data-lvl={it.level}

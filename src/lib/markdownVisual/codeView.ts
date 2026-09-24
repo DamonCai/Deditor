@@ -21,8 +21,9 @@ import { tStatic } from "../i18n";
 import { markdownHistory } from "../markdownHistory";
 import { logError } from "../logger";
 
-export function codeView(tabId: string, theme: "light" | "dark") {
+export function codeView(tabId: string, initialTheme: "light" | "dark" | (() => "light" | "dark")) {
   return (initial: ProseNode, view: ProseView, getPos: () => number | undefined): NodeView => {
+    let theme = typeof initialTheme === "function" ? initialTheme() : initialTheme;
     let node = initial, updating = false, generation = 0, languageGeneration = 0, destroyed = false, expanded = false;
     let suppressSelectionReveal = false;
     type DiagramMode = "edit" | "split" | "preview";
@@ -100,7 +101,7 @@ export function codeView(tabId: string, theme: "light" | "dark") {
         modeButtons.find(button => button.dataset.mode === mode)?.focus({ preventScroll: true });
       }
     }
-    const languageCompartment = new Compartment(), editableCompartment = new Compartment(), presentationCompartment = new Compartment();
+    const languageCompartment = new Compartment(), editableCompartment = new Compartment(), presentationCompartment = new Compartment(), themeCompartment = new Compartment();
     let presentation: Extension = [], presentationGeneration = 0;
     const wrapping = new Compartment(), indentation = new Compartment();
     const settings = useEditorStore.getState().markdownSettings;
@@ -108,7 +109,7 @@ export function codeView(tabId: string, theme: "light" | "dark") {
     const ensureEditor = () => {
       if (cm) return cm;
       cm = new EditorView({ parent: editor, state: EditorState.create({ doc: node.textContent, extensions: [basicSetup, wrapping.of(settings.codeWrap ? EditorView.lineWrapping : []), indentation.of(indentUnit.of(" ".repeat(settings.codeIndent))),
-      EditorView.theme({}, { dark: theme === "dark" }), presentationCompartment.of(presentation), languageCompartment.of([]), editableCompartment.of([EditorView.editable.of(view.editable), EditorState.readOnly.of(!view.editable)]),
+      themeCompartment.of(EditorView.theme({}, { dark: theme === "dark" })), presentationCompartment.of(presentation), languageCompartment.of([]), editableCompartment.of([EditorView.editable.of(view.editable), EditorState.readOnly.of(!view.editable)]),
       Prec.highest(keymap.of([
         indentWithTab,
         { key: "Mod-Enter", run: () => exitBlockSource(view, node, getPos(), 1) },
@@ -206,7 +207,7 @@ export function codeView(tabId: string, theme: "light" | "dark") {
       const documentSource = lang === "latex" ? useEditorStore.getState().tabs.find(tab => tab.id === tabId)?.content ?? source : source;
       const contextual = lang === "latex" && (settings.mathAutoNumber || /\\(?:label|eqref|ref)\{/.test(code));
       const math = contextual ? markdownMathContext(documentSource) : null;
-      const renderKey = source + (math ? JSON.stringify([settings.mathAutoNumber, math.blocks]) : "");
+      const renderKey = theme + ":" + source + (math ? JSON.stringify([settings.mathAutoNumber, math.blocks]) : "");
       let ordinal = 0;
       if (contextual) view.state.doc.descendants((node, pos) => {if(pos < (getPos() ?? 0) && node.type.name === "code_block" && String(node.attrs.language).toLowerCase() === "latex") ordinal++;});
       // Editing and focus changes do not invalidate the rendered projection. In particular,
@@ -309,8 +310,18 @@ export function codeView(tabId: string, theme: "light" | "dark") {
       cm?.dispatch({effects:[wrapping.reconfigure(settings.codeWrap ? EditorView.lineWrapping : []), indentation.reconfigure([indentUnit.of(" ".repeat(settings.codeIndent)), EditorState.tabSize.of(settings.codeIndent)])]});
     };
     const settingsChanged = () => {configure(); render();};
+    const themeChanged = (event: Event) => {
+      const next = (event as CustomEvent<"light" | "dark">).detail;
+      if (next !== "light" && next !== "dark" || next === theme) return;
+      theme = next;
+      updating = true;
+      cm?.dispatch({ effects: themeCompartment.reconfigure(EditorView.theme({}, { dark: theme === "dark" })) });
+      updating = false;
+      loadPresentation(); render();
+    };
     const documentChanged = () => {if (String(node.attrs.language).toLowerCase() === "latex") render();};
     view.dom.addEventListener("deditor-writing-change", settingsChanged);
+    view.dom.addEventListener("deditor-theme-change", themeChanged);
     view.dom.addEventListener("deditor-document-change", documentChanged);
     configure(); loadLanguage(); loadPresentation(); render();
     return { dom, stopEvent: () => true, ignoreMutation: () => true,
@@ -334,7 +345,7 @@ export function codeView(tabId: string, theme: "light" | "dark") {
         if (languageChanged) { loadLanguage(); loadPresentation(); }
         if (textChanged || languageChanged || language.readOnly === view.editable) render(textChanged && !languageChanged);
         return true;
-      }, destroy() { drag.destroy(); overview.destroy(); view.dom.removeEventListener("deditor-diagram-overview-close", closeOverview); split.destroy(); view.dom.removeEventListener("deditor-contextmenu-close", menuClosed); view.dom.removeEventListener("deditor-writing-change", settingsChanged); view.dom.removeEventListener("deditor-document-change", documentChanged); view.dom.removeEventListener("deditor-editable-change", modeChanged); view.dom.removeEventListener("deditor-restore-focus", restoreFocus); dom.removeEventListener("focusout", collapse); destroyed = true; generation++; if (renderTimer) clearTimeout(renderTimer); controllers.forEach(controller => controller.abort()); cm?.destroy(); },
+      }, destroy() { drag.destroy(); overview.destroy(); view.dom.removeEventListener("deditor-diagram-overview-close", closeOverview); split.destroy(); view.dom.removeEventListener("deditor-contextmenu-close", menuClosed); view.dom.removeEventListener("deditor-writing-change", settingsChanged); view.dom.removeEventListener("deditor-theme-change", themeChanged); view.dom.removeEventListener("deditor-document-change", documentChanged); view.dom.removeEventListener("deditor-editable-change", modeChanged); view.dom.removeEventListener("deditor-restore-focus", restoreFocus); dom.removeEventListener("focusout", collapse); destroyed = true; generation++; if (renderTimer) clearTimeout(renderTimer); controllers.forEach(controller => controller.abort()); cm?.destroy(); },
     };
   };
 }

@@ -22,4 +22,20 @@ try {
  assert.equal(el.querySelector('svg text')?.textContent,'Recovered');assert.ok(!el.classList.contains('error'));
  await hydratePlantuml(root).done;assert.equal(calls,2,'successful hydration stays cached');
  console.log('PASS actual 5s timeout timer, preserved source, same-node retry, cleared error and success cache');
+ const box=document.createElement('div');box.innerHTML='<div class="plantuml-diagram" data-plantuml-encoded="button-fixture" data-plantuml-source="Button source"></div>';document.body.append(box);
+ let retries=0,finish;
+ globalThis.fetch=async()=>{retries++;if(retries===1)throw new Error('HTTP 503');return new Promise(resolve=>{finish=resolve;});};
+ const control=hydratePlantuml(box);await control.done;
+ const button=box.querySelector('button');assert.ok(button);assert.equal(button.type,'button');button.click();button.click();
+ assert.equal(retries,2,'double activation must issue only one retry');assert.ok(button.disabled);
+ finish(new Response('<svg><text>Button recovered</text></svg>'));
+ for(let n=0;n<50&&!box.querySelector('svg');n++)await new Promise(resolve=>setTimeout(resolve,10));
+ assert.equal(box.querySelector('svg text')?.textContent,'Button recovered');assert.equal(box.querySelector('button'),null);
+ console.log('PASS visible retry, repeated click coalescing, recovered SVG and button removal');
+ const stopped=document.createElement('div');stopped.innerHTML='<div class="plantuml-diagram" data-plantuml-encoded="cancel-fixture"></div>';document.body.append(stopped);
+ let stoppedCalls=0;globalThis.fetch=async()=>{stoppedCalls++;throw new Error('HTTP 503');};
+ const cancelled=hydratePlantuml(stopped);await cancelled.done;cancelled.abort();stopped.querySelector('button').click();assert.equal(stoppedCalls,1);
+ const removed=document.createElement('div');removed.innerHTML='<div class="plantuml-diagram" data-plantuml-encoded="removed-fixture"></div>';document.body.append(removed);
+ await hydratePlantuml(removed).done;const detachedButton=removed.querySelector('button');removed.remove();detachedButton.click();assert.equal(stoppedCalls,2);
+ console.log('PASS cancelled lifecycle and detached controls cannot restart network work');
 } finally {globalThis.fetch=actualFetch;dom.window.close();}

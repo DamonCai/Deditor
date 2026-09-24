@@ -1,9 +1,15 @@
-import { renderMarkdown, renderMarkdownTocs, type RenderOptions } from "./markdown";
+import { renderMarkdown, renderMarkdownTocs, readMarkdownTocs, type MarkdownToc, type RenderOptions } from "./markdown";
 
 interface FragmentContext {
   source: string; optionsKey: string; owner?: object;
   template?: Promise<HTMLTemplateElement>;
   tocs?: Promise<Map<number, string>>;
+  tocData?: Promise<Map<number, MarkdownToc>>;
+}
+export async function readMarkdownTocFragment(source: string, line: number, options: RenderOptions, owner?: object) {
+  const entry = context(source, options, owner);
+  const tocs = await (entry.tocData ??= retryable(entry, readMarkdownTocs(source, options)));
+  return tocs.get(line);
 }
 let cached: FragmentContext | undefined;
 export function clearMarkdownFragmentContext(owner: object) {

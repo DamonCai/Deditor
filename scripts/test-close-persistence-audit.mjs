@@ -1,3 +1,5 @@
+import { recoveryIpcFixture } from './recovery-ipc-fixture.mjs';
+const receiveRecovery = recoveryIpcFixture();
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -44,6 +46,7 @@ globalThis.clearTimeout = id => { if (!timers.delete(id)) realClearTimeout(id); 
 let diskState = '', writes = [], interceptWrite;
 globalThis.__choice = 'cancel';
 globalThis.__invoke = async (cmd, args) => {
+  if (cmd === 'write_app_state_incremental') return receiveRecovery(args.packet, content => globalThis.__invoke('write_app_state', {content}));
   if (cmd === 'write_app_state') {
     writes.push(JSON.parse(args.content));
     await interceptWrite?.(args.content);

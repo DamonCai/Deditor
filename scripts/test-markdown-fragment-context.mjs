@@ -9,12 +9,12 @@ for(const name of ['window','document','HTMLElement','Node','DOMParser'])Object.
 window.matchMedia=()=>({matches:false,addEventListener(){},removeEventListener(){}});
 Object.defineProperty(globalThis,'localStorage',{value:dom.window.localStorage,configurable:true});
 const output=path.resolve('node_modules/.cache/deditor-fragment-context.mjs');
-await build({entryPoints:['src/lib/markdownFragments.ts'],outfile:output,bundle:true,format:'esm',platform:'node',packages:'external',plugins:[{name:'controlled-render',setup(b){
+await build({stdin:{contents:'export * from \"./src/lib/markdownFragments\"; export {MarkdownTocView} from \"./src/lib/markdownVisual/tocView\";',resolveDir:process.cwd()},outfile:output,bundle:true,format:'esm',platform:'node',packages:'external',plugins:[{name:'controlled-render',setup(b){
  b.onLoad({filter:/markdownFragments\.ts$/},a=>({contents:fs.readFileSync(a.path,'utf8').replace('from "./markdown"','from "test-fragment-render"'),loader:'ts'}));
  b.onResolve({filter:/^test-fragment-render$/},()=>({path:'render',namespace:'test'}));
- b.onLoad({filter:/.*/,namespace:'test'},()=>({contents:`import {renderMarkdown as actual, renderMarkdownTocs as renderMarkdownTocsActual} from ${JSON.stringify(path.resolve('src/lib/markdown.ts'))}; globalThis.fragmentActual=actual; export const renderMarkdownTocs=(...args)=>globalThis.fragmentTocs ? globalThis.fragmentTocs(...args) : renderMarkdownTocsActual(...args); export const renderMarkdown=(...args)=>globalThis.fragmentRender ? globalThis.fragmentRender(...args) : actual(...args);`,resolveDir:process.cwd(),loader:'js'}));
+ b.onLoad({filter:/.*/,namespace:'test'},()=>({contents:`import {renderMarkdown as actual, readMarkdownTocs, renderMarkdownTocs as renderMarkdownTocsActual} from ${JSON.stringify(path.resolve('src/lib/markdown.ts'))}; globalThis.fragmentActual=actual; export {readMarkdownTocs}; export const renderMarkdownTocs=(...args)=>globalThis.fragmentTocs ? globalThis.fragmentTocs(...args) : renderMarkdownTocsActual(...args); export const renderMarkdown=(...args)=>globalThis.fragmentRender ? globalThis.fragmentRender(...args) : actual(...args);`,resolveDir:process.cwd(),loader:'js'}));
 }}],logLevel:'silent'});
-const {renderMarkdownFragment:fragment,clearMarkdownFragmentContext:clear}=await import(pathToFileURL(output));
+const {renderMarkdownFragment:fragment,clearMarkdownFragmentContext:clear,readMarkdownTocFragment:readToc,MarkdownTocView}=await import(pathToFileURL(output));
 let templates=0;
 const create=document.createElement.bind(document);
 document.createElement=(...args)=>{if(args[0]==='template')templates++;return create(...args);};
@@ -44,10 +44,23 @@ for(const source of tocSources)for(const options of [light,dark]){
  const count=templates;
  const actual=await Promise.all(navs.map(nav=>fragment('[toc]',source,Number(nav.dataset.line),options,owner)));
  assert.deepEqual(actual,navs.map(nav=>nav.outerHTML));
+ for(const nav of navs){const view=new MarkdownTocView();view.update(await readToc(source,Number(nav.dataset.line),options,owner));assert.equal(view.dom.outerHTML,nav.outerHTML);}
  assert.equal(templates,count,'TOC rendering never constructs unrelated full-document DOM');
  clear(owner);
 }
 console.log('PASS TOC matches full rendering across duplicate/reference/nested/setext/fenced/CRLF headings and both themes');
+const tocView=new MarkdownTocView();
+const tocSource='[toc]\n\n'+Array.from({length:1000},(_,i)=>'# Heading '+i).join('\n\n');
+tocView.update(await readToc(tocSource,1,light,owner));
+const rows=[...tocView.dom.querySelectorAll('li')];
+tocView.update(await readToc(tocSource.replace('# Heading 0','# Changed <script> & \"safe\"'),1,light,owner));
+assert.equal(rows.filter(row=>tocView.dom.contains(row)).length,999);
+assert.equal(tocView.dom.querySelectorAll('script').length,0);
+tocView.update(await readToc('[toc]\n\n# Last\n\n# Last\n\n## 中文😀',1,dark,owner));
+assert.equal(tocView.dom.querySelectorAll('li').length,3);
+assert.deepEqual([...tocView.dom.querySelectorAll('a')].map(a=>a.getAttribute('href')),['#last','#last-1','#'+encodeURIComponent('中文😀')]);
+tocView.update(await readToc('[toc]',1,light,owner));assert.equal(tocView.dom.querySelectorAll('li').length,0);
+console.log('PASS structured TOC exact HTML, 1000-row reuse, delete/replace, duplicate slugs, safe text and empty document');
 let renders=0;
 globalThis.fragmentRender=async(s,options)=>{renders++;return `<p data-line="1">${s}-${options.theme}</p>`;};
 assert.match(await fragment('[toc]','theme-test',1,light,owner),/theme-test-light/);
@@ -88,4 +101,4 @@ const recoveredToc=fragment('[toc]','reject-toc',1,light,owner);assert.equal(toc
 tocPending[3].resolve(new Map([[1,'<nav>recovered</nav>']]));assert.equal(await recoveredToc,'<nav>recovered</nav>');
 console.log('PASS TOC request coalescing, owner release during pending work and rejection retry');
 clear(owner);delete globalThis.fragmentRender;delete globalThis.fragmentActual;delete globalThis.fragmentTocs;dom.window.close();
-console.log('6 fragment context regression groups passed');
+console.log('7 fragment context regression groups passed');

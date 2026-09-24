@@ -59,7 +59,7 @@ const failedCases=[];
 const testFilter=process.env.DEDITOR_TEST_FILTER ? new RegExp(process.env.DEDITOR_TEST_FILTER) : null;
 async function test(name,fn){if(testFilter && !testFilter.test(name))return;try{await fn();passed++;console.log('PASS '+name);}catch(error){failedCases.push(name);console.error('FAIL '+name+'\n'+error.stack);}}
 const {Editor:MilkdownEditor,editorViewCtx}=await import('@milkdown/kit/core');
-const {TextSelection}=await import('@milkdown/kit/prose/state');
+const {TextSelection,AllSelection}=await import('@milkdown/kit/prose/state');
 const make=MilkdownEditor.make;let view;
 MilkdownEditor.make=function(...args){const editor=make.apply(this,args),create=editor.create;editor.create=async()=>{const result=await create();editor.action(ctx=>{view=ctx.get(editorViewCtx);});return result;};return editor;};
 const reset=async(text)=>{await act(async()=>root.render(null));await act(async()=>store.getState().setContent(text,'a','command'));await render();await act(async()=>pause(60));assert.equal(view.editable,true);};
@@ -94,7 +94,141 @@ const selectDocument=async()=>{
  assert.equal(view.state.selection.from,0,'select all starts at document boundary');
  assert.equal(view.state.selection.to,view.state.doc.content.size,'select all includes final block');
 };
+const selectClipboardDocument=async()=>act(async()=>{
+ view.focus();view.dispatch(view.state.tr.setSelection(new AllSelection(view.state.doc)));
+});
 try {
+ await test('PLAIN01 Cmd/Ctrl Shift C copies only selected literal text, including readonly',async()=>{
+  for(const mod of [{metaKey:true},{ctrlKey:true}]){
+   const original='Before **a_b** and `c_d` after\n';await reset(original);
+   await act(async()=>{view.focus();view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc,8,19)));});
+   const copied=[];Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>copied.push(text)}});
+   assert.equal((await key('C',{...mod,shiftKey:true})).defaultPrevented,true);assert.deepEqual(copied,['a_b and c_d']);assert.equal(content(),original);
+   await render(true);await key('c',{...mod,shiftKey:true});assert.deepEqual(copied,['a_b and c_d','a_b and c_d']);
+   await render(false);await select('Before a_b and c_d after',0);await key('c',{...mod,shiftKey:true});assert.equal(copied.length,2,'empty selection leaves clipboard intact');
+  }
+ });
+ await test('PLAIN02 Cmd/Ctrl Shift V inserts literal text in prose and tables with one undo',async()=>{
+  const literal='**literal**\n# heading\nleft\tright \\_';
+  for(const mod of [{metaKey:true},{ctrlKey:true}])for(const original of ['target\n','| A | B |\n| --- | --- |\n| target | keep |\n']){
+   await reset(original);await range('target',0,6);
+   Object.defineProperty(navigator,'clipboard',{configurable:true,value:{readText:async()=>literal}});
+   assert.equal((await key('V',{...mod,shiftKey:true})).defaultPrevented,true);
+   assert.ok(visible().includes(literal));assert.equal(view.dom.querySelector('strong,h1'),null);await exactHistory(original);
+  }
+ });
+ await test('PLAIN03 delayed shortcut paste rejects changed content, selection, blur and readonly',async()=>{
+  for(const change of ['content','selection','blur','readonly','unmount']){
+   await reset('target\n');await range('target',0,6);let release;
+   Object.defineProperty(navigator,'clipboard',{configurable:true,value:{readText:()=>new Promise(resolve=>release=resolve)}});
+   await key('v',{metaKey:true,shiftKey:true});assert.equal(typeof release,'function');
+   if(change==='content')await input('new');
+   if(change==='selection')await select('target',1);
+   if(change==='blur')await act(async()=>view.dom.blur());
+   if(change==='readonly')await render(true);
+   if(change==='unmount')await act(async()=>root.render(null));
+   const before=content();await act(async()=>{release('STALE');await pause(30);});assert.equal(content(),before,change);
+  }
+  await reset('target\n');await range('target',0,6);let reads=0;
+  Object.defineProperty(navigator,'clipboard',{configurable:true,value:{readText:async()=>{reads++;return 'blocked';}}});
+  await render(true);await key('v',{metaKey:true,shiftKey:true});assert.equal(reads,0);assert.equal(content(),'target\n');
+  await render(false);await key('v',{metaKey:true,shiftKey:true,isComposing:true});assert.equal(reads,0);
+ });
+ await test('PLAIN04 expanded inline source supports both plain clipboard shortcuts literally',async()=>{
+  const original='Before `a_b` after\n';await reset(original);
+  await act(async()=>{app.getVisualEditor().navigate(1,original.indexOf('a_b')+2);await pause(30);});
+  let at;view.state.doc.descendants((node,pos)=>{if(node.type.name==='deditor_inline_source')at=pos+2;});assert.notEqual(at,undefined);
+  await act(async()=>view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc,at,at+3))));
+  const copied=[];Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>copied.push(text),readText:async()=>'c_d\\_'}});
+  await key('c',{metaKey:true,shiftKey:true});assert.deepEqual(copied,['a_b']);
+  await key('v',{metaKey:true,shiftKey:true});assert.equal(content(),'Before `c_d\\_` after\n');await exactHistory(original);
+ });
+ await test('PLAIN05 embedded code selection copies literally and plain paste normalizes CRLF with exact undo',async()=>{
+  const original='```text\na_b\n```\n';await reset(original);
+  const {EditorView}=await import('@codemirror/view');
+  await act(async()=>document.querySelector('.md-code-preview').dispatchEvent(new dom.window.MouseEvent('mousedown',{button:0,bubbles:true})));
+  const cm=EditorView.findFromDOM(document.querySelector('.md-code-block .cm-editor'));assert.ok(cm);
+  await act(async()=>{cm.focus();cm.dispatch({selection:{anchor:0,head:3}});});
+  const copied=[];Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>copied.push(text),readText:async()=>'**x**\r\n\r\ny_z'}});
+  const shortcut=async key=>act(async()=>{cm.contentDOM.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key,metaKey:true,shiftKey:true,bubbles:true,cancelable:true}));await pause(40);});
+  await shortcut('c');assert.deepEqual(copied,['a_b']);await shortcut('v');assert.equal(cm.state.doc.toString(),'**x**\n\ny_z');assert.equal(cm.state.selection.main.head,cm.state.doc.length);await exactHistory(original);
+ });
+ await test('ESC01 ordinary copy uses visible text for filenames, escapes and mixed inline marks',async()=>{
+  const filename='disabled_sg_channels_7d_sls_20260914.csv';
+  const cases=[
+   [filename,filename],
+   [filename.replaceAll('_','\\_'),filename],
+   ['`'+filename+'`',filename],
+   ['File: `'+filename+'` end','File: '+filename+' end'],
+   ['\\`'+filename.replaceAll('_','\\_')+'\\`','`'+filename+'`'],
+   ['**a_b** and *c_d* and ~~e_f~~','a_b and c_d and e_f'],
+   ['[a_b](https://example.com/a_b "title") end','a_b end'],
+   ['\\*literal\\* \\[x\\] \\# \\> \\| \\! &amp;','*literal* [x] # > | ! &'],
+   ['`C:\\temp\\a_b.csv` and `\\_`','C:\\temp\\a_b.csv and \\_'],
+   ['first_a\n\nsecond_b','first_a\nsecond_b'],
+   ['# title_a\n\n> quote_b\n\n- item_c','title_a\nquote_b\nitem_c'],
+   ['line_a  \nline_b','line_a\nline_b'],
+   ['```text\n`a_b` \\_ **literal**\n```','`a_b` \\_ **literal**'],
+   ['中文 **文件_a** 与 `é_👨‍👩‍👧‍👦`','中文 文件_a 与 é_👨‍👩‍👧‍👦'],
+  ];
+  for(const [markdown,expected] of cases){
+   await reset(markdown+'\n');await selectClipboardDocument();
+   const copied=await copySelection();
+   assert.equal(copied.text,expected,markdown);
+   assert.equal(app.getVisualEditor().clipboard().text,expected,'toolbar and shortcut agree');
+   assert.equal(content(),markdown+'\n','copy preserves source bytes');
+  }
+ });
+ await test('ESC02 partial mixed selection and cut retain exact text, rich marks and undo',async()=>{
+  const original='prefix **a_b** and `c_d` suffix\n';
+  await reset(original);
+  await act(async()=>{view.focus();view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc,8,19)));});
+  const copied=await copySelection();assert.equal(copied.text,'a_b and c_d');
+  assert.match(copied.html,/<strong>a_b<\/strong>/);assert.match(copied.html,/<code>c_d<\/code>/);
+  const cut=await copySelection('cut');assert.equal(cut.text,copied.text);await exactHistory(original);
+  await reset('');await paste(copied.text,copied.html);assert.equal(visible(),'a_b and c_d');
+  await exactHistory('');
+ });
+ await test('ESC03 repeated rich clipboard round trips never accumulate escape characters',async()=>{
+  const original='File: `disabled_sg_channels_7d_sls_20260914.csv` **a_b** \\*literal\\*\n';
+  await reset(original);const expected=semantics(), expectedText=visible();
+  for(let i=0;i<3;i++){
+   await selectClipboardDocument();const copied=await copySelection();assert.equal(copied.text,expectedText);
+   await reset('');await paste(copied.text,copied.html);assert.deepEqual(semantics(),expected);await exactHistory('');
+  }
+ });
+ await test('ESC04 rich copy keeps emoji, image labels and formula text instead of blank lines',async()=>{
+  for(const [markdown,expected] of [
+   ['start :smile: end','start 😄 end'],
+   ['start ![a_b](image.png) end','start a_b end'],
+   ['start $a_b + c$ end','start a_b + c end'],
+   ['start[^a_b] end\n\n[^a_b]: footnote','start[a_b] end\nfootnote'],
+  ]){
+   await reset(markdown+'\n');await selectClipboardDocument();
+   assert.equal(app.getVisualEditor().clipboard().text,expected,markdown);
+   assert.equal((await copySelection()).text,expected,markdown);
+  }
+ });
+ await test('ESC05 expanded inline source copies literal selection without another escaping pass',async()=>{
+  const raw='`disabled_sg_channels_7d_sls_20260914.csv`';
+  const original='Before '+raw+' after.\n\nTail\n';await reset(original);
+  await act(async()=>{app.getVisualEditor().navigate(1,original.indexOf('disabled')+2);await pause(30);});
+  let from,to;view.state.doc.descendants((node,pos)=>{if(node.type.name==='deditor_inline_source'){from=pos+1;to=from+node.content.size;}});
+  assert.notEqual(from,undefined);
+  await act(async()=>view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc,from,to))));
+  assert.equal((await copySelection()).text,raw);assert.equal(content(),original);
+ });
+ await test('ESC06 table cells and TSV retain literal underscores, emoji and formulas',async()=>{
+  const original='| A | B |\n| --- | --- |\n| **a_b** :smile: | $c_d$ |\n';
+  await reset(original);
+  const {CellSelection,TableMap}=await import('@milkdown/kit/prose/tables');let table,pos;
+  view.state.doc.descendants((node,at)=>{if(node.type.name==='table'){table=node;pos=at;}});
+  const map=TableMap.get(table);
+  await act(async()=>view.dispatch(view.state.tr.setSelection(new CellSelection(view.state.doc.resolve(pos+1+map.map[2]),view.state.doc.resolve(pos+1+map.map[3])))));
+  const payload=app.getVisualEditor().clipboard();assert.equal(payload.tsv,'a_b 😄\tc_d');
+  assert.equal(payload.text,'a_b 😄\nc_d');assert.equal((await copySelection()).text,payload.text);
+  assert.equal(content(),original);
+ });
  await test('EXCEL headerless HTML keeps all sixteen cells without a synthetic blank header',async()=>{
   const expected=[['Name','Count','Note','Empty'],['Alpha','12','中文',''],['Bravo','34','"quoted"','tail'],['Pipe|value','56','last','']];
   const html='<html><body><table><tbody>'+expected.map(row=>'<tr>'+row.map(value=>'<td style="vertical-align:bottom">'+value+'</td>').join('')+'</tr>').join('')+'</tbody></table></body></html>';
@@ -152,7 +286,7 @@ try {
   await reset('target\n');await select('target');let release;
   Object.defineProperty(navigator,'clipboard',{configurable:true,value:{readText:()=>new Promise(resolve=>release=resolve)}});
   const pending=app.getVisualEditor().pastePlain();await input('X');const before=content();await act(async()=>release('SHOULD NOT INSERT'));assert.equal(await pending,false);assert.equal(content(),before);
-  await reset('target\n');await range('target',0,6);await key('v',{ctrlKey:true,shiftKey:true});await paste('**literal**','<strong>wrong</strong>');assert.equal(visible(),'**literal**');assert.equal(view.dom.querySelector('strong'),null);await exactHistory('target\n');
+  await reset('target\n');await range('target',0,6);Object.defineProperty(navigator,'clipboard',{configurable:true,value:{readText:async()=>'**literal**'}});await key('v',{ctrlKey:true,shiftKey:true});assert.equal(visible(),'**literal**');assert.equal(view.dom.querySelector('strong'),null);await exactHistory('target\n');
  });
  await test('Q01 slash filters and inserts existing block types in one undoable operation',async()=>{
   for(const [query,type] of [['table','table'],['code','code_block'],['mermaid','code_block'],['plantuml','code_block'],['task','bullet_list'],['bullet','bullet_list'],['heading','heading'],['quote','blockquote'],['divider','hr']]){
@@ -175,10 +309,10 @@ try {
   assert.deepEqual(semantics(),expected,'all blocks and authored attributes survive rich clipboard');
   await exactHistory('');assert.deepEqual(semantics(),expected,'saved source reparses to the same structure');
  });
- await test('C06 whole-document plain Markdown paste preserves Unicode, table and literal code',async()=>{
+ await test('C06 explicit Markdown copy and plain paste preserve Unicode, table and literal code',async()=>{
   const original='# 中文 e\u0301\n\n| 甲 | 乙 |\n| --- | --- |\n| 中文 | 𠮷 |\n\n```text\n  leading\n\ntrailing  \n```\n\n最后\n';
-  await reset(original);const expected=semantics();await selectDocument();const copied=await copySelection();
-  await reset('');await paste(copied.text);view.state.doc.check();
+  await reset(original);const expected=semantics();await selectDocument();const copied=app.getVisualEditor().clipboard();
+  await reset('');await paste(copied.markdown);view.state.doc.check();
   assert.deepEqual(semantics(),expected);await exactHistory('');
  });
  await test('C07 whole-document cut restores exact source and selection, then accepts new typing',async()=>{

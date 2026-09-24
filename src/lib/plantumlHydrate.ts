@@ -145,9 +145,10 @@ export function hydratePlantuml(
       if (el.dataset.plantumlHydrated === "1") return;
       const encoded = el.dataset.plantumlEncoded || "";
       if (!encoded) return;
-      el.dataset.plantumlHydrated = "1";
       const source = el.dataset.plantumlSource || "";
-      return fetchSvg(encoded, ctrl.signal)
+      const load = () => {
+        el.dataset.plantumlHydrated = "1";
+        return fetchSvg(encoded, ctrl.signal)
         .then((svg) => {
           if (ctrl.signal.aborted) return;
           // Inline the raw SVG. The CSS in styles.css scopes `.preview
@@ -160,7 +161,19 @@ export function hydratePlantuml(
           delete el.dataset.plantumlHydrated;
           el.classList.add("error");
           el.innerHTML = failureMarkup(err, source);
+          const retry = document.createElement("button");
+          retry.type = "button";
+          retry.className = "deditor-btn plantuml-retry";
+          retry.textContent = tStatic("markdown.plantumlRetry");
+          retry.onclick = () => {
+            if (ctrl.signal.aborted || !el.isConnected || el.dataset.plantumlHydrated === "1") return;
+            retry.disabled = true;
+            void load();
+          };
+          el.append(retry);
         });
+      };
+      return load();
     }),
   ).then(() => undefined);
   return ctrl;

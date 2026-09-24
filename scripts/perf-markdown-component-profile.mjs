@@ -60,7 +60,8 @@ export {markdownHistory} from './src/lib/markdownHistory';
   const base=owned ? baseline ?? process.env.DEDITOR_MARKDOWN_TARGET : process.env.DEDITOR_PROFILE_BASE;
   const frozen=base ? path.join(base,relative) : null;
   const component=relative==='src/components/MarkdownVisualEditor.tsx' && !baseline ? process.env.DEDITOR_PROFILE_COMPONENT : undefined;
-  const file=component ?? (frozen && fs.existsSync(frozen) ? frozen : a.path);
+  const readingBase=process.env.DEDITOR_READING_BASELINE ? path.join(process.env.DEDITOR_READING_BASELINE,relative) : null;
+  const file=readingBase && fs.existsSync(readingBase) ? readingBase : component ?? (frozen && fs.existsSync(frozen) ? frozen : a.path);
   let contents=await fs.promises.readFile(file,'utf8');
   if(relative==='src/components/MarkdownVisualEditor.tsx' && process.env.DEDITOR_PROFILE_BASE && !baseline && !component) contents=contents.replace('deditor_raw: rawView(filePath, tabId),','deditor_raw: rawView(filePath, tabId, () => document.sourceContext()),');
   contents=contents.replace('const result = create(node, view, getPos, decorations, innerDecorations);','const start=performance.now(); const result = create(node, view, getPos, decorations, innerDecorations); (globalThis as any).mdProfile("table NodeView create",performance.now()-start);');
@@ -98,12 +99,18 @@ const operations=[];
 for(let i=0;i<5;i++){
  await act(async()=>{app.getVisualEditor().navigate(1,3);});
  take();
+ const outlineRows=[...document.querySelectorAll('.preview-toc-list > li')];
+ const tocRows=[...document.querySelectorAll('.md-toc li')];
  const p=document.querySelector('.ProseMirror h1');
  const begin=performance.now();
  await act(async()=>{p.firstChild.textContent+='中';document.getSelection().collapse(p.firstChild,p.firstChild.textContent.length);p.dispatchEvent(new Event('input',{bubbles:true}));await pause(0);});
  const elapsed=performance.now()-begin;
  assert.equal(content(),source.replace(/^# (.+)$/m, '# $1中'),'input exact');
- operations.push({ms:elapsed,profile:take()});
+ const retainedOutlineRows=outlineRows.filter(row=>row.isConnected).length;
+ if(!process.env.DEDITOR_READING_BASELINE && !process.env.DEDITOR_PROFILE_BASE) assert.ok(retainedOutlineRows>=outlineRows.length-1, "unchanged headings retain outline DOM after an earlier input");
+ const retainedTocRows=tocRows.filter(row=>row.isConnected).length;
+ if(!process.env.DEDITOR_READING_BASELINE && !process.env.DEDITOR_PROFILE_BASE) assert.ok(retainedTocRows>=tocRows.length-1,'unchanged body TOC rows retain DOM');
+ operations.push({ms:elapsed,outlineRows:outlineRows.length,retainedOutlineRows,tocRows:tocRows.length,retainedTocRows,profile:take()});
  await act(async()=>app.markdownHistory());
  assert.equal(content(),source,'undo exact');
 }
@@ -119,7 +126,18 @@ for(let i=0;i<5;i++){
  bodyOperations.push({ms:elapsed,profile:take()});
  await act(async()=>app.markdownHistory());assert.equal(content(),source,'body undo exact');
 }
-console.log(JSON.stringify({sections,chars:source.length,readyMs,domNodes:document.querySelectorAll('*').length,tables:document.querySelectorAll('.milkdown-table-block').length,init,idle,operations,bodyOperations},null,2));
+const themeOperations=[];
+for(const theme of ['dark','light','dark']) {
+ const pm=document.querySelector('.ProseMirror'),tables=[...document.querySelectorAll('.milkdown-table-block')];take();
+ const begin=performance.now();
+ await act(async()=>{document.documentElement.classList.toggle('dark',theme==='dark');root.render(React.createElement(app.Visual,{tabId:'a',theme}));await pause(0);});
+ for(let i=0;i<300&&!app.getVisualEditor();i++)await act(async()=>pause(10));
+ assert.ok(app.getVisualEditor());assert.equal(content(),source,'theme retains exact source');
+ const retainedTables=tables.filter(table=>table.isConnected).length;
+ if(!process.env.DEDITOR_READING_BASELINE && !process.env.DEDITOR_PROFILE_BASE) {assert.equal(document.querySelector('.ProseMirror'),pm);assert.equal(retainedTables,tables.length);}
+ themeOperations.push({theme,ms:performance.now()-begin,retainedTables,profile:take()});
+}
+console.log(JSON.stringify({sections,chars:source.length,bytes:Buffer.byteLength(source),readyMs,domNodes:document.querySelectorAll('*').length,tables:document.querySelectorAll('.milkdown-table-block').length,init,idle,operations,bodyOperations,themeOperations},null,2));
 await act(async()=>root.unmount());
 assert.equal(runtimeErrors.length,0);
 dom.window.close();

@@ -1,3 +1,6 @@
+import { recoveryIpcFixture } from './recovery-ipc-fixture.mjs';
+const receiveRecovery = recoveryIpcFixture();
+globalThis.__receiveRecovery=receiveRecovery;
 import { zipSync, strToU8 } from "fflate";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -78,7 +81,7 @@ fs.symlinkSync(
 const stubs = {
   "../preview.css?raw": `export default ${JSON.stringify(fs.readFileSync("src/preview.css", "utf8"))};`,
   "@tauri-apps/api/core":
-    "export const invoke=(...args)=>globalThis.__invoke(...args); export const convertFileSrc=(p)=>'http://asset.localhost/'+encodeURIComponent(p);",
+    "export const invoke=(cmd,args)=>cmd==='write_app_state_incremental'?globalThis.__receiveRecovery(args.packet,content=>globalThis.__invoke('write_app_state',{content})):globalThis.__invoke(cmd,args); export const convertFileSrc=(p)=>'http://asset.localhost/'+encodeURIComponent(p);",
   "@tauri-apps/plugin-dialog":
     "export const save=(...args)=>globalThis.__save(...args); export const open=(...args)=>globalThis.__open(...args);",
   "@tauri-apps/plugin-opener":

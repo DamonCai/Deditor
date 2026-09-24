@@ -1,6 +1,6 @@
 [package]
 name = "deditor"
-version = "1.0.1"
+version = "1.0.2"
 description = "DEditor - Markdown and multi-language code editor"
 authors = ["DEditor"]
 license = ""
@@ -16,7 +16,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-serde_json = "1.0"
+serde_json = { version = "1.0", features = ["raw_value"] }
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2", features = ["protocol-asset"] }

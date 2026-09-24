@@ -747,6 +747,7 @@ const ZH: Record<string, string> = {
   // markdown
   "markdown.plantumlError": "PlantUML 渲染失败: {error}",
   "markdown.plantumlLoading": "正在加载 PlantUML 图表…",
+  "markdown.plantumlRetry": "重试图表",
   "markdown.plantumlOffline":
     "PlantUML 服务无法访问（离线或超时）— 显示原始源码作为替代",
   "markdown.mermaidLoading": "正在加载 Mermaid 图表…",
@@ -1503,6 +1504,7 @@ const EN: Record<string, string> = {
   // markdown
   "markdown.plantumlError": "PlantUML render failed: {error}",
   "markdown.plantumlLoading": "Loading PlantUML diagram…",
+  "markdown.plantumlRetry": "Retry diagram",
   "markdown.plantumlOffline":
     "PlantUML service unreachable (offline or timed out) — showing source instead",
   "markdown.mermaidLoading": "Loading Mermaid diagram…",

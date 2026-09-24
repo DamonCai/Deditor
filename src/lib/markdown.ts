@@ -223,6 +223,23 @@ export interface RenderOptions {
   mathOrdinal?: number;
 }
 
+export interface MarkdownToc { line: number; headings: { level: number; id: string; text: string }[] }
+
+/** Structured output from the same parser as the full preview. A preserved TOC
+ * can patch its text-only rows without parsing/sanitizing thousands of HTML nodes. */
+export async function readMarkdownTocs(source: string, opts: RenderOptions): Promise<Map<number, MarkdownToc>> {
+  const parsedSource = normalizeMarkdownFences(source);
+  if (sourceMaybeHasKatex(parsedSource)) await loadKatex();
+  const env = { __mathSource: opts.documentSource ?? source, __mathAutoNumber: opts.mathAutoNumber, __mathBlockIndex: opts.mathOrdinal ?? 0 };
+  const tokens = md.parse(parsedSource, env);
+  const result = new Map<number, MarkdownToc>();
+  for (const token of tokens) if (token.type === "deditor_toc" && token.map) {
+    const line = token.map[0] + 1;
+    result.set(line, { line, headings: token.meta.headings });
+  }
+  return result;
+}
+
 /** A TOC needs the full parser context (duplicate slugs, references and nested
  * headings), but none of the unrelated table/code HTML or its DOM. */
 export async function renderMarkdownTocs(source: string, opts: RenderOptions): Promise<Map<number, string>> {

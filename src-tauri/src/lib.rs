@@ -8,6 +8,7 @@ mod dock_menu;
 mod markdown_images;
 mod markdown_history;
 mod markdown_state;
+mod recovery_transport;
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
@@ -413,6 +414,14 @@ fn read_app_state(app: tauri::AppHandle, window: tauri::WebviewWindow) -> Result
 fn write_app_state(app: tauri::AppHandle, window: tauri::WebviewWindow, content: String) -> Result<(), String> {
     let path = app_state_path(&app, window.label())?;
     markdown_state::write(&path, &content)
+}
+
+#[tauri::command]
+async fn write_app_state_incremental(app: tauri::AppHandle, window: tauri::WebviewWindow, packet: recovery_transport::Packet) -> Result<bool, String> {
+    let path = app_state_path(&app, window.label())?;
+    let recovery = app.state::<recovery_transport::Windows>().window(window.label());
+    tauri::async_runtime::spawn_blocking(move || recovery.lock().unwrap().write(&path, packet))
+        .await.map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -1391,6 +1400,7 @@ pub fn run() {
         // builder so those early file requests have somewhere to wait.
         .manage(PendingOpens(Mutex::new(std::collections::HashMap::new())))
         .manage(editor_windows::Windows::default())
+        .manage(recovery_transport::Windows::default())
         // Persist window position / size / monitor / maximized state so
         // re-opens land where you left off — including across displays.
         .plugin(tauri_plugin_window_state::Builder::new().with_filter(|label| label == "main").build())
@@ -1474,6 +1484,7 @@ pub fn run() {
                     }
                 }
                 tauri::WindowEvent::Destroyed => {
+                    window.state::<recovery_transport::Windows>().remove(window.label());
                     let state = window.state::<editor_windows::Windows>();
                     let mut state = state.0.lock().unwrap();
                     state.menu.remove(window.label());
@@ -1527,6 +1538,7 @@ pub fn run() {
             read_markdown_history,
             read_app_state,
             write_app_state,
+            write_app_state_incremental,
             drain_pending_open_files
         ])
         .build(tauri::generate_context!())

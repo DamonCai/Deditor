@@ -35,7 +35,7 @@ import { sharedHeadingIds } from "../lib/markdownVisual/headingIds";
 import { installTypewriter } from "../lib/markdownVisual/typewriter";
 import { pasteTableClipboard } from "../lib/markdownVisual/tablePaste";
 import { pastePlainText } from "../lib/markdownVisual/plainTextPaste";
-import { clipboardPayload, insertPlainText, installPlainPasteShortcut } from "../lib/markdownVisual/clipboardFormats";
+import { clipboardPayload, clipboardText, insertPlainText, installPlainClipboardShortcuts } from "../lib/markdownVisual/clipboardFormats";
 import { inlineSourceSchema, installInlineSource, inlineProjection } from "../lib/markdownVisual/inlineSource";
 import { installLinkSelection } from "../lib/markdownVisual/linkSelection";
 import { installCompositionViewport } from "../lib/markdownVisual/compositionViewport";
@@ -99,6 +99,8 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
   const root = useRef<HTMLDivElement>(null), scroller = useRef<HTMLDivElement>(null), searchInput = useRef<HTMLInputElement>(null), replaceInput = useRef<HTMLInputElement>(null);
   const searchFocus = useRef(false);
   const runtime = useRef<Runtime | null>(null), readonlyRef = useRef(readonly), sourceRef = useRef(source), activeRef = useRef(active);
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
   readonlyRef.current = readonly; sourceRef.current = source; activeRef.current = active;
   const imageRoot = documentImageRoot(source, filePath);
   const [error, setError] = useState("");
@@ -109,7 +111,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
   const [searchOptions, setSearchOptions] = useState({ caseSensitive: false, wholeWord: false, regex: false });
   const [searchError, setSearchError] = useState(false);
   const searchKey = JSON.stringify([query, searchOptions]);
-  const [headings, setHeadings] = useState<{ pos: number; level: number; text: string }[]>([]);
+  const [headings, setHeadings] = useState<{ pos: number; level: number; text: string; key: string }[]>([]);
   const [activeHeading, setActiveHeading] = useState(-1);
   const headingPositions = useRef<{pos: number}[]>([]);
   const clickedHeading = useRef<{pos: number; scrollTop: number} | null>(null);
@@ -174,7 +176,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
     };
     const clipboardImages = imageClipboard(upload, () => activeRef.current && !readonlyRef.current && !cancelled && !isWindowCloseCommitted(), () => session.breakGroup());
     const initialSource = sourceRef.current;
-    const codeNodeView = codeView(tabId, theme);
+    const codeNodeView = codeView(tabId, () => themeRef.current);
     let sourceDocument: MarkdownDocument | undefined;
     const crepe = new CrepeBuilder({ root: host, defaultValue: normalizeMarkdownFences(initialSource) })
       .addFeature(codeMirror)
@@ -196,6 +198,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
     crepe.editor.config(ctx => ctx.update(editorViewOptionsCtx, prev => ({ ...prev, attributes: { class: "md-document", "aria-label": t("md.visualEditor"), spellcheck: "false" },
       handleKeyDown: (view, event) => handleSelectedBlockExit(view, event) || handleTableKeys(view, event),
       handlePaste: (view, event, slice) => clipboardImages.paste(view, event) || pasteTableClipboard(view, event, slice) || pastePlainText(view, event, slice, ctx.get(parserCtx)),
+      clipboardTextSerializer: clipboardText,
       handleDOMEvents: { ...prev.handleDOMEvents,
       mousedown: (_view, event) => {
         if ((event.metaKey || event.ctrlKey) && (event.target as HTMLElement).closest("a")) { event.preventDefault(); return true; }
@@ -219,7 +222,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
       ...(originals["image-block"] ? { "image-block": accessibleImageView(originals["image-block"], language, tabId) } : {}),
       ...(originals.image ? { image: rootAwareImageView(originals.image) } : {}),
       math_inline: mathView(tabId), footnote_reference: footnoteNodeView, footnote_definition: footnoteNodeView,
-      deditor_raw: rawView(filePath, tabId, () => sourceDocument?.sourceContext()), code_block: codeNodeView,
+      deditor_raw: rawView(filePath, tabId, () => sourceDocument?.sourceContext(), () => themeRef.current), code_block: codeNodeView,
     })));
     crepe.setReadonly(true);
     const initialize = async () => {
@@ -300,12 +303,25 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
           store.setTabPosition(paneViewKey(tabId, paneId), { cursor: position.sourceCursor, scrollTopLine: store.tabPositions[paneViewKey(tabId, paneId)]?.scrollTopLine ?? 1 });
           useEditorStore.getState().setActiveSelectionLength(view.state.selection.to - view.state.selection.from);
         };
+        const headingKeys = new WeakMap<object, number>();
+        let nextHeadingKey = 0;
         const outline = () => {
           if (!activeRef.current) return;
-          const result: { pos: number; level: number; text: string }[] = [];
-          view.state.doc.descendants((node, pos) => { if (node.type.name === "heading") { result.push({ pos: pos + 1, level: node.attrs.level, text: outlineHeadingText(node) }); return false; } });
+          const result: { pos: number; level: number; text: string; key: string }[] = [];
+          const occurrences = new Map<number, number>();
+          view.state.doc.descendants((node, pos) => {
+            if (node.type.name !== "heading") return;
+            let identity = headingKeys.get(node);
+            if (identity === undefined) { identity = nextHeadingKey++; headingKeys.set(node, identity); }
+            const occurrence = occurrences.get(identity) ?? 0;
+            occurrences.set(identity, occurrence + 1);
+            // Positions change after every earlier edit. Node identity keeps
+            // untouched outline rows mounted while navigation uses fresh positions.
+            result.push({ pos: pos + 1, level: node.attrs.level, text: outlineHeadingText(node), key: `${identity}:${occurrence}` });
+            return false;
+          });
           headingPositions.current = result;
-          setHeadings(previous => previous.length === result.length && previous.every((item, i) => item.pos === result[i].pos && item.level === result[i].level && item.text === result[i].text) ? previous : result);
+          setHeadings(previous => previous.length === result.length && previous.every((item, i) => item.key === result[i].key && item.pos === result[i].pos && item.level === result[i].level && item.text === result[i].text) ? previous : result);
         };
         const flush = () => {
           const content = document.apply(view.state.doc);
@@ -347,7 +363,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
         inlineEditing = installInlineSource(view, document, () => session.breakGroup());
         cleanupInlineSource = inlineEditing.destroy;
         cleanupLinkSelection = installLinkSelection(ctx, view, () => session.breakGroup(), () => !cancelled && activeRef.current);
-        cleanupPlainPaste = installPlainPasteShortcut(view, () => !cancelled && activeRef.current);
+        cleanupPlainPaste = installPlainClipboardShortcuts(view, () => !cancelled && activeRef.current);
         const sync = (content: string) => {
           if (document.source === content) return;
           if (view.composing || composition.composing) return;
@@ -476,7 +492,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
       void dispose().then(() => host.replaceChildren());
     });
     return () => {
-      // A path/language/theme remount may follow an external source replacement in the same batch.
+      // A path/language remount may follow an external source replacement in the same batch.
       // Never let the outgoing view overwrite the newer store content during cleanup.
       const outgoing = runtime.current;
       if (outgoing && activeRef.current && useEditorStore.getState().tabs.find(tab => tab.id === tabId)?.content === outgoing.document.source) outgoing.flush();
@@ -485,7 +501,13 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
       if (getVisualEditor()?.owner === owner.current) setVisualEditor(null);
       void dispose(); host.remove();
     };
-  }, [tabId, filePath, language, theme, loadAttempt]);
+  }, [tabId, filePath, language, loadAttempt]);
+  // Theme changes affect presentation, not the editing document. Rebuilding
+  // thousands of NodeViews also temporarily retains the outgoing DOM and its
+  // event handlers. Refresh only theme-dependent projections in place.
+  useLayoutEffect(() => {
+    runtime.current?.view.dom.dispatchEvent(new CustomEvent("deditor-theme-change", { detail: theme }));
+  }, [theme, runtimeVersion]);
   useLayoutEffect(() => { if (visible) runtime.current?.sync(source); }, [source, visible, active]);
   useEffect(() => { runtime.current?.outline(); }, [ready]);
   useEffect(() => {

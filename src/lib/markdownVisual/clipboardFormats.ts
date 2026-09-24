@@ -1,8 +1,27 @@
 import { Fragment, Slice, type Node as ProseNode } from "@milkdown/kit/prose/model";
 import type { EditorView } from "@milkdown/kit/prose/view";
 import { CellSelection, isInTable, selectedRect } from "@milkdown/kit/prose/tables";
+import { emojiValue } from "../markdownShorthand";
+import { EditorView as CodeView } from "@codemirror/view";
+import { isWindowCloseCommitted } from "../windowCloseGuard";
+import { showError } from "../feedback";
+import { tStatic } from "../i18n";
 
 export interface MarkdownClipboardPayload { markdown: string; text: string; html: string; tsv?: string }
+
+/** Ordinary copy exposes the selected text, never Markdown serialization escapes. */
+export function clipboardText(slice: Slice): string {
+  return slice.content.textBetween(0, slice.content.size, "\n", node => {
+    switch (node.type.name) {
+      case "hardbreak": return "\n";
+      case "deditor_emoji": return emojiValue(node.attrs.name) ?? `:${node.attrs.name}:`;
+      case "image": case "image-block": return node.attrs.alt ?? "";
+      case "math_inline": return node.attrs.value ?? "";
+      case "footnote_reference": return `[${node.attrs.label || node.attrs.identifier}]`;
+      default: return node.type.spec.leafText?.(node) ?? "";
+    }
+  });
+}
 
 export function clipboardPayload(view: EditorView, source: string, serialize: (doc: ProseNode) => string): MarkdownClipboardPayload {
   const { doc, selection, schema } = view.state;
@@ -17,7 +36,7 @@ export function clipboardPayload(view: EditorView, source: string, serialize: (d
       const row: ProseNode[] = [], texts: string[] = [];
       for (let c = left; c < right; c++) {
         const cell = rect.table.nodeAt(rect.map.map[r * rect.map.width + c])!;
-        texts.push(cell.textBetween(0, cell.content.size, "\n", "\n"));
+        texts.push(clipboardText(new Slice(cell.content, 0, 0)));
         row.push((r === top ? schema.nodes.table_header : schema.nodes.table_cell).create(cell.attrs, cell.content));
       }
       values.push(texts);
@@ -43,7 +62,7 @@ export function clipboardPayload(view: EditorView, source: string, serialize: (d
   const copiedDoc = schema.topNodeType.createAndFill(null, slice.content);
   return {
     markdown: selection.empty ? source : copiedDoc ? serialize(copiedDoc) : view.serializeForClipboard(slice).text,
-    text: slice.content.textBetween(0, slice.content.size, "\n", "\n"),
+    text: clipboardText(slice),
     html: dom.innerHTML,
     tsv,
   };
@@ -68,16 +87,42 @@ export function insertPlainText(view: EditorView, text: string) {
   view.focus(); return true;
 }
 
-export function installPlainPasteShortcut(view: EditorView, enabled: () => boolean) {
-  let pending = false;
-  const keydown = (event: KeyboardEvent) => { pending = enabled() && !(event.target instanceof Element && event.target.closest('.cm-editor')) && (event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'v'; };
-  const keyup = () => { pending = false; };
-  const paste = (event: ClipboardEvent) => {
-    if (!pending || !enabled() || !view.editable || view.composing || !event.clipboardData) return;
-    pending = false; event.preventDefault(); event.stopImmediatePropagation();
-    insertPlainText(view, event.clipboardData.getData('text/plain'));
+export function installPlainClipboardShortcuts(view: EditorView, enabled: () => boolean) {
+  let disposed = false, request = 0;
+  const keydown = (event: KeyboardEvent) => {
+    const key = event.key.toLowerCase();
+    if (!enabled() || isWindowCloseCommitted() || event.defaultPrevented || event.isComposing || view.composing ||
+      event.altKey || !(event.metaKey || event.ctrlKey) || !event.shiftKey || !['c', 'v'].includes(key)) return;
+    const target = event.target instanceof Element ? event.target : null;
+    const codeRoot = target?.closest<HTMLElement>('.cm-editor');
+    const code = codeRoot ? CodeView.findFromDOM(codeRoot) : null;
+    if (target?.closest('input,textarea,select') && !code) return;
+    // Handle the command itself: native plain-paste can arrive after keyup or
+    // without the keydown/paste ordering assumed by a pending-event flag.
+    event.preventDefault(); event.stopImmediatePropagation();
+    const state = view.state, codeState = code?.state, token = ++request;
+    const run = async () => {
+      if (key === 'c') {
+        if (codeState ? codeState.selection.main.empty : state.selection.empty) return;
+        const text = codeState ? codeState.sliceDoc(codeState.selection.main.from, codeState.selection.main.to) : clipboardText(state.selection.content());
+        await navigator.clipboard.writeText(text);
+        return;
+      }
+      if (!view.editable || codeState?.readOnly || code?.composing) return;
+      const text = await navigator.clipboard.readText();
+      if (!text || disposed || token !== request || !enabled() || isWindowCloseCommitted() || !view.editable || view.composing ||
+        view.state.doc !== state.doc || !view.state.selection.eq(state.selection)) return;
+      if (code && codeState) {
+        if (!code.hasFocus || code.composing || code.state.readOnly || code.state.doc !== codeState.doc || !code.state.selection.eq(codeState.selection)) return;
+        const inserted = code.state.toText(text);
+        code.dispatch({ changes: { from: codeState.selection.main.from, to: codeState.selection.main.to, insert: inserted },
+          selection: { anchor: codeState.selection.main.from + inserted.length }, userEvent: 'input.paste' });
+      } else if (view.hasFocus()) insertPlainText(view, text);
+    };
+    void run().catch(() => {
+      if (!disposed && enabled() && !isWindowCloseCommitted()) void showError(tStatic('md.clipboardError'));
+    });
   };
-  view.dom.addEventListener('keydown', keydown, true); view.dom.addEventListener('keyup', keyup);
-  view.dom.addEventListener('paste', paste, true); view.dom.addEventListener('blur', keyup);
-  return () => { view.dom.removeEventListener('keydown', keydown, true); view.dom.removeEventListener('keyup', keyup); view.dom.removeEventListener('paste', paste, true); view.dom.removeEventListener('blur', keyup); };
+  view.dom.addEventListener('keydown', keydown, true);
+  return () => { disposed = true; view.dom.removeEventListener('keydown', keydown, true); };
 }

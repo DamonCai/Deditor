@@ -10,6 +10,7 @@ import {
 import { logInfo, logWarn } from "./logger";
 import { isBinaryRenderable } from "./lang";
 import { readAsDataUrl } from "./fileio";
+import { captureRecoverySnapshot, RecoveryEncoder } from "./recoveryTransport";
 
 // localStorage keys are LEGACY: persistence now lives in a real file managed
 // by the Rust side (see read_app_state / write_app_state). We still read these
@@ -365,6 +366,7 @@ export function pausePersistence(): () => void {
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let latestExtras: UiExtras | null = null;
 let pendingWrite: Promise<void> = Promise.resolve();
+const recoveryEncoder = new RecoveryEncoder();
 
 export function schedulePersist(extras: UiExtras): void {
   latestExtras = extras;
@@ -443,9 +445,18 @@ function doSave(extras: UiExtras): Promise<void> {
     autoSave: s.autoSave,
     formatOnSave: s.formatOnSave,
   };
-  const content = JSON.stringify(base);
+  const captured = captureRecoverySnapshot(base);
   // An older in-flight snapshot must finish before a close snapshot is written.
-  const write = pendingWrite.then(() => invoke<void>("write_app_state", { content }));
+  // Capture the state above now, but derive deltas only from the last successful
+  // write. A slow/failed write must not shift the baseline of a queued close.
+  const write = pendingWrite.then(async () => {
+    let prepared = recoveryEncoder.prepareCaptured(captured);
+    if (!await invoke<boolean>("write_app_state_incremental", { packet: prepared.packet })) {
+      prepared = recoveryEncoder.prepareCaptured(captured, true);
+      if (!await invoke<boolean>("write_app_state_incremental", { packet: prepared.packet })) throw new Error("Recovery resync failed");
+    }
+    prepared.acknowledge();
+  });
   pendingWrite = write.catch(() => {});
   return write
     .then(() => {

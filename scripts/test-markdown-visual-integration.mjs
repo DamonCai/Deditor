@@ -1,3 +1,5 @@
+import { recoveryIpcFixture } from './recovery-ipc-fixture.mjs';
+const receiveRecovery = recoveryIpcFixture();
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 import { JSDOM } from 'jsdom';
@@ -26,6 +28,7 @@ fs.mkdirSync(path.dirname(output),{recursive:true});
 const writes=[];let failed=false,persistedState='';
 globalThis.mdInvoke=async(command,args)=>{
  if(command==='read_app_state')return persistedState;
+ if(command==='write_app_state_incremental')return receiveRecovery(args.packet,content=>globalThis.mdInvoke('write_app_state',{content}));
  if(command==='write_app_state'){persistedState=args.content;return;}
  if(command==='write_text_file'){if(failed)throw new Error('generated disk failure');writes.push(args);}
  if(command==='read_text_file')return '';
@@ -1334,6 +1337,35 @@ await test('retained modes: suspend defers source sync, save stays current and r
  await act(async()=>root.render(React.createElement(app.Visual,{tabId:'a',active:false,theme:'light'})));
  await act(async()=>store.getState().setContent('# External replacement\n','a','command'));
  await act(async()=>root.render(null));assert.equal(content(),'# External replacement\n');await render();
+});
+await test('theme changes retain document/table DOM, caret, history and refresh every code projection',async()=>{
+ await act(async()=>root.render(null));
+ const original='[toc]\n\n# Theme\n\nBody text\n\n```js\nconst value = "test";\n```\n\n| A | B |\n| --- | --- |\n| Keep | table |\n'.replaceAll('\\n','\n');
+ await act(async()=>store.getState().setContent(original,'a','command'));await render();
+ await navigateMarker('Body text');
+ const pm=document.querySelector('.ProseMirror'),table=document.querySelector('.milkdown-table-block');
+ const anchor=document.getSelection().anchorNode,offset=document.getSelection().anchorOffset;
+ const switchTheme=async theme=>act(async()=>{document.documentElement.classList.toggle('dark',theme==='dark');root.render(React.createElement(app.Visual,{tabId:'a',theme}));await pause(120);});
+ const codeColors=element=>[...element.querySelectorAll('span[style]')].map(e=>e.getAttribute('style'));
+ const expectedHost=document.createElement('div');expectedHost.innerHTML=app.markdownDisplayHtml(await app.renderMarkdown('```js\nconst value = "test";\n```'.replaceAll('\\n','\n'),{theme:'dark'}));
+ await switchTheme('dark');
+ assert.equal(document.querySelector('.ProseMirror'),pm);assert.equal(document.querySelector('.milkdown-table-block'),table);assert.equal(content(),original);
+ assert.equal(document.getSelection().anchorNode,anchor);assert.equal(document.getSelection().anchorOffset,offset);
+ assert.deepEqual(codeColors(document.querySelector('.md-code-preview')),codeColors(expectedHost));
+ const {EditorView}=await import('@codemirror/view');
+ await act(async()=>document.querySelector('.md-code-preview').dispatchEvent(new dom.window.MouseEvent('mousedown',{button:0,bubbles:true})));
+ const cm=EditorView.findFromDOM(document.querySelector('.md-code-editor .cm-editor'));
+ await act(async()=>{cm.focus();cm.dispatch({selection:{anchor:6,head:11}});});
+ assert.equal(cm.state.facet(EditorView.darkTheme),true);
+ await switchTheme('light');assert.equal(cm.state.facet(EditorView.darkTheme),false);assert.deepEqual([cm.state.selection.main.anchor,cm.state.selection.main.head],[6,11]);assert.equal(content(),original);
+ await act(async()=>cm.dispatch({changes:{from:6,to:11,insert:'count'}}));assert.equal(content(),original.replace('value','count'));
+ await act(async()=>app.markdownHistory());assert.equal(content(),original);
+ // Newly constructed NodeViews must use the latest theme, not a factory's old closure.
+ await switchTheme('dark');
+ await act(async()=>store.getState().setContent(original+'\n```js\nconst value = "test";\n```\n'.replaceAll('\\n','\n'),'a','command'));await act(async()=>pause(160));
+ for(const preview of document.querySelectorAll('.md-code-preview'))assert.deepEqual(codeColors(preview),codeColors(expectedHost));
+ assert.equal(document.querySelectorAll('.md-code-preview').length,2);
+ await switchTheme('light');await act(async()=>root.render(null));await render();
 });
 await test('lifecycle stress: repeated table documents release every editor and preserve source',async()=>{
  await act(async()=>root.render(null));

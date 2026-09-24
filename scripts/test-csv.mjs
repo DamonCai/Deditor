@@ -1,3 +1,5 @@
+import { recoveryIpcFixture } from './recovery-ipc-fixture.mjs';
+const receiveRecovery = recoveryIpcFixture();
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 import { JSDOM } from 'jsdom';
@@ -26,6 +28,7 @@ fs.mkdirSync(path.dirname(output),{recursive:true});
 const writes=[];let failed=false,persistedState='';
 globalThis.mdInvoke=async(command,args)=>{
  if(command==='read_app_state')return persistedState;
+ if(command==='write_app_state_incremental')return receiveRecovery(args.packet,content=>globalThis.mdInvoke('write_app_state',{content}));
  if(command==='write_app_state'){persistedState=args.content;return;}
  if(command==='write_text_file'){if(failed)throw new Error('generated disk failure');writes.push(args);}
  if(command==='read_text_file')return '';

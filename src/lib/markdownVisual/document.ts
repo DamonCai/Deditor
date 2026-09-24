@@ -1,3 +1,4 @@
+import { offsetSourceTree } from "./sourceOffsets";
 import { tableListTree } from "./tableTree";
 import { taskIndentTree } from "./taskIndent";
 import { decodeHTMLStrict } from "entities";
@@ -183,10 +184,14 @@ export class MarkdownDocument {
   editInline(from: number, length: number, raw: string, next: ProseNode) {
     const end = from + length, delta = raw.length - length;
     const multiline = /[\r\n]/.test(this.source.slice(from, end));
-    const shift = (n: SourceNode): SourceNode => ({ ...n, position: n.position ? {
-      start: { offset: (n.position.start.offset ?? 0) >= end ? (n.position.start.offset ?? 0) + delta : n.position.start.offset },
-      end: { offset: (n.position.end.offset ?? 0) >= end ? (n.position.end.offset ?? 0) + delta : n.position.end.offset },
-    } : undefined, children: n.children?.map(shift) });
+    const shift = (n: SourceNode): SourceNode => {
+      if (!delta || range(n)[1] < end) return n;
+      if (range(n)[0] >= end) return offsetSourceTree(n, delta);
+      return { ...n, position: n.position ? {
+        start: { offset: n.position.start.offset },
+        end: { offset: (n.position.end.offset ?? 0) >= end ? (n.position.end.offset ?? 0) + delta : n.position.end.offset },
+      } : undefined, children: n.children?.map(shift) };
+    };
     this.source = this.source.slice(0, from) + raw + this.source.slice(end);
     this.ast = this.ast.map(shift);
     // An inline edit without line breaks cannot consume a neighboring block.
@@ -200,8 +205,7 @@ export class MarkdownDocument {
       const [start, stop] = range(block);
       const parsed = editingTree(this.source.slice(start, stop)).children ?? [];
       if (parsed.length === 1 && parsed[0].type === block.type && !contextual(parsed[0])) {
-        const offset = (n: SourceNode): SourceNode => ({ ...n, position: n.position ? { start: { offset: start + (n.position.start.offset ?? 0) }, end: { offset: start + (n.position.end.offset ?? 0) } } : undefined, children: n.children?.map(offset) });
-        this.ast[blockIndex] = offset(parsed[0]); local = true;
+        this.ast[blockIndex] = offsetSourceTree(parsed[0], start); local = true;
       }
     }
     if (!local) {
@@ -262,15 +266,9 @@ export class MarkdownDocument {
           const ast = editingTree(raw).children ?? [];
           const parsed = ast.length === 1 && ast[0].type === previous.type && !needsDocumentContext(ast[0]) ? this.parse(raw) : null;
           if (parsed?.childCount === 1 && parsed.firstChild!.type === this.doc.child(index).type) {
-            const offset = (node: SourceNode, local: boolean): SourceNode => ({ ...node,
-              position: node.position ? {
-                start: { offset: local ? start + (node.position.start.offset ?? 0) : (node.position.start.offset ?? 0) + ((node.position.start.offset ?? 0) >= stop ? delta : 0) },
-                end: { offset: local ? start + (node.position.end.offset ?? 0) : (node.position.end.offset ?? 0) + ((node.position.end.offset ?? 0) >= stop ? delta : 0) },
-              } : undefined, children: node.children?.map(child => offset(child, local)),
-            });
             const blocks = children(this.doc); blocks[index] = parsed.firstChild!;
             this.source = source; this.doc = this.doc.type.create(this.doc.attrs, blocks, this.doc.marks);
-            this.ast = this.ast.map((node, at) => offset(at === index ? ast[0] : node, at === index));
+            this.ast = this.ast.map((node, at) => at === index ? offsetSourceTree(ast[0], start) : at > index ? offsetSourceTree(node, delta) : node);
             return this.doc;
           }
         }
@@ -315,19 +313,15 @@ export class MarkdownDocument {
     }
     replacement = leading + replacement + trailing;
     const delta = replacement.length - (to - from);
-    const shifted = (node: SourceNode, offset: number): SourceNode => ({ ...node,
-      position: node.position ? { start: { offset: (node.position.start.offset ?? 0) + offset }, end: { offset: (node.position.end.offset ?? 0) + offset } } : undefined,
-      children: node.children?.map(child => shifted(child, offset)),
-    });
     let cursor = from + leading.length;
     const spans = parts.map((part, index) => {
       const ast = changed[index].type.name !== "deditor_raw"
-        ? shifted(editingBlock(part, definitions), cursor)
+        ? offsetSourceTree(editingBlock(part, definitions), cursor)
         : { type: "deditorRaw", position: { start: { offset: cursor }, end: { offset: cursor + part.length } } };
       cursor += part.length + eol.length * 2;
       return ast;
     });
-    this.ast = [...this.ast.slice(0, first), ...spans, ...this.ast.slice(oldEnd).map(node => shifted(node, delta))];
+    this.ast = [...this.ast.slice(0, first), ...spans, ...this.ast.slice(oldEnd).map(node => offsetSourceTree(node, delta))];
     this.source = this.source.slice(0, from) + replacement + this.source.slice(to);
     this.doc = next;
     return this.source;
@@ -341,7 +335,6 @@ export class MarkdownDocument {
     const edits: Edit[] = [], assigned = new Map<number,{ast:SourceNode;edit?:Edit;relative?:number}>();
     const definitions = this.ast.filter(node => node.type === "footnoteDefinition" || node.type === "definition").map(node=>this.source.slice(...range(node))).join("\n\n");
     const serialize = (node:ProseNode) => node.type.name === "deditor_raw" ? node.textContent : this.serialize(next.type.create(null,node)).replace(/\n$/,"").replace(/\r?\n/g,eol);
-    const offsetTree = (node:SourceNode, amount:number):SourceNode => ({...node,position:node.position?{start:{offset:(node.position.start.offset??0)+amount},end:{offset:(node.position.end.offset??0)+amount}}:undefined,children:node.children?.map(child=>offsetTree(child,amount))});
     // The usual keystroke changes one block. Avoid building a complete projection
     // map for thousands of unaffected paragraphs/tables just because a footer exists.
     if (before.length === after.length) {
@@ -361,7 +354,7 @@ export class MarkdownDocument {
         }
         const replacement = editingBlock(raw, definitions);
         const delta = raw.length - (to - from);
-        this.ast = this.ast.map((entry, index) => index === changed ? offsetTree(replacement, from) : delta && range(entry)[0] >= to ? offsetTree(entry, delta) : entry);
+        this.ast = this.ast.map((entry, index) => index === changed ? offsetSourceTree(replacement, from) : delta && range(entry)[0] >= to ? offsetSourceTree(entry, delta) : entry);
         this.source = this.source.slice(0,from) + raw + this.source.slice(to);
         this.doc = next; return this.source;
       }
@@ -427,8 +420,8 @@ export class MarkdownDocument {
     };
     this.ast=after.map((_node,index)=>{
       const entry=assigned.get(index);if(!entry)throw new Error("Missing Markdown footer source mapping");
-      if(entry.edit)return offsetTree(entry.ast,entry.edit.from+shift(entry.edit.from,entry.edit)+(entry.relative??0));
-      return offsetTree(entry.ast,shift(range(entry.ast)[0]));
+      if(entry.edit)return offsetSourceTree(entry.ast,entry.edit.from+shift(entry.edit.from,entry.edit)+(entry.relative??0));
+      return offsetSourceTree(entry.ast,shift(range(entry.ast)[0]));
     });
     for(const edit of [...edits].reverse())this.source=this.source.slice(0,edit.from)+edit.insert+this.source.slice(edit.to);
     this.doc=next;return this.source;

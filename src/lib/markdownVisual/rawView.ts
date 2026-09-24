@@ -13,7 +13,8 @@ import { EditorState, Prec } from "@codemirror/state";
 import { basicSetup } from "codemirror";
 import { indentWithTab } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
-import { clearMarkdownFragmentContext, renderMarkdownFragment } from "../markdownFragments";
+import { clearMarkdownFragmentContext, readMarkdownTocFragment, renderMarkdownFragment } from "../markdownFragments";
+import { MarkdownTocView } from "./tocView";
 import { hydrateLocalImages } from "../localImgHydrate";
 import { documentImageRoot } from "../markdownImageSettings";
 import { tStatic } from "../i18n";
@@ -36,10 +37,12 @@ function sourceContext(view: ProseView, source: string) {
   return context;
 }
 
-export function rawView(filePath: string | null, tabId: string, documentContext?: () => MarkdownSourceContext | undefined) {
+export function rawView(filePath: string | null, tabId: string, documentContext?: () => MarkdownSourceContext | undefined, currentTheme?: () => "light" | "dark") {
   return (initial: ProseNode, view: ProseView, getPos: () => number | undefined): NodeView => {
     let node = initial, cm: EditorView | null = null, updating = false, generation = 0, destroyed = false;
     let controllers: AbortController[] = [];
+    let tocView: MarkdownTocView | undefined;
+    let theme: "light" | "dark" = currentTheme?.() ?? (document.documentElement.classList.contains("dark") ? "dark" : "light");
     const dom = document.createElement("section"); dom.className = "md-raw-block"; dom.contentEditable = "false";
     const preview = document.createElement("div"); preview.className = "markdown-body md-raw-preview";
     const button = document.createElement("button"); button.className = "deditor-btn md-raw-edit"; button.dataset.variant = "ghost";
@@ -59,15 +62,28 @@ export function rawView(filePath: string | null, tabId: string, documentContext?
       let index = 0; view.state.doc.forEach((_node, offset, i) => { if (offset === getPos()) index = i; });
       const start = ast[index] ? range(ast[index])[0] : 0;
       const line = source.slice(0, start).split("\n").length;
-      void renderMarkdownFragment(node.textContent + "\n\n" + definitions, source, line, { theme: document.documentElement.classList.contains("dark") ? "dark" : "light" }, view).then(html => {
+      const options = { theme };
+      const renderPreview = async () => {
+        if (/^\s*\[(?:toc|\[toc\])\]\s*$/i.test(node.textContent)) {
+          const toc = await readMarkdownTocFragment(source, line, options, view);
+          if (destroyed || version !== generation) return;
+          if (toc) {
+            tocView ??= new MarkdownTocView(); tocView.update(toc);
+            if (preview.firstChild !== tocView.dom) preview.replaceChildren(tocView.dom);
+            return;
+          }
+        }
+        const html = await renderMarkdownFragment(node.textContent + "\n\n" + definitions, source, line, options, view);
         if (destroyed || version !== generation) return;
+        tocView = undefined;
         preview.innerHTML = markdownDisplayHtml(html);
         const currentSource = useEditorStore.getState().tabs.find(t => t.id === tabId)?.content ?? source;
         controllers = [hydrateMarkdownDisplay(preview, {
-          theme: document.documentElement.classList.contains("dark") ? "dark" : "light",
+          theme: options.theme,
           filePath, imageRoot: documentImageRoot(currentSource, filePath),
         })];
-      }).catch(error => { logError("Markdown preserved block render failed", error); if (!destroyed && version === generation) preview.textContent = node.textContent; });
+      };
+      void renderPreview().catch(error => { logError("Markdown preserved block render failed", error); if (!destroyed && version === generation) { tocView = undefined; preview.textContent = node.textContent; } });
     };
     const breakHistory = () => {
       const tab = useEditorStore.getState().tabs.find(tab => tab.id === tabId);
@@ -133,7 +149,13 @@ export function rawView(filePath: string | null, tabId: string, documentContext?
       if (view.editable && !(e.target as HTMLElement).closest("summary,button,input,select,textarea,audio,video,iframe")) open();
     });
     const modeChanged = () => { if (!view.editable) close(false); render(); };
+    const themeChanged = (event: Event) => {
+      const next = (event as CustomEvent<"light" | "dark">).detail;
+      if (next !== "light" && next !== "dark" || next === theme) return;
+      theme = next; render();
+    };
     view.dom.addEventListener("deditor-editable-change", modeChanged);
+    view.dom.addEventListener("deditor-theme-change", themeChanged);
     const imageRootChanged = () => hydrateLocalImages(preview, filePath, documentImageRoot(useEditorStore.getState().tabs.find(t => t.id === tabId)?.content ?? "", filePath));
     view.dom.addEventListener("deditor-image-root-change", imageRootChanged);
     // A TOC depends on headings, not every body keystroke. Keep node identities
@@ -177,7 +199,7 @@ export function rawView(filePath: string | null, tabId: string, documentContext?
           updating = true; cm.dispatch({ changes: { from: 0, to: cm.state.doc.length, insert: next.textContent } }); updating = false;
         }
         if (changed) render(); return true;
-      }, destroy() { dom.removeEventListener("focusout", blur); controllers.forEach(controller => controller.abort()); view.dom.removeEventListener("deditor-document-change", documentChanged); view.dom.removeEventListener("deditor-editable-change", modeChanged); view.dom.removeEventListener("deditor-image-root-change", imageRootChanged); clearMarkdownFragmentContext(view); destroyed = true; generation++; cm?.destroy(); },
+      }, destroy() { dom.removeEventListener("focusout", blur); controllers.forEach(controller => controller.abort()); view.dom.removeEventListener("deditor-document-change", documentChanged); view.dom.removeEventListener("deditor-editable-change", modeChanged); view.dom.removeEventListener("deditor-theme-change", themeChanged); view.dom.removeEventListener("deditor-image-root-change", imageRootChanged); clearMarkdownFragmentContext(view); destroyed = true; generation++; cm?.destroy(); },
     };
   };
 }
