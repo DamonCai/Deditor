@@ -308,6 +308,7 @@ const ZH: Record<string, string> = {
 
   "fileio.targetAlreadyOpen": "目标文件已在另一标签打开，请先关闭该标签或选择其他路径。",
   "fileio.openFailed": "无法打开「{name}」。\n{err}",
+  "fileio.openMissing": "找不到「{name}」。文件可能已被移动或删除，文件树已刷新。",
   "fileio.saveFailed": "无法保存「{name}」。更改仍保留在编辑器中，请重试。\n{err}",
   // common
   "common.cancel": "取消",
@@ -1060,6 +1061,7 @@ const EN: Record<string, string> = {
 
   "fileio.targetAlreadyOpen": "This file is already open in another tab. Close it or choose another path.",
   "fileio.openFailed": "Could not open “{name}”.\n{err}",
+  "fileio.openMissing": "Could not find “{name}”. The file may have been moved or deleted. The file tree has been refreshed.",
   "fileio.saveFailed": "Could not save “{name}”. Your changes remain in the editor. Please try again.\n{err}",
   // common
   "common.cancel": "Cancel",

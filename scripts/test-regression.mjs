@@ -476,6 +476,42 @@ test(2, "same-name workspace groups collapse independently and preserve file sel
   assert.ok(calls.every(c=>c.cmd === "list_dir"), "disclosure performs only directory reads");
 });
 
+test(2, "file tree drops externally removed files when the app regains focus", async () => {
+  reset();
+  store.setState({ workspaces: ["/work"], expandedDirs: {} });
+  let files = [{ name: "main.py", path: "/work/main.py", is_dir: false }];
+  let reads = 0;
+  globalThis.__invoke = async (cmd) => {
+    assert.equal(cmd, "list_dir");
+    reads++;
+    return files;
+  };
+  await render(React.createElement(app.FileTree));
+  assert.ok(document.querySelector('[data-file-path="/work/main.py"]'));
+  files = [];
+  await act(async () => { window.dispatchEvent(new window.Event("focus")); await flush(); });
+  assert.equal(document.querySelector('[data-file-path="/work/main.py"]'), null);
+  assert.equal(reads, 2);
+});
+
+test(2, "opening an externally removed file refreshes its parent directory", async () => {
+  reset();
+  store.setState({ workspaces: ["/work"], expandedDirs: {} });
+  let files = [{ name: "main.py", path: "/work/main.py", is_dir: false }];
+  let reads = 0;
+  globalThis.__invoke = async (cmd) => {
+    if (cmd === "list_dir") { reads++; return files; }
+    if (cmd === "read_text_file") throw new Error("No such file or directory (os error 2)");
+    return undefined;
+  };
+  await render(React.createElement(app.FileTree));
+  files = [];
+  await act(async () => { document.querySelector('[data-file-path="/work/main.py"]').click(); await flush(); });
+  assert.equal(document.querySelector('[data-file-path="/work/main.py"]'), null);
+  assert.equal(reads, 2);
+  await dismissSaveError(/main\.py/);
+});
+
 test(1, "XML mapper and new language mappings create highlighted editor spans in both themes", async () => {
   reset([tab('syntax','','/generated/Mapper.xml')]);
   const paths=['Mapper.xml','schema.XSD','sample.json5','sample.kt','sample.scss','sample.svelte','sample.properties','sample.mts','sample.diff'];

@@ -15,7 +15,7 @@ import {
   setWorkspaceByPath,
   type DirEntry,
 } from "../lib/fileio";
-import { onRefresh } from "../lib/treeRefresh";
+import { notifyRefreshAll, onRefresh } from "../lib/treeRefresh";
 import LangIcon from "./LangIcon";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
 import { promptInput } from "./PromptDialog";
@@ -75,6 +75,23 @@ function FileTreeImpl() {
     setRevealRequest(null);
     return () => { operation.current++; };
   }, [workspaces]);
+
+  useEffect(() => {
+    // Files may be created, moved or removed by another app while DEditor is
+    // in the background. Re-list only mounted (visible/expanded) tree folders.
+    let lastRefresh = 0;
+    const refresh = () => {
+      if (document.hidden || Date.now() - lastRefresh < 1000) return;
+      lastRefresh = Date.now();
+      notifyRefreshAll();
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, []);
 
   useEffect(() => {
     if (!revealRequest || revealRequest.path !== filePath || !treeRef.current) return;
@@ -551,14 +568,19 @@ const Folder = memo(function Folder({
 }) {
   const [entries, setEntries] = useState<DirEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const loadId = useRef(0);
 
   const load = useCallback(async () => {
+    const id = ++loadId.current;
     try {
       setError(null);
       const list = await listDir(path);
-      setEntries(list);
+      if (id === loadId.current) setEntries(list);
     } catch (e) {
-      setError(String(e));
+      if (id === loadId.current) {
+        setEntries(null);
+        setError(String(e));
+      }
     }
   }, [path]);
 
@@ -568,9 +590,11 @@ const Folder = memo(function Folder({
 
   useEffect(() => {
     return onRefresh((p) => {
-      if (p === path) load();
+      if (p === undefined || p === path) load();
     });
   }, [path, load]);
+
+  useEffect(() => () => { loadId.current++; }, []);
 
   return (
     <div>
@@ -656,14 +680,19 @@ const DirNode = memo(function DirNode({
   const setDirExpanded = useEditorStore((s) => s.setDirExpanded);
   const [entries, setEntries] = useState<DirEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const loadId = useRef(0);
 
   const load = useCallback(async () => {
+    const id = ++loadId.current;
     try {
       setError(null);
       const list = await listDir(entry.path);
-      setEntries(list);
+      if (id === loadId.current) setEntries(list);
     } catch (e) {
-      setError(String(e));
+      if (id === loadId.current) {
+        setEntries(null);
+        setError(String(e));
+      }
     }
   }, [entry.path]);
 
@@ -673,12 +702,17 @@ const DirNode = memo(function DirNode({
 
   useEffect(() => {
     return onRefresh((p) => {
-      if (p === entry.path) {
+      if (p === undefined || p === entry.path) {
         if (open) load();
-        else setEntries(null); // invalidate so next open re-fetches
+        else {
+          loadId.current++;
+          setEntries(null); // invalidate so next open re-fetches
+        }
       }
     });
   }, [entry.path, open, load]);
+
+  useEffect(() => () => { loadId.current++; }, []);
 
   return (
     <div>

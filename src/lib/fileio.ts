@@ -65,10 +65,21 @@ interface OpenFileOptions {
 }
 
 function reportOpenError(path: string, error: unknown, options: OpenFileOptions) {
+  const detail = error instanceof Error ? error.message : String(error);
+  const missing = /os error (2|3)\b|no such file or directory|path not found/i.test(detail);
+  if (missing) {
+    // The directory list may predate an external rename/delete. Drop the
+    // stale row immediately instead of letting every click repeat this error.
+    const separator = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+    if (separator >= 0) {
+      const parent = path.slice(0, separator || 1);
+      notifyRefresh(/^[A-Za-z]:$/.test(parent) ? `${parent}${path[separator]}` : parent);
+    }
+  }
   if (options.reportError === false) return;
-  void showError(tStatic("fileio.openFailed", {
+  void showError(tStatic(missing ? "fileio.openMissing" : "fileio.openFailed", {
     name: displayName(path),
-    err: error instanceof Error ? error.message : String(error),
+    err: detail,
   }));
 }
 
