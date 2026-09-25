@@ -12,6 +12,6 @@ const target=path.join(output,'frontend');fs.mkdirSync(output,{recursive:true});
 await build({entryPoints:['tests/diagnostics/native-composition.ts'],outfile:path.join(target,'composition-diagnostic.js'),bundle:true,format:'esm',platform:'browser',define:{__COMPOSITION_LOG__:JSON.stringify(path.join(output,'events.json')),__COMPOSITION_FIXTURES__:JSON.stringify(fixtures)},logLevel:'silent'});
 fs.writeFileSync(path.join(target,'index.html'),html.replace('</body>','<script type="module" src="/composition-diagnostic.js"></script></body>'));
 const config=path.join(output,'tauri.compositiondiagnostic.json');
-fs.writeFileSync(config,JSON.stringify({productName:'DEditor Composition Diagnostic',identifier:'com.deditor.compositiondiagnostic20260922',build:{frontendDist:target,beforeBuildCommand:''}},null,2)+'\n');
+fs.writeFileSync(config,JSON.stringify({productName:'DEditor Composition Diagnostic',identifier:'com.deditor.compositiondiagnostic20260922',build:{frontendDist:target,beforeBuildCommand:''},bundle:{fileAssociations:[]}},null,2)+'\n');
 fs.writeFileSync(path.join(output,'manifest.json'),JSON.stringify({source,sourceIndexSha256:crypto.createHash('sha256').update(html).digest('hex'),output:target,fixtureRoot:fixtures,entry:'tests/diagnostics/native-composition.ts',created:new Date().toISOString()},null,2)+'\n');
 console.log(JSON.stringify({config,frontend:target,log:path.join(output,'events.json')},null,2));

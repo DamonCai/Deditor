@@ -70,6 +70,8 @@ export function accessibleImageView(original: NodeViewConstructor, language: "zh
     dom.append(label);
     let displayedWidth = node.attrs.width, displayedAlt = node.attrs.alt, displayedCaption = node.attrs.caption;
     const update = () => {
+      const fluidSvg = !node.attrs.width && /\.svg(?:[?#].*)?$/i.test(node.attrs.src);
+      dom.classList.toggle("md-svg-image", fluidSvg);
       label.hidden = !view.editable;
       // An actual metadata change (including undo/redo) supersedes the field's
       // last committed value. Unrelated renders still preserve a focused draft.
@@ -80,7 +82,7 @@ export function accessibleImageView(original: NodeViewConstructor, language: "zh
       displayedWidth = node.attrs.width; displayedAlt = node.attrs.alt; displayedCaption = node.attrs.caption;
       dom.querySelectorAll("img").forEach(img => {
         if (img.alt !== node.attrs.alt) img.alt = node.attrs.alt;
-        img.style.setProperty("width", node.attrs.width ? `${node.attrs.width}px` : "auto", "important");
+        img.style.setProperty("width", node.attrs.width ? `${node.attrs.width}px` : fluidSvg ? "100%" : "auto", "important");
         img.style.setProperty("max-width", "100%");
       });
     };

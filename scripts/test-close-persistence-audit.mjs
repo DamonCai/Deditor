@@ -43,7 +43,7 @@ const timers = new Map();
 globalThis.setTimeout = (fn, ms, ...args) => ms === 500
   ? (timers.set(++timerId, () => fn(...args)), timerId) : realSetTimeout(fn, ms, ...args);
 globalThis.clearTimeout = id => { if (!timers.delete(id)) realClearTimeout(id); };
-let diskState = '', writes = [], interceptWrite;
+let diskState = '', writes = [], interceptWrite, missingSource = false;
 globalThis.__choice = 'cancel';
 globalThis.__invoke = async (cmd, args) => {
   if (cmd === 'write_app_state_incremental') return receiveRecovery(args.packet, content => globalThis.__invoke('write_app_state', {content}));
@@ -54,7 +54,7 @@ globalThis.__invoke = async (cmd, args) => {
     return;
   }
   if (cmd === 'read_app_state') return diskState;
-  if (cmd === 'read_text_file') return 'new disk';
+  if (cmd === 'read_text_file') { if (missingSource && args.path === tab.filePath) throw Error('No such file'); return 'new disk'; }
   if (cmd === 'record_markdown_draft') return;
   throw Error(cmd);
 };
@@ -64,7 +64,7 @@ const deferred = () => { let resolve, reject; const promise = new Promise((a, b)
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function reset() {
   store.setState({ ...initial, tabs: [{ ...tab }], activeId: tab.id, tabPositions: {}, closedTabsStack: [] });
-  writes = []; diskState = ''; interceptWrite = undefined;
+  writes = []; diskState = ''; interceptWrite = undefined; missingSource = false;
 }
 function reload() {
   store.setState(s => ({ tabs: s.tabs.map(t => t.id === tab.id ? { ...t, content: 'new disk', savedContent: 'new disk', externalChange: undefined } : t) }));
@@ -164,6 +164,26 @@ try {
   resume();
   assert.equal(timers.size, 0, 'duplicate cancellation does not schedule another write');
   console.log('PASS cancelled close persists edits made while paused without requiring another edit');
+
+  delete window.__TAURI_INTERNALS__;
+  reset();missingSource=true;
+  store.setState(s => ({tabs:s.tabs.map(t=>({...t,content:'only open copy',savedContent:'only open copy',missingOnDisk:true}))}));
+  await app.flushPersist();
+  assert.equal(JSON.parse(diskState).tabs[0].content,'only open copy','clean deleted files need a recovery copy');
+  await app.loadPersisted();
+  assert.equal(store.getState().tabs[0].filePath,tab.filePath);
+  assert.equal(store.getState().tabs[0].content,'only open copy');
+  assert.equal(store.getState().tabs[0].missingOnDisk,true);
+  console.log('PASS a deleted clean source retains its named buffer across restart for Save As');
+
+  const binary='data:image/svg+xml;base64,PHN2Zy8+';
+  store.setState({tabs:[{id:'asset',filePath:'/self-created/asset.svg',content:binary,savedContent:binary,missingOnDisk:true}],activeId:'asset'});
+  await app.flushPersist();
+  assert.equal(JSON.parse(diskState).tabs[0].content,binary);
+  await app.loadPersisted();
+  assert.equal(store.getState().tabs[0].content,binary);
+  assert.equal(store.getState().tabs[0].missingOnDisk,true);
+  console.log('PASS a deleted binary buffer remains available after restart');
 
 } finally {
   unsubscribe();

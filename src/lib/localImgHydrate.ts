@@ -1,5 +1,6 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { resolveMarkdownImage } from "./markdownImageSettings";
+import { markdownImageAsset } from "./markdownImageAsset";
 
 /** After Markdown HTML is mounted, walk every `<img data-raw-src>` and rewrite
  *  the `src` for local files to the Tauri asset:// URL. Remote images keep
@@ -14,13 +15,13 @@ export function hydrateLocalImages(
   imgs.forEach((img) => {
     const raw = img.dataset.rawSrc ?? img.getAttribute("src");
     if (!raw) return;
-    const clean = resolveMarkdownImage(raw, filePath, imageRoot);
-    if (clean === null || img.dataset.absPath === clean && img.dataset.localImgHydrated === "1") return;
     try {
-      img.src = convertFileSrc(clean);
+      const asset = markdownImageAsset(raw, filePath, imageRoot);
+      if (asset === null || img.dataset.absPath === asset.path && img.dataset.localImgHydrated === "1") return;
+      img.src = asset.url;
       img.dataset.rawSrc = raw;
       img.dataset.localImgHydrated = "1";
-      img.dataset.absPath = clean;
+      img.dataset.absPath = asset.path;
       img.style.cursor = "zoom-in";
     } catch {
       /* leave broken — at least the alt text is visible */

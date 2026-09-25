@@ -1140,6 +1140,7 @@ test(
     reset();
     const gate = deferred();
     globalThis.__invoke = async (cmd, args) => {
+      if (cmd === 'file_mtimes') return [1];
       writes.push({ cmd, ...args });
       await gate.promise;
     };
@@ -1191,6 +1192,7 @@ test(
     reset();
     const gate = deferred();
     globalThis.__invoke = async (cmd, args) => {
+      if (cmd === 'file_mtimes') return [1];
       writes.push({ cmd, ...args });
       if (writes.length === 1) await gate.promise;
     };
@@ -2010,6 +2012,23 @@ test(6, "External file monitoring retries failed reads and ignores overlapping o
     await act(async()=>{pending.resolve('older disk content');await flush();});
     assert.equal(store.getState().tabs[0].content,'locally saved');
     assert.equal(store.getState().tabs[0].externalChange,undefined);
+    mtime=null;pending=null;
+    await act(async()=>{poll();await flush();});
+    assert.equal(store.getState().tabs[0].content,'locally saved');
+    assert.equal(store.getState().tabs[0].missingOnDisk,true);
+    mtime=4;
+    await act(async()=>{poll();await flush();});
+    assert.equal(store.getState().tabs[0].missingOnDisk,false);
+    assert.equal(store.getState().tabs[0].content,'external');
+    const binary=tab('asset','data:image/svg+xml;base64,AA==','/test/asset.svg','data:image/svg+xml;base64,AA==');
+    store.setState({tabs:[binary],activeId:binary.id});
+    const textReads=reads;mtime=null;
+    await act(async()=>{poll();await flush();});
+    assert.equal(store.getState().tabs[0].missingOnDisk,true);
+    mtime=5;
+    await act(async()=>{poll();await flush();});
+    assert.equal(store.getState().tabs[0].missingOnDisk,false);
+    assert.equal(reads,textReads,'binary buffers are checked for deletion without text reload');
   } finally {globalThis.setInterval=realInterval;}
 });
 

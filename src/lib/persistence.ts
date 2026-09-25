@@ -25,6 +25,7 @@ interface PersistedTab {
   filePath: string | null;
   content: string;
   savedContent: string;
+  missingOnDisk?: boolean;
   // v3+: per-tab view state. Optional so older snapshots still parse.
   cursor?: number;
   scrollTopLine?: number;
@@ -222,29 +223,30 @@ export async function loadPersisted(): Promise<UiExtras | null> {
       continue;
     }
     if (isBinaryRenderable(t.filePath)) {
-      // Binary-rendered files (image / pdf / audio / video). If the file is
-      // gone, drop the tab.
-      if (disk == null) continue;
+      // A deleted binary may still have its in-memory data URL in recovery.
+      if (disk == null && !t.missingOnDisk) continue;
       const id = newId();
       restored.push({
         id,
         filePath: t.filePath,
-        content: disk,
-        savedContent: disk,
+        content: disk ?? t.content,
+        savedContent: disk ?? t.savedContent,
+        missingOnDisk: disk == null,
       });
       continue;
     }
     // Named text tab.
     if (disk == null) {
-      // File is gone. If user had unsaved edits, demote to untitled to
-      // preserve them; otherwise drop the tab.
-      if (t.content !== t.savedContent) {
+      // Keep a recoverable named buffer when the source disappeared. Clean
+      // missing tabs carry their content explicitly in the persisted state.
+      if (t.missingOnDisk || t.content !== t.savedContent) {
         const id = newId();
         restored.push({
           id,
-          filePath: null,
+          filePath: t.filePath,
           content: t.content,
-          savedContent: "",
+          savedContent: t.savedContent,
+          missingOnDisk: true,
         });
         stashPos(id, t);
       }
@@ -412,12 +414,13 @@ function doSave(extras: UiExtras): Promise<void> {
       //    user's unsaved edits survive a relaunch.
       const binary = isBinaryRenderable(t.filePath);
       const dirty = t.content !== t.savedContent;
-      const skipContent = binary || (t.filePath != null && !dirty);
+      const skipContent = !t.missingOnDisk && (binary || (t.filePath != null && !dirty));
       return {
         recoveryId: t.id,
         filePath: t.filePath,
         content: skipContent ? "" : t.content,
         savedContent: skipContent ? "" : t.savedContent,
+        missingOnDisk: !!t.missingOnDisk,
         cursor: pos?.cursor,
         scrollTopLine: pos?.scrollTopLine,
       };

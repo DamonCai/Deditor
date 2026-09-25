@@ -46,6 +46,8 @@ export interface Tab {
    *  we stash the on-disk content here and surface a banner so the user can
    *  pick "reload from disk" or "keep my edits". Cleared once the user chooses. */
   externalChange?: string;
+  /** The path disappeared while its in-memory tab remains open for Save As. */
+  missingOnDisk?: boolean;
   /** Temporary size for this open file only; excluded from persistence and reopen history. */
   zoomFontSize?: number;
 }
@@ -832,7 +834,7 @@ const editorStore = create<EditorState>((rawSet, get) => {
   isActiveDirty: () => {
     const { tabs, activeId } = get();
     const t = tabs.find((x) => x.id === activeId);
-    return !!t && t.content !== t.savedContent;
+    return !!t && isTabDirty(t);
   },
 });
 });
@@ -878,6 +880,7 @@ export interface ActiveTabMeta {
   filePath: string | null;
   isDiff: boolean;
   hasExternalChange: boolean;
+  missingOnDisk: boolean;
 }
 export function useActiveTabMeta(): ActiveTabMeta | null {
   return useEditorStore(
@@ -889,6 +892,7 @@ export function useActiveTabMeta(): ActiveTabMeta | null {
         filePath: t.filePath,
         isDiff: !!t.diff,
         hasExternalChange: t.externalChange != null,
+        missingOnDisk: !!t.missingOnDisk,
       };
     }),
   );
@@ -909,7 +913,7 @@ export function useActiveTabHeader(): { filePath: string | null; dirty: boolean 
     useShallow((s) => {
       const t = s.tabs.find((x) => x.id === s.activeId);
       if (!t) return null;
-      return { filePath: t.filePath, dirty: t.content !== t.savedContent };
+      return { filePath: t.filePath, dirty: isTabDirty(t) };
     }),
   );
 }
@@ -956,5 +960,5 @@ export function useActiveTabExternalChange(): string | null {
 }
 
 export function isTabDirty(t: Tab): boolean {
-  return t.content !== t.savedContent;
+  return !!t.missingOnDisk || t.content !== t.savedContent;
 }

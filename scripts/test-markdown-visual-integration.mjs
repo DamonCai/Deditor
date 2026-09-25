@@ -841,7 +841,7 @@ await test('image root paths: website roots, encoded filenames, explicit files, 
  for(const url of ['https://example.com/a','//cdn.example.com/a','#part','data:image/png;base64,a']) assert.equal(resolve(url,'/a.md','/site'),null);
 });
 await test('image root views: Preview, block/inline/HTML images update together without source writes',async()=>{
- const original='---\ntypora-root-url: /site-one\n---\n\n![block](/img/block.png)\n\nText ![inline](/img/inline.png) end\n\n<figure><img src="/img/raw.png" alt="raw"></figure>\n';
+ const original='---\ntypora-root-url: /site-one\n---\n\n![block](/img/block.png)\n\n![flow](/img/flow.svg)\n\nText ![inline](/img/inline.png) end\n\n<figure><img src="/img/raw.png" alt="raw"></figure>\n';
  await act(async()=>store.getState().setContent(original,'a','command'));await render(false);
  const previewHost=document.createElement('div');document.body.append(previewHost);const previewRoot=createRoot(previewHost);
  try {
@@ -849,9 +849,11 @@ await test('image root views: Preview, block/inline/HTML images update together 
   await act(async()=>{previewRoot.render(React.createElement(app.Preview,{tabId:'a',theme:'light'}));await pause(200);});
   await act(async()=>{await pause(150);});
   const targets=scope=>[...scope.querySelectorAll('img')].map(img=>img.getAttribute('src')).filter(src=>src?.includes('/img/')).sort();
-  const expected=root=>['block','inline','raw'].map(name=>root+'/img/'+name+'.png').sort();
+  const expected=root=>['block','inline','raw'].map(name=>root+'/img/'+name+'.png').concat(root+'/img/flow.svg').sort();
   assert.deepEqual(targets(document.querySelector('.ProseMirror')),expected('/site-one'));
   assert.deepEqual(targets(previewHost),expected('/site-one'));
+  const visualSvg=document.querySelector('.ProseMirror img[alt="flow"]');
+  assert.ok(visualSvg.closest('.md-svg-image'));assert.equal(visualSvg.style.width,'100%');
   assert.equal(previewHost.querySelector('img[alt="inline"]').dataset.mdInline,'true');
   assert.equal(previewHost.querySelector('img[alt="block"]').dataset.mdInline,undefined);
   assert.equal(content(),original);

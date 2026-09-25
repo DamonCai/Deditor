@@ -15,7 +15,7 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'deditor-recovery-audit-'));
 fs.symlinkSync(path.resolve('node_modules'), path.join(dir, 'node_modules'), 'dir');
 const stubs = {
   '@tauri-apps/api/core': 'export const invoke=(...args)=>globalThis.__invoke(...args); export const convertFileSrc=p=>p;',
-  '@tauri-apps/plugin-dialog': 'export const open=async()=>null;export const save=async()=>globalThis.__savePath;',
+  '@tauri-apps/plugin-dialog': 'export const open=async()=>null;export const save=async args=>{globalThis.__saveArgs=args;return globalThis.__savePath;};',
   '@tauri-apps/plugin-opener': 'export const revealItemInDir=async()=>{};',
   '../components/ConfirmDialog': 'export const confirmUnsaved=async()=>globalThis.__choice;',
   './logger': 'export const logWarn=()=>{};export const logInfo=()=>{};export const logError=()=>{};',
@@ -24,7 +24,7 @@ const stubs = {
   './feedback': 'export const showError=async message=>{globalThis.__errors.push(message);};',
 };
 await build({
-  stdin: { contents: `export {saveFile,saveAllDirty,saveFileAs,closeActiveTab,closeTabById} from './src/lib/fileio'; export {COMMANDS} from './src/lib/commands'; export {useEditorStore} from './src/store/editor';`, resolveDir: process.cwd() },
+  stdin: { contents: `export {saveFile,saveAllDirty,saveFileAs,closeActiveTab,closeTabById,deletePath} from './src/lib/fileio'; export {COMMANDS} from './src/lib/commands'; export {useEditorStore} from './src/store/editor';`, resolveDir: process.cwd() },
   outfile: path.join(dir, 'app.mjs'), bundle: true, packages: 'external', format: 'esm', platform: 'node',
   plugins: [{ name: 'ipc-boundary', setup(b) {
     b.onResolve({ filter: /.*/ }, a => stubs[a.path] ? { path: a.path, namespace: 'stub' } : undefined);
@@ -37,15 +37,18 @@ const initial = store.getState();
 const deferred = () => { let resolve, reject; const promise = new Promise((a,b) => { resolve=a; reject=b; }); return {promise, resolve, reject}; };
 const tick = () => new Promise(resolve => setImmediate(resolve));
 let writes=[], disk='', interceptWrite;
+const missingPaths=new Set();
 globalThis.__invoke=async(cmd,args)=>{
-  if(cmd==='write_text_file') { writes.push({...args}); await interceptWrite?.(args); disk=args.content; return; }
+  if(cmd==='file_mtimes')return args.paths.map(path=>missingPaths.has(path)?null:1);
+  if(cmd==='delete_path'){missingPaths.add(args.path);return;}
+  if(cmd==='write_text_file') { writes.push({...args}); await interceptWrite?.(args); disk=args.content;missingPaths.delete(args.path);return; }
   if(cmd==='record_markdown_draft') return;
   throw Error(cmd);
 };
 const tab = {id:'save-race', filePath:'/self-created/save-race.md', content:'# Local draft\n', savedContent:'# Original\n'};
 function reset(){
   store.setState({...initial,tabs:[{...tab}],activeId:tab.id,formatOnSave:true});
-  writes=[];disk=tab.savedContent;interceptWrite=undefined;globalThis.__errors=[];
+  writes=[];disk=tab.savedContent;interceptWrite=undefined;globalThis.__errors=[];globalThis.__saveArgs=undefined;missingPaths.clear();
   globalThis.__format=async content=>content;
   globalThis.__choice='discard';globalThis.__savePath='/self-created/renamed.md';
 }
@@ -107,6 +110,27 @@ try {
     await app.saveAllDirty();assert.equal(store.getState().tabs.find(t=>t.id===tab.id).savedContent,tab.savedContent);
     assert.equal(store.getState().tabs.find(t=>t.id===other).savedContent,'# Other dirty\n');
     assert.deepEqual(globalThis.__errors,[]);
+  });
+  await test('RC09 deleting an open source keeps its buffer and Save As rebinds it',async()=>{
+    await app.deletePath(tab.filePath);
+    assert.equal(store.getState().tabs.length,1);
+    assert.equal(store.getState().tabs[0].content,tab.content);
+    assert.equal(store.getState().tabs[0].missingOnDisk,true);
+    await app.saveAllDirty();assert.equal(writes.length,0,'auto-save must not recreate the deleted source');
+    globalThis.__choice='cancel';assert.equal(await app.closeActiveTab(),false,'closing the only copy needs a choice');
+    assert.equal(await app.saveFileAs(),true);
+    assert.deepEqual(writes,[{path:'/self-created/renamed.md',content:tab.content}]);
+    assert.equal(store.getState().tabs[0].filePath,'/self-created/renamed.md');
+    assert.equal(store.getState().tabs[0].missingOnDisk,false);
+  });
+  await test('RC10 deleted clean source routes Save to Save As, including cancel and absent parent',async()=>{
+    change({content:tab.savedContent,savedContent:tab.savedContent});
+    missingPaths.add(tab.filePath);missingPaths.add('/self-created');
+    globalThis.__savePath=null;assert.equal(await app.saveFile(),false);
+    assert.equal(globalThis.__saveArgs.defaultPath,'save-race.md');
+    assert.equal(writes.length,0);assert.equal(store.getState().tabs[0].missingOnDisk,true);
+    globalThis.__savePath='/self-created/renamed.md';assert.equal(await app.saveFile(),true);
+    assert.deepEqual(writes,[{path:'/self-created/renamed.md',content:tab.savedContent}]);
   });
   console.log(`${passed} recovery groups passed, ${failed} failed`);
   if(failed)process.exitCode=1;

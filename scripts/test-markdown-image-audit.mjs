@@ -96,6 +96,12 @@ try {
   for(const [url,file,root,expected] of [['中文%20a%23.svg','/docs/a.md',null,'/docs/中文 a#.svg'],['/image.svg','/docs/a.md','/site','/site/image.svg'],['file:///tmp/a%23.svg','/docs/a.md','/site','/tmp/a#.svg'],['a.svg','C:\\docs\\a.md',null,'C:\\docs\\a.svg']])assert.equal(app.resolveMarkdownImage(url,file,root),expected);
   const source='![a \\](b](old.png "title")\n';assert.equal(app.rebaseMarkdownImages(source,'/docs/a.md','/other/b.md'),'![a \\](b](../docs/old.png "title")\n');
  });
+ await test('H05 reading editor uses the shared local SVG asset and fluid layout',async()=>{
+  const original='![安全网关主链路](./gateway-main-flow.svg)\n';await reset(original);
+  const image=document.querySelector('.md-persisted-image img');
+  assert.equal(image?.getAttribute('src'),'/generated/gateway-main-flow.svg');
+  assert.ok(image.closest('.md-svg-image'));assert.equal(image.style.width,'100%');assert.equal(content(),original);
+ });
  await test('H01 alt, title and width edit independently with special characters and exact history',async()=>{
   for(const original of ['Before\n\n![old alt](assets/a.svg "old title")\n\nTail\n','Before\n\n<img src="assets/a.svg" alt="old alt" width="320" title="old title">\n\nTail\n']) {
    await reset(original);const alt=document.querySelector('.md-image-alt input');assert.ok(alt);const nextAlt='中文 < & " \\ ]( alternative';await act(async()=>{alt.focus();alt.value=nextAlt;alt.dispatchEvent(new Event('change',{bubbles:true}));alt.blur();await pause(30);});let image;view.state.doc.descendants(n=>{if(n.type.name==='image-block')image=n;});assert.equal(image.attrs.alt,nextAlt);assert.equal(image.attrs.caption,'old title');assert.equal(document.querySelector('.md-persisted-image img').alt,nextAlt);assert.equal(image.attrs.width,original.includes('width')?320:null);assert.ok(content().endsWith('\n\nTail\n'));await exactHistory(original);assert.equal(document.querySelector('.md-image-alt input').value,nextAlt);

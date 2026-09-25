@@ -20,11 +20,6 @@ export function useFileWatch(): void {
       const paths: string[] = [];
       for (const t of tabs) {
         if (!t.filePath || t.diff) continue;
-        // Binary-rendered tabs (image / pdf / audio / video / hex) live as
-        // data URLs, not text. read_text_file would WARN on every poll for
-        // these — skip them. mtime-driven reload for binaries can be added
-        // later if anyone asks; for now just don't spam the log.
-        if (isBinaryRenderable(t.filePath)) continue;
         paths.push(t.filePath);
       }
       const openPaths = new Set(paths);
@@ -46,13 +41,35 @@ export function useFileWatch(): void {
       for (let i = 0; i < paths.length; i++) {
         const path = paths[i];
         const mt = mtimes[i];
-        if (mt == null) continue;
+        if (mt == null) {
+          const original = tabs.find(t => t.filePath === path);
+          const current = useEditorStore.getState().tabs.find(t => t.id === original?.id && t.filePath === path);
+          if (current && !current.missingOnDisk) {
+            useEditorStore.setState(state => ({ tabs: state.tabs.map(t =>
+              t.id === current.id ? { ...t, missingOnDisk: true, externalChange: undefined } : t,
+            ) }));
+            logWarn(`open file disappeared from disk: ${path}`);
+          }
+          continue;
+        }
+        if (isBinaryRenderable(path)) {
+          // Track disappearance for already-loaded binary buffers too, but
+          // never try to reload their data URLs through read_text_file.
+          lastMtimes.set(path, mt);
+          const original = tabs.find(t => t.filePath === path);
+          const current = useEditorStore.getState().tabs.find(t => t.id === original?.id && t.filePath === path);
+          if (current?.missingOnDisk) useEditorStore.setState(state => ({ tabs: state.tabs.map(t =>
+            t.id === current.id ? { ...t, missingOnDisk: false } : t,
+          ) }));
+          continue;
+        }
         const prev = lastMtimes.get(path);
-        if (prev === undefined) {
+        const missing = tabs.some(t => t.filePath === path && t.missingOnDisk);
+        if (prev === undefined && !missing) {
           lastMtimes.set(path, mt);
           continue;
         }
-        if (prev === mt) continue;
+        if (prev === mt && !missing) continue;
         changedPaths.push(path);
       }
       if (changedPaths.length === 0) return;
@@ -80,6 +97,9 @@ export function useFileWatch(): void {
         // A save, save-as or close/reopen during I/O makes this read stale.
         if (cur.id !== original?.id || cur.savedContent !== original.savedContent) continue;
         lastMtimes.set(path, mtimes[paths.indexOf(path)]!);
+        if (cur.missingOnDisk) useEditorStore.setState(state => ({ tabs: state.tabs.map(t =>
+          t.id === cur.id ? { ...t, missingOnDisk: false } : t,
+        ) }));
         if (fresh === cur.content) continue;
         if (fresh === cur.savedContent) continue;
 

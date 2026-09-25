@@ -60,7 +60,7 @@ export async function installWindowLifecycle(): Promise<() => void> {
         // Hold its now-persisted editor steady until exit or cancellation.
         resumeInteraction = commitWindowClose();
         committedGeneration = requestGeneration;
-        const hasDirty = useEditorStore.getState().tabs.some(tab => !tab.diff && tab.content !== tab.savedContent);
+        const hasDirty = useEditorStore.getState().tabs.some(tab => !tab.diff && (tab.missingOnDisk || tab.content !== tab.savedContent));
         await invoke("finish_window_close", { hasDirty });
       } catch (error) {
         if (requestGeneration !== generation) return;

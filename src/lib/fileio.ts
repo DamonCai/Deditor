@@ -326,6 +326,7 @@ function finishSave(snapshot: Tab, path: string, written: string): boolean {
         content: tab.content === snapshot.content ? written : tab.content,
         savedContent: written,
         externalChange: tab.externalChange === snapshot.externalChange ? undefined : tab.externalChange,
+        missingOnDisk: false,
       };
     }),
   }));
@@ -338,21 +339,48 @@ async function saveTab(id: string, saveAs = false, automatic = false): Promise<b
     flushDocument(id);
     const snapshot = useEditorStore.getState().tabs.find((t) => t.id === id);
     if (!snapshot || snapshot.diff) return false;
-    if (automatic && (!snapshot.filePath || snapshot.externalChange != null)) return false;
+    if (automatic && (!snapshot.filePath || snapshot.externalChange != null || snapshot.missingOnDisk)) return false;
     const binary = isBinaryRenderable(snapshot.filePath);
     let target = snapshot.filePath;
-    if (saveAs || !target) {
+    let chooseTarget = saveAs || !target || !!snapshot.missingOnDisk;
+    if (target && !chooseTarget) {
+      // A deleted source must stay available as a buffer. In particular, an
+      // unchanged buffer cannot report a successful no-op save, and auto-save
+      // must not silently recreate a path that was just removed.
+      try {
+        const [mtime] = await invoke<(number | null)[]>("file_mtimes", { paths: [target] });
+        if (mtime == null) {
+          useEditorStore.setState(state => ({ tabs: state.tabs.map(tab =>
+            tab.id === id && tab.filePath === target ? { ...tab, missingOnDisk: true } : tab,
+          ) }));
+          if (automatic) return false;
+          chooseTarget = true;
+        }
+      } catch (err) { logWarn(`could not check file before save: ${target}`, err); }
+    }
+    if (chooseTarget) {
       // macOS appends the first filter's extension even when defaultPath already
       // ends in .xmind. Keep the archive format explicit in Save As.
       const filters = isXmindFile(snapshot.filePath)
         ? [{ name: "XMind", extensions: ["xmind"] }]
         : MD_FILTER;
-      target = await save({ filters, defaultPath: target ?? "untitled.md" });
+      let defaultPath = target ?? "untitled.md";
+      if (target) {
+        const parent = target.slice(0, Math.max(target.lastIndexOf("/"), target.lastIndexOf("\\")));
+        if (parent) {
+          try {
+            const [mtime] = await invoke<(number | null)[]>("file_mtimes", { paths: [parent] });
+            if (mtime == null) defaultPath = displayName(target);
+          } catch { defaultPath = displayName(target); }
+        }
+      }
+      target = await save({ filters, defaultPath });
       if (!target) return false;
       if (useEditorStore.getState().tabs.some((t) => t.id !== id && t.filePath === target)) {
         throw new Error(tStatic("fileio.targetAlreadyOpen"));
       }
     }
+    if (!target) return false;
     // A tab may have closed or been renamed while the native dialog was open.
     if (!useEditorStore.getState().tabs.some((t) => t.id === id && t.filePath === snapshot.filePath)) return false;
     try {
@@ -366,7 +394,8 @@ async function saveTab(id: string, saveAs = false, automatic = false): Promise<b
       if (!current || current.filePath !== snapshot.filePath ||
           current.savedContent !== snapshot.savedContent ||
           current.externalChange !== snapshot.externalChange ||
-          (automatic && current.content !== snapshot.content)) return false;
+          (automatic && (current.content !== snapshot.content || current.missingOnDisk))) return false;
+      if (!chooseTarget && current.missingOnDisk) return false;
       if (target !== snapshot.filePath || formatted !== snapshot.savedContent) {
         await writeTabContent(target, formatted, binary);
       }
@@ -383,7 +412,7 @@ async function saveTab(id: string, saveAs = false, automatic = false): Promise<b
 export async function saveAllDirty(): Promise<void> {
   flushDocuments();
   const ids = useEditorStore.getState().tabs
-    .filter((t) => t.filePath && !t.diff && t.content !== t.savedContent && t.externalChange == null)
+    .filter((t) => t.filePath && !t.diff && !t.missingOnDisk && t.content !== t.savedContent && t.externalChange == null)
     .map((t) => t.id);
   for (const id of ids) {
     try { await saveTab(id, false, true); }
@@ -417,6 +446,10 @@ export async function saveFileAs(): Promise<boolean> {
   return id ? saveManually(id, true) : false;
 }
 
+export async function saveTabAs(id: string): Promise<boolean> {
+  return saveManually(id, true);
+}
+
 export function newFile() {
   useEditorStore.getState().newUntitled();
 }
@@ -441,7 +474,7 @@ export function closeTabById(id: string): Promise<boolean> {
     flushDocument(id);
     const tab = useEditorStore.getState().tabs.find((t) => t.id === id);
     if (!tab) return true;
-    if (tab.content !== tab.savedContent) {
+    if (tab.content !== tab.savedContent || tab.missingOnDisk) {
       useEditorStore.getState().setActive(id);
       const choice = await confirmUnsaved(
         tStatic("fileio.unsavedClose", { name: displayName(tab.filePath) }),
@@ -623,14 +656,13 @@ export async function deletePath(path: string): Promise<void> {
     if (mark && (mark === path || mark.startsWith(path + "/") || mark.startsWith(path + "\\"))) {
       useEditorStore.getState().setCompareMarkPath(null);
     }
-    // Close any tabs pointing at the deleted path or under it (if it was a dir)
-    const { tabs, closeTab } = useEditorStore.getState();
-    for (const t of tabs) {
-      if (!t.filePath) continue;
-      if (t.filePath === path || t.filePath.startsWith(path + "/") || t.filePath.startsWith(path + "\\")) {
-        closeTab(t.id);
-      }
-    }
+    // Keep open buffers recoverable. Deleting a folder marks every contained
+    // tab; Save As can bind each one to a new location.
+    useEditorStore.setState(state => ({ tabs: state.tabs.map(tab =>
+      tab.filePath && (tab.filePath === path || tab.filePath.startsWith(path + "/") || tab.filePath.startsWith(path + "\\"))
+        ? { ...tab, missingOnDisk: true, externalChange: undefined }
+        : tab,
+    ) }));
   } catch (err) {
     logError(`delete failed: ${path}`, err);
     throw err;

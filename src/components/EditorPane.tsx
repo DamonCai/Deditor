@@ -4,6 +4,7 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import { useEditorStore, useActiveTabMeta, useEditorPaneId, paneViewKey } from "../store/editor";
 import { beginPaneResize } from "../lib/paneResize";
 import { flushDocument } from "../lib/documentFlush";
+import { saveTabAs } from "../lib/fileio";
 import { useT } from "../lib/i18n";
 import { isMarkdown, isJson, isSql, isHtml, isCsv } from "../lib/lang";
 import { Button } from "./ui/Button";
@@ -89,10 +90,11 @@ export default function EditorPane({ initialPreviewPct = 50, onPreviewPctChange 
           {!isDiffTab && isMarkdown(filePath) && <MarkdownToolbar />}
           {!isDiffTab && htmlFile && <HtmlToolbar />}
           {!isDiffTab && csvFile && <CsvToolbar />}
-          {!isDiffTab && (htmlFile || csvFile) && activeMeta?.hasExternalChange && (
+          {!isDiffTab && activeMeta?.missingOnDisk && <MissingFileBanner tabId={activeMeta.id} />}
+          {!isDiffTab && (htmlFile || csvFile) && !activeMeta?.missingOnDisk && activeMeta?.hasExternalChange && (
             <ExternalChangeBanner tabId={activeMeta.id} />
           )}
-          {isMarkdown(filePath) && activeMeta?.hasExternalChange && <ExternalChangeBanner tabId={activeMeta.id} />}
+          {isMarkdown(filePath) && !activeMeta?.missingOnDisk && activeMeta?.hasExternalChange && <ExternalChangeBanner tabId={activeMeta.id} />}
           {/* Editor + Preview row. Editor pane is ALWAYS mounted (display:none
               in reading mode) — not for memory but for sync correctness: when
               the user navigates preview to a section while in reading mode,
@@ -118,7 +120,7 @@ export default function EditorPane({ initialPreviewPct = 50, onPreviewPctChange 
             >
                 {!isDiffTab && isJson(filePath) && <JsonToolbar />}
                 {!isDiffTab && isSql(filePath) && <SqlToolbar />}
-                {!htmlFile && !csvFile && !isMarkdown(filePath) && activeMeta?.hasExternalChange && (
+                {!htmlFile && !csvFile && !isMarkdown(filePath) && !activeMeta?.missingOnDisk && activeMeta?.hasExternalChange && (
                   <ExternalChangeBanner tabId={activeMeta.id} />
                 )}
                 <div className="flex-1 min-h-0 flex">
@@ -193,6 +195,14 @@ export default function EditorPane({ initialPreviewPct = 50, onPreviewPctChange 
           </div>
         </section>
   );
+}
+
+function MissingFileBanner({ tabId }: { tabId: string }) {
+  const t = useT();
+  return <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 12px", background: "var(--warning-bg)", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
+    <span style={{ flex: 1, color: "var(--text)" }}>{t("watch.fileMissing")}</span>
+    <Button variant="primary" size="sm" onClick={() => void saveTabAs(tabId)}>{t("titlebar.saveAs")}</Button>
+  </div>;
 }
 
 function ExternalChangeBanner({ tabId }: { tabId: string }) {

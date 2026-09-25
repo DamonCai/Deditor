@@ -18,7 +18,7 @@ await build({ entryPoints: ['tests/diagnostics/native-desktop.ts'], outfile: pat
 fs.writeFileSync(path.join(target, 'index.html'), index.replace('</body>', '<script type="module" src="/desktop-diagnostic.js"></script></body>'));
 const config = path.join(output, 'tauri.desktopdiagnostic.json');
 fs.writeFileSync(config, JSON.stringify({ productName: 'DEditor Desktop Diagnostic', identifier: 'com.deditor.desktopdiagnostic20260922',
-  build: { frontendDist: target, beforeBuildCommand: '' } }, null, 2) + '\n');
+  build: { frontendDist: target, beforeBuildCommand: '' }, bundle: { fileAssociations: [] } }, null, 2) + '\n');
 fs.writeFileSync(path.join(output, 'manifest.json'), JSON.stringify({ source, sourceIndexSha256: crypto.createHash('sha256').update(index).digest('hex'),
   entry: 'tests/diagnostics/native-desktop.ts', output: target, created: new Date().toISOString() }, null, 2) + '\n');
 console.log(JSON.stringify({ frontend: target, config, logs: path.join(output, 'desktop-<window-label>-<started>.json') }, null, 2));

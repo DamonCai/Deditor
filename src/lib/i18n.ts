@@ -495,6 +495,7 @@ const ZH: Record<string, string> = {
 
   // External file change watcher
   "watch.externalChanged": "此文件在 DEditor 之外被修改了。",
+  "watch.fileMissing": "源文件不存在或无法访问，当前内容仍保留。可以另存为新文件。",
   "watch.reload": "从磁盘重载",
   "watch.keepMine": "保留我的修改",
 
@@ -1248,6 +1249,7 @@ const EN: Record<string, string> = {
 
   // External file change watcher
   "watch.externalChanged": "This file was changed outside DEditor.",
+  "watch.fileMissing": "The source file is missing or inaccessible. Its contents are still open; you can save them as a new file.",
   "watch.reload": "Reload from disk",
   "watch.keepMine": "Keep my edits",
 

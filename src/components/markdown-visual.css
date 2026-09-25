@@ -170,6 +170,7 @@
 .md-visual-shell .milkdown .md-document .list-item .label-wrapper svg { fill: var(--preview-muted); }
 .md-visual-shell .milkdown .md-document .milkdown-image-block { margin: var(--md-image-space) 0; }
 .md-visual-shell .milkdown .md-document .milkdown-image-block > .image-wrapper { margin: 0; min-width: 0; max-width: 100%; }
+.md-visual-shell .milkdown .md-document .milkdown-image-block.md-svg-image > .image-wrapper { width: 100%; }
 .md-visual-shell .milkdown .md-document .milkdown-image-block img { min-height: 0; height: auto !important; margin: 0; }
 .md-visual-shell .milkdown .md-document .milkdown-image-inline { vertical-align: baseline; }
 .md-visual-shell .milkdown .md-document img.ProseMirror-separator { margin: 0; }

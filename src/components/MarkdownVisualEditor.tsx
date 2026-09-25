@@ -23,7 +23,8 @@ import { decodeAnchor, openMarkdownFileLink } from "../lib/markdownLinks";
 import MarkdownOutline from "./MarkdownOutline";
 import MarkdownDocumentSurface from "./MarkdownDocumentSurface";
 import { installFootnotePreview } from "../lib/markdownFootnotePreview";
-import { documentImageDirectory, documentImageRoot, resolveMarkdownImage, markdownImageReference } from "../lib/markdownImageSettings";
+import { documentImageDirectory, documentImageRoot, markdownImageReference } from "../lib/markdownImageSettings";
+import { markdownImageAsset } from "../lib/markdownImageAsset";
 import { shorthandRemark, highlightRemark, shorthandMarks, emojiSchema, shorthandInputRules, configureShorthand } from "../lib/markdownVisual/shorthand";
 import { MarkdownSearch, markdownReplacement, type MarkdownMatch } from "../lib/markdownVisual/search";
 import { nativeMarkdownCursor } from "../lib/markdownVisual/cursor";
@@ -65,7 +66,6 @@ import { trailing } from "@milkdown/kit/plugin/trailing";
 import { handleTableKeys } from "../lib/markdownVisual/tableKeys";
 import { TextSelection, Selection } from "@milkdown/kit/prose/state";
 import type { EditorView } from "@milkdown/kit/prose/view";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import SearchPanel from "./SearchPanel";
 import { useEditorPaneId, paneViewKey, useEditorStore, useTabContent, useTabFilePath } from "../store/editor";
 import { useT, tStatic } from "../lib/i18n";
@@ -188,8 +188,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
       .addFeature(linkTooltip, { inputPlaceholder: t("md.linkUrl") })
       .addFeature(imageBlock, { onUpload: upload,
         proxyDomURL: url => {
-          const path = resolveMarkdownImage(url, filePath, documentImageRoot(sourceRef.current, filePath));
-          return path === null ? url : convertFileSrc(path);
+          return markdownImageAsset(url, filePath, documentImageRoot(sourceRef.current, filePath))?.url ?? url;
         },
         inlineUploadButton: t("md.uploadImage"), blockUploadButton: t("md.uploadImage"), blockConfirmButton: t("common.confirm"),
         inlineUploadPlaceholderText: t("md.imageUrlLabel"), blockUploadPlaceholderText: t("md.imageUrlLabel"), blockCaptionPlaceholderText: t("md.imageTitleLabel") })
