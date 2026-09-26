@@ -63,7 +63,7 @@ let passed=0;
 const testFilter=process.env.DEDITOR_TEST_FILTER ? new RegExp(process.env.DEDITOR_TEST_FILTER) : null;
 async function test(name,fn){if(testFilter && !testFilter.test(name))return;await fn();passed++;console.log('PASS '+name);}
 const {Editor:MilkdownEditor,editorViewCtx}=await import('@milkdown/kit/core');
-const {TextSelection}=await import('@milkdown/kit/prose/state');
+const {TextSelection,NodeSelection}=await import('@milkdown/kit/prose/state');
 const make=MilkdownEditor.make;let view;
 MilkdownEditor.make=function(...args){const editor=make.apply(this,args),create=editor.create;editor.create=async()=>{const result=await create();editor.action(ctx=>{view=ctx.get(editorViewCtx);});return result;};return editor;};
 const reset=async(text)=>{await act(async()=>root.render(null));await act(async()=>store.getState().setContent(text,'a','command'));await render();await act(async()=>pause(60));assert.equal(view.editable,true);};
@@ -389,6 +389,27 @@ await test('drag round 4: list schema, close/readonly, capture loss and unmount 
   if(cancel==='unmount')await act(async()=>root.render(null));
   await run(()=>dragPointer(window,'pointerup',30,300));resume?.();assert.equal(content(),fixture,cancel);assert.equal(document.querySelector('.md-diagram-drop-line'),null,cancel);
  }
+});
+await test('diagram labels cannot turn a click into a neighboring text selection',async()=>{
+ const original=diagramSource('mermaid');await reset(original);
+ const preview=document.querySelector('.md-diagram-block .md-code-preview');
+ const label=document.createElement('span');label.textContent='Diagram label';preview.append(label);
+ label.addEventListener('mousedown',event=>event.stopPropagation());
+ const press=new window.MouseEvent('mousedown',{button:0,bubbles:true,cancelable:true});
+ await run(()=>label.dispatchEvent(press));
+ assert.equal(press.defaultPrevented,true,'capture handles labels with their own mouse handler');
+ assert.ok(view.state.selection instanceof NodeSelection);
+ assert.equal(view.state.selection.node.type.name,'code_block');
+ const link=document.createElement('a');link.href='#target';link.textContent='Link';preview.append(link);
+ const linkPress=new window.MouseEvent('mousedown',{button:0,bubbles:true,cancelable:true});
+ await run(()=>link.dispatchEvent(linkPress));
+ assert.equal(linkPress.defaultPrevented,false,'diagram links retain native activation');
+ const prose=view.dom.querySelector('p:last-child');
+ prose.addEventListener('mousedown',event=>event.stopPropagation(),{once:true});
+ const prosePress=new window.MouseEvent('mousedown',{button:0,bubbles:true,cancelable:true});
+ await run(()=>prose.dispatchEvent(prosePress));
+ assert.equal(prosePress.defaultPrevented,false,'neighboring prose keeps native caret placement');
+ assert.equal(content(),original);
 });
 } finally {await act(async()=>root.unmount());}
 assert.deepEqual(runtimeErrors,[]);console.log(`Passed ${passed} diagram mode groups`);

@@ -248,9 +248,12 @@ export function codeView(tabId: string, initialTheme: "light" | "dark" | (() => 
         if (!destroyed && token === generation) { pendingSource = null; preview.textContent = String(err); }
       });
     }
-    preview.onmousedown = event => {
+    // Mermaid's SVG/foreignObject content may handle its own mouse events.
+    // Intercept the press before those handlers can leave a native text range
+    // crossing the diagram boundary into the neighboring paragraph.
+    const previewMouseDown = (event: MouseEvent) => {
       if (!view.editable || event.button !== 0 || overview.isOpen) return;
-      if ((event.target as Element).closest("audio,video,iframe,button,input,select,textarea,summary,a")) return;
+      if (event.target instanceof Element && event.target.closest("audio,video,iframe,button,input,select,textarea,summary,a")) return;
       event.preventDefault();
       if (hasDiagramModes()) { selectNode(); return; }
       expanded = true; render();
@@ -259,6 +262,7 @@ export function codeView(tabId: string, initialTheme: "light" | "dark" | (() => 
       if (pos !== null) active.dispatch({ selection: { anchor: pos } });
       active.focus();
     };
+    preview.addEventListener("mousedown", previewMouseDown, true);
     preview.onkeydown = event => {
       if (!view.editable || event.key !== "Enter") return;
       if ((event.target as Element).closest("audio,video,iframe,button,input,select,textarea,summary,a")) return;
@@ -345,7 +349,7 @@ export function codeView(tabId: string, initialTheme: "light" | "dark" | (() => 
         if (languageChanged) { loadLanguage(); loadPresentation(); }
         if (textChanged || languageChanged || language.readOnly === view.editable) render(textChanged && !languageChanged);
         return true;
-      }, destroy() { drag.destroy(); overview.destroy(); view.dom.removeEventListener("deditor-diagram-overview-close", closeOverview); split.destroy(); view.dom.removeEventListener("deditor-contextmenu-close", menuClosed); view.dom.removeEventListener("deditor-writing-change", settingsChanged); view.dom.removeEventListener("deditor-theme-change", themeChanged); view.dom.removeEventListener("deditor-document-change", documentChanged); view.dom.removeEventListener("deditor-editable-change", modeChanged); view.dom.removeEventListener("deditor-restore-focus", restoreFocus); dom.removeEventListener("focusout", collapse); destroyed = true; generation++; if (renderTimer) clearTimeout(renderTimer); controllers.forEach(controller => controller.abort()); cm?.destroy(); },
+      }, destroy() { drag.destroy(); overview.destroy(); preview.removeEventListener("mousedown", previewMouseDown, true); view.dom.removeEventListener("deditor-diagram-overview-close", closeOverview); split.destroy(); view.dom.removeEventListener("deditor-contextmenu-close", menuClosed); view.dom.removeEventListener("deditor-writing-change", settingsChanged); view.dom.removeEventListener("deditor-theme-change", themeChanged); view.dom.removeEventListener("deditor-document-change", documentChanged); view.dom.removeEventListener("deditor-editable-change", modeChanged); view.dom.removeEventListener("deditor-restore-focus", restoreFocus); dom.removeEventListener("focusout", collapse); destroyed = true; generation++; if (renderTimer) clearTimeout(renderTimer); controllers.forEach(controller => controller.abort()); cm?.destroy(); },
     };
   };
 }

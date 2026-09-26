@@ -78,6 +78,10 @@
 .md-diagram-block .md-code-editor { display: flex; background: var(--preview-code-bg); }
 .md-visual-shell .milkdown .md-diagram-block .md-code-editor .cm-editor { flex: 1; min-width: 0; min-height: 0; border: 0; border-radius: 0; }
 .md-visual-shell .milkdown .md-diagram-block .md-code-preview { overflow: visible; background: var(--bg); }
+/* The rendered SVG is one selectable editor node. Prevent native label
+   selection from crossing into adjacent prose in the editable view. */
+.md-visual-shell[data-readonly="false"] .milkdown .md-diagram-block .md-code-preview,
+.md-visual-shell[data-readonly="false"] .milkdown .md-diagram-block .md-code-preview * { -webkit-user-select: none; user-select: none; }
 .md-visual-shell .milkdown .md-diagram-block .md-code-preview > :is(.mermaid-diagram, .plantuml-diagram) { border: 0; border-radius: 0; margin: 0; min-height: 0; }
 /* PlantUML can carry a fixed inline height; keep its viewBox aspect ratio when narrowed. */
 .md-visual-shell .milkdown .md-diagram-block .md-code-preview > :is(.mermaid-diagram, .plantuml-diagram) > svg { height: auto !important; }
@@ -92,11 +96,11 @@
 /* Table font is .9em in the shared sheet: retain its 1.4em outer spacing. */
 .md-visual-shell .milkdown .md-document .milkdown-table-block { margin: calc(var(--md-table-font-scale) * var(--md-block-space)) 0; }
 .md-visual-shell .milkdown .md-document .milkdown-table-block table { margin: 0; }
-/* Crepe's text selection color overrides ProseMirror's hidden selection.
-   WebKit then paints the preceding cell's blank area for a CellSelection.
-   Keep the native range for clipboard/keyboard handling; only cells paint it. */
-.md-visual-shell .milkdown .ProseMirror-hideselection .milkdown-table-block *::selection { background: transparent; }
-.md-visual-shell .milkdown .ProseMirror-hideselection .milkdown-table-block *::-moz-selection { background: transparent; }
+/* Crepe's selection color has higher specificity than ProseMirror's hidden
+   selection rule. NodeSelection and CellSelection still need their native DOM
+   range for keyboard/clipboard behavior, but it must not paint adjacent prose. */
+.md-visual-shell .milkdown .ProseMirror-hideselection *::selection { background: transparent; }
+.md-visual-shell .milkdown .ProseMirror-hideselection *::-moz-selection { background: transparent; }
 .md-visual-shell .milkdown .md-document :is(td, th) > p { margin: 0; }
 .md-visual-shell .milkdown .md-document .milkdown-list-item-block { margin: var(--md-list-item-space) 0; padding: 0; }
 .md-visual-shell .milkdown .md-document .list-item { display: block; position: relative; gap: 0; padding-left: var(--md-list-item-indent); margin: 0; }
