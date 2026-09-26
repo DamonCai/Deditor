@@ -101,6 +101,11 @@
    range for keyboard/clipboard behavior, but it must not paint adjacent prose. */
 .md-visual-shell .milkdown .ProseMirror-hideselection *::selection { background: transparent; }
 .md-visual-shell .milkdown .ProseMirror-hideselection *::-moz-selection { background: transparent; }
+/* WebKit may restore a selected diagram before the editor owns focus. In that
+   state ProseMirror marks the node but does not add hideselection, so the DOM
+   range can paint the following paragraph as a full-width blue block. */
+.md-visual-shell .milkdown .md-document:has(.md-diagram-block.ProseMirror-selectednode) *::selection { background: transparent; }
+.md-visual-shell .milkdown .md-document:has(.md-diagram-block.ProseMirror-selectednode) *::-moz-selection { background: transparent; }
 .md-visual-shell .milkdown .md-document :is(td, th) > p { margin: 0; }
 .md-visual-shell .milkdown .md-document .milkdown-list-item-block { margin: var(--md-list-item-space) 0; padding: 0; }
 .md-visual-shell .milkdown .md-document .list-item { display: block; position: relative; gap: 0; padding-left: var(--md-list-item-indent); margin: 0; }
