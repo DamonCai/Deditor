@@ -2,7 +2,7 @@ import XmindGroupRange from "./XmindGroupRange";
 import XmindNumberInput from "./XmindNumberInput";
 import { BOUNDARY_SHAPES, SUMMARY_SHAPES } from "../lib/xmind/groupShapes";
 import XmindRelationshipInspector from "./XmindRelationshipInspector";
-import { ALL_TOPIC_SHAPES } from "../lib/xmind/shapes";
+import { ALL_TOPIC_SHAPES, supportsCustomWidth } from "../lib/xmind/shapes";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   useCallback,
@@ -454,6 +454,7 @@ export default function XmindView({ dataUrl, tabId, active = true }: Props) {
   const widths=(selected.length>1 ? selected.map(id=>findTopic(sheet.rootTopic,id)) : [topic])
     .map(n=>typeof n?.customWidth==='number' && Number.isFinite(n.customWidth) ? n.customWidth : null);
   const customWidth=widths.every(value=>value===widths[0]) ? widths[0] : undefined;
+  const canSetWidth=styles.every(style=>supportsCustomWidth(style.shape));
   const shapeValue = (shape: string) => shape.startsWith("org.xmind.topicShape.") ? shape : `org.xmind.topicShape.${shape}`;
   const shape = common(style => shapeValue(style.shape));
   const noFill = common(style => style.fill === "none");
@@ -756,16 +757,18 @@ export default function XmindView({ dataUrl, tabId, active = true }: Props) {
                 </label>
                 <label className="xm-field">
                   {t("xmind.topicWidth")}
-                  <input type="number" min={40} max={2000} disabled={!editing}
+                  <input type="number" min={40} max={2000} disabled={!editing || !canSetWidth}
+                    title={canSetWidth ? undefined : t("xmind.contentSizedShape")}
                     key={`${selected.join(',')}-${customWidth}`}
                     defaultValue={customWidth ?? ""}
                     placeholder={t(customWidth===undefined ? "xmind.mixed" : "xmind.automaticWidth")}
                     onBlur={(e)=>{
                       const width=e.target.value.trim()==='' ? null : Number(e.target.value);
-                      if(width!==customWidth && (width===null || (Number.isFinite(width)&&width>=40&&width<=2000)))
+                      if(canSetWidth && width!==customWidth && (width===null || (Number.isFinite(width)&&width>=40&&width<=2000)))
                         execute({type:"width",ids:selected.length ? selected : [topic.id],width});
                     }} />
                 </label>
+                {!canSetWidth && <small>{t("xmind.contentSizedShape")}</small>}
                 <Button size="sm" disabled={!editing || widths.every(width=>width===null)}
                   onClick={()=>execute({type:"width",ids:selected.length ? selected : [topic.id],width:null})}>
                   {t("xmind.automaticWidth")}

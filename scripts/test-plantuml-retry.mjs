@@ -38,4 +38,38 @@ try {
  const removed=document.createElement('div');removed.innerHTML='<div class="plantuml-diagram" data-plantuml-encoded="removed-fixture"></div>';document.body.append(removed);
  await hydratePlantuml(removed).done;const detachedButton=removed.querySelector('button');removed.remove();detachedButton.click();assert.equal(stoppedCalls,2);
  console.log('PASS cancelled lifecycle and detached controls cannot restart network work');
+ const resumed=document.createElement('div');resumed.innerHTML='<div class="plantuml-diagram" data-plantuml-encoded="resume-fixture"></div>';document.body.append(resumed);
+ let resumeCalls=0;
+ globalThis.fetch=async (_url,{signal})=>{resumeCalls++;if(resumeCalls===1)return new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(new DOMException('aborted','AbortError')),{once:true}));return new Response('<svg><text>Resumed</text></svg>');};
+ const old=hydratePlantuml(resumed);old.abort();const resumedControl=hydratePlantuml(resumed);
+ await Promise.all([old.done,resumedControl.done]);
+ assert.equal(resumeCalls,2,'cancelled hydration must immediately release the same DOM placeholder');
+ assert.equal(resumed.querySelector('svg text')?.textContent,'Resumed');
+ console.log('PASS immediate cancellation and same-node rehydration');
+ const first=document.createElement('div'),second=document.createElement('div');
+ first.innerHTML=second.innerHTML='<div class="plantuml-diagram" data-plantuml-encoded="shared-fixture"></div>';document.body.append(first,second);
+ let sharedCalls=0,finishShared;
+ globalThis.fetch=async (_url,{signal})=>{sharedCalls++;return new Promise((resolve,reject)=>{finishShared=resolve;signal.addEventListener('abort',()=>reject(new DOMException('aborted','AbortError')),{once:true});});};
+ const left=hydratePlantuml(first),right=hydratePlantuml(second);left.abort();
+ finishShared(new Response('<svg><text>Other view remains</text></svg>'));await Promise.all([left.done,right.done]);
+ assert.equal(sharedCalls,1,'active consumers continue sharing one request');
+ assert.equal(second.querySelector('svg text')?.textContent,'Other view remains','closing the first view must not cancel the second view');
+ assert.equal(first.querySelector('svg'),null,'cancelled view cannot receive late markup');
+ console.log('PASS shared request survives one consumer cancellation');
+ left.abort();right.abort();await hydratePlantuml(second).done;
+ assert.equal(sharedCalls,1,'aborting settled views must preserve successful DOM and cached result');
+ const sharedA=document.createElement('div'),sharedB=document.createElement('div');
+ sharedA.innerHTML=sharedB.innerHTML='<div class="plantuml-diagram" data-plantuml-encoded="all-cancel-fixture"></div>';document.body.append(sharedA,sharedB);
+ let allCalls=0,allAborts=0,resolveReplacement;
+ globalThis.fetch=async (_url,{signal})=>{allCalls++;return new Promise((resolve,reject)=>{if(allCalls===2)resolveReplacement=resolve;signal.addEventListener('abort',()=>{allAborts++;reject(new DOMException('aborted','AbortError'));},{once:true});});};
+ const allA=hydratePlantuml(sharedA),allB=hydratePlantuml(sharedB);allA.abort();assert.equal(allAborts,0);
+ allB.abort();assert.equal(allAborts,1,'last consumer must cancel the actual transport');
+ const replacement=hydratePlantuml(sharedB);await Promise.all([allA.done,allB.done]);
+ const another=document.createElement('div');another.innerHTML=sharedA.innerHTML;document.body.append(another);const stillShared=hydratePlantuml(another);
+ assert.equal(allCalls,2,'old completion must not delete the replacement shared request');
+ resolveReplacement(new Response('<svg><text>Replacement</text></svg>'));await Promise.all([replacement.done,stillShared.done]);
+ assert.equal(sharedB.querySelector('svg text')?.textContent,'Replacement');assert.equal(another.querySelector('svg text')?.textContent,'Replacement');
+ console.log('PASS last-consumer cancellation, immediate replacement and stale-finally ownership');
+
+
 } finally {globalThis.fetch=actualFetch;dom.window.close();}

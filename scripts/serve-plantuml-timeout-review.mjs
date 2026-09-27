@@ -1,6 +1,10 @@
 // Manual fault injection: forward genuine PlantUML SVG, delay the first body.
 import http from 'node:http';
 import fs from 'node:fs';
+import path from 'node:path';
+import {createHash} from 'node:crypto';
+const output=process.argv[2];
+if(output)fs.mkdirSync(output,{recursive:true});
 const port=Number(process.env.PLANTUML_REVIEW_PORT||5174);let attempt=0;
 const server=http.createServer(async(req,res)=>{
  res.setHeader('Access-Control-Allow-Origin','*');
@@ -11,7 +15,8 @@ const server=http.createServer(async(req,res)=>{
  try{
   const upstream=await fetch('https://www.plantuml.com/plantuml/svg/'+encoded,{signal:ctrl.signal});
   const body=Buffer.from(await upstream.arrayBuffer());
-  console.log(JSON.stringify({id,event:'upstream',status:upstream.status,bytes:body.length,elapsedMs:Date.now()-started}));
+  if(output)fs.writeFileSync(path.join(output,`upstream-${id}.svg`),body);
+  console.log(JSON.stringify({id,event:'upstream',status:upstream.status,bytes:body.length,sha256:createHash('sha256').update(body).digest('hex'),elapsedMs:Date.now()-started}));
   if(res.destroyed)return;
   res.writeHead(upstream.status,{'Content-Type':upstream.headers.get('content-type')||'image/svg+xml','Cache-Control':'no-store'});
   if(id===1){res.write(body.subarray(0,100));delay=setTimeout(()=>res.end(body.subarray(100)),6500);}

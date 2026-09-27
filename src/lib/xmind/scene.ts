@@ -1,7 +1,7 @@
 import { colorLuminance, automaticTextColor, smartTextColor, levelTextColor } from "./colors";
 import { isPunctuationShape } from "./punctuationShapes";
 import { BOUNDARY_SHAPES, SUMMARY_SHAPES, boundaryOverflow, boundaryHidesTitle } from "./groupShapes";
-import { shapeSize, shapeName, ALL_TOPIC_SHAPES } from "./shapes";
+import { shapeSize, shapeName, supportsCustomWidth, ALL_TOPIC_SHAPES } from "./shapes";
 import { shapeContentCenter, advancedShapeScale, flowContentScale, referenceSymbol } from "./shapePaths";
 import { relationshipGeometry } from "./relationship";
 import { topicIndicators, type TopicIndicator } from "./indicators";
@@ -397,7 +397,7 @@ export function buildScene(
       p = style.properties;
     if (!knownTopicShapes.has(shapeName(style.shape)))
       warnings.add(style.shape);
-    const customWidth = typeof topic.customWidth === "number" && Number.isFinite(topic.customWidth) && topic.customWidth > 0
+    const customWidth = supportsCustomWidth(style.shape) && typeof topic.customWidth === "number" && Number.isFinite(topic.customWidth) && topic.customWidth > 0
       ? Math.max(40,Math.min(10000,topic.customWidth)) : undefined;
     const horizontalPadding = kind === "floatingTopic" ? 26 : depth === 0 ? 64 : depth === 1 ? 40 : 12;
     const scale = flowContentScale(style.shape)?.[0] ?? advancedShapeScale(shapeName(style.shape)) ?? 1;
@@ -405,7 +405,7 @@ export function buildScene(
       p["fo:max-width"] ?? p["fo:width"],
       300,
     ) : Math.max(style.fontSize,customWidth/scale-horizontalPadding);
-    const lines = wrap(
+    let lines = wrap(
       topic.title,
       Math.max(style.fontSize, widthHint),
       style.fontSize,
@@ -423,17 +423,37 @@ export function buildScene(
     const inlineIcons = indicators.filter(i => i.kind === "notes" || i.kind === "link");
     const leadingIcons = indicators.filter(i => i.kind !== "notes" && i.kind !== "link");
     const inlineWidth = inlineIcons.length ? inlineIcons.length * 20 + 4 : 0;
-    const titleWidth = Math.max(24, ...lines.map(s => measure(s, style.fontSize, p)));
+    let titleWidth = Math.max(24, ...lines.map(s => measure(s, style.fontSize, p)));
     const leadingWidth = leadingIcons.length ? leadingIcons.length * 20 + 4 : 0;
     const indicatorColumns = leadingIcons.length;
-    const contentWidth = Math.max(24, imageWidth, titleWidth + leadingWidth + inlineWidth);
-    const titleHeight = Math.max(lines.length * style.fontSize * 1.4, indicators.length ? 16 : 0);
+    let contentWidth = Math.max(24, imageWidth, titleWidth + leadingWidth + inlineWidth);
+    let titleHeight = Math.max(lines.length * style.fontSize * 1.4, indicators.length ? 16 : 0);
     const pictureHeight = imageHeight ? imageHeight + 8 : 0;
-    const contentHeight = pictureHeight + titleHeight;
-    const paddedWidth = Math.max(depth === 0 ? 100 : 50,
+    let contentHeight = pictureHeight + titleHeight;
+    let paddedWidth = Math.max(depth === 0 ? 100 : 50,
       contentWidth + horizontalPadding);
-    const paddedHeight = contentHeight + (depth === 0 ? 36 : depth === 1 && !kind ? 22 : 18);
-    const naturalSize = shapeSize(style.shape, paddedWidth, paddedHeight);
+    const verticalPadding = depth === 0 ? 36 : depth === 1 && !kind ? 22 : 18;
+    let paddedHeight = contentHeight + verticalPadding;
+    let naturalSize = shapeSize(style.shape, paddedWidth, paddedHeight);
+    if (customWidth !== undefined && shapeName(style.shape) === 'circle.compact') {
+      // Native canonical widths first estimate the circular outline, then lay
+      // out once against that estimate. Images set a minimum central-column
+      // width; marker/link columns occupy their own room beside that column.
+      // Do not iterate to convergence: a circle expands its content rectangle.
+      let preferredWidth = widthHint;
+      for (let pass = 0; pass < 2; pass++) {
+        const titleLimit = Math.max(style.fontSize, imageWidth, preferredWidth - leadingWidth - inlineWidth);
+        lines = wrap(topic.title, titleLimit, style.fontSize, p, measure);
+        titleWidth = Math.max(24, ...lines.map(s => measure(s, style.fontSize, p)));
+        contentWidth = Math.max(preferredWidth, Math.max(imageWidth, titleWidth) + leadingWidth + inlineWidth);
+        titleHeight = Math.max(lines.length * style.fontSize * 1.4, indicators.length ? 16 : 0);
+        contentHeight = pictureHeight + titleHeight;
+        paddedWidth = Math.max(depth === 0 ? 100 : 50, contentWidth + horizontalPadding);
+        paddedHeight = contentHeight + verticalPadding;
+        naturalSize = shapeSize(style.shape, paddedWidth, paddedHeight);
+        preferredWidth = naturalSize.width - horizontalPadding;
+      }
+    }
     const width=customWidth===undefined ? naturalSize.width : Math.max(customWidth,naturalSize.width);
     const height=naturalSize.height;
     const [centerX,centerY]=shapeContentCenter(style.shape);

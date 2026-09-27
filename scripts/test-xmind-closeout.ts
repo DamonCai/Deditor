@@ -2,13 +2,76 @@ import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { unzipSync } from 'fflate';
 import { closeoutSheets } from '../tests/fixtures/xmind-closeout';
+import { widthCloseoutSheets } from '../tests/fixtures/xmind-width-closeout';
 import { sampleArchive, sampleSheets } from '../tests/fixtures/xmind';
 import { buildScene, createSceneBuilder, edgePath } from '../src/lib/xmind/scene';
+import { shapeSize } from '../src/lib/xmind/shapes';
 import { editDocument, openDocument, writeDocument, type Command } from '../src/lib/xmind/document';
 
 const output='tests/artifacts/xmind-closeout-20260922';
 mkdirSync(output,{recursive:true});
 const sheets=closeoutSheets();
+// The native diamond intentionally changes branches at width === height:
+// square/wide content uses 20 degrees, slightly taller content uses 45.
+const squareDiamond=shapeSize('diamond',100,100),tallDiamond=shapeSize('diamond',100,100.01);
+assert.ok(squareDiamond.width>370 && squareDiamond.height<140,'native square diamond uses the wide 20-degree branch');
+assert.ok(Math.abs(tallDiamond.width-200.01)<1e-8 && Math.abs(tallDiamond.height-200.01)<1e-8,
+  'native slightly tall diamond uses the 45-degree branch, without invented smoothing');
+const canonicalWidths=widthCloseoutSheets();
+const nativeAuto=buildScene(canonicalWidths[0]);
+let canonicalWidthCases=0;
+for (const sheet of canonicalWidths.slice(1)) {
+  const original=JSON.stringify(sheet);
+  const scene=buildScene(sheet);
+  for (const node of scene.nodes.slice(1)) {
+    const baseline=nativeAuto.nodes.find(n=>n.topic.id===node.topic.id)!;
+    if (/ellipserect\.compact|diamond$/.test(node.shape)) {
+      assert.deepEqual([node.width,node.height,node.lines],[baseline.width,baseline.height,baseline.lines],
+        'native content-sized shape must not wrap using customWidth');
+    } else if (node.topic.customWidth===150) {
+      assert.notDeepEqual([node.width,node.height,node.lines],[baseline.width,baseline.height,baseline.lines],
+        'native resizable shape must still respond to customWidth');
+    }
+    canonicalWidthCases++;
+  }
+  assert.equal(JSON.stringify(sheet),original,'ignored customWidth must remain in the source');
+  const archive=sampleArchive([sheet]),doc=openDocument(archive);
+  const edited=editDocument(doc.sheets,sheet.id,{type:'title',id:sheet.rootTopic.id,title:'Width roundtrip'});
+  assert.deepEqual(openDocument(writeDocument(doc,edited)).sheets[0].rootTopic.children,sheet.rootTopic.children,
+    'editing a different title must preserve canonical widths');
+}
+for (const shape of ['org.xmind.topicShape.ellipserect.compact','org.xmind.topicShape.diamond']) {
+  const sheet=structuredClone(canonicalWidths[0]);
+  const topic=sheet.rootTopic.children!.detached!.find(topic=>topic.style!.properties!['shape-class']===shape)!;
+  topic.style!.properties!['fo:max-width']='60';
+  const node=buildScene(sheet).nodes.find(node=>node.topic.id===topic.id)!;
+  assert.ok(node.lines.length>nativeAuto.nodes.find(node=>node.topic.id===topic.id)!.lines.length,
+    'legacy explicit fo:max-width rendering remains supported');
+}
+const canonicalCircle=buildScene(canonicalWidths[1]).nodes.find(node=>node.shape.endsWith('circle.compact'))!;
+assert.deepEqual(canonicalCircle.lines.map(line=>line.trim()),['中文紧凑标题','alpha bravo charlie','delta'],
+  'canonical narrow circle must reflow against its estimated outline, as the native sample does');
+let circleReflowCases=0;
+for (const width of [40,150,300]) for (const image of [false,true]) for (const marker of [false,true])
+for (const font of [9,18,40]) for (const dark of [false,true]) {
+  const sheet=structuredClone(canonicalWidths[1]);
+  const topic=sheet.rootTopic.children!.detached!.find(topic=>topic.style!.properties!['shape-class'].endsWith('circle.compact'))!;
+  topic.customWidth=width;
+  if (!image) delete topic.image;
+  if (!marker) delete topic.markers;
+  topic.style!.properties!['fo:font-size']=String(font);
+  sheet.style={properties:{'svg:fill':dark?'#112244':'#ffffff'}};
+  const before=JSON.stringify(sheet),node=buildScene(sheet).nodes.find(node=>node.topic.id===topic.id)!;
+  assert.equal(JSON.stringify(sheet),before,'circle reflow must not rewrite source width or title');
+  assert.equal(node.lines.join('').replace(/\s/g,''),topic.title.replace(/\s/g,''),'circle reflow must retain every title character');
+  assert.equal(node.width,node.height,'canonical circle must remain circular');
+  assert.ok(Number.isFinite(node.width)&&node.width>=width);
+  const c=node.content;
+  for(const x of [c.x,c.x+c.width])for(const y of [c.y,c.y+c.height])
+    assert.ok(Math.hypot(x-node.width/2,y-node.height/2)<=node.width/2+1e-8,'circle must contain image, title and marker columns');
+  assert.ok(node.labels.every(label=>label.y>=node.height),'reflow must keep labels outside the circle');
+  circleReflowCases++;
+}
 for(const sheet of sheets)writeFileSync(`${output}/${sheet.id}.xmind`,sampleArchive([sheet]));
 writeFileSync(`${output}/all.xmind`,sampleArchive(sheets));
 // The filled root hides an embedded stem; a transparent root must never let
@@ -76,6 +139,6 @@ for(let i=0;i<500;i++) {
 }
 for(const state of revisions.slice(-51).reverse())assert.deepEqual(openDocument(writeDocument(doc,state)).sheets,state);
 assert.deepEqual(writeDocument(doc,revisions[0]),source,'original revision must restore exact archive');
-const report={transparentBranchCases:transparentBranches,shapeThemeCombinations:combinations,mixedOperations:500,roundtripHistoryRevisions:51,medianOperationMs:times.sort((a,b)=>a-b)[250],maxOperationMs:Math.max(...times),nativePixelParity:'not asserted',longTermMemory:'not asserted'};
+const report={canonicalWidthCases,circleReflowCases,transparentBranchCases:transparentBranches,shapeThemeCombinations:combinations,mixedOperations:500,roundtripHistoryRevisions:51,medianOperationMs:times.sort((a,b)=>a-b)[250],maxOperationMs:Math.max(...times),nativePixelParity:'not asserted',longTermMemory:'not asserted'};
 writeFileSync(`${output}/core-results.json`,JSON.stringify(report,null,2)+'\n');
 console.log(JSON.stringify(report,null,2));

@@ -28,6 +28,12 @@
   --crepe-shadow-2: var(--shadow-popup);
 }
 .md-visual-shell .milkdown .ProseMirror.md-document { min-height: 100%; height: auto; overflow: visible; }
+/* WebKit can keep asynchronous paragraph spelling markers despite a nested
+   spellcheck=false span. Suppress only words accepted by the app dictionary;
+   removing the decoration restores the native marker without system changes. */
+.md-document [data-deditor-spelling-accepted="true"]::spelling-error,
+.md-document [data-deditor-spelling-accepted="true"] *::spelling-error { text-decoration: none; }
+
 .md-visual-shell .milkdown button:focus-visible,
 .md-visual-shell .milkdown input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .md-visual-shell .milkdown .cm-editor { font-size: var(--md-visual-font-size); }

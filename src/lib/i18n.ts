@@ -295,6 +295,7 @@ const ZH: Record<string, string> = {
   "xmind.originalShape": "原始形状",
   "xmind.topicWidth": "主题宽度",
   "xmind.automaticWidth": "适应内容",
+  "xmind.contentSizedShape": "胶囊和菱形随内容自动调整宽度",
 
   "goto.title": "搜索文件",
   "symbol.title": "跳转到符号",
@@ -1049,6 +1050,7 @@ const EN: Record<string, string> = {
   "xmind.originalShape": "Original shape",
   "xmind.topicWidth": "Topic width",
   "xmind.automaticWidth": "Fit content",
+  "xmind.contentSizedShape": "Capsules and diamonds size to their content",
 
   "goto.title": "Go to File",
   "symbol.title": "Go to Symbol",

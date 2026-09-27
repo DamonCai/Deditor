@@ -12,6 +12,11 @@ export function shapeName(shape: string): string {
   return name === 'ellipserect.compact' ? 'pill' : name;
 }
 
+/** Native capsules and diamonds derive their outline from the content. */
+export function supportsCustomWidth(shape: string): boolean {
+  return !['pill', 'diamond'].includes(shapeName(shape));
+}
+
 /** Shape-specific room around the already padded content rectangle. */
 export function shapeSize(shape: string, width: number, height: number) {
   const name = shapeName(shape);
@@ -26,7 +31,14 @@ export function shapeSize(shape: string, width: number, height: number) {
     return { width: diameter, height: diameter };
   }
   if (/ellipse|oval/.test(name)) return { width: width * Math.SQRT2, height: height * Math.SQRT2 };
-  if (name === 'diamond') return { width: width * 2, height: height * 2 };
+  if (name === 'diamond') {
+    // A wide native diamond has 20-degree sides. Tall content progressively
+    // steepens those sides, while keeping every padded content corner inside.
+    const angle = width >= height ? Math.PI / 9
+      : Math.min(7 * Math.PI / 18, Math.max(Math.PI / 4, Math.PI / 12 * height / width));
+    const slope = Math.tan(angle);
+    return { width: width + height / slope, height: height + width * slope };
+  }
   if (name === 'pill') return { width: width + height, height };
   if (name === 'hexagon') return { width: width + height * 0.5, height };
   if (name === 'roundedhexagon' || name === 'ellipticrectangle') return { width, height: height / 0.6 };
