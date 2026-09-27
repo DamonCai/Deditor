@@ -156,6 +156,15 @@ export function installInlineSource(view: EditorView, document: MarkdownDocument
   };
   const key = (event: KeyboardEvent) => {
     if (!active || event.isComposing || view.composing) return;
+    const shortcut = event.key.toLowerCase();
+    if (view.editable && event.keyCode !== 229 && (event.metaKey || event.ctrlKey) && !event.shiftKey
+      && (event.altKey ? shortcut === "x" : ["b", "i"].includes(shortcut))) {
+      // A source projection has no marks. Restore the rendered selection before
+      // the regular mark shortcut runs, just as toolbar formatting already does.
+      // Keep the event available to the existing keymap (and its platform rules).
+      close(document.sourceOffset(view.state.selection.head), document.sourceOffset(view.state.selection.anchor));
+      return;
+    }
     const current = find(); if (!current) return;
     const at = view.state.selection.head - current.pos - 1;
     if (event.key === "Escape" || event.key === "Enter" || event.key === "Tab" ||

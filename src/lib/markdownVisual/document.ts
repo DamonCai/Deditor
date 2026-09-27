@@ -436,6 +436,17 @@ export class MarkdownDocument {
     const emptySource: number[] = [], emptyProse: number[] = [];
     const walk = (n: SourceNode, ends: number[] = []) => {
       if (["paragraph", "listItem"].includes(n.type) && !n.children?.length) emptySource.push(range(n)[1]);
+      if (n.type === "tableCell" && !n.children?.length) {
+        // mdast has no paragraph child for an empty pipe cell, while the
+        // editor does. Give that caret its own source anchor instead of
+        // falling back to the nearest text in a neighboring cell. Known
+        // hidden table metadata precedes content and must stay there.
+        const [from, to] = range(n), raw = this.source.slice(from, to);
+        const prefix = raw.match(/^\|?[ \t]*(?:<!-- deditor:(?:table-indent=\d+|valign=(?:middle|bottom)) -->[ \t]*)*/)?.[0] ?? "";
+        // Padding after a hidden comment becomes visible text once content
+        // follows it, unlike ordinary leading pipe padding. Insert before it.
+        emptySource.push(from + (prefix.includes("-->") ? prefix.trimEnd().length : prefix.length));
+      }
       if (["text", "inlineCode", "code", "math", "break"].includes(n.type)) { leaves.push(n); closingEnds.set(n, ends); }
       else if (n.type === "html" && /^<br\s*\/?>$/i.test(n.value ?? "")) leaves.push({ ...n, type: "break" });
       else {

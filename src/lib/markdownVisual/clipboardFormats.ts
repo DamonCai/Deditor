@@ -43,7 +43,12 @@ export function clipboardPayload(view: EditorView, source: string, serialize: (d
       rows.push((r === top ? schema.nodes.table_header_row : schema.nodes.table_row).create(null, row));
     }
     tsv = values.map(row => row.map(value => /[\t\r\n"]/.test(value) ? '"' + value.replace(/"/g, '""') + '"' : value).join("\t")).join("\n");
-    if (cells) slice = new Slice(Fragment.from(schema.nodes.table.create(null, rows)), 0, 0);
+    if (cells) {
+      const wholeTable = top === 0 && bottom === rect.map.height && left === 0 && right === rect.map.width;
+      // A copied rectangle becomes a new standalone table. Only a complete
+      // table selection carries the original table's presentation attributes.
+      slice = new Slice(Fragment.from(schema.nodes.table.create(wholeTable ? rect.table.attrs : null, rows)), 0, 0);
+    }
   }
   const { dom } = view.serializeForClipboard(slice);
   // Inline borders make copied tables readable in document/email editors.

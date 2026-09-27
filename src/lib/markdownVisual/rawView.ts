@@ -110,7 +110,10 @@ export function rawView(filePath: string | null, tabId: string, documentContext?
           if (!selection.empty || selection.head !== (direction < 0 ? 0 : cm!.state.doc.length)) return false;
           if (!exitBlockSource(view, node, getPos(), direction)) return false;
           close(false, false); return true;
-        } })), { key: "Escape", run: () => close() }, { key: "Mod-z", run: () => markdownHistory(false, tabId) }, { key: "Mod-Shift-z", run: () => markdownHistory(true, tabId) }])),
+        } })), { key: "Mod-Enter", run: () => {
+          if (!exitBlockSource(view, node, getPos(), 1)) return false;
+          close(false, false); return true;
+        } }, { key: "Escape", run: () => close() }, { key: "Mod-z", run: () => markdownHistory(false, tabId) }, { key: "Mod-Shift-z", run: () => markdownHistory(true, tabId) }])),
         EditorView.updateListener.of(update => {
           if (updating || !(update.docChanged || update.view.hasFocus && (update.selectionSet || update.focusChanged))) return;
           const pos = getPos(); if (pos === undefined) return;

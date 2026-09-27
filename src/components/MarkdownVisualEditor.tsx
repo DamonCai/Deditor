@@ -610,7 +610,10 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
     for (const match of [...targets].reverse()) {
       const value = markdownReplacement(match, replacement, searchOptions.regex);
       // Preserve the text style at each match without parsing replacement as Markdown.
-      const marks = tr.doc.resolve(match.from).marks();
+      const start = tr.doc.resolve(match.from);
+      // At a mark boundary, marks() describes the preceding text. A search
+      // replacement takes its style from the first character being replaced.
+      const marks = start.nodeAfter?.marks ?? start.marks();
       if (value) tr.replaceWith(match.from, match.to, tr.doc.type.schema.text(value, marks));
       else tr.delete(match.from, match.to);
     }

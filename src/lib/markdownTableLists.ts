@@ -55,8 +55,11 @@ export function markdownTableLists(md: MarkdownIt): void {
   md.core.ruler.after("block", "table_lists", (state) => {
     const result: Token[] = [];
     let rowLine = 0;
+    let table: Token | null = null, firstHeader = false;
     for (let i = 0; i < state.tokens.length; i++) {
       const token = state.tokens[i];
+      if (token.type === "table_open") { table = token; firstHeader = true; }
+      if (token.type === "table_close") { table = null; firstHeader = false; }
       if (token.type === "tr_open") rowLine = token.map?.[0] ?? 0;
       const previous = state.tokens[i - 1];
       if (token.type !== "inline" || !["td_open", "th_open"].includes(previous?.type)) {
@@ -64,6 +67,23 @@ export function markdownTableLists(md: MarkdownIt): void {
         continue;
       }
 
+      // Persist whole-table presentation inside the first header cell, keeping
+      // ordinary Markdown table structure and source-line positions unchanged.
+      if (previous.type === "th_open" && firstHeader) {
+        firstHeader = false;
+        const match = /^<!-- deditor:table-indent=(\d+) -->/.exec(token.content);
+        const indent = match ? Number(match[1]) : 0;
+        if (match && Number.isSafeInteger(indent) && indent >= 0) {
+          token.content = token.content.slice(match[0].length);
+          if (indent && table) {
+            table.attrSet('data-deditor-table-indent', String(indent));
+            // The table has a smaller font than the reading block's wrapper.
+            // Keep each visual step equal to the wrapper's 2em.
+            const offset = `calc(${indent * 2}em / var(--md-table-font-scale, 1))`;
+            table.attrJoin('style', `margin-inline-start:${offset};max-width:calc(100% - ${offset})`);
+          }
+        }
+      }
       const alignment = /^<!-- deditor:valign=(middle|bottom) -->/.exec(token.content);
       if (alignment) {
         previous.attrJoin('style', `vertical-align:${alignment[1]}`);

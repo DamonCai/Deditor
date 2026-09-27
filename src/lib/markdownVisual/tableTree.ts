@@ -24,6 +24,15 @@ function cellStrongTree(node: SourceNode, source: string) {
 
 /** Existing DEditor extension: list items inside pipe-table cells use <br>. */
 export function tableListTree(tree: SourceNode, source: string) {
+  if (tree.type === "table") {
+    const firstCell = tree.children?.[0]?.children?.[0];
+    const first = firstCell?.children?.[0];
+    const marker = first?.type === 'html' && /^<!-- deditor:table-indent=(\d+) -->$/.exec(first.value ?? '');
+    if (marker && Number.isSafeInteger(Number(marker[1]))) {
+      (tree as SourceNode & { deditorIndent: number }).deditorIndent = Number(marker[1]);
+      firstCell!.children = firstCell!.children!.slice(1);
+    }
+  }
   if (tree.type !== "tableCell") { tree.children?.forEach(child => tableListTree(child, source)); return; }
   // mdast cell ranges include separators/padding; inline children delimit content.
   let children = tree.children ?? [];

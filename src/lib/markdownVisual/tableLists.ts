@@ -3,7 +3,7 @@ import { spreadsheetTableHeaders } from "./tablePaste";
 import { tableMenuPlacement } from "./tableMenu";
 import type { Ctx } from "@milkdown/kit/ctx";
 import { hardbreakFilterNodes, paragraphSchema } from "@milkdown/kit/preset/commonmark";
-import type { Node as ProseNode } from "@milkdown/kit/prose/model";
+import { Fragment, type Node as ProseNode } from "@milkdown/kit/prose/model";
 import { SerializerState } from "@milkdown/kit/transformer";
 import { remarkCtx } from "@milkdown/kit/core";
 import { tableCellSchema, tableHeaderSchema, tableHeaderRowSchema, tableSchema } from "@milkdown/kit/preset/gfm";
@@ -14,7 +14,7 @@ const tableCellExtensions = [tableCellSchema, tableHeaderSchema].map(schema => s
   return { ...base, content: "(paragraph | bullet_list | ordered_list)+",
     // Match tables inserted from Markdown: new columns have no explicit
     // alignment until the user chooses one. Rendering still defaults to left.
-    attrs: { ...base.attrs, alignment: { ...base.attrs?.alignment, default: null }, verticalAlignment: { default: null } },
+    attrs: { ...base.attrs, alignment: { ...base.attrs?.alignment, default: null }, verticalAlignment: { default: null }, tableIndent: { default: 0 } },
     toDOM: node => {
       const spec = base.toDOM!(node) as [string, Record<string, unknown>, number];
       return [spec[0], { ...spec[1], style: String(spec[1].style ?? "") + (node.attrs.verticalAlignment ? `;vertical-align:${node.attrs.verticalAlignment}` : "") }, spec[2]];
@@ -34,7 +34,7 @@ const tableCellExtensions = [tableCellSchema, tableHeaderSchema].map(schema => s
       state.closeNode();
     } },
     toMarkdown: { ...base.toMarkdown, runner: (state, node) => {
-      if (!node.attrs.verticalAlignment && node.childCount === 1 && node.firstChild?.type.name === "paragraph") {
+      if (!node.attrs.tableIndent && !node.attrs.verticalAlignment && node.childCount === 1 && node.firstChild?.type.name === "paragraph") {
         if (!node.firstChild.content.size) { state.openNode("tableCell").closeNode(); return; }
         let hasBreak = false; node.firstChild.forEach(child => { if (child.type.name === "hardbreak") hasBreak = true; });
         if (!hasBreak && !/^[ \t]|[ \t]$/.test(node.firstChild.textContent)) { base.toMarkdown.runner(state, node); return; }
@@ -52,7 +52,7 @@ const tableCellExtensions = [tableCellSchema, tableHeaderSchema].map(schema => s
       // GFM strips padding around cells before parsing inline content. Encode
       // actual boundary whitespace so save/reopen does not turn it into padding.
       const faithful = content.replace(/^[ \t]+|[ \t]+$/g, spaces => [...spaces].map(char => char === " " ? "&#32;" : "&#9;").join(""));
-      state.openNode("tableCell").addNode("html", undefined, (node.attrs.verticalAlignment ? `<!-- deditor:valign=${node.attrs.verticalAlignment} -->` : "") + faithful).closeNode();
+      state.openNode("tableCell").addNode("html", undefined, (node.attrs.tableIndent ? `<!-- deditor:table-indent=${node.attrs.tableIndent} -->` : "") + (node.attrs.verticalAlignment ? `<!-- deditor:valign=${node.attrs.verticalAlignment} -->` : "") + faithful).closeNode();
     } },
   };
 }));
@@ -69,7 +69,36 @@ const nonemptyTableHeader = tableHeaderRowSchema.extendSchema(previous => ctx =>
   ...previous(ctx), content: "table_header+",
 }));
 // GFM allows a header-only table after its final data row is deleted.
-const headerOnlyTable = tableSchema.extendSchema(previous => ctx => ({
-  ...previous(ctx), content: "table_header_row table_row*",
-}));
+const headerOnlyTable = tableSchema.extendSchema(previous => ctx => {
+  const base = previous(ctx);
+  const indent = (value: unknown) => Number.isSafeInteger(Number(value)) && Number(value) > 0 ? Number(value) : 0;
+  return { ...base, content: "table_header_row table_row*",
+    attrs: { ...base.attrs, indent: { default: 0 } },
+    parseDOM: base.parseDOM?.map(rule => !('tag' in rule) ? rule : { ...rule, getAttrs: (dom: HTMLElement) => {
+      const attrs = rule.getAttrs ? rule.getAttrs(dom) : rule.attrs;
+      return attrs === false ? false : { ...attrs, indent: indent(dom.getAttribute('data-deditor-table-indent')) };
+    } }),
+    toDOM: node => {
+      const level = indent(node.attrs.indent);
+      return ['table', level ? { 'data-deditor-table-indent': level, style: `margin-inline-start:calc(${level * 2}em / var(--md-table-font-scale, 1))` } : {}, ['tbody', 0]];
+    },
+    parseMarkdown: { ...base.parseMarkdown, runner: (state, node, type) => {
+      const align = node.align as (string | null)[];
+      state.openNode(type, { indent: indent(node.deditorIndent) });
+      state.next((node.children ?? []).map((row, index) => ({ ...row, align, isHeader: index === 0 })));
+      state.closeNode();
+    } },
+    toMarkdown: { ...base.toMarkdown, runner: (state, node) => {
+      const level = indent(node.attrs.indent);
+      if (!level || !node.firstChild?.firstChild) { base.toMarkdown.runner(state, node); return; }
+      // Keep the extension inside the table's source span. The carrier only
+      // exists during serialization; normal cell edits cannot move its state.
+      const rows: ProseNode[] = []; node.forEach(row => rows.push(row));
+      const cells: ProseNode[] = []; rows[0].forEach(cell => cells.push(cell));
+      cells[0] = cells[0].type.create({ ...cells[0].attrs, tableIndent: level }, cells[0].content, cells[0].marks);
+      rows[0] = rows[0].copy(Fragment.fromArray(cells));
+      base.toMarkdown.runner(state, node.copy(Fragment.fromArray(rows)));
+    } },
+  };
+});
 export const extendedTableCells = [...tableCellExtensions, nonemptyTableHeader, headerOnlyTable, tableMenuPlacement, accurateTableDrop, spreadsheetTableHeaders];

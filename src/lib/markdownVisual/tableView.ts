@@ -6,12 +6,21 @@ export function stableTableView(create: NodeViewConstructor): NodeViewConstructo
     const result = create(node, view, getPos, decorations, innerDecorations);
     const update = result.update?.bind(result), stopEvent = result.stopEvent?.bind(result);
     let current = node;
+    const applyIndent = (value: typeof node) => {
+      if (!(result.dom instanceof HTMLElement)) return;
+      const level = Number.isSafeInteger(value.attrs.indent) && value.attrs.indent > 0 ? value.attrs.indent : 0;
+      result.dom.style.marginInlineStart = level ? `${level * 2}em` : '';
+      result.dom.style.maxWidth = level ? `calc(100% - ${level * 2}em)` : '';
+      if (level) result.dom.dataset.deditorTableIndent = String(level);
+      else delete result.dom.dataset.deditorTableIndent;
+    };
+    applyIndent(node);
     result.update = (next, outer, inner) => {
       // Crepe returns false for unchanged content, rebuilding the entire table
       // whenever the current-block decoration moves between cells.
       if (next === current) return true;
       const accepted = update?.(next, outer, inner) ?? false;
-      if (accepted) current = next;
+      if (accepted) { current = next; applyIndent(next); }
       return accepted;
     };
     result.stopEvent = event => {
