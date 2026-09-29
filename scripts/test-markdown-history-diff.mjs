@@ -105,8 +105,56 @@ try {
   await act(async()=>root.render(React.createElement(app.History,{tabId:'a',onClose:()=>{}})));await click(document.querySelectorAll('.md-history-list button')[0]);await click(document.querySelectorAll('.md-history-list button')[1]);assert.match(document.querySelector('[role=alert]').textContent,/Generated read failure/);assert.equal(button('Compare with current content').disabled,true);
   await click(document.querySelectorAll('.md-history-list button')[2]);await act(async()=>release('STALE'));assert.equal(document.querySelector('textarea').value,base);await click(button('Compare with current content'));assert.equal(document.querySelectorAll('.diff-overview-marker').length,3);
  });
- await test('round 5: ordinary file comparison keeps its existing controls and full rows',async()=>{
-  await render(base,changed,false);assert.equal(document.querySelector('.diff-navigation'),null);assert.equal(document.querySelector('.diff-overview'),null);assert.equal(document.querySelectorAll('[data-diff-row]').length,100);
+ await test('file round 1: ordinary comparison collapses, expands a range, and restores all lines',async()=>{
+  await render(base,changed,false);
+  assert.equal(document.querySelector('.diff-overview'),null);
+  assert.equal(document.querySelector('.diff-navigation-steps'),null);
+  assert.equal(document.querySelectorAll('[data-diff-row]').length,100);
+  assert.equal(button('Collapse unchanged content').getAttribute('aria-pressed'),'false');
+  await click(button('Collapse unchanged content'));
+  assert.equal(document.querySelectorAll('.diff-fold').length,4);
+  assert.equal(document.querySelectorAll('[data-diff-row]').length,9);
+  assert.equal(document.querySelector('[data-diff-row="49"]').children[0].textContent,'50');
+  await click(document.querySelector('.diff-fold button'));
+  assert.equal(document.querySelectorAll('.diff-fold').length,3);
+  assert.equal(document.querySelectorAll('[data-diff-row]').length,17);
+  assert.equal(document.activeElement,document.querySelector('.diff-scroll'));
+  await click(button('Collapse unchanged content'));
+  assert.equal(document.querySelectorAll('[data-diff-row]').length,100);
+  await click(button('Collapse unchanged content'));
+  assert.equal(document.querySelectorAll('.diff-fold').length,4);
+ });
+ await test('file round 2: empty, identical, added/deleted, short context, CRLF and Unicode',async()=>{
+  for(const [a,b] of [['',''],[base,base],['','中文\n'],['删除\n',''],['旧\n','新\n'],['同\r\n旧\r\n尾\r\n','同\r\n新\r\n尾\r\n']]){
+   await render(a,b,false);
+   const rows=app.computeDiff(a,b).rows;
+   const toggle=button('Collapse unchanged content');
+   assert.equal(toggle.disabled,!rows.some(row=>row.changeType==='eq'));
+   assert.equal(document.querySelectorAll('[data-diff-row]').length,rows.length);
+   if(toggle.disabled)continue;
+   await click(toggle);
+   for(const [index,row] of rows.entries())if(row.changeType!=='eq')assert.ok(document.querySelector(`[data-diff-row="${index}"]`));
+   for(const fold of Array.from(document.querySelectorAll('.diff-fold button')))await click(fold);
+   assert.equal(document.querySelectorAll('[data-diff-row]').length,rows.length);
+   assert.deepEqual(Array.from(document.querySelectorAll('[data-diff-row]')).map(el=>el.children[0].textContent),rows.map(row=>String(row.leftLineNum??'')));
+  }
+ });
+ await test('file round 3: independent comparisons, language switch and same-content file replacement',async()=>{
+  const leftSpec=spec(base,changed),rightSpec={...spec(base,changed),leftPath:'another.txt',rightPath:'other.txt'};
+  await act(async()=>root.render(React.createElement(React.Fragment,null,React.createElement(app.Diff,{spec:leftSpec}),React.createElement(app.Diff,{spec:rightSpec}))));
+  await click(document.querySelector('.diff-header-actions button'));
+  const views=document.querySelectorAll('.diff-view');
+  assert.equal(views[0].querySelectorAll('.diff-fold').length,4);
+  assert.equal(views[1].querySelectorAll('.diff-fold').length,0);
+  await act(async()=>app.store.setState({language:'zh'}));
+  assert.ok(button('折叠未变更内容'));assert.match(document.querySelector('.diff-fold').textContent,/展开 8 行/);
+  await act(async()=>root.render(React.createElement(app.Diff,{spec:rightSpec})));
+  assert.equal(document.querySelectorAll('.diff-fold').length,0);
+  await click(button('折叠未变更内容'));
+  await act(async()=>root.render(React.createElement(app.Diff,{spec:leftSpec})));
+  assert.equal(document.querySelectorAll('.diff-fold').length,0);
+  assert.equal(document.querySelectorAll('[data-diff-row]').length,100);
+  await act(async()=>app.store.setState({language:'en'}));
  });
  console.log(`${passed} history diff groups passed`);
 }finally{await act(async()=>root.unmount());window.close();}

@@ -31,13 +31,13 @@ export default function DiffView({ spec, navigation = false }: Props) {
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
   const [active, setActive] = useState(0);
   const scroller = useRef<HTMLDivElement>(null);
-  const displayRows = useMemo(() => diffDisplayRows(rows, navigation && collapsed, expanded), [rows, navigation, collapsed, expanded]);
+  const displayRows = useMemo(() => diffDisplayRows(rows, collapsed, expanded), [rows, collapsed, expanded]);
   useLayoutEffect(() => {
     setActive(0);
     setCollapsed(navigation);
     setExpanded(new Set());
     if (scroller.current) scroller.current.scrollTop = 0;
-  }, [rows, navigation]);
+  }, [rows, navigation, spec.leftPath, spec.rightPath]);
   function scrollToHunk(index: number) {
     const container = scroller.current;
     const hunk = hunks[index];
@@ -83,13 +83,15 @@ export default function DiffView({ spec, navigation = false }: Props) {
           <LangIcon filePath={spec.rightPath} size={14} />
           <span className="truncate">{rightName}</span>
         </div>
-        <span className="tabular-nums" style={{ color: "var(--success-text)" }}>+{stats.addedLines}</span>
-        <span className="tabular-nums" style={{ color: "var(--error-text)" }}>−{stats.removedLines}</span>
-        <span className="tabular-nums" style={{ color: "var(--text-soft)" }}>~{stats.modifiedLines}</span>
+        <div className="diff-header-actions flex items-center gap-3 shrink-0">
+          <span className="tabular-nums" style={{ color: "var(--success-text)" }}>+{stats.addedLines}</span>
+          <span className="tabular-nums" style={{ color: "var(--error-text)" }}>−{stats.removedLines}</span>
+          <span className="tabular-nums" style={{ color: "var(--text-soft)" }}>~{stats.modifiedLines}</span>
+          <Button size="sm" pressed={collapsed} disabled={!hasUnchanged} onClick={() => { setCollapsed(!collapsed); setExpanded(new Set()); }}>{t("diff.collapseUnchanged")}</Button>
+        </div>
       </div>
 
       {navigation && <div className="diff-navigation">
-        <Button size="sm" pressed={collapsed} disabled={!hasUnchanged} onClick={() => { setCollapsed(!collapsed); setExpanded(new Set()); }}>{t("diff.collapseUnchanged")}</Button>
         <div className="diff-navigation-steps">
           <Button size="icon" title={t("diff.previous")} disabled={!hunks.length || active <= 0} onClick={() => setActive(active - 1)}><FiChevronUp /></Button>
           <span className="diff-position" role="status">{t("diff.position", { current: hunks.length ? active + 1 : 0, total: hunks.length })}</span>
@@ -99,7 +101,7 @@ export default function DiffView({ spec, navigation = false }: Props) {
       {navigation && !hunks.length && <div className="diff-identical" role="status">{t("diff.identical")}</div>}
       {/* One shared scroll container keeps both sides and their line numbers aligned. */}
       <div className="diff-body">
-      <div ref={scroller} className="diff-scroll flex-1 min-h-0 overflow-auto" tabIndex={navigation ? 0 : undefined} aria-label={navigation ? t("diff.content") : undefined}>
+      <div ref={scroller} className="diff-scroll flex-1 min-h-0 overflow-auto" tabIndex={0} aria-label={t("diff.content")}>
 
         {rows.length === 0 && !navigation ? (
           <div className="p-6 text-sm" style={{ color: "var(--text-soft)" }}>
