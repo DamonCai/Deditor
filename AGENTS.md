@@ -5,6 +5,8 @@ DEditor 项目的协作上下文。Codex 在这个目录工作时自动加载本
 ## macOS 隔离测试包
 
 - 正式 DEditor 包保留 `tauri.conf.json` 中的文件关联。任何用于原生验收的 Review/Diagnostic 隔离包，其 Tauri 覆盖配置都必须设置 `bundle.fileAssociations: []`，避免测试包进入 macOS 的“打开方式”列表并干扰默认应用选择。
+- 2026-09-30 修复历史测试包污染“打开方式”：25 个旧包移除 `CFBundleDocumentTypes` 并刷新 Launch Services；原 plist 和必要的本地签名备份保存在 `tests/artifacts/open-with-cleanup-2026-09-30/`。不能仅改配置后声称已清理旧包；必须核对系统注册和 Finder 菜单。正式安装包及默认应用选择保留。
+- `src-tauri/build.rs` 按 Tauri 的平台配置和 `TAURI_CONFIG` 合并结果检查：名称或 identifier 不同于正式版且仍有文件关联时拒绝构建。专项命令 `npm run test:native-bundle-isolation` 使用真实 Cargo 检查，覆盖身份变化、继承、空数组/null 和正式版恢复，不生成测试应用。
 
 ## 快捷操作整合提交（2026-09-27）
 
