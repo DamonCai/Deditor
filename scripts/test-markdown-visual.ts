@@ -105,6 +105,17 @@ crepe.editor.action(ctx => {
    assert.equal(model.positionAtSource(source.indexOf('tail')),before,'mark splitting must not invalidate the whole list');
    assert.equal(model.sourceOffset(before),source.indexOf('tail'));
  });
+ test("caret mapping: invisible inline delimiters resolve within their own token across containers", () => {
+   for (const raw of ['**目标**','*目标*','~~目标~~','`目标`','[目标](https://example.com/long/path "title")','[目标][ref]','***目标***','==目标==','~目标~','^目标^']) {
+     for (const wrap of [(s:string)=>s+'\n', (s:string)=>'- '+s+'\n- neighbor\n', (s:string)=>'> '+s+'\n', (s:string)=>'| '+ 'A'.padEnd(100)+' | B |\n| --- | --- |\n| '+s+' | neighbor |\n']) {
+       const source=wrap(raw)+'\n[ref]: https://example.com\n',model=make(source);
+       let start=0;model.doc.descendants((node,pos)=>{if(node.isText && node.text==='目标')start=pos;});assert.ok(start,raw);
+       const from=source.indexOf(raw),text=source.indexOf('目标');
+       for(let at=from;at<=text;at++)assert.equal(model.positionAtSource(at),start,raw+' opening '+at);
+       for(let at=text+2;at<=from+raw.length;at++)assert.equal(model.positionAtSource(at),start+2,raw+' closing '+at);
+     }
+   }
+ });
  test("source reset: local edits match full parsing and retain interleaved source ranges", () => {
    const source = "# Head\r\n\r\nFirst **bold** paragraph.\r\n\r\n[^note]: Definition.\r\n\r\nLast paragraph[^note].\r\n";
    const document = make(source), untouched = document.doc.lastChild;

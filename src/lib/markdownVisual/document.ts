@@ -578,8 +578,29 @@ export class MarkdownDocument {
       if (offset >= from && offset <= to) {
         matched=true;
         pos = start + Math.min(node.nodeSize - 1, Math.max(1, offset - from + 1));
-        const segment = this.textRanges(node, index, start).find(r => offset >= r.from && offset <= r.to);
+        const ranges = this.textRanges(node, index, start);
+        const segment = ranges.find(r => offset >= r.from && offset <= r.to);
         if (segment) pos = offset === segment.to ? segment.end : segment.pos + Math.min(offset - segment.from, segment.end - segment.pos);
+        else {
+          // Delimiters and link destinations have no rendered text position.
+          // Resolve them against their own inline token, never against a flat
+          // source offset in a table/list (whose syntax can dwarf its text).
+          let token: SourceNode | undefined;
+          const walk = (n: SourceNode) => {
+            const [a, b] = range(n);
+            if (offset < a || offset > b) return;
+            if (["strong", "emphasis", "delete", "link", "linkReference", "inlineCode", "mark", "subscript", "superscript"].includes(n.type)) token = n;
+            n.children?.forEach(walk);
+          };
+          if (this.ast[index]) walk(this.ast[index]);
+          if (token) {
+            const [a, b] = range(token);
+            const own = ranges.filter(r => r.from >= a && r.to <= b);
+            const distance = (r: typeof ranges[number]) => Math.min(Math.abs(offset - r.from), Math.abs(offset - r.to));
+            const nearest = own.reduce<typeof ranges[number] | undefined>((best, r) => !best || distance(r) < distance(best) ? r : best, undefined);
+            if (nearest) pos = offset < nearest.from ? nearest.pos : nearest.end;
+          }
+        }
       }
     });
     return Math.min(this.doc.content.size, Math.max(0, pos));

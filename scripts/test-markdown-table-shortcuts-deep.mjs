@@ -228,5 +228,45 @@ try {
    await reset(source);await selectCell(index);const expected=matrix(),attrs=table().node.toJSON().attrs;await type('**X**');expected[Math.floor(index/3)][index%3]='X';assert.deepEqual(matrix(),expected,`${variant}/${index}`);assert.deepEqual(table().node.attrs,attrs);const edited=content();await exactHistory(source);await reset(edited);assert.deepEqual(matrix(),expected);assert.equal((content().match(/deditor:table-indent/g)||[]).length,variant==='metadata'?1:0);assert.ok(!table().node.textContent.includes('deditor:'));
   }
  });
+ await test('T24 formatted-only cells keep Enter inside the same cell at the text end',async()=>{
+  for(const raw of ['**中文指标**','*中文指标*','~~中文指标~~','`中文指标`','[中文指标](https://example.com)']) {
+   const source=original.replace('| one | two |',`| ${raw} | two |`);
+   await reset(source);await select('中文指标');const cell=cellLocation();
+   await key('Enter');
+   assert.equal(cellLocation(),cell,`${raw}: ${JSON.stringify(view.state.selection.toJSON())} / ${content()}`);
+   assert.ok(matrix()[1][0].includes('\n'),raw);
+   await exactHistory(source);
+  }
+ });
+ await test('T25 padded table columns retain the cell when Enter closes formatted source',async()=>{
+  const source='| '+ 'A'.padEnd(48) +' | B | C |\n| --- | --- | --- |\n| <span style="color:red">P0</span> | **自建待检查指标** | 说明<br>下一行 |\n| P1 | 普通指标 | 描述 |\n\n';
+  for(const edge of ['text','source']) {
+   await reset(source);await select('自建待检查指标');const cell=cellLocation();
+   if(edge==='source')await act(async()=>{const at=view.state.selection.$head;assert.equal(at.parent.type.name,'deditor_inline_source');view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc,at.end())));});
+   await key('Enter');assert.equal(cellLocation(),cell,`${edge}: ${JSON.stringify(view.state.selection.toJSON())} / ${content()}`);
+   assert.ok(matrix()[1][1].includes('\n'));await exactHistory(source);
+  }
+ });
+ await test('T26 closing syntax across formats and padded cells preserves Enter, ShiftEnter, Tab and arrows',async()=>{
+  for(const raw of ['**目标**','*目标*','~~目标~~','`目标`','[目标](https://example.com/long/path "title")','[目标][ref]','***目标***','==目标==','~目标~','^目标^'])for(const action of ['Enter','ShiftEnter','Tab','ArrowRight']) {
+   const source=original.replace('| A | B |','| '+ 'A'.padEnd(100) +' | B |').replace('| one | two |',`| ${raw} | two |`)+'\n[ref]: https://example.com\n';
+   await reset(source);await select('目标');const cell=cellLocation();
+   await act(async()=>{const at=view.state.selection.$head;assert.equal(at.parent.type.name,'deditor_inline_source',raw);view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc,at.end())));});
+   await key(action==='ShiftEnter'?'Enter':action,{shiftKey:action==='ShiftEnter'});
+   if(action==='Tab'){assert.equal(view.state.selection.$head.parent.textContent,'two');assert.equal(content(),source);}
+   else if(action==='ArrowRight'){assert.equal(cellLocation(),cell,raw);assert.equal(content(),source);assert.equal(view.state.selection.$head.parentOffset,view.state.selection.$head.parent.content.size);}
+   else {assert.equal(cellLocation(),cell,raw);assert.ok(matrix()[1][0].endsWith('\n'),raw);await exactHistory(source);}
+  }
+ });
+ await test('T27 syntax boundaries after source edits and in nested/CRLF tables preserve break and history',async()=>{
+  for(const variant of ['header','last','nested','crlf'])for(const edited of [false,true]) {
+   let source=original.replace('| A | B |','| '+ 'A'.padEnd(100) +' | B |').replace(variant==='header'?'| '+ 'A'.padEnd(100) +' | B |':variant==='last'?'| three | four |':'| one | two |',variant==='header'?'| **目标** | B |':variant==='last'?'| three | **目标** |':'| **目标** | two |');
+   if(variant==='nested')source='- parent\n\n'+source.split('\n').map(line=>'  '+line).join('\n');
+   if(variant==='crlf')source=source.replace(/\n/g,'\r\n');
+   await reset(source);await select('目标');
+   await act(async()=>{const at=view.state.selection.$head;if(edited)view.dispatch(view.state.tr.insertText('新增',at.end()-2));const next=view.state.selection.$head;view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc,next.end())));});
+   const before=content(),cell=cellLocation();await key('Enter');assert.equal(cellLocation(),cell,variant);assert.ok(matrix().flat().some(text=>text===(edited?'目标新增':'目标')+'\n'));await exactHistory(before);
+  }
+ });
  assert.equal(runtimeErrors.length,0);console.log(`${passed} deep table keyboard checks passed`);
 } finally {MilkdownEditor.make=make;await act(async()=>root.render(null));window.close();}
