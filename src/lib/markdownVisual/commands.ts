@@ -1,3 +1,4 @@
+import { CellSelection } from "@milkdown/kit/prose/tables";
 import { MarkdownDocument } from "./document";
 import { setBlockType, toggleMark, wrapIn, lift } from "@milkdown/kit/prose/commands";
 import { wrapInList, liftListItem } from "@milkdown/kit/prose/schema-list";
@@ -101,6 +102,23 @@ export function visualCommands(view: EditorView, tabId: string, parse: (s: strin
       }
       focus();
     },
+    background(color) {
+      if (!view.editable) return;
+      boundary();
+      const tr = view.state.tr, { from, to } = view.state.selection;
+      const targets = new Set<number>();
+      // Cell selections and text selections both shade whole cells; never their paragraphs.
+      if (view.state.selection instanceof CellSelection) view.state.selection.forEachCell((_node, pos) => targets.add(pos));
+      else view.state.doc.nodesBetween(from, to, (node, pos) => {
+        if (["table_cell", "table_header", "paragraph", "heading"].includes(node.type.name)) {
+          targets.add(pos); return false;
+        }
+      });
+      targets.forEach(pos => { const node = tr.doc.nodeAt(pos)!; if (node.attrs.background !== color) tr.setNodeMarkup(pos, undefined, { ...node.attrs, background: color }); });
+      if (view.state.selection.empty && view.state.storedMarks) tr.setStoredMarks(view.state.storedMarks);
+      if (tr.docChanged) view.dispatch(tr);
+      boundary(); focus();
+    },
     color(property, color) {
       boundary();
       const type = view.state.schema.marks[property === "color" ? "deditor_color" : "deditor_background"];
@@ -118,10 +136,10 @@ export function visualCommands(view: EditorView, tabId: string, parse: (s: strin
       view.dispatch(view.state.tr.replaceWith(start, end, view.state.schema.text(label, [mark])).scrollIntoView()); focus();
     },
     capture() {
-      const captured = view.state.doc, selection = view.state.selection;
+      const captured = view.state.doc, selection = view.state.selection, storedMarks = view.state.storedMarks;
       return { selected, apply(action) {
         if (getVisualEditor()?.tabId !== tabId || !view.editable || view.state.doc !== captured || view.isDestroyed) return false;
-        view.dispatch(view.state.tr.setSelection(selection));
+        view.dispatch(view.state.tr.setSelection(selection).setStoredMarks(storedMarks));
         action(); return true;
       } };
     },

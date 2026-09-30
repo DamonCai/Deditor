@@ -1,3 +1,4 @@
+import { markdownBackground } from "./markdownBackground";
 import { loadMarkdownMath, markdownMathHtml } from "./markdownMath";
 import { needsHtmlDocument } from "./htmlDocument";
 import type { PluginSimple } from "markdown-it";
@@ -138,6 +139,7 @@ md.renderer.rules.html_block = (tokens, index, options, env, renderer) => {
 
 md.use(anchor, { permalink: false });
 md.use(markdownTableLists);
+md.use(markdownBackground);
 md.use(taskLists, { enabled: false });
 md.use(markdownTaskIndent);
 md.use(footnote);

@@ -1,3 +1,4 @@
+import { validBackground } from "./markdownBackground";
 import { getVisualEditor } from "./markdownVisualBridge";
 import type { EditorView } from "@codemirror/view";
 import { EditorSelection, type EditorState } from "@codemirror/state";
@@ -335,4 +336,21 @@ export function captureEditorTarget() {
       return true;
     },
   };
+}
+
+/** Paragraph shading outside tables, whole-cell shading inside tables. */
+export async function setBlockBackground(color: string | null): Promise<void> {
+  if (color !== null && !validBackground(color)) return;
+  const visual = getVisualEditor();
+  if (visual) { if (visual.editable) visual.background?.(color); return; }
+  const target = captureEditorTarget();
+  const { blockBackgroundEdits } = await import("./markdownVisual/backgroundSource");
+  target?.apply(() => withView(view => {
+    if (view.state.readOnly) return;
+    const { from, to } = view.state.selection.main;
+    const edits = blockBackgroundEdits(view.state.doc.toString(), from, to, color);
+    if (!edits.length) return;
+    const changes = view.state.changes(edits);
+    view.dispatch({ changes, selection: EditorSelection.create(view.state.selection.ranges.map(range => EditorSelection.range(changes.mapPos(range.anchor, 1), changes.mapPos(range.head, 1))), view.state.selection.mainIndex), annotations: isolateHistory.of("full") });
+  }));
 }

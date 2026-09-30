@@ -1,3 +1,4 @@
+import { LuHighlighter, LuPaintBucket } from "react-icons/lu";
 import { useEffect, useLayoutEffect, useRef, useState, useId } from "react";
 import { createPortal } from "react-dom";
 import { FiCheck, FiChevronDown } from "react-icons/fi";
@@ -49,13 +50,15 @@ export default function MarkdownColorPicker({
   title,
   value,
   disabled,
-  highlight,
+  variant = "text",
+  onClear,
   onApply,
 }: {
   title: string;
   value: string;
   disabled: boolean;
-  highlight?: boolean;
+  variant?: "text" | "highlight" | "background";
+  onClear?: () => void;
   onApply: (color: string) => void;
 }) {
   const t = useT();
@@ -191,14 +194,8 @@ export default function MarkdownColorPicker({
           }
         }}
       >
-        <span
-          className={
-            highlight
-              ? "md-color-letter md-color-letter--highlight"
-              : "md-color-letter"
-          }
-        >
-          A
+        <span className="md-color-letter" aria-hidden="true">
+          {variant === "highlight" ? <LuHighlighter size={15} /> : variant === "background" ? <LuPaintBucket size={15} /> : "A"}
           <span
             className="md-color-indicator"
             style={{ backgroundColor: value }}
@@ -220,6 +217,9 @@ export default function MarkdownColorPicker({
               <span>{title}</span>
               <code>{value.toUpperCase()}</code>
             </div>
+            {onClear && <Button variant="ghost" size="sm" className="md-color-clear" onClick={() => {
+              if (target.apply(onClear)) close(); else setError(t("md.targetChanged"));
+            }}>{t("md.noBackground")}</Button>}
             <p className="md-color-caption">{t("md.themeColors")}</p>
             {swatches(palette, t("md.themeColors"))}
             <p className="md-color-caption">{t("md.standardColors")}</p>

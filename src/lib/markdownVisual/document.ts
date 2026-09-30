@@ -1,3 +1,4 @@
+import { backgroundTree } from "../markdownBackground";
 import { offsetSourceTree } from "./sourceOffsets";
 import { tableListTree } from "./tableTree";
 import { taskIndentTree } from "./taskIndent";
@@ -22,7 +23,7 @@ export interface SourceNode {
 export interface MarkdownSourceContext { source: string; ast: readonly SourceNode[]; definitions: string }
 const syntax = unified().use(remarkParse).use(remarkGfm, { singleTilde: false }).use(remarkMark).use(remarkShorthand).use(remarkMath).use(remarkFrontmatter, ["yaml", "toml"]);
 export function sourceTree(source: string): SourceNode { return syntax.parse(normalizeMarkdownFences(source)) as SourceNode; }
-function editingTree(source: string): SourceNode { const tree = sourceTree(source); editableBlockTree(tree, source); tableListTree(tree, source); taskIndentTree(tree); orderFootnoteTree(tree); return tree; }
+function editingTree(source: string): SourceNode { const tree = sourceTree(source); editableBlockTree(tree, source); tableListTree(tree, source); taskIndentTree(tree); backgroundTree(tree); orderFootnoteTree(tree); return tree; }
 function editingBlock(source: string, definitions: string): SourceNode {
   const parsed = (editingTree(source + (definitions ? "\n\n" + definitions : "")).children ?? [])
     .filter(node => range(node)[0] < source.length);
@@ -442,10 +443,10 @@ export class MarkdownDocument {
         // falling back to the nearest text in a neighboring cell. Known
         // hidden table metadata precedes content and must stay there.
         const [from, to] = range(n), raw = this.source.slice(from, to);
-        const prefix = raw.match(/^\|?[ \t]*(?:<!-- deditor:(?:table-indent=\d+|valign=(?:middle|bottom)) -->[ \t]*)*/)?.[0] ?? "";
+        const prefix = raw.match(/^\|?[ \t]*(?:(?:<!-- deditor:(?:table-indent=\d+|valign=(?:middle|bottom)) -->|<span data-deditor-background="#[\da-fA-F]{6}"><\/span>)[ \t]*)*/)?.[0] ?? "";
         // Padding after a hidden comment becomes visible text once content
         // follows it, unlike ordinary leading pipe padding. Insert before it.
-        emptySource.push(from + (prefix.includes("-->") ? prefix.trimEnd().length : prefix.length));
+        emptySource.push(from + (prefix.includes(">") ? prefix.trimEnd().length : prefix.length));
       }
       if (["text", "inlineCode", "code", "math", "break"].includes(n.type)) { leaves.push(n); closingEnds.set(n, ends); }
       else if (n.type === "html" && /^<br\s*\/?>$/i.test(n.value ?? "")) leaves.push({ ...n, type: "break" });

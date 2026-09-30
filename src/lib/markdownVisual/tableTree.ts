@@ -1,3 +1,4 @@
+import { takeBackground } from "../markdownBackground";
 import { sourceTree, range, type SourceNode } from "./document";
 import { tableCellSource, tableListStart, tableCjkStrongAt } from "../markdownTableSyntax";
 
@@ -41,6 +42,8 @@ export function tableListTree(tree: SourceNode, source: string) {
     (tree as SourceNode & { deditorVAlign: string }).deditorVAlign = marker[1];
     children = children.slice(1); tree.children = children;
   }
+  takeBackground(tree);
+  children = tree.children ?? [];
   if (!children.length) return;
   const from = range(children[0])[0], to = range(children.at(-1)!)[1];
   const breaks: SourceNode[] = [];

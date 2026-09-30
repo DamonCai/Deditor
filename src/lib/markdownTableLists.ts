@@ -1,3 +1,4 @@
+import { backgroundPrefix, backgroundStyle } from "./markdownBackground";
 import type MarkdownIt from "markdown-it";
 import type Token from "markdown-it/lib/token.mjs";
 import { tableCellSource, tableListStart, tableCjkStrongAt } from "./markdownTableSyntax";
@@ -88,6 +89,12 @@ export function markdownTableLists(md: MarkdownIt): void {
       if (alignment) {
         previous.attrJoin('style', `vertical-align:${alignment[1]}`);
         token.content = token.content.slice(alignment[0].length);
+      }
+      const background = backgroundPrefix.exec(token.content);
+      if (background) {
+        previous.attrJoin('style', backgroundStyle(background[1]));
+        previous.attrSet('data-deditor-background', background[1]);
+        token.content = token.content.slice(background[0].length);
       }
       const positions: Array<[number, number]> = [];
       md.inline.parse(token.content, md, { ...state.env, [cellBreaks]: positions }, []);

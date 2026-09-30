@@ -1,3 +1,4 @@
+import { withBackground } from "./background";
 import { $inputRule } from "@milkdown/kit/utils";
 import { headingSchema } from "@milkdown/kit/preset/commonmark";
 import { textblockTypeInputRule } from "@milkdown/kit/prose/inputrules";
@@ -8,3 +9,5 @@ export const absoluteHeadingInputRule = $inputRule(ctx => textblockTypeInputRule
   headingSchema.type(ctx),
   match => ({ level: match[1].length }),
 ));
+
+export const shadedHeading = headingSchema.extendSchema(previous => ctx => withBackground(previous(ctx)));

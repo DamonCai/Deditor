@@ -15,6 +15,12 @@ export const editableBlockquote = blockquoteSchema.extendSchema(previous => ctx 
     parseMarkdown: { ...base.parseMarkdown, runner: (state, node, type) => { state.openNode(type, { callout: node.callout ?? null }).next(node.children).closeNode(); } },
     toMarkdown: { ...base.toMarkdown, runner: (state, node) => {
       if (!node.attrs.callout) { base.toMarkdown.runner(state, node); return; }
+      if (node.firstChild?.attrs.background) {
+        // Keep the alert marker in its own paragraph: inline HTML otherwise
+        // collapses its terminal newline to a space during serialization.
+        state.openNode("blockquote").openNode("paragraph").addNode("text", undefined, `[!${node.attrs.callout}]`).closeNode().next(node.content).closeNode();
+        return;
+      }
       state.openNode("blockquote").openNode("paragraph").addNode("text", undefined, `[!${node.attrs.callout}]\n`);
       if (node.firstChild?.type.name === "paragraph") {
         state.next(node.firstChild.content).closeNode();

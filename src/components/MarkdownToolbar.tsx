@@ -32,6 +32,7 @@ import {
   insertBlock,
   prefixLines,
   setSelectionColor,
+  setBlockBackground,
   subscribeActiveEditor,
   wrapSelection,
 } from "../lib/editorBridge";
@@ -57,13 +58,14 @@ export default function MarkdownToolbar() {
   const session = activeId ? markdownSession(activeId, content) : null;
   const editorFontSize = useEditorStore((s) => s.tabs.find((tab) => tab.id === s.activeId)?.zoomFontSize ?? s.editorFontSize);
   const setEditorZoomFontSize = useEditorStore((s) => s.setEditorZoomFontSize);
-  const disabled = !visual && !state;
+  const disabled = visual ? !visual.editable : !state || state.readOnly;
   const [dialog, setDialog] = useState<{
     kind: InsertKind;
     target: NonNullable<ReturnType<typeof captureEditorTarget>>;
   } | null>(null);
   const [exportSnapshot, setExportSnapshot] = useState<ExportSnapshot | null>(null);
   const [color, setColor] = useState("#e53e3e");
+  const [background, setBackground] = useState("#FFF2CC");
   const [highlight, setHighlight] = useState("#fff59d");
   useEffect(() => {
     setDialog(null);
@@ -229,10 +231,22 @@ export default function MarkdownToolbar() {
               title={t("md.highlight")}
               value={highlight}
               disabled={disabled}
-              highlight
+              variant="highlight"
               onApply={(value) => {
                 setHighlight(value);
                 run(() => setSelectionColor("background", value));
+              }}
+            />
+            <MarkdownColorPicker
+              key={`background-${activeId}`}
+              title={t("md.background")}
+              value={background}
+              disabled={disabled}
+              variant="background"
+              onClear={() => run(() => setBlockBackground(null))}
+              onApply={(value) => {
+                setBackground(value);
+                run(() => setBlockBackground(value));
               }}
             />
           </div>
