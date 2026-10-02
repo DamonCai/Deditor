@@ -311,7 +311,9 @@ export default function XmindCanvas({
     const el = host.current;
     if (!el) return;
     const wheel = (e: WheelEvent) => {
-      if ((e.target as HTMLElement).closest("input,textarea")) return;
+      // The context menu is a scrollable child of the canvas. Let its own
+      // scrollbar consume the wheel instead of panning/zooming the map below.
+      if ((e.target as Element).closest("input,textarea,.xm-context")) return;
       e.preventDefault();
       const c = cameraRef.current;
       if (e.ctrlKey || e.metaKey) {
