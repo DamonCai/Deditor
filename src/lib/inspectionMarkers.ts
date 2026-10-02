@@ -30,7 +30,9 @@ class InspectionStrip implements PluginValue {
       top: "0",
       bottom: "0",
       width: "8px",
-      pointerEvents: "auto",
+      // The strip overlays the native scrollbar. Its empty area must let
+      // pointer/wheel events reach the scroller, including thumb drags.
+      pointerEvents: "none",
       zIndex: "5",
     } as CSSStyleDeclaration);
     view.dom.appendChild(this.dom);
@@ -80,6 +82,8 @@ class InspectionStrip implements PluginValue {
         borderRadius: "1px",
         background: m.color,
         cursor: "pointer",
+        // Keep bookmark navigation interactive without capturing the track.
+        pointerEvents: "auto",
       } as CSSStyleDeclaration);
       dot.title = m.label;
       const pos = m.pos;
