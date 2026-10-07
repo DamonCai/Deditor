@@ -58,6 +58,21 @@ export const nativeMarkdownCursor = $prose(() => {
       },
       handleClick(view, pos, event) {
         if (!view.editable || view.composing || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return false;
+        // WebKit can resolve blank space after an uneditable inline atom to
+        // its left edge when a hardbreak follows it. Use the rendered right
+        // edge to keep a click after the formula/footnote on the intended line.
+        const $click = view.state.doc.resolve(pos), atom = $click.nodeAfter;
+        if (atom?.isInline && atom.isAtom && !atom.isText && atom.type.name !== "hardbreak"
+          && $click.parent.childAfter($click.parentOffset + atom.nodeSize).node?.type.name === "hardbreak") {
+          const dom = view.nodeDOM(pos);
+          if (dom instanceof HTMLElement) {
+            const rect = dom.getBoundingClientRect();
+            if (rect.width > 0 && event.clientX >= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom) {
+              view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, pos + atom.nodeSize)));
+              view.focus(); return true;
+            }
+          }
+        }
         const $pos = terminalHtml(view.state, pos); if (!$pos) return false;
         const block = view.nodeDOM($pos.before());
         const last = block?.lastChild;

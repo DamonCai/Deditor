@@ -50,7 +50,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { extendedTableCells, configureTableEditing } from "../lib/markdownVisual/tableLists";
 import { inlineSchemas, faithfulInlineHtml, configureInlineSerialization } from "../lib/markdownVisual/inline";
 import { codeView } from "../lib/markdownVisual/codeView";
-import { codeBlockSchema, remarkInlineLinkPlugin, remarkPreserveEmptyLinePlugin, syncHeadingIdPlugin, wrapInHeadingInputRule } from "@milkdown/kit/preset/commonmark";
+import { codeBlockSchema, inlineNodesCursorPlugin, remarkInlineLinkPlugin, remarkPreserveEmptyLinePlugin, syncHeadingIdPlugin, wrapInHeadingInputRule } from "@milkdown/kit/preset/commonmark";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CrepeBuilder } from "@milkdown/crepe/builder";
 import { codeMirror } from "@milkdown/crepe/feature/code-mirror";
@@ -233,6 +233,10 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
       await crepe.editor.remove(syncHeadingIdPlugin);
       await crepe.editor.remove(remarkInlineLinkPlugin.plugin);
       await crepe.editor.remove(remarkPreserveEmptyLinePlugin.plugin);
+      // Its editable widgets swallow native input between inline atoms (e.g.
+      // formula + hardbreak), and its compositionend handler bypasses
+      // ProseMirror's composition cleanup. Keep the native DOM caret instead.
+      await crepe.editor.remove(inlineNodesCursorPlugin);
       // A mode/tab switch (or StrictMode cleanup) can cancel this asynchronous
       // setup. Do not parse the whole document into an already detached host.
       if (cancelled) return;
