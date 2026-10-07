@@ -10,6 +10,14 @@ function terminalHtml(state: EditorState, pos = state.selection.head) {
   return $pos;
 }
 
+function atomBeforeBreak(state: EditorState) {
+  const { selection } = state;
+  return selection instanceof TextSelection && selection.empty &&
+    selection.$head.nodeBefore?.isAtom && !selection.$head.nodeBefore.isText &&
+    selection.$head.nodeBefore.type.name !== "hardbreak" &&
+    selection.$head.nodeAfter?.type.name === "hardbreak";
+}
+
 /** Keep mark-boundary navigation while the browser draws its native caret. */
 export const nativeMarkdownCursor = $prose(() => {
   const affinity = createVirtualCursor({ skipWarning: true });
@@ -28,7 +36,19 @@ export const nativeMarkdownCursor = $prose(() => {
   };
   return new Plugin({
     props: {
+      attributes: state => ({ "data-md-atom-caret": atomBeforeBreak(state) ? "true" : "false" }),
       decorations(state) {
+        if (atomBeforeBreak(state)) {
+          // WebKit paints the native parent-DOM caret at the paragraph start
+          // between an uneditable atom and BR. Draw only this boundary in flow.
+          // The empty, uneditable widget never owns preedit or source text.
+          return DecorationSet.create(state.doc, [Decoration.widget(state.selection.head, () => {
+            const caret = document.createElement("span");
+            caret.className = "md-atom-boundary-caret";
+            caret.setAttribute("aria-hidden", "true");
+            return caret;
+          }, { key: "md-atom-boundary-caret", side: -1, marks: [] })]);
+        }
         if (!state.selection.empty || state.storedMarks?.length !== 0 || !terminalHtml(state)) return null;
         // Browsers otherwise paint even a parent-DOM caret inside the last
         // padded inline element. This zero-width view-only anchor gives the

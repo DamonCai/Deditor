@@ -146,6 +146,20 @@ try {
   await act(async()=>root.render(null));await render();assert.equal(content(),saved);assert.equal(view.composing,false);
   const next=await atBoundary();await compose(next,'再');assert.ok(content().includes('$再补充<br>'));
  });
+ await test('M10 exact reported fixture preserves Chinese input and history after the formula',async()=>{
+  const original=fs.readFileSync('tests/fixtures/markdown-math-caret.md','utf8');
+  await reset(original);const at=await atBoundary();
+  const caret=view.dom.querySelector('.md-atom-boundary-caret');assert.ok(caret);
+  assert.equal(caret.contentEditable,'false');assert.equal(caret.textContent,'');
+  assert.equal(caret.previousSibling?.getAttribute('data-type'),'math_inline');
+  assert.equal(caret.nextSibling?.getAttribute('data-type'),'hardbreak');
+  assert.equal(view.dom.getAttribute('data-md-atom-caret'),'true');
+  assert.equal(view.state.doc.textContent.includes('\u200b'),false);assert.equal(content(),original);
+  await compose(at,'补充');assert.ok(content().includes('$补充<br>端到端链路建设'));
+  assert.equal(view.dom.querySelector('.md-atom-boundary-caret'),null);
+  assert.equal(view.dom.getAttribute('data-md-atom-caret'),'false');
+  assert.equal(content().includes('\u200b'),false);await exactHistory(original);
+ });
  await test('M09 WebKit left-edge hit after formula is corrected only for the visible right-side gap',async()=>{
   await reset(fixture);const after=await atBoundary(),before=after-1;
   const atom=view.nodeDOM(before);atom.getBoundingClientRect=()=>({left:100,right:180,top:30,bottom:50,width:80,height:20});

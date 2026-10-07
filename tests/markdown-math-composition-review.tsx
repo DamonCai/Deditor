@@ -1,4 +1,4 @@
-// Self-created fixture, with no persistence or user file access.
+// Self-contained reproduction fixture; no persistence or filesystem access.
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import Visual from '../src/components/MarkdownVisualEditor';
@@ -6,7 +6,7 @@ import Preview from '../src/components/Preview';
 import { useEditorStore } from '../src/store/editor';
 import { markdownHistory } from '../src/lib/markdownHistory';
 import '../src/styles.css';
-const source = '| **项目** |    | 合规： $\\color{#0089FF}{@xx(x舲)}$<br>后续文字**完成率 90 %**<br> |\n| :--- | :- | :--- |\n';
+import source from './fixtures/markdown-math-caret.md?raw';
 useEditorStore.setState({tabs:[{id:'feedback',filePath:'/generated/feedback.md',content:source,savedContent:source}],activeId:'feedback',language:'zh',theme:'light',markdownMode:'visual',autoSave:'off'});
 function Review(){
  const theme=useEditorStore(s=>s.theme);const content=useEditorStore(s=>s.tabs[0].content);
