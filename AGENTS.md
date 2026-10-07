@@ -6,6 +6,7 @@ DEditor 项目的协作上下文。Codex 在这个目录工作时自动加载本
 
 - 当前工作分支 `feature/1.0.2`。Windows/WebView2 原生编辑、快捷键、文件面板、双窗退出恢复以及 DEditor→原版 XMind 读取自建归档已完成 WIN-01/02/03/05/06；准确范围见[本轮记录](docs/windows-acceptance-2026-10-08.md)。真实 PicGo Core 上传与图片重新显示闭环完成 EXT-01，见[图床记录](docs/picgo-windows-2026-10-08.md)。当前待办 **6 类、16 项**，Windows 仅余 WIN-04 系统文件拖放至目标窗口。其它类别不因本轮 Windows 验收自动收口。
 - 原生验收使用 `tests/artifacts/windows-build/` 中自建样例。不要把文件面板打开当作系统拖放，也不要把工具注入的按键解释为真实物理 IME 候选窗验收。历史条目中的待办数量是当时快照，以[当前待办](docs/pending-tasks.md)为准。
+- 用户后续要求远程提交及本机重装；本轮 Windows 改动已推送到 `origin/feature/1.0.2`，重新构建的 1.0.2 NSIS 包已安装并启动验证。此前历史条目中的“不推送、不替换日常应用”仅描述当时状态。
 
 ## 公式后可见光标补修（2026-10-07）
 
