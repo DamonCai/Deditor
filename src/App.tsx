@@ -1,4 +1,6 @@
 import RecentFiles from "./components/RecentFiles";
+import { handleWindowsFileShortcut } from "./lib/windowsFileShortcuts";
+import { newWindow } from "./lib/editorWindows";
 import { installRecentFiles, handleRecentFilesKey } from "./lib/recentFiles";
 import { installWindowLifecycle, isWindowCloseCommitted, windowEventTarget } from "./lib/editorWindows";
 import { showError } from "./lib/feedback";
@@ -199,9 +201,8 @@ export default function App() {
     return installRecentFiles();
   }, [hydrated]);
 
-  // File menu lives in the native macOS app menu (built in Rust). Accelerators
-  // there (Cmd+N / Cmd+O / Cmd+S / etc.) are intercepted by the OS, so we
-  // only handle the shortcuts the menu doesn't own here.
+  // macOS file accelerators belong to the OS menu. On Windows WebView2 owns
+  // the bindings and the native menu keeps clickable entries with hints.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isWindowCloseCommitted()) return;
@@ -210,6 +211,17 @@ export default function App() {
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
       const prefs = useEditorStore.getState().shortcuts;
+      if (handleWindowsFileShortcut(e, prefs, action => {
+        switch (action) {
+          case "file_new": newFile(); break;
+          case "file_new_window": void newWindow(); break;
+          case "file_open": void openFile(); break;
+          case "file_open_folder": void openFolder(); break;
+          case "file_save": void saveFile(); break;
+          case "file_save_as": void saveFileAs(); break;
+          case "file_close_tab": void closeActiveTab(); break;
+        }
+      })) return;
       const k = e.key.toLowerCase();
       if (k === "b" && !e.shiftKey && !e.altKey) {
         if ((e.target as HTMLElement)?.closest?.('.md-visual-shell[data-readonly="false"] .ProseMirror')) return;

@@ -1,17 +1,19 @@
 # DEditor - Windows production build (.msi + .exe)
 # Usage:
-#   .\scripts\build-win.ps1                    # version 0.0.1 (default)
+#   .\scripts\build-win.ps1                    # keep current project version
 #   .\scripts\build-win.ps1 -Version 0.2.0     # PowerShell style
 #   .\scripts\build-win.ps1 --version 0.2.0    # GNU style (also accepted)
 param(
-    # Default version when -Version is omitted. Every build pins a known
-    # version into the three manifest files so the About dialog and
-    # bundle filenames stay in sync.
-    [string]$Version = "0.0.1"
+    # Read the project version unless explicitly overridden.
+    [string]$Version = ""
 )
 
 $ErrorActionPreference = "Stop"
 Set-Location "$PSScriptRoot\.."
+
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $Version = (Get-Content "package.json" -Raw | ConvertFrom-Json).version
+}
 
 # ---------------------------------------------------------------------------
 # Argument fix-up: PowerShell only recognises `-Version 0.2.0`. If the user
@@ -78,7 +80,7 @@ if (-not $cl) {
 }
 
 # --- Version bump ---
-if ($Version -notmatch '^\d+\.\d+\.\d+') {
+if ($Version -notmatch '^\d+\.\d+\.\d+$') {
     Write-Host "Version must look like X.Y.Z (got: $Version)"
     exit 1
 }

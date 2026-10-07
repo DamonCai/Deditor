@@ -1,11 +1,22 @@
 import { markdownSession } from "../markdownSession";
 import { useEditorStore } from "../../store/editor";
 import { imageBlockSchema } from "@milkdown/kit/component/image-block";
+import { imageSchema } from "@milkdown/kit/preset/commonmark";
 import type { NodeViewConstructor } from "@milkdown/kit/prose/view";
 import type { SourceNode } from "./document";
 import { markdownLabels } from "../markdownPreferences";
 import { t } from "../i18n";
 const escapeAttribute = (s: string) => s.replace(/[&<>"\n\r]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "\n": "&#10;", "\r": "&#13;" })[c]!);
+
+/** Markdown omits optional titles as null; the upstream schema requires strings. */
+export const faithfulInlineImage = imageSchema.extendSchema(previous => ctx => {
+  const base = previous(ctx);
+  return { ...base, parseMarkdown: { ...base.parseMarkdown,
+    runner: (state, node, type) => state.addNode(type, {
+      src: node.url, alt: node.alt ?? "", title: node.title ?? "",
+    }),
+  } };
+});
 
 /** A metadata change need not change the image node or its authored URL. */
 export function rootAwareImageView(original: NodeViewConstructor): NodeViewConstructor {

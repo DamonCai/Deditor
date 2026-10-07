@@ -12,6 +12,13 @@ import { useEditorStore } from "./store/editor";
 import { dropEditorStateCache } from "./lib/editorStateCache";
 import "./styles.css";
 
+// JetBrains' fonts are private to its runtime, rather than Windows system fonts.
+// Ship the Windows faces so the same declared stack resolves offline in WebView2.
+if (/Windows/i.test(navigator.userAgent)) {
+  document.documentElement.dataset.platform = "windows";
+  void import("./windows-fonts.css");
+}
+
 installGlobalLogHandlers();
 
 // Prune the per-tab CodeMirror state cache whenever tabs disappear (closed,

@@ -1110,6 +1110,14 @@ fn build_and_set_menu(
     // based on the disabled list. We can't pass `Option` to .accelerator(), so
     // branch the builder chain instead.
     let build_file_item = |id: &'static str, label: &str, accel: &'static str| -> Result<_, Box<dyn std::error::Error>> {
+        // Give WebView2 sole ownership of Windows file shortcuts. The native
+        // menu keeps their hints and clicks without also firing an accelerator.
+        #[cfg(target_os = "windows")]
+        if id.starts_with("file_") {
+            let label = if is_disabled(id) { label.to_string() }
+                else { format!("{}\t{}", label, accel.replace("CmdOrCtrl", "Ctrl")) };
+            return Ok(MenuItemBuilder::new(label).id(id).build(app)?);
+        }
         let b = MenuItemBuilder::new(label).id(id);
         let item = if is_disabled(id) {
             b.build(app)?
@@ -1563,6 +1571,7 @@ pub fn run() {
             // signal, so a cold-start race (event fires before React's
             // listener registers) doesn't drop the file. The emit payload is
             // intentionally empty; the queue is the source of truth.
+            #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
             if let tauri::RunEvent::Opened { urls } = event {
                 log::info!("RunEvent::Opened fired with {} url(s)", urls.len());
                 for u in &urls {

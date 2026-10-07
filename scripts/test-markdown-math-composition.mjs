@@ -152,7 +152,10 @@ try {
   const caret=view.dom.querySelector('.md-atom-boundary-caret');assert.ok(caret);
   assert.equal(caret.contentEditable,'false');assert.equal(caret.textContent,'');
   assert.equal(caret.previousSibling?.getAttribute('data-type'),'math_inline');
-  assert.equal(caret.nextSibling?.getAttribute('data-type'),'hardbreak');
+  // ProseMirror can insert its uneditable-atom separator before the break.
+  let next=caret.nextSibling;
+  if(next?.nodeName==='IMG' && next.classList.contains('ProseMirror-separator')) next=next.nextSibling;
+  assert.equal(next?.getAttribute('data-type'),'hardbreak');
   assert.equal(view.dom.getAttribute('data-md-atom-caret'),'true');
   assert.equal(view.state.doc.textContent.includes('\u200b'),false);assert.equal(content(),original);
   await compose(at,'补充');assert.ok(content().includes('$补充<br>端到端链路建设'));

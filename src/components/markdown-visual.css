@@ -23,7 +23,7 @@
   --crepe-base-font-size: var(--md-visual-font-size);
   --crepe-font-title: var(--md-font-family);
   --crepe-font-default: var(--md-font-family);
-  --crepe-font-code: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --crepe-font-code: var(--font-mono, "SFMono-Regular", Consolas, "Liberation Mono", monospace);
   --crepe-shadow-1: var(--shadow-popup);
   --crepe-shadow-2: var(--shadow-popup);
 }
@@ -150,7 +150,7 @@
 .md-code-select { position: absolute; left: -28px; top: 24px; width: 24px; height: 28px; padding: 0; border: 0; border-radius: 4px; background: var(--bg); color: var(--text-soft); cursor: pointer; opacity: 0; z-index: 3; }
 .md-code-block:hover > .md-code-select, .md-code-block:focus-within > .md-code-select, .md-code-select:focus-visible, .md-code-block.ProseMirror-selectednode > .md-code-select { opacity: 1; }
 .md-visual-shell .milkdown .md-document .md-code-block.ProseMirror-selectednode { outline: 2px solid var(--accent); outline-offset: 2px; }
-.md-visual-shell .milkdown .md-code-editor .cm-scroller { font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace; font-size: 13px; line-height: 1.75; }
+.md-visual-shell .milkdown .md-code-editor .cm-scroller { font-family: var(--font-mono, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace); font-size: 13px; line-height: 1.75; }
 .md-visual-shell .milkdown .md-code-editor .cm-content { caret-color: var(--preview-text); }
 .md-visual-shell .milkdown .md-code-editor .cm-cursor { border-left-color: var(--preview-text); }
 .md-visual-shell .milkdown .md-code-editor .cm-content { padding: 18px 0; }

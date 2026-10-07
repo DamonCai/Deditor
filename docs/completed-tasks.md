@@ -1,9 +1,13 @@
 # 已完成事项与验收记录
 
-更新：2026-09-27。以下范围已从[当前待办](pending-tasks.md)移除，供追溯使用；同一功能尚缺的具体场景只在当前待办中列出。
+更新：2026-10-08。以下范围已从[当前待办](pending-tasks.md)移除，供追溯使用；同一功能尚缺的具体场景只在当前待办中列出。
 
 | 已完成范围 | 记录 |
 | --- | --- |
+| EXT-01：Windows 原生 DEditor 产品上传按钮经隔离 PicGo Core 3.1.0 的真实 `/upload` 服务，把自建 PNG 上传至 Litterbox 一小时临时图床；首次 HTTP 412 失败后再次操作成功取得 HTTPS 链接，替换 Markdown 本地引用，Ctrl+S 落盘并关闭重开在 WebView2 再次显示图片。远程引用与原 PNG 分别核对，临时链接不代表永久图床服务或账户验收 | [Windows PicGo 闭环](picgo-windows-2026-10-08.md) |
+| WIN-01/02/03：Windows WebView2 自建 Markdown 含中文、英文、emoji 的实际编辑、Ctrl+S 磁盘内容、Ctrl+Z/Ctrl+Shift+Z 结果，以及 Windows 文件面板打开/另存中文路径，源文件与另存文件逐字节一致 | [Windows 原生验收](windows-acceptance-2026-10-08.md) |
+| WIN-05：两个 Windows 原生窗口分别持有已存文件上的未存中文草稿和未命名中文/emoji 草稿；全部进程退出再重启后，两窗标签、内容归属正确，随后分别保存 | [Windows 原生验收](windows-acceptance-2026-10-08.md) |
+| WIN-06：DEditor 原生保存自建 XMind，核对 content.json、其它 ZIP 条目和第二工作表字段；原版 XMind 实际打开并显示新根标题、分支和图像 | [Windows XMind 验收](windows-acceptance-2026-10-08.md) |
 | SPELL-03/04：修复 WK 段落重新检查后词典接受词红线再现；最终产品样式隔离原生包增词、继续编辑、亮暗、删词恢复通过，115字节原文一致；系统建议菜单仍待验 | [原生拼写收尾](native-spelling-closeout-2026-09-27.md) |
 | XM-01/02/03：原版自建紧凑形状/圆角、显式白字、亮暗 smart 主题对照；修复胶囊/菱形 canonical 宽度、菱形比例、紧凑圆图片折行。119 XMind、8 宽度及72圆形组合等通过；不称所有主题逐像素一致 | [XMind 原版对照](xmind-closeout-2026-09-27.md) |
 | PlantUML 失败后清理已加载标记，允许同节点重试；恢复后清理错误样式，5 秒超时及重试回归通过。EXT-04 后续闭环见下行 | [重试状态修复](plantuml-retry-fix-2026-09-22.md) |

@@ -152,12 +152,12 @@ export {default as GotoSymbol} from './src/components/GotoSymbol';
             return { path: "css-stub", namespace: "stub" };
           if (
             a.path === "../components/ConfirmDialog" &&
-            a.importer.endsWith("/fileio.ts")
+            /[/\\]fileio\.ts$/i.test(a.importer)
           )
             return { path: "confirm-stub", namespace: "stub" };
           if (
             a.path === "../lib/markdown" &&
-            a.importer.endsWith("/Preview.tsx")
+            /[/\\]Preview\.tsx$/.test(a.importer)
           )
             return { path: "markdown-stub", namespace: "stub" };
           if (stubs[a.path]) return { path: a.path, namespace: "stub" };

@@ -44,7 +44,7 @@ import { installMarkdownComposition } from "../lib/markdownComposition";
 import { faithfulLink } from "../lib/markdownVisual/references";
 import { absoluteHeadingInputRule, shadedHeading } from "../lib/markdownVisual/heading";
 import { activeBlockHint } from "../lib/markdownVisual/blockHint";
-import { faithfulImage, accessibleImageView, rootAwareImageView } from "../lib/markdownVisual/image";
+import { faithfulImage, faithfulInlineImage, accessibleImageView, rootAwareImageView } from "../lib/markdownVisual/image";
 import { installMarkdownAccessibility, tableIcon } from "../lib/markdownVisual/accessibility";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { extendedTableCells, configureTableEditing } from "../lib/markdownVisual/tableLists";
@@ -193,7 +193,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
         inlineUploadButton: t("md.uploadImage"), blockUploadButton: t("md.uploadImage"), blockConfirmButton: t("common.confirm"),
         inlineUploadPlaceholderText: t("md.imageUrlLabel"), blockUploadPlaceholderText: t("md.imageUrlLabel"), blockCaptionPlaceholderText: t("md.imageTitleLabel") })
       .addFeature(latex);
-    crepe.editor.use(faithfulTableSelection).use(markdownContextMenu(tabId, () => !cancelled && activeRef.current)).use(clipboardImages.plugin).use(shorthandRemark).use(highlightRemark).use(shorthandMarks.flat()).use(emojiSchema).use(shorthandInputRules).config(configureShorthand).use(editableBlockquote).use(footnoteReference).use(footnoteDefinition).use(footnoteUpdates).use(footnoteOrder).use(inlineSourceSchema).use(absoluteHeadingInputRule).use(activeBlockHint).use(sharedHeadingIds).use(faithfulParagraph).use(shadedHeading).use(faithfulLink).use(faithfulInlineHtml).use(faithfulImage).use(extendedTableCells.flat()).config(configureTableEditing).use(inlineSchemas.flat()).config(configureInlineSerialization).use(frontmatter).use(rawRemark(mdx)).use(rawSchema);
+    crepe.editor.use(faithfulTableSelection).use(markdownContextMenu(tabId, () => !cancelled && activeRef.current)).use(clipboardImages.plugin).use(shorthandRemark).use(highlightRemark).use(shorthandMarks.flat()).use(emojiSchema).use(shorthandInputRules).config(configureShorthand).use(editableBlockquote).use(footnoteReference).use(footnoteDefinition).use(footnoteUpdates).use(footnoteOrder).use(inlineSourceSchema).use(absoluteHeadingInputRule).use(activeBlockHint).use(sharedHeadingIds).use(faithfulParagraph).use(shadedHeading).use(faithfulLink).use(faithfulInlineHtml).use(faithfulImage).use(faithfulInlineImage).use(extendedTableCells.flat()).config(configureTableEditing).use(inlineSchemas.flat()).config(configureInlineSerialization).use(frontmatter).use(rawRemark(mdx)).use(rawSchema);
     crepe.editor.config(ctx => ctx.update(editorViewOptionsCtx, prev => ({ ...prev, attributes: { class: "md-document", "aria-label": t("md.visualEditor"), spellcheck: "false" },
       handleKeyDown: (view, event) => handleSelectedBlockExit(view, event) || handleTableKeys(view, event),
       handlePaste: (view, event, slice) => clipboardImages.paste(view, event) || pasteTableClipboard(view, event, slice) || pastePlainText(view, event, slice, ctx.get(parserCtx)),

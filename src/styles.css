@@ -167,8 +167,8 @@ body,
 .cm-editor {
   height: 100%;
 }
-.cm-scroller {
-  font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+.cm-editor .cm-scroller {
+  font-family: var(--font-mono, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace);
   font-size: var(--editor-font-size, 14px);
   line-height: 1.6;
 }
