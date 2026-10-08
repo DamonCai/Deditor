@@ -64,7 +64,11 @@ export {markdownHistory} from './src/lib/markdownHistory';
   const file=readingBase && fs.existsSync(readingBase) ? readingBase : component ?? (frozen && fs.existsSync(frozen) ? frozen : a.path);
   let contents=await fs.promises.readFile(file,'utf8');
   if(relative==='src/components/MarkdownVisualEditor.tsx' && process.env.DEDITOR_PROFILE_BASE && !baseline && !component) contents=contents.replace('deditor_raw: rawView(filePath, tabId),','deditor_raw: rawView(filePath, tabId, () => document.sourceContext()),');
-  contents=contents.replace('const result = create(node, view, getPos, decorations, innerDecorations);','const start=performance.now(); const result = create(node, view, getPos, decorations, innerDecorations); (globalThis as any).mdProfile("table NodeView create",performance.now()-start);');
+  if(relative==='src/lib/markdownVisual/tableView.ts') {
+   const factoryCall=/(?:const )?result = create\(node, view, getPos, decorations, innerDecorations\);/;
+   assert.ok(factoryCall.test(contents), 'table factory profiling hook must match the implementation');
+   contents=contents.replace(factoryCall, call => 'const tableProfileStart=performance.now(); '+call+' (globalThis as any).mdProfile("table NodeView create",performance.now()-tableProfileStart);');
+  }
   contents=contents.replace('const indexed = documentContext?.();','const indexed = documentContext?.(); (globalThis as any).mdProfile(indexed?.source === source ? "raw.indexedReuse" : "raw.indexedMiss",0);');
   contents=contents.replace('const tree = sourceTree(source);','const treeStart=performance.now(); const tree = sourceTree(source); (globalThis as any).mdProfile(' + JSON.stringify(relative.endsWith('/document.ts') ? 'model.editingTree' : relative.endsWith('/rawView.ts') ? 'raw.sourceTree' : 'math.sourceTree') + ',performance.now()-treeStart);');
   contents=contents.replaceAll('const tokens = md.parse(parsedSource, env);','const parseStart=performance.now(); const tokens = md.parse(parsedSource, env); (globalThis as any).mdProfile("markdown.parse",performance.now()-parseStart);');

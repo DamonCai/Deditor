@@ -1,5 +1,6 @@
 # Markdown P1–P3 实施与验证（2026-09-12）
 
+2026-10-08 维护：下文复跑入口已更新为保留入口；历史应用名称与当时验收结论保持原样。清理范围见[测试维护说明](../tests/README.md)。
 ## 范围与结论
 
 用户要求执行完整优先级、使用复杂 Markdown、保持阅读编辑与真实预览的样式一致，并更新 README、上下文、提交推送。本次继续完成可独立推进的 P1–P3 开发；P0 真实拼音和 Windows 验收仍未完成，不能将本文写成“全部平台、全部交互已通过”。
@@ -60,7 +61,7 @@
 
 ## 原生检查与未验收项
 
-独立应用 `DEditor Markdown P1P3 Review`，identifier `com.deditor.markdownp1p3review20260912`；配置在 `tests/markdown-p1p3-native-review.conf.json`。只操作 `/tmp/deditor-p1p3-native-fixture.md`（自建复杂文档的副本，图片改为自建 SVG 的绝对路径）。
+独立应用 `DEditor Markdown P1P3 Review`，identifier `com.deditor.markdownp1p3review20260912`；配置在 `tests/markdown-native-review.conf.json`。只操作 `/tmp/deditor-p1p3-native-fixture.md`（自建复杂文档的副本，图片改为自建 SVG 的绝对路径）。
 
 - 原生文件打开、切换阅读编辑、复杂文档呈现已实际操作。
 - 实际键入 `x` 和粘贴“原生保存测试”，Cmd+S 后从磁盘核对落盘；关闭标签后使用 Cmd+Shift+T 重新打开，经标准文件读取路径确认内容仍存在。

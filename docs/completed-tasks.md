@@ -4,11 +4,14 @@
 
 | 已完成范围 | 记录 |
 | --- | --- |
+| SOAK-01/02：修复后台表格销毁未取消挂载动画回调；原生 47 分 5.866 秒、374 轮内容和关闭资源断言通过，另有 880 次真实大图拖动与 10 分钟进程内存采样；记录实际峰值和回收范围，不称任意时长无泄漏 | [非 Windows 接续](mac-closeout-2026-10-08.md) |
+| CLIP-01：钉钉便签真实往返的标题、粗体、链接和中文保留；斜体/表格降级与独立标准 HTML 对照逐字节相同，按接收端边界归档，不称全部格式通过 | [非 Windows 接续](mac-closeout-2026-10-08.md) |
+| SPELL-01/02：Mac 产品亮暗正文和表格通过 Option+右键实际系统 quick 建议，仅更正所选 quikc；保存、单次撤销和重开逐字节恢复原文，未修改系统词典 | [非 Windows 接续](mac-closeout-2026-10-08.md) |
 | EXT-01：Windows 原生 DEditor 产品上传按钮经隔离 PicGo Core 3.1.0 的真实 `/upload` 服务，把自建 PNG 上传至 Litterbox 一小时临时图床；首次 HTTP 412 失败后再次操作成功取得 HTTPS 链接，替换 Markdown 本地引用，Ctrl+S 落盘并关闭重开在 WebView2 再次显示图片。远程引用与原 PNG 分别核对，临时链接不代表永久图床服务或账户验收 | [Windows PicGo 闭环](picgo-windows-2026-10-08.md) |
 | WIN-01/02/03：Windows WebView2 自建 Markdown 含中文、英文、emoji 的实际编辑、Ctrl+S 磁盘内容、Ctrl+Z/Ctrl+Shift+Z 结果，以及 Windows 文件面板打开/另存中文路径，源文件与另存文件逐字节一致 | [Windows 原生验收](windows-acceptance-2026-10-08.md) |
 | WIN-05：两个 Windows 原生窗口分别持有已存文件上的未存中文草稿和未命名中文/emoji 草稿；全部进程退出再重启后，两窗标签、内容归属正确，随后分别保存 | [Windows 原生验收](windows-acceptance-2026-10-08.md) |
 | WIN-06：DEditor 原生保存自建 XMind，核对 content.json、其它 ZIP 条目和第二工作表字段；原版 XMind 实际打开并显示新根标题、分支和图像 | [Windows XMind 验收](windows-acceptance-2026-10-08.md) |
-| SPELL-03/04：修复 WK 段落重新检查后词典接受词红线再现；最终产品样式隔离原生包增词、继续编辑、亮暗、删词恢复通过，115字节原文一致；系统建议菜单仍待验 | [原生拼写收尾](native-spelling-closeout-2026-09-27.md) |
+| SPELL-03/04：修复 WK 段落重新检查后词典接受词红线再现；最终产品样式隔离原生包增词、继续编辑、亮暗、删词恢复通过，115字节原文一致；系统建议菜单于 10 月 8 日补齐，见上行 | [原生拼写收尾](native-spelling-closeout-2026-09-27.md) |
 | XM-01/02/03：原版自建紧凑形状/圆角、显式白字、亮暗 smart 主题对照；修复胶囊/菱形 canonical 宽度、菱形比例、紧凑圆图片折行。119 XMind、8 宽度及72圆形组合等通过；不称所有主题逐像素一致 | [XMind 原版对照](xmind-closeout-2026-09-27.md) |
 | PlantUML 失败后清理已加载标记，允许同节点重试；恢复后清理错误样式，5 秒超时及重试回归通过。EXT-04 后续闭环见下行 | [重试状态修复](plantuml-retry-fix-2026-09-22.md) |
 | EXT-04：真实 PlantUML 响应经测试代理延迟尾段触发产品 5 秒超时，实际点击重试后再次远程 HTTP 200 恢复，正文不变；修复取消后同节点无法重载及关闭首视图误中断共享请求。属于明确传输故障注入，不称上游自然故障或原生验收 | [外部服务收尾](external-services-closeout-2026-09-27.md) |
@@ -41,7 +44,7 @@
 | 链接卡片编辑已接入；确认/取消后的焦点与光标恢复、继续输入、保存及分步撤销已有组件自动化覆盖 | [IN08 连续操作测试](../scripts/test-markdown-round3-inline.mjs)、[卡片选区实现](../src/lib/markdownVisual/linkSelection.ts)；最后完整 test:all 通过见[性能检查](markdown-performance-audit-2026-09-22.md) |
 | 文件链接从真实悬浮卡片在应用内打开，包括 file、绝对和相对路径 | [文件链接原生验证](markdown-file-links-fix-2026-09-13.md) |
 | 新建窗口的文件菜单/快捷键、独立文档与保存、关闭/重启恢复、窗口列表 | [新建窗口验收](new-editor-window-2026-09-21.md) |
-| 系统拼写 Alt/Option 右键入口及中英文提示；浏览器/组件确认应用不拦截系统菜单 | [拼写菜单入口](closeout-shortcuts-2026-09-22.md)；实际系统菜单仍在待验收中 |
+| 系统拼写 Alt/Option 右键入口及中英文提示；浏览器/组件确认应用不拦截系统菜单 | [拼写菜单入口](closeout-shortcuts-2026-09-22.md)；实际系统菜单于 10 月 8 日补齐，见本轮记录 |
 | XMind 96 组形状几何、500 次混合修改和归档、51 个历史版本、千节点 50 步浏览器输入/撤销/重做 | [XMind 收尾](closeout-xmind-2026-09-22.md)；不扩大为原版像素一致或长期内存结论 |
 
 产品及验收提交：`c2adcee`、`5df2aef`、`494209d`。历史记录中的“未提交”描述的是当时状态，不代表这些修复仍未提交。

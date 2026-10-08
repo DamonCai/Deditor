@@ -1,5 +1,6 @@
 # XMind 跨机器接续上下文
 
+2026-10-08 维护：下文复跑入口已更新为保留入口；历史应用名称与当时验收结论保持原样。清理范围见[测试维护说明](../tests/README.md)。
 > 当前状态入口已于 2026-09-22 清理：[XMind 未完成项](xmind-pending-audit-2026-09-12.md) / [全项目当前待办](pending-tasks.md)。下文保留各历史批次证据，旧“最新/尚未修复/待重开”不再作为当前待办，按链接中的后续闭环结果判断。
 
 ## 历史批次档案
@@ -134,7 +135,7 @@ npm run dev -- --host 127.0.0.1 --port 5173
 5. macOS 独立测试包使用已纳入仓库的配置，替代旧机器 `/tmp/deditor-native-round3.conf.json`：
 
 ```sh
-npm run tauri -- build --bundles app --config tests/xmind-native-review.conf.json
+npm run tauri -- build --bundles app --config tests/xmind-native-acceptance.conf.json
 ```
 
 输出：`src-tauri/target/release/bundle/macos/DEditor XMind Review3.app`。identifier 为 `com.deditor.xmindreview3`，清空文件关联。Review3 是沿用的测试应用名，不代表只包含第三批代码。每次源码修改、重新构建后要退出旧进程，再启动新包验证；应用正在运行不意味着它已经加载了新源码。Windows 使用匹配该平台的构建产物重新验证。

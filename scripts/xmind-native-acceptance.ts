@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { strFromU8, unzipSync } from 'fflate';
@@ -67,8 +67,8 @@ if (mode === 'prepare') {
     writeFileSync(join(directory, entry.expected), expectedBytes, { flag: 'wx' });
     manifest.cases.push(entry);
   }
-  const paths = execFileSync('git', ['ls-files', '-z', '--', 'src', 'src-tauri', 'scripts', 'tests', 'package.json', 'package-lock.json'], { cwd: root })
-    .toString().split('\0').filter(Boolean);
+  const paths = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', 'src', 'src-tauri', 'scripts', 'tests', 'package.json', 'package-lock.json'], { cwd: root })
+    .toString().split('\0').filter(path => path && existsSync(join(root, path)));
   // Include this script and the isolated config even before their first commit.
   for (const path of ['scripts/xmind-native-acceptance.ts', 'tests/xmind-native-acceptance.conf.json']) if (!paths.includes(path)) paths.push(path);
   const source = Object.fromEntries(paths.sort().map(path => [path, hash(readFileSync(join(root, path)))]));

@@ -1,5 +1,6 @@
 # XMind 接续验收矩阵
 
+2026-10-08 维护：下文复跑入口已更新为保留入口；历史应用名称与当时验收结论保持原样。清理范围见[测试维护说明](../tests/README.md)。
 > 当前状态入口已于 2026-09-22 清理：[XMind 未完成项](xmind-pending-audit-2026-09-12.md) / [全项目当前待办](pending-tasks.md)。下文保留各历史批次证据，旧“最新/尚未修复/待重开”不再作为当前待办，按链接中的后续闭环结果判断。
 
 ## 历史批次档案
@@ -100,7 +101,7 @@
 node --import tsx scripts/create-xmind-round6.ts
 node --import tsx scripts/test-xmind.ts
 npm run test:regression
-npm run tauri -- build --bundles app --config tests/xmind-native-review-round6.conf.json
+npm run tauri -- build --bundles app --config tests/xmind-native-acceptance.conf.json
 ```
 
 独立浏览器入口：`tests/xmind-review.html?probe=round6`（时间轴）和 `?probe=round6-styles`（形状/分组/联系文字），加 `&dark` 验证暗色。本轮后段用 `/tmp/deditor-xmind-round6-preview` 的源码快照在本机 5174 端口验证，避免其他任务修改共用源码造成 HMR 打断草稿；该快照不是交付源码。

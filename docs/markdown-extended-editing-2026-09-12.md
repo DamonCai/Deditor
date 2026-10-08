@@ -1,5 +1,6 @@
 # Markdown 非导出扩展实施与验收
 
+2026-10-08 维护：下文复跑入口已更新为保留入口；历史应用名称与当时验收结论保持原样。清理范围见[测试维护说明](../tests/README.md)。
 用户要求继续处理与 Typora 的差距，排除导出、统一字体、使用完整复杂 Markdown 验证。本任务没有执行提交或推送；收尾检查时共享工作区 HEAD 已变为 `840e863`，功能代码已包含在该提交中，本文还有未提交的验收记录更新。此前检查记录中的缺口属于当时状态，请结合本文阅读。
 
 ## 已实施
@@ -27,7 +28,7 @@
 - 原生独立应用 `DEditor Markdown Extended Review`、identifier `com.deditor.markdownextended20260912`，通过固定启动样例加载 `/tmp/deditor-extended-native-fixture.md`。实际直接编辑提示块，菜单保存后核对磁盘内容；整理两张自建 SVG 后再保存，两个目标文件 SHA-256 均匹配原图，原图保留。组合键工具未稳定触发保存，产生过字面量 `s`；本次只将菜单保存记为通过。
 - 原生应用构建通过。最后的页边提示缩短、提示字体继承和嵌套脚注/重复引用回跳属于后续修改：最终前端测试与构建覆盖，原生交互证据针对这些修改之前的核心功能构建。
 
-复跑：`npm run test:all`、`NODE_OPTIONS=--conditions=development npm run test:markdown-visual`、`node --import tsx scripts/perf-markdown-inline.ts`、`node scripts/audit-markdown-compatibility.mjs`。原生隔离配置：`tests/markdown-extended-native-review.conf.json`。证据归档 `tests/artifacts/markdown-extended-2026-09-12/`，Git 忽略，跨机时另行复制。
+复跑：`npm run test:all`、`NODE_OPTIONS=--conditions=development npm run test:markdown-visual`、`node --import tsx scripts/perf-markdown-inline.ts`、`node scripts/audit-markdown-compatibility.mjs`。原生隔离配置：`tests/markdown-native-review.conf.json`。证据归档 `tests/artifacts/markdown-extended-2026-09-12/`，Git 忽略，跨机时另行复制。
 
 ## 当时的边界（图片与浮层已有后续实现，见末节）
 
