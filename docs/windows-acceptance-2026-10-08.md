@@ -22,4 +22,14 @@
 
 Windows 字体采用 IDEA 常用的 JetBrains Mono 编辑字体与 Inter 界面字体，字体文件及 OFL 许可证纳入项目；代码编辑区的 CodeMirror 样式也已核对实际计算字体。具体实现见 `src/windows-fonts.css`、`src/main.tsx` 和相关样式文件。字体匹配以本机可用的 IDEA 默认/外观设置为准，不代表每位用户手动改过的 IDE 字体偏好。
 
-这份记录限于上述自建样例和本轮原生操作，不推论所有 XMind 主题的逐像素一致、所有 Windows 输入法或长期内存稳定性。按用户后续要求，本轮代码已提交并推送到 `origin/feature/1.0.2`；重新构建的 NSIS 包已安装到 `%LOCALAPPDATA%/DEditor/`，系统安装记录与实际启动的程序均为 1.0.2。
+这份记录限于上述自建样例和本轮原生操作，不推论所有 XMind 主题的逐像素一致、所有 Windows 输入法或长期内存稳定性。按用户后续要求，本轮代码已提交并推送到 `origin/feature/1.0.2`；重新构建的 NSIS 包已安装，系统安装记录与实际启动的程序均为 1.0.2。安装路径的后续纠正见下节。
+
+## Windows 搜索图标与安装路径补验（2026-10-09）
+
+用户截图显示 Windows 搜索中的 DEditor 仍为通用程序图标。提交 `e060a3f` 已给 NSIS 开始菜单和桌面快捷方式显式设置应用 EXE 图标并保留 `com.deditor.app`，但只核对打包进程内的 EXE、快捷方式和 Shell 图标，不能证明系统搜索能读取同一文件。
+
+本机 Codex 是打包应用；它启动的安装进程访问 `%LOCALAPPDATA%/DEditor/` 时，被 Windows 映射到 Codex 包的 `LocalCache/Local/DEditor/`。独立于 Codex 包的同一用户进程核对时，开始菜单快捷方式指向的真实 `%LOCALAPPDATA%/DEditor/deditor.exe` 不存在。这是搜索结果拿不到应用图标的实际原因，不能归因于图标素材或仅归因于 SearchHost 缓存。
+
+以同一用户的非打包进程运行已构建的 1.0.2 NSIS 安装包后，安装程序退出码为 0；独立进程核对真实 EXE 存在、SHA-256 为 `7A2ED1C33C4C28117C7CB072F2716F549B3206E65907BCEF7CB29B2D5E52F9FB`，开始菜单快捷方式目标与图标均指向该真实 EXE，提取图标为宇航员。重启 SearchHost 后，用户在 Windows 搜索输入 `deditor`，确认结果显示宇航员 logo。临时对照快捷方式和 EXE 已移除，搜索中仅留 `com.deditor.app`。本节只确认这台 Windows 机器的搜索结果和安装路径。
+
+以后在打包应用启动的终端中验收 Windows 安装时，必须用非打包的同一用户进程核对真实安装路径，再检查搜索界面；仅在该终端内 `Test-Path` 或提取 Shell 图标会误读映射副本。

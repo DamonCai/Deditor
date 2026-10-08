@@ -2,6 +2,11 @@
 
 DEditor 项目的协作上下文。Codex 在这个目录工作时自动加载本文件。
 
+## Windows 搜索 logo 与真实安装路径（2026-10-09）
+
+- Windows 搜索曾显示通用图标，实际原因是打包版 Codex 启动的 NSIS 安装进程将 `%LOCALAPPDATA%/DEditor/` 写进了 Codex 包的 `LocalCache/Local/DEditor/`；系统搜索读取的真实安装目录当时没有 EXE。不能只从同一个打包进程检查 `Test-Path`、快捷方式或 Shell 图标就宣称本机安装成功。
+- 已用同一用户的非打包进程重新安装正式 1.0.2 NSIS 包，独立核对真实 EXE、快捷方式目标与图标；用户确认 Windows 搜索里的 `deditor` 已显示宇航员 logo。准确证据及边界见[Windows 验收记录](docs/windows-acceptance-2026-10-08.md)。后续重装须再次从非打包进程核对真实路径。
+
 ## macOS 整合提交与重装授权（2026-10-08）
 
 - 用户明确要求将本轮表格生命周期修复、非 Windows 验收记录和旧测试清理一并提交并推送到当前 `feature/1.0.2`，随后在本机重新构建并安装正式 1.0.2 macOS 包。下方“不推送、不替换日常应用、未提交”均为此前阶段记录，不限制本轮操作。
