@@ -1,0 +1,30 @@
+[
+  {
+    "index": 0,
+    "value": "org.xmind.relationshipShape.curved"
+  },
+  {
+    "index": 1,
+    "value": "org.xmind.relationshipShape.straight"
+  },
+  {
+    "index": 2,
+    "value": "org.xmind.relationshipShape.angled"
+  },
+  {
+    "index": 3,
+    "value": "org.xmind.relationshipShape.zigzag"
+  },
+  {
+    "index": 4,
+    "value": "org.xmind.relationshipShape.flexible.curved"
+  },
+  {
+    "index": 5,
+    "value": "org.xmind.relationshipShape.flexible.angled"
+  },
+  {
+    "index": 6,
+    "value": "org.xmind.relationshipShape.flexible.zigzag"
+  }
+]

@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "DEditor",
-  "version": "0.8.0",
+  "version": "1.0.2",
   "identifier": "com.deditor.app",
   "build": {
     "frontendDist": "../dist",
@@ -21,7 +21,7 @@
         "fullscreen": false,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "trafficLightPosition": { "x": 14, "y": 13 }
+        "trafficLightPosition": { "x": 14, "y": 24 }
       }
     ],
     "security": {
@@ -42,6 +42,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
+        "installerHooks": "windows/installer-hooks.nsh"
+      }
+    },
     "fileAssociations": [
       {
         "name": "Markdown Document",

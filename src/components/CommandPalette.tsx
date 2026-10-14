@@ -1,3 +1,4 @@
+import { useModalFocus } from "../lib/useModalFocus";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { COMMANDS, type Command } from "../lib/commands";
 import { fuzzyMatch, type FuzzyMatch } from "../lib/fuzzy";
@@ -20,6 +21,7 @@ const GROUP_ORDER: Command["group"][] = ["nav", "file", "view", "editor"];
 
 export default function CommandPalette({ open, onClose }: Props) {
   const t = useT();
+  const panelRef = useModalFocus(open, onClose);
   const [query, setQuery] = useState("");
   const [selectedIdx, setSelectedIdx] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -123,7 +125,7 @@ export default function CommandPalette({ open, onClose }: Props) {
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(0,0,0,0.35)",
+        background: "var(--modal-backdrop)",
         zIndex: 1050,
         display: "flex",
         justifyContent: "center",
@@ -131,6 +133,11 @@ export default function CommandPalette({ open, onClose }: Props) {
       }}
     >
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t("palette.title")}
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
         style={{
           width: "min(640px, 92vw)",
@@ -145,7 +152,9 @@ export default function CommandPalette({ open, onClose }: Props) {
         }}
       >
         <input
+          className="deditor-palette-input"
           ref={inputRef}
+          aria-label={t("palette.title")}
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);

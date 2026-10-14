@@ -1,3 +1,4 @@
+import { useModalFocus } from "../lib/useModalFocus";
 import { create } from "zustand";
 import { tStatic } from "../lib/i18n";
 import { Button } from "./ui/Button";
@@ -16,6 +17,7 @@ interface State {
   title: string;
   message: string;
   buttons: ButtonSpec[];
+  tone?: "error";
   resolve: ((c: string) => void) | null;
 }
 
@@ -27,20 +29,26 @@ const useConfirm = create<State>(() => ({
   resolve: null,
 }));
 
+let pendingDialog: Promise<unknown> = Promise.resolve();
+
 function show(opts: {
   title: string;
   message: string;
   buttons: ButtonSpec[];
+  tone?: "error";
 }): Promise<string> {
-  return new Promise((resolve) => {
+  const pending = pendingDialog.then(() => new Promise<string>((resolve) => {
     useConfirm.setState({
       open: true,
       title: opts.title,
       message: opts.message,
       buttons: opts.buttons,
+      tone: opts.tone,
       resolve,
     });
-  });
+  }));
+  pendingDialog = pending;
+  return pending;
 }
 
 export function confirmUnsaved(
@@ -80,46 +88,52 @@ export function chooseAction(opts: {
   title: string;
   message: string;
   buttons: ButtonSpec[];
+  tone?: "error";
 }): Promise<string> {
   return show(opts);
 }
 
 export default function ConfirmDialog() {
-  const { open, title, message, buttons, resolve } = useConfirm();
-  if (!open) return null;
-
+  const { open, title, message, buttons, resolve, tone } = useConfirm();
   const close = (value: string) => {
     resolve?.(value);
     useConfirm.setState({ open: false, resolve: null });
   };
+
+  const panelRef = useModalFocus(open, () => close("cancel"), resolve);
+  if (!open) return null;
 
   return (
     <div
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(0,0,0,0.45)",
+        background: "var(--modal-backdrop)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        zIndex: 1000,
+        zIndex: 3000,
       }}
       onClick={(e) => {
         if (e.target === e.currentTarget) close("cancel");
       }}
       onKeyDown={(e) => {
         if (e.key === "Escape") close("cancel");
-        if (e.key === "Enter") {
+        if (e.key === "Enter" && !(e.target as HTMLElement).closest("button")) {
           const primary = buttons.find((b) => b.primary || b.danger);
           if (primary) close(primary.value);
         }
       }}
       tabIndex={-1}
-      ref={(el) => el?.focus()}
     >
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
         style={{
-          minWidth: 380,
+          width: "min(520px, calc(100vw - 32px))",
           maxWidth: 520,
           background: "var(--bg)",
           color: "var(--text)",
@@ -130,7 +144,8 @@ export default function ConfirmDialog() {
         }}
       >
         <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>{title}</div>
-        <div style={{ fontSize: 14, color: "var(--text-soft)", marginBottom: 18 }}>
+        <div className={tone ? "deditor-notice" : undefined} data-tone={tone}
+          style={{ ...(tone ? {} : { fontSize: 14, color: "var(--text-soft)" }), marginBottom: 18, maxHeight: "50vh", overflowY: "auto", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
           {message}
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
@@ -139,7 +154,6 @@ export default function ConfirmDialog() {
               key={b.value}
               variant={b.danger ? "danger" : b.primary ? "primary" : "secondary"}
               onClick={() => close(b.value)}
-              style={{ padding: "6px 16px", fontSize: 13 }}
             >
               {b.label}
             </Button>

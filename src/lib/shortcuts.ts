@@ -19,6 +19,8 @@ export type ShortcutLayer = "menu" | "app" | "editor";
 export type ShortcutId =
   // menu
   | "file_new"
+  | "file_new_window"
+  | "file_recent"
   | "file_open"
   | "file_open_folder"
   | "file_save"
@@ -37,6 +39,7 @@ export type ShortcutId =
   // editor (CodeMirror custom keymap)
   | "editor_add_cursor_above"
   | "editor_add_cursor_below"
+  | "editor_font_zoom"
   | "editor_select_all_matches";
 
 export interface ShortcutMeta {
@@ -54,6 +57,7 @@ export interface ShortcutMeta {
 
 export const SHORTCUTS: ShortcutMeta[] = [
   // File
+  { id: "file_new_window", display: "Cmd/Ctrl+Shift+N", labelKey: "shortcut.file.newWindow", layer: "menu", group: "file" },
   { id: "file_new",          display: "Cmd/Ctrl+N",        labelKey: "shortcut.file.new",         layer: "menu",   group: "file" },
   { id: "file_open",         display: "Cmd/Ctrl+O",        labelKey: "shortcut.file.open",        layer: "menu",   group: "file" },
   { id: "file_open_folder",  display: "Cmd/Ctrl+Shift+O",  labelKey: "shortcut.file.openFolder",  layer: "menu",   group: "file" },
@@ -62,6 +66,7 @@ export const SHORTCUTS: ShortcutMeta[] = [
   { id: "file_close_tab",    display: "Cmd/Ctrl+W",        labelKey: "shortcut.file.closeTab",    layer: "menu",   group: "file" },
 
   // Navigation
+  { id: "file_recent", display: "Cmd/Ctrl+E", labelKey: "recent.title", layer: "menu", group: "nav" },
   { id: "app_goto_anything",   display: "Cmd/Ctrl+P",       labelKey: "shortcut.nav.gotoAnything",   layer: "app", group: "nav" },
   { id: "app_command_palette", display: "Cmd/Ctrl+Shift+P", labelKey: "shortcut.nav.commandPalette", layer: "app", group: "nav" },
   { id: "app_goto_symbol",     display: "Cmd/Ctrl+R",       labelKey: "shortcut.nav.gotoSymbol",     layer: "app", group: "nav" },
@@ -73,6 +78,7 @@ export const SHORTCUTS: ShortcutMeta[] = [
   { id: "app_split_editor",    display: "Cmd/Ctrl+\\",      labelKey: "shortcut.nav.splitEditor",    layer: "app", group: "nav" },
 
   // Editor
+  { id: "editor_font_zoom", display: "Cmd/Ctrl+Wheel", labelKey: "shortcut.editor.fontZoom", layer: "editor", group: "editor" },
   { id: "editor_add_cursor_above",    display: "Cmd/Ctrl+Alt+↑",  labelKey: "shortcut.editor.addCursorAbove",    layer: "editor", group: "editor" },
   { id: "editor_add_cursor_below",    display: "Cmd/Ctrl+Alt+↓",  labelKey: "shortcut.editor.addCursorBelow",    layer: "editor", group: "editor" },
   { id: "editor_select_all_matches",  display: "Cmd/Ctrl+Shift+L", labelKey: "shortcut.editor.selectAllMatches",  layer: "editor", group: "editor" },

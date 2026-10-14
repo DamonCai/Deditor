@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # DEditor - macOS production build (.dmg + .app)
 # Usage:
-#   ./scripts/build-mac.sh                          # current arch, version 0.0.1 (default)
-#   ./scripts/build-mac.sh --universal              # universal (Apple Silicon + Intel), 0.0.1
+#   ./scripts/build-mac.sh                          # current arch, current package.json version
+#   ./scripts/build-mac.sh --universal              # universal (Apple Silicon + Intel), current version
 #   ./scripts/build-mac.sh --version 0.2.0          # bump to 0.2.0 and build
 #   ./scripts/build-mac.sh --version 0.2.0 --universal
 set -e
@@ -32,10 +32,9 @@ if ! command -v node >/dev/null 2>&1; then
 fi
 
 # --- Argument parsing ---
-# Default version when --version is omitted. Every build pins a known
-# version into the three manifest files so the About dialog and bundle
-# filenames are always in sync.
-VERSION="0.0.1"
+# package.json is the source of the current app version. An explicit
+# --version overrides it; either way the three bundle manifests stay in sync.
+VERSION=""
 TARGET_ARG=""
 TARGET_DIR=""
 while [ $# -gt 0 ]; do
@@ -67,13 +66,17 @@ while [ $# -gt 0 ]; do
     *)
       echo "ERROR: unknown argument: $1"
       echo "Valid flags:"
-      echo "  --version <X.Y.Z>   bump version before building (default 0.0.1)"
+      echo "  --version <X.Y.Z>   bump version before building (default: current version)"
       echo "  --universal         build a universal arm64+x64 bundle"
       echo "  -h | --help         show usage"
       exit 1
       ;;
   esac
 done
+
+if [ -z "$VERSION" ]; then
+  VERSION="$(node -p "require('./package.json').version")"
+fi
 
 # Validate version format.
 case "$VERSION" in
@@ -83,7 +86,7 @@ case "$VERSION" in
     exit 1
     ;;
 esac
-echo "Bumping version → $VERSION"
+echo "Building version → $VERSION"
 # Replace top-level version fields in the three files that drive the
 # bundle. Using `sed -i.bak` for BSD/GNU portability and removing the
 # backup afterwards. Each pattern is anchored so we only touch the

@@ -1,0 +1,37 @@
+[
+  {
+    "index": 0,
+    "shape": "org.xmind.topicShape.singleBookQuote",
+    "fill": "none"
+  },
+  {
+    "index": 1,
+    "shape": "org.xmind.topicShape.doubleBookQuote",
+    "fill": "none"
+  },
+  {
+    "index": 2,
+    "shape": "org.xmind.topicShape.squareBracket",
+    "fill": "none"
+  },
+  {
+    "index": 3,
+    "shape": "org.xmind.topicShape.roundBracket",
+    "fill": "none"
+  },
+  {
+    "index": 4,
+    "shape": "org.xmind.topicShape.curlyBracket",
+    "fill": "none"
+  },
+  {
+    "index": 5,
+    "shape": "org.xmind.topicShape.squareQuote",
+    "fill": "none"
+  },
+  {
+    "index": 6,
+    "shape": "org.xmind.topicShape.doubleQuote",
+    "fill": "none"
+  }
+]

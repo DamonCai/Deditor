@@ -1,10 +1,31 @@
+#[cfg(target_os = "macos")]
+mod window_chrome;
+mod editor_windows;
+mod recent_files;
+mod spelling_dictionary;
+#[cfg(target_os = "macos")]
+mod dock_menu;
+#[cfg(target_os = "macos")]
+mod save_shortcut;
+mod markdown_images;
+mod markdown_history;
+mod markdown_state;
+mod recovery_transport;
+
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use tauri::menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{Emitter, Manager};
 use tauri_plugin_log::{Target, TargetKind};
+
+/// Queue of file paths the OS asked us to open before the webview was ready
+/// (Finder "Open With → DEditor" on macOS, double-click association on Windows).
+/// Tauri events are not buffered, so we hold paths here until the frontend
+/// drains the queue via `drain_pending_open_files`.
+struct PendingOpens(Mutex<std::collections::HashMap<String, Vec<String>>>);
 
 #[derive(serde::Serialize)]
 struct DirEntry {
@@ -74,12 +95,61 @@ fn read_binary_as_base64(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn write_text_file(path: String, content: String) -> Result<(), String> {
+fn write_text_file(app: tauri::AppHandle, path: String, content: String) -> Result<(), String> {
     log::debug!("write_text_file: {} ({} bytes)", path, content.len());
-    fs::write(expand(&path), content).map_err(|e| {
-        log::error!("write_text_file failed: {} -- {}", path, e);
-        e.to_string()
-    })
+    let root = app.path().app_data_dir().ok().map(|dir| dir.join("markdown-history"));
+    write_text_with_history(&expand(&path), &path, &content, root.as_deref())
+}
+
+fn write_text_with_history(target: &std::path::Path, path: &str, content: &str, root: Option<&std::path::Path>) -> Result<(), String> {
+    let root = root.filter(|_| is_markdown_history_path(path));
+    if let Some(root) = root {
+        if let Ok(Some(previous)) = markdown_history::read_previous_for_history(target) {
+            if let Err(error) = markdown_history::record(root, &path, &previous, false) { log::warn!("Markdown history: {error}"); }
+        }
+    }
+    fs::write(target, content).map_err(|e| e.to_string())?;
+    if let Some(root) = root {
+        if let Err(error) = markdown_history::record(root, path, content, false) { log::warn!("Markdown history: {error}"); }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod markdown_save_tests {
+    use super::*;
+    #[test]
+    fn saves_preserve_versions_and_main_write_error_semantics() {
+        let root = std::env::temp_dir().join(format!("deditor-save-test-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir_all(&root).unwrap();
+        let history = root.join("history");
+        let file = root.join("文档.md");
+        fs::write(&file, "original\n").unwrap();
+        write_text_with_history(&file, "文档.md", "changed 中文\n", Some(&history)).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), "changed 中文\n");
+        let versions = markdown_history::list(&history, Some("文档.md")).unwrap();
+        assert_eq!(versions.len(), 2);
+        assert_eq!(markdown_history::read(&history, &versions[0].id).unwrap(), "changed 中文\n");
+        assert_eq!(markdown_history::read(&history, &versions[1].id).unwrap(), "original\n");
+        write_text_with_history(&file, "文档.md", "changed 中文\n", Some(&history)).unwrap();
+        assert_eq!(markdown_history::list(&history, Some("文档.md")).unwrap().len(), 2);
+        // A failed primary write must not publish a successful new version.
+        let missing = root.join("missing").join("fail.md");
+        assert!(write_text_with_history(&missing, "fail.md", "not saved", Some(&history)).is_err());
+        assert!(markdown_history::list(&history, Some("fail.md")).unwrap().is_empty());
+        // History failure is still nonfatal to the actual document save.
+        let blocked_history = root.join("blocked");
+        fs::write(&blocked_history, "file, not directory").unwrap();
+        write_text_with_history(&file, "文档.md", "saved despite history error", Some(&blocked_history)).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), "saved despite history error");
+        // Oversized original files are skipped, but their small replacement is retained.
+        fs::write(&file, "x".repeat(3 * 1024 * 1024)).unwrap();
+        write_text_with_history(&file, "large.md", "small replacement", Some(&history)).unwrap();
+        let versions = markdown_history::list(&history, Some("large.md")).unwrap();
+        assert_eq!(versions.len(), 1);
+        assert_eq!(markdown_history::read(&history, &versions[0].id).unwrap(), "small replacement");
+        fs::remove_dir_all(root).unwrap();
+    }
 }
 
 #[tauri::command]
@@ -96,12 +166,17 @@ fn write_binary_file(path: String, data: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn save_image(dir: String, name: String, data: String) -> Result<String, String> {
+fn save_image(dir: String, name: String, data: String, folder: Option<String>) -> Result<String, String> {
     let bytes = BASE64.decode(&data).map_err(|e| {
         log::error!("save_image base64 decode failed for {}: {}", name, e);
         e.to_string()
     })?;
-    let assets_dir = expand(&dir).join("assets");
+    let folder = folder.unwrap_or_else(|| "assets".to_string()).replace('\\', "/");
+    if folder.split('/').any(|part| part.is_empty() || part == "." || part == ".." || part.chars().any(|c| c.is_control() || "<>:\"|?*".contains(c)))
+        || name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\']) {
+        return Err("Invalid relative image path".to_string());
+    }
+    let assets_dir = expand(&dir).join(folder);
     if let Err(e) = fs::create_dir_all(&assets_dir) {
         log::error!(
             "save_image create_dir_all failed: {} -- {}",
@@ -117,6 +192,31 @@ fn save_image(dir: String, name: String, data: String) -> Result<String, String>
     })?;
     log::info!("saved image: {} ({} bytes)", path.display(), bytes.len());
     Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+async fn download_markdown_image(url: String) -> Result<markdown_images::DownloadedImage, String> {
+    tauri::async_runtime::spawn_blocking(move || markdown_images::download(&url))
+        .await.map_err(|_| "Image download task failed".to_string())?
+}
+
+#[tauri::command]
+fn save_image_to_directory(directory: String, name: String, data: String) -> Result<String, String> {
+    let path = PathBuf::from(&directory);
+    if !path.is_absolute() || path.components().any(|part| matches!(part, std::path::Component::ParentDir)) {
+        return Err("Expected an absolute image directory".into());
+    }
+    // Reuse the existing filename/folder checks and directory creation, while
+    // keeping save_image's relative-folder contract unchanged for other callers.
+    let parent = path.parent().ok_or("Choose a folder below the filesystem root")?;
+    let folder = path.file_name().and_then(|name| name.to_str()).ok_or("Invalid image directory")?;
+    save_image(parent.to_string_lossy().into(), name, data, Some(folder.into()))
+}
+
+#[tauri::command]
+async fn upload_markdown_image(path: String, endpoint: String, token: Option<String>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || markdown_images::upload(&expand(&path), &endpoint, token.as_deref()))
+        .await.map_err(|_| "Image upload task failed".to_string())?
 }
 
 #[tauri::command]
@@ -276,16 +376,33 @@ fn create_dir(path: String) -> Result<(), String> {
 // localStorage. A file in `~/Library/Application Support/com.deditor.app/`
 // (macOS), `%APPDATA%\com.deditor.app\` (Windows), or
 // `~/.local/share/com.deditor.app/` (Linux) survives reinstalls cleanly.
-fn app_state_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+fn app_state_path(app: &tauri::AppHandle, label: &str) -> Result<PathBuf, String> {
     app.path()
         .app_data_dir()
-        .map(|d| d.join("state.json"))
+        .map(|d| editor_windows::state_path(&d, label))
         .map_err(|e| e.to_string())
 }
 
+fn is_markdown_history_path(path: &str) -> bool {
+    markdown_state::is_markdown_path(path)
+}
 #[tauri::command]
-fn read_app_state(app: tauri::AppHandle) -> Result<String, String> {
-    let path = app_state_path(&app)?;
+fn list_markdown_history(app: tauri::AppHandle, path: Option<String>) -> Result<Vec<markdown_history::Entry>, String> {
+    markdown_history::list(&app.path().app_data_dir().map_err(|e| e.to_string())?.join("markdown-history"), path.as_deref())
+}
+#[tauri::command]
+fn record_markdown_draft(app: tauri::AppHandle, path: String, content: String) -> Result<(), String> {
+    if !path.starts_with("untitled:") && !is_markdown_history_path(&path) { return Ok(()); }
+    markdown_history::record(&app.path().app_data_dir().map_err(|e| e.to_string())?.join("markdown-history"), &path, &content, true)
+}
+#[tauri::command]
+fn read_markdown_history(app: tauri::AppHandle, id: String) -> Result<String, String> {
+    markdown_history::read(&app.path().app_data_dir().map_err(|e| e.to_string())?.join("markdown-history"), &id)
+}
+
+#[tauri::command]
+fn read_app_state(app: tauri::AppHandle, window: tauri::WebviewWindow) -> Result<String, String> {
+    let path = app_state_path(&app, window.label())?;
     if !path.exists() {
         return Ok(String::new());
     }
@@ -296,40 +413,27 @@ fn read_app_state(app: tauri::AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn write_app_state(app: tauri::AppHandle, content: String) -> Result<(), String> {
-    let path = app_state_path(&app)?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| {
-            log::error!("write_app_state mkdir failed: {} -- {}", parent.display(), e);
-            e.to_string()
-        })?;
-    }
-    // Atomic write: stage to a sibling tmp file, then rename. Avoids leaving
-    // a half-written state.json behind if we crash mid-write.
-    let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, content.as_bytes()).map_err(|e| {
-        log::error!("write_app_state stage failed: {} -- {}", tmp.display(), e);
-        e.to_string()
-    })?;
-    fs::rename(&tmp, &path).map_err(|e| {
-        log::error!(
-            "write_app_state rename failed: {} -> {} -- {}",
-            tmp.display(),
-            path.display(),
-            e
-        );
-        e.to_string()
-    })?;
-    log::debug!("write_app_state: {} ({} bytes)", path.display(), content.len());
-    Ok(())
+fn write_app_state(app: tauri::AppHandle, window: tauri::WebviewWindow, content: String) -> Result<(), String> {
+    let path = app_state_path(&app, window.label())?;
+    markdown_state::write(&path, &content)
 }
 
 #[tauri::command]
-fn print_window(app: tauri::AppHandle) -> Result<(), String> {
-    let win = app
-        .get_webview_window("main")
-        .ok_or_else(|| "main window not found".to_string())?;
-    win.print().map_err(|e| {
+async fn write_app_state_incremental(app: tauri::AppHandle, window: tauri::WebviewWindow, packet: recovery_transport::Packet) -> Result<bool, String> {
+    let path = app_state_path(&app, window.label())?;
+    let recovery = app.state::<recovery_transport::Windows>().window(window.label());
+    tauri::async_runtime::spawn_blocking(move || recovery.lock().unwrap().write(&path, packet))
+        .await.map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+fn update_window_title(window: tauri::WebviewWindow, title: String) -> Result<(), String> {
+    window.set_title(&title).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn print_window(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.print().map_err(|e| {
         log::error!("print_window failed: {}", e);
         e.to_string()
     })
@@ -443,6 +547,20 @@ struct SearchResult {
     files_scanned: usize,
 }
 
+// Rank is independent of parallel completion order. Only the earliest
+// SEARCH_HITS_CAP + 1 matches are retained (one sentinel detects truncation).
+struct RankedHit {
+    file: usize,
+    path: std::sync::Arc<str>,
+    line: u32,
+    col: u32,
+    text: String,
+}
+impl PartialEq for RankedHit { fn eq(&self, other: &Self) -> bool { (self.file, self.line) == (other.file, other.line) } }
+impl Eq for RankedHit {}
+impl PartialOrd for RankedHit { fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> { Some(self.cmp(other)) } }
+impl Ord for RankedHit { fn cmp(&self, other: &Self) -> std::cmp::Ordering { (self.file, self.line).cmp(&(other.file, other.line)) } }
+
 const SEARCH_FILE_BYTES_CAP: u64 = 1_048_576; // 1 MB
 const SEARCH_HITS_CAP: usize = 5_000;
 const SEARCH_FILES_CAP: usize = MAX_WORKSPACE_FILES;
@@ -463,7 +581,6 @@ fn find_in_files(
         return Ok(SearchResult { hits: vec![], truncated: false, files_scanned: 0 });
     }
     let needle = if case_sensitive { query.clone() } else { query.to_lowercase() };
-    let needle_bytes = needle.as_bytes();
 
     // PHASE 1: walk every workspace tree, collecting candidate file paths.
     // This is fs metadata only — very cheap, kept single-threaded so we can
@@ -511,81 +628,54 @@ fn find_in_files(
         }
     }
 
-    // PHASE 2: scan each candidate in parallel across rayon's thread pool.
-    // The per-file work (read + UTF-8 validate + per-line substring search)
-    // dominates the wall-clock; running it concurrently across N cores is
-    // a near-linear speedup until disk IO saturates. Each thread emits its
-    // own Vec<SearchHit>; we flatten + truncate at the end.
+    // Bound retained matches without serial batch barriers. A monotone
+    // cutoff lets late files skip matching once an earlier full prefix exists.
+    // Every file is still read/validated, preserving files_scanned semantics.
     let files_scanned = std::sync::atomic::AtomicUsize::new(0);
-    let per_file_hits: Vec<Vec<SearchHit>> = candidates
-        .par_iter()
-        .map(|path| {
-            let meta = match path.metadata() {
-                Ok(m) => m,
-                Err(_) => return Vec::new(),
-            };
-            if meta.len() > SEARCH_FILE_BYTES_CAP { return Vec::new(); }
-            let bytes = match fs::read(path) {
-                Ok(b) => b,
-                Err(_) => return Vec::new(),
-            };
-            // Skip binary: any NUL in the first 8 KB.
-            let probe_end = bytes.len().min(8192);
-            if bytes[..probe_end].iter().any(|&b| b == 0) {
-                return Vec::new();
+    let cutoff = std::sync::atomic::AtomicUsize::new(usize::MAX);
+    let retained = std::sync::Mutex::new(std::collections::BinaryHeap::<RankedHit>::new());
+    candidates.par_iter().enumerate().for_each(|(index, path)| {
+        let meta = match path.metadata() { Ok(m) => m, Err(_) => return };
+        if meta.len() > SEARCH_FILE_BYTES_CAP { return; }
+        let bytes = match fs::read(path) { Ok(b) => b, Err(_) => return };
+        if bytes[..bytes.len().min(8192)].contains(&0) { return; }
+        let text = match std::str::from_utf8(&bytes) { Ok(s) => s, Err(_) => return };
+        files_scanned.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if index > cutoff.load(std::sync::atomic::Ordering::Relaxed) { return; }
+        let path_str: std::sync::Arc<str> = path.to_string_lossy().as_ref().into();
+        let mut local = Vec::new();
+        for (lineno, line) in text.lines().enumerate() {
+            if index > cutoff.load(std::sync::atomic::Ordering::Relaxed) { break; }
+            if let Some((start, _)) = match_range(line, &needle, case_sensitive) {
+                local.push(RankedHit {
+                    file: index,
+                    path: path_str.clone(),
+                    line: (lineno + 1) as u32,
+                    col: (line[..start].encode_utf16().count() + 1) as u32,
+                    text: line.to_string(),
+                });
+                if local.len() == SEARCH_HITS_CAP + 1 { break; }
             }
-            let text = match std::str::from_utf8(&bytes) {
-                Ok(s) => s,
-                Err(_) => return Vec::new(),
-            };
-            files_scanned.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let path_str = path.to_string_lossy().to_string();
-            // ASCII-only fast path: when the needle is pure ASCII we can do
-            // byte-level case-insensitive search without allocating a
-            // lowercased copy of each line. Most source-code searches stay
-            // here. We just have to verify the LINE is also ASCII for the
-            // fast path to be sound — for Unicode lines fall back to
-            // `to_lowercase` (which IS Unicode-correct for accented Latin
-            // / Greek / etc).
-            let needle_is_ascii = needle.is_ascii();
-            let mut local: Vec<SearchHit> = Vec::new();
-            for (lineno, line) in text.lines().enumerate() {
-                let found = if case_sensitive {
-                    find_subseq(line.as_bytes(), needle_bytes)
-                } else if needle_is_ascii && line.is_ascii() {
-                    // ASCII case-insensitive — no allocation.
-                    find_subseq_ascii_ci(line.as_bytes(), needle_bytes)
-                } else {
-                    let lower = line.to_lowercase();
-                    find_subseq(lower.as_bytes(), needle_bytes)
-                };
-                if let Some(col) = found {
-                    local.push(SearchHit {
-                        path: path_str.clone(),
-                        line: (lineno + 1) as u32,
-                        col: (col + 1) as u32,
-                        text: line.to_string(),
-                    });
-                }
-            }
-            local
-        })
-        .collect();
-
-    // PHASE 3: flatten + truncate. Order is preserved (par_iter preserves
-    // input order in the collected result), so hits within a file stay
-    // grouped and files come back in walk order.
-    let mut hits: Vec<SearchHit> = Vec::new();
-    let mut truncated = walk_truncated;
-    'collect: for batch in per_file_hits {
-        for h in batch {
-            if hits.len() >= SEARCH_HITS_CAP {
-                truncated = true;
-                break 'collect;
-            }
-            hits.push(h);
         }
-    }
+        if local.is_empty() { return; }
+        let mut heap = retained.lock().unwrap();
+        for hit in local {
+            if heap.len() < SEARCH_HITS_CAP + 1 {
+                heap.push(hit);
+            } else if heap.peek().is_some_and(|last| &hit < last) {
+                heap.pop();
+                heap.push(hit);
+            }
+        }
+        if heap.len() == SEARCH_HITS_CAP + 1 {
+            cutoff.store(heap.peek().unwrap().file, std::sync::atomic::Ordering::Relaxed);
+        }
+    });
+    let ranked = retained.into_inner().unwrap().into_sorted_vec();
+    let truncated = walk_truncated || ranked.len() > SEARCH_HITS_CAP;
+    let hits: Vec<SearchHit> = ranked.into_iter().take(SEARCH_HITS_CAP).map(|hit| SearchHit {
+        path: hit.path.to_string(), line: hit.line, col: hit.col, text: hit.text,
+    }).collect();
 
     log::info!(
         "find_in_files: \"{}\" → {} hits in {} files{}",
@@ -626,12 +716,46 @@ fn find_subseq_ascii_ci(hay: &[u8], needle: &[u8]) -> Option<usize> {
     None
 }
 
+/// Map folded UTF-8 positions back to original character boundaries, including
+/// expanding lowercase mappings such as U+0130 (I with dot).
+struct FoldedText { text: String, boundaries: Vec<(usize, usize)> }
+impl FoldedText {
+    fn new(text: &str) -> Self {
+        let mut boundaries = Vec::new();
+        let mut folded_offset = 0;
+        for (offset, ch) in text.char_indices() {
+            boundaries.push((folded_offset, offset));
+            folded_offset += ch.to_lowercase().map(char::len_utf8).sum::<usize>();
+        }
+        boundaries.push((folded_offset, text.len()));
+        Self { text: text.to_lowercase(), boundaries }
+    }
+    fn original_range(&self, start: usize, end: usize) -> (usize, usize) {
+        let left = self.boundaries.partition_point(|&(offset, _)| offset <= start) - 1;
+        let right = self.boundaries.partition_point(|&(offset, _)| offset < end);
+        (self.boundaries[left].1, self.boundaries[right].1)
+    }
+}
+
+fn match_range(text: &str, needle: &str, case_sensitive: bool) -> Option<(usize, usize)> {
+    if case_sensitive {
+        return find_subseq(text.as_bytes(), needle.as_bytes()).map(|i| (i, i + needle.len()));
+    }
+    if text.is_ascii() {
+        return find_subseq_ascii_ci(text.as_bytes(), needle.as_bytes()).map(|i| (i, i + needle.len()));
+    }
+    let folded = FoldedText::new(text);
+    find_subseq(folded.text.as_bytes(), needle.as_bytes())
+        .map(|i| folded.original_range(i, i + needle.len()))
+}
+
 #[derive(serde::Serialize)]
 struct ReplaceResult {
     /// Total replacement count across all files.
     total: u32,
     /// Number of files that had at least one replacement (and were rewritten).
     files_changed: u32,
+    errors: Vec<String>,
 }
 
 /// Plain-substring replace across the supplied file paths. Mirrors the case-
@@ -648,7 +772,7 @@ fn replace_in_files(
 ) -> Result<ReplaceResult, String> {
     use rayon::prelude::*;
     if query.is_empty() {
-        return Ok(ReplaceResult { total: 0, files_changed: 0 });
+        return Ok(ReplaceResult { total: 0, files_changed: 0, errors: vec![] });
     }
     // Per-file work: read → match → write. Each file is independent (no
     // shared mutable state), so we can fan out across rayon's thread pool.
@@ -680,8 +804,9 @@ fn replace_in_files(
         .collect();
     let mut total: u32 = 0;
     let mut files_changed: u32 = 0;
+    let mut errors = Vec::new();
     for r in results {
-        let (count, changed) = r?;
+        let (count, changed) = match r { Ok(value) => value, Err(err) => { errors.push(err); continue; } };
         total = total.saturating_add(count);
         if changed { files_changed = files_changed.saturating_add(1); }
     }
@@ -689,7 +814,7 @@ fn replace_in_files(
         "replace_in_files: \"{}\" → \"{}\" — {} replacements across {} file(s)",
         query, replacement, total, files_changed
     );
-    Ok(ReplaceResult { total, files_changed })
+    Ok(ReplaceResult { total, files_changed, errors })
 }
 
 /// Replace every (non-overlapping) occurrence of `needle` in `hay`, returning
@@ -701,34 +826,34 @@ fn substring_replace_all(
     replacement: &str,
     case_sensitive: bool,
 ) -> (String, u32) {
-    let hb = hay.as_bytes();
-    let nb = needle.as_bytes();
-    if nb.is_empty() || nb.len() > hb.len() {
-        return (hay.to_string(), 0);
-    }
+    if needle.is_empty() { return (hay.to_string(), 0); }
+    let needle = if case_sensitive { needle.to_string() } else { needle.to_lowercase() };
+    let folded = (!case_sensitive && !hay.is_ascii()).then(|| FoldedText::new(hay));
+    let search = folded.as_ref().map_or(hay, |f| f.text.as_str());
     let mut out = String::with_capacity(hay.len());
-    let mut count: u32 = 0;
-    let mut i = 0;
-    let mut copied_until = 0;
-    while i + nb.len() <= hb.len() {
-        let m = if case_sensitive {
-            &hb[i..i + nb.len()] == nb
+    let mut copied = 0;
+    let mut offset = 0;
+    let mut count = 0;
+    while offset < search.len() {
+        let rest = &search.as_bytes()[offset..];
+        let found = if !case_sensitive && folded.is_none() {
+            find_subseq_ascii_ci(rest, needle.as_bytes())
         } else {
-            (0..nb.len()).all(|k| hb[i + k].eq_ignore_ascii_case(&nb[k]))
+            find_subseq(rest, needle.as_bytes())
         };
-        if m {
-            // Splicing at byte offset `i` is UTF-8-safe because `needle` itself
-            // is UTF-8 and we only match aligned occurrences of it.
-            out.push_str(&hay[copied_until..i]);
+        let Some(found) = found else { break };
+        let start = offset + found;
+        let end = start + needle.len();
+        let (from, to) = folded.as_ref().map_or((start, end), |f| f.original_range(start, end));
+        if from >= copied {
+            out.push_str(&hay[copied..from]);
             out.push_str(replacement);
-            count = count.saturating_add(1);
-            i += nb.len();
-            copied_until = i;
-        } else {
-            i += 1;
+            copied = to;
+            count += 1;
         }
+        offset = end;
     }
-    out.push_str(&hay[copied_until..]);
+    out.push_str(&hay[copied..]);
     (out, count)
 }
 
@@ -809,6 +934,15 @@ fn path_kind(path: String) -> String {
     }
 }
 
+/// Keep the native fullscreen controls in sync with the web titlebar / Zen mode.
+#[tauri::command]
+fn set_titlebar_visible(app: tauri::AppHandle, window: tauri::WebviewWindow, visible: bool) {
+    #[cfg(target_os = "macos")]
+    window_chrome::set_visible(&app, window.label(), visible);
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, window, visible);
+}
+
 /// Receive a log line from the frontend.
 /// Levels: "error" | "warn" | "info" | "debug" | "trace"
 #[tauri::command]
@@ -836,8 +970,10 @@ struct MenuLabels {
     quit: &'static str,
     // File submenu
     new: &'static str,
+    new_window: &'static str,
     open: &'static str,
     open_folder: &'static str,
+    recent_files: &'static str,
     save: &'static str,
     save_as: &'static str,
     close_tab: &'static str,
@@ -848,6 +984,8 @@ struct MenuLabels {
     copy: &'static str,
     paste: &'static str,
     select_all: &'static str,
+    find: &'static str,
+    replace: &'static str,
     // Window submenu (predefined items)
     minimize: &'static str,
     maximize: &'static str,
@@ -867,8 +1005,10 @@ fn labels_for(lang: &str) -> MenuLabels {
             show_all: "全部显示",
             quit: "退出 DEditor",
             new: "新建",
+            new_window: "新建窗口",
             open: "打开…",
             open_folder: "打开文件夹…",
+            recent_files: "近期文件…",
             save: "保存",
             save_as: "另存为…",
             close_tab: "关闭标签",
@@ -878,9 +1018,11 @@ fn labels_for(lang: &str) -> MenuLabels {
             copy: "复制",
             paste: "粘贴",
             select_all: "全选",
+            find: "查找…",
+            replace: "替换…",
             minimize: "最小化",
             maximize: "最大化",
-            fullscreen: "进入全屏",
+            fullscreen: "切换全屏",
         },
         _ => MenuLabels {
             file: "File",
@@ -893,8 +1035,10 @@ fn labels_for(lang: &str) -> MenuLabels {
             show_all: "Show All",
             quit: "Quit DEditor",
             new: "New",
+            new_window: "New Window",
             open: "Open…",
             open_folder: "Open Folder…",
+            recent_files: "Recent Files…",
             save: "Save",
             save_as: "Save As…",
             close_tab: "Close Tab",
@@ -904,9 +1048,11 @@ fn labels_for(lang: &str) -> MenuLabels {
             copy: "Copy",
             paste: "Paste",
             select_all: "Select All",
+            find: "Find…",
+            replace: "Replace…",
             minimize: "Minimize",
             maximize: "Zoom",
-            fullscreen: "Enter Full Screen",
+            fullscreen: "Toggle Full Screen",
         },
     }
 }
@@ -917,8 +1063,8 @@ fn labels_for(lang: &str) -> MenuLabels {
 /// menu IDs (e.g. "file_save") whose keyboard accelerator should be omitted —
 /// used by the in-app Settings dialog to free up conflicting shortcuts. The
 /// menu item itself stays clickable; only the keyboard binding is dropped.
-fn build_and_set_menu<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
+fn build_and_set_menu(
+    app: &tauri::AppHandle,
     lang: &str,
     disabled_accelerators: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -966,6 +1112,14 @@ fn build_and_set_menu<R: tauri::Runtime>(
     // based on the disabled list. We can't pass `Option` to .accelerator(), so
     // branch the builder chain instead.
     let build_file_item = |id: &'static str, label: &str, accel: &'static str| -> Result<_, Box<dyn std::error::Error>> {
+        // Give WebView2 sole ownership of Windows file shortcuts. The native
+        // menu keeps their hints and clicks without also firing an accelerator.
+        #[cfg(target_os = "windows")]
+        if id.starts_with("file_") {
+            let label = if is_disabled(id) { label.to_string() }
+                else { format!("{}\t{}", label, accel.replace("CmdOrCtrl", "Ctrl")) };
+            return Ok(MenuItemBuilder::new(label).id(id).build(app)?);
+        }
         let b = MenuItemBuilder::new(label).id(id);
         let item = if is_disabled(id) {
             b.build(app)?
@@ -975,7 +1129,9 @@ fn build_and_set_menu<R: tauri::Runtime>(
         Ok(item)
     };
     let new_item = build_file_item("file_new", l.new, "CmdOrCtrl+N")?;
+    let new_window_item = build_file_item("file_new_window", l.new_window, "CmdOrCtrl+Shift+N")?;
     let open_item = build_file_item("file_open", l.open, "CmdOrCtrl+O")?;
+    let recent_files_item = build_file_item("file_recent", l.recent_files, "CmdOrCtrl+E")?;
     let open_folder_item = build_file_item("file_open_folder", l.open_folder, "CmdOrCtrl+Shift+O")?;
     let save_item = build_file_item("file_save", l.save, "CmdOrCtrl+S")?;
     let save_as_item = build_file_item("file_save_as", l.save_as, "CmdOrCtrl+Shift+S")?;
@@ -983,9 +1139,11 @@ fn build_and_set_menu<R: tauri::Runtime>(
 
     let file_menu = SubmenuBuilder::new(app, l.file)
         .item(&new_item)
+        .item(&new_window_item)
         .separator()
         .item(&open_item)
         .item(&open_folder_item)
+        .item(&recent_files_item)
         .separator()
         .item(&save_item)
         .item(&save_as_item)
@@ -1000,6 +1158,8 @@ fn build_and_set_menu<R: tauri::Runtime>(
     let paste_item = PredefinedMenuItem::paste(app, Some(l.paste))?;
     let select_all_item = PredefinedMenuItem::select_all(app, Some(l.select_all))?;
 
+    let find_item = build_file_item("edit_find", l.find, "CmdOrCtrl+F")?;
+    let replace_item = build_file_item("edit_replace", l.replace, "CmdOrCtrl+Alt+F")?;
     let edit_menu = SubmenuBuilder::new(app, l.edit)
         .item(&undo_item)
         .item(&redo_item)
@@ -1008,6 +1168,9 @@ fn build_and_set_menu<R: tauri::Runtime>(
         .item(&copy_item)
         .item(&paste_item)
         .item(&select_all_item)
+        .separator()
+        .item(&find_item)
+        .item(&replace_item)
         .build()?;
 
     let minimize_item = PredefinedMenuItem::minimize(app, Some(l.minimize))?;
@@ -1025,6 +1188,8 @@ fn build_and_set_menu<R: tauri::Runtime>(
         .items(&[&app_menu, &file_menu, &edit_menu, &window_menu])
         .build()?;
     app.set_menu(menu)?;
+    #[cfg(target_os = "macos")]
+    window_menu.set_as_windows_menu_for_nsapp()?;
 
     // macOS auto-injects items into any submenu containing cut:/copy:/paste:
     // ("Start Dictation…", "Emoji & Symbols", "AutoFill" on Sonoma+, plus
@@ -1032,9 +1197,12 @@ fn build_and_set_menu<R: tauri::Runtime>(
     // keys NSDisabledDictationMenuItem / NSDisabledCharacterPaletteMenuItem
     // only cover the first two and aren't honored on every macOS version, so
     // we walk the live NSMenu after AppKit has injected and remove anything
-    // whose action isn't one of our six known selectors.
+    // whose action is not a standard edit selector or our custom dispatcher.
     #[cfg(target_os = "macos")]
-    strip_macos_edit_menu_extras(l.edit);
+    {
+        strip_macos_edit_menu_extras(l.edit);
+        dock_menu::install(app, l.new_window)?;
+    }
 
     Ok(())
 }
@@ -1087,6 +1255,8 @@ fn strip_macos_edit_menu_extras(edit_title: &str) {
         sel!(copy:),
         sel!(paste:),
         sel!(selectAll:),
+        // Custom Tauri items (Find / Replace) use muda's action dispatcher.
+        sel!(fireMenuItemAction:),
     ];
 
     // Walk back-to-front so removing items doesn't shift indices ahead of us.
@@ -1164,8 +1334,15 @@ fn install_app_menu(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
     // start with `file_`; predefined items (quit, copy, …) handle themselves.
     app.on_menu_event(|app_handle, event| {
         let id = event.id().0.as_str().to_string();
-        if id.starts_with("file_") {
-            let _ = app_handle.emit("menu-action", id);
+        if id == "file_new_window" {
+            let app = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(error) = editor_windows::new_window(app.clone()).await {
+                    if let Some(window) = editor_windows::target(&app) { let _ = app.emit_to(window.label(), "new-window-error", error); }
+                }
+            });
+        } else if id.starts_with("file_") || matches!(id.as_str(), "edit_find" | "edit_replace") {
+            if let Some(window) = editor_windows::target(app_handle) { let _ = app_handle.emit_to(window.label(), "menu-action", id); }
         }
     });
 
@@ -1175,13 +1352,34 @@ fn install_app_menu(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
 #[tauri::command]
 fn update_menu_state(
     app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
     lang: String,
     disabled_accelerators: Vec<String>,
 ) -> Result<(), String> {
+    app.state::<editor_windows::Windows>().0.lock().unwrap().menu.insert(window.label().into(), (lang.clone(), disabled_accelerators.clone()));
+    if editor_windows::target(&app).is_some_and(|target| target.label() != window.label()) { return Ok(()); }
     build_and_set_menu(&app, &lang, &disabled_accelerators).map_err(|e| {
         log::error!("update_menu_state failed: {}", e);
         e.to_string()
     })
+}
+
+/// Drain any file paths the OS queued before the frontend was ready to
+/// receive `open-file` events. Called once on app mount and again whenever
+/// the listener fires (signal-only emit) so the same code path handles both
+/// the cold-start race and the running-instance case.
+#[tauri::command]
+fn drain_pending_open_files(state: tauri::State<'_, PendingOpens>, window: tauri::WebviewWindow) -> Vec<String> {
+    let out = state
+        .0
+        .lock()
+        .map(|mut q| q.remove(window.label()).unwrap_or_default())
+        .unwrap_or_default();
+    log::info!("drain_pending_open_files: returned {} path(s)", out.len());
+    for p in &out {
+        log::info!("  drained path: {}", p);
+    }
+    out
 }
 
 fn install_panic_hook() {
@@ -1208,9 +1406,14 @@ pub fn run() {
     install_panic_hook();
 
     tauri::Builder::default()
+        // macOS can deliver Opened before setup. Register the queue on the
+        // builder so those early file requests have somewhere to wait.
+        .manage(PendingOpens(Mutex::new(std::collections::HashMap::new())))
+        .manage(editor_windows::Windows::default())
+        .manage(recovery_transport::Windows::default())
         // Persist window position / size / monitor / maximized state so
         // re-opens land where you left off — including across displays.
-        .plugin(tauri_plugin_window_state::Builder::new().build())
+        .plugin(tauri_plugin_window_state::Builder::new().with_filter(|label| label == "main").build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(
@@ -1236,8 +1439,77 @@ pub fn run() {
             if let Ok(log_dir) = app.path().app_log_dir() {
                 log::info!("log directory: {}", log_dir.display());
             }
+
+            // Seed the pending-opens queue with any file paths passed via argv
+            // — this is how Windows delivers a file-association double-click
+            // (the OS passes the path as the first argument). macOS uses the
+            // Cocoa openURLs callback instead, handled below via RunEvent::Opened.
+            let mut initial: Vec<String> = Vec::new();
+            for arg in std::env::args().skip(1) {
+                // Skip macOS Process Serial Number flags and any other -* flags.
+                if arg.starts_with('-') {
+                    continue;
+                }
+                let p = PathBuf::from(&arg);
+                if p.is_file() {
+                    let resolved = p
+                        .canonicalize()
+                        .unwrap_or(p)
+                        .to_string_lossy()
+                        .to_string();
+                    initial.push(resolved);
+                }
+            }
+            if !initial.is_empty() {
+                log::info!("seeded {} file(s) from argv for open-on-launch", initial.len());
+            }
+            if let Ok(mut queue) = app.state::<PendingOpens>().0.lock() {
+                queue.entry("main".into()).or_default().extend(initial);
+            }
+
             install_app_menu(app)?;
+            #[cfg(target_os = "macos")]
+            save_shortcut::install(app.handle())?;
+            #[cfg(target_os = "macos")]
+            window_chrome::schedule_sync(app.handle(), "main");
+            let root = app.path().app_data_dir()?;
+            for label in editor_windows::saved_labels(&root) {
+                if let Err(error) = editor_windows::create(app.handle(), &label) { log::error!("Restore window {label}: {error}"); }
+            }
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            match event {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    api.prevent_close();
+                    editor_windows::request_close(window.app_handle(), window.label(), false);
+                }
+                tauri::WindowEvent::Focused(true) => {
+                    let state = window.state::<editor_windows::Windows>();
+                    let menu = {
+                        let mut state = state.0.lock().unwrap();
+                        state.active = window.label().into();
+                        state.menu.get(window.label()).cloned()
+                    };
+                    if let Some((lang, disabled)) = menu {
+                        if let Err(error) = build_and_set_menu(window.app_handle(), &lang, &disabled) { log::error!("Focus menu: {error}"); }
+                    }
+                }
+                tauri::WindowEvent::Destroyed => {
+                    window.state::<recovery_transport::Windows>().remove(window.label());
+                    let state = window.state::<editor_windows::Windows>();
+                    let mut state = state.0.lock().unwrap();
+                    state.menu.remove(window.label());
+                    state.pending.remove(window.label());
+                }
+                _ => {}
+            }
+            #[cfg(target_os = "macos")]
+            match event {
+                tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Focused(_) | tauri::WindowEvent::ScaleFactorChanged { .. } => window_chrome::schedule_sync(window.app_handle(), window.label()),
+                tauri::WindowEvent::Destroyed => window_chrome::clear(window.label()),
+                _ => {}
+            }
         })
         .invoke_handler(tauri::generate_handler![
             read_text_file,
@@ -1246,12 +1518,25 @@ pub fn run() {
             list_dir,
             resolve_path,
             save_image,
+            download_markdown_image,
+            save_image_to_directory,
+            upload_markdown_image,
             create_file,
             create_dir,
             rename_path,
             delete_path,
             print_window,
+            update_window_title,
+            spelling_dictionary::read_spelling_dictionary,
+            spelling_dictionary::change_spelling_dictionary,
+            recent_files::read_recent_files,
+            recent_files::record_recent_file,
+            editor_windows::new_window,
+            editor_windows::window_ready,
+            editor_windows::finish_window_close,
+            editor_windows::cancel_window_close,
             frontend_log,
+            set_titlebar_visible,
             update_menu_state,
             read_binary_as_base64,
             list_workspace_files,
@@ -1260,20 +1545,69 @@ pub fn run() {
             find_in_files,
             replace_in_files,
             add_recent_document,
+            record_markdown_draft,
+            list_markdown_history,
+            read_markdown_history,
             read_app_state,
-            write_app_state
+            write_app_state,
+            write_app_state_incremental,
+            drain_pending_open_files
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            if matches!(&event, tauri::RunEvent::Exit) { save_shortcut::uninstall(); }
+            if let tauri::RunEvent::ExitRequested { api, .. } = &event {
+                let windows = app.webview_windows();
+                let state = app.state::<editor_windows::Windows>();
+                let mut state = state.0.lock().unwrap();
+                if !state.allow_exit && !windows.is_empty() {
+                    api.prevent_exit();
+                    if state.quitting.is_none() {
+                        state.quitting = Some(windows.keys().cloned().collect());
+                        drop(state);
+                        for label in windows.keys() { editor_windows::request_close(app, label, true); }
+                    }
+                }
+            }
             // OS asked us to open these files (Finder "Open With…" / `open -a`
-            // on macOS, double-click association on Windows, etc.). Forward
-            // each path as a frontend `open-file` event so the JS side runs
-            // the same code path used for drag-and-drop.
+            // on macOS, drag-onto-Dock, etc.). We queue the paths and emit a
+            // signal — the frontend drains the queue on mount AND on every
+            // signal, so a cold-start race (event fires before React's
+            // listener registers) doesn't drop the file. The emit payload is
+            // intentionally empty; the queue is the source of truth.
+            #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
             if let tauri::RunEvent::Opened { urls } = event {
-                for url in urls {
-                    if let Ok(path) = url.to_file_path() {
-                        let _ = app.emit("open-file", path.to_string_lossy().to_string());
+                log::info!("RunEvent::Opened fired with {} url(s)", urls.len());
+                for u in &urls {
+                    log::info!("  raw url: {}", u);
+                }
+                let paths: Vec<String> = urls
+                    .iter()
+                    .filter_map(|u| u.to_file_path().ok())
+                    .map(|p| p.to_string_lossy().to_string())
+                    .collect();
+                if !paths.is_empty() {
+                    log::info!("RunEvent::Opened -> queuing {} path(s)", paths.len());
+                    let win = editor_windows::target(app);
+                    let label = win.as_ref().map(|win| win.label()).unwrap_or("main");
+                    if let Some(state) = app.try_state::<PendingOpens>() {
+                        if let Ok(mut q) = state.0.lock() {
+                            q.entry(label.into()).or_default().extend(paths);
+                        }
+                    }
+                    let _ = app.emit_to(label, "open-file", ());
+
+                    // Bring the receiving window to the foreground. When DEditor is
+                    // already running but backgrounded / minimized / on another
+                    // Space, "Open With" otherwise silently appends a tab the
+                    // user never sees. unminimize + show + set_focus together
+                    // cover all three states (idempotent if already foreground).
+                    if let Some(win) = win {
+                        let _ = win.unminimize();
+                        let _ = win.show();
+                        let _ = win.set_focus();
                     }
                 }
             }
@@ -1459,6 +1793,32 @@ mod ipc_bench {
     }
 
     #[test]
+    fn find_in_files_5k_repeated_matrix() {
+        let scratch = Scratch::new("search_matrix");
+        for i in 0..5000 {
+            let term = if i % 40 == 0 { "needle" } else if i % 20 == 0 { "NeEdLe" } else { "absent" };
+            let content = format!("{}\nthe {} is here\n", "padding ".repeat(128), term);
+            fs::write(scratch.0.join(format!("f_{:05}.md", i)), content).unwrap();
+        }
+        for (query, sensitive, expected) in [("needle", true, 125), ("needle", false, 250), ("missing-token", false, 0)] {
+            let mut times = Vec::new();
+            let mut first = None;
+            for _ in 0..5 {
+                let started = Instant::now();
+                let result = find_in_files(vec![scratch.0.to_string_lossy().into_owned()], query.into(), sensitive).unwrap();
+                times.push(started.elapsed().as_secs_f64() * 1000.0);
+                assert_eq!(result.files_scanned, 5000);
+                assert_eq!(result.hits.len(), expected);
+                assert!(!result.truncated);
+                for hit in &result.hits { assert_eq!(hit.line, 2); assert_eq!(hit.col, 5); }
+                let ordering: Vec<_> = result.hits.iter().map(|hit| hit.path.clone()).collect();
+                if let Some(prior) = &first { assert_eq!(&ordering, prior); } else { first = Some(ordering); }
+            }
+            println!("[find_in_files matrix] query={} sensitive={} files=5000 hits={} rounds_ms={:?}", query, sensitive, expected, times);
+        }
+    }
+
+    #[test]
     fn find_in_files_5k_files() {
         // Build 5000 files, ~1 KB each, with the query string in 5% of them.
         let s = Scratch::new("find_5k");
@@ -1508,5 +1868,125 @@ mod ipc_bench {
             dt
         );
         assert!(r.hits.len() > 0);
+    }
+}
+
+#[cfg(test)]
+mod regression {
+    use super::*;
+    fn scratch(name: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("deditor_regression_{}_{}", name, std::process::id()));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+    #[test]
+    fn unicode_search_and_replace() {
+        let dir = scratch("unicode");
+        let file = dir.join("sample.txt");
+        fs::write(&file, "中文foo\n😀foo\nİx\nCAFÉ\nΟΣ").unwrap();
+        let roots = vec![dir.to_string_lossy().into_owned()];
+        let res = find_in_files(roots.clone(), "foo".into(), true).unwrap();
+        assert_eq!(res.hits.iter().map(|h| (h.line,h.col)).collect::<Vec<_>>(), vec![(1,3),(2,3)]);
+        let res = find_in_files(roots.clone(), "x".into(), false).unwrap();
+        assert_eq!((res.hits[0].line,res.hits[0].col), (3,2));
+        assert_eq!(find_in_files(roots, "café".into(), false).unwrap().hits.len(),1);
+        assert_eq!(substring_replace_all("CAFÉ café", "café", "X", false), ("X X".into(),2));
+        assert_eq!(substring_replace_all("İİ", "i", "X", false), ("XX".into(),2));
+        assert_eq!(substring_replace_all("ΟΣ", "ος", "X", false), ("X".into(),1));
+        assert_eq!(substring_replace_all("中文foo😀foo", "foo", "X", true), ("中文X😀X".into(),2));
+        assert_eq!(substring_replace_all("aaaa", "aa", "X", true), ("XX".into(),2));
+        assert_eq!(substring_replace_all("abc", "", "X", false), ("abc".into(),0));
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn exact_cap_order_and_binary_boundaries() {
+        let dir = scratch("cap");
+        let file = dir.join("sample.txt");
+        fs::write(&file,"match\n".repeat(SEARCH_HITS_CAP)).unwrap();
+        fs::write(dir.join("binary.bin"), b"match\0match").unwrap();
+        fs::write(dir.join("large.txt"), vec![b'm'; SEARCH_FILE_BYTES_CAP as usize + 1]).unwrap();
+        let roots=vec![dir.to_string_lossy().into_owned()];
+        let exact=find_in_files(roots.clone(),"match".into(),true).unwrap();
+        assert!(!exact.truncated);
+        assert_eq!(exact.files_scanned,1);
+        assert_eq!(exact.hits.len(),SEARCH_HITS_CAP);
+        assert!(exact.hits.iter().enumerate().all(|(i,h)| h.line as usize == i+1));
+        fs::write(&file,"match\n".repeat(SEARCH_HITS_CAP+1)).unwrap();
+        let extra=find_in_files(roots.clone(),"match".into(),true).unwrap();
+        assert!(extra.truncated);
+        assert_eq!(extra.hits.len(),SEARCH_HITS_CAP);
+        assert_eq!(extra.files_scanned,1);
+        let empty=find_in_files(roots,"".into(),true).unwrap();
+        assert!(empty.hits.is_empty());
+        assert_eq!(empty.files_scanned,0);
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn parallel_search_keeps_the_serial_prefix() {
+        let dir = scratch("ordered");
+        for i in 0..64 { fs::write(dir.join(format!("{i}.txt")), "match\n".repeat(100)).unwrap(); }
+        let expected: Vec<(String, u32)> = fs::read_dir(&dir).unwrap().flatten()
+            .flat_map(|entry| (1..=100).map(move |line| (entry.path().to_string_lossy().into_owned(), line)))
+            .take(SEARCH_HITS_CAP).collect();
+        for _ in 0..5 {
+            let result = find_in_files(vec![dir.to_string_lossy().into_owned()], "match".into(), true).unwrap();
+            let actual: Vec<_> = result.hits.into_iter().map(|hit| (hit.path, hit.line)).collect();
+            assert_eq!(actual, expected);
+            assert!(result.truncated);
+            assert_eq!(result.files_scanned, 64);
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn partial_replace_reports_successes_and_failures() {
+        let dir=scratch("replace");
+        let good=dir.join("good.txt");
+        fs::write(&good,"CAFÉ café").unwrap();
+        let result=replace_in_files(vec![good.to_string_lossy().into_owned(),dir.join("missing.txt").to_string_lossy().into_owned()],"café".into(),"X".into(),false).unwrap();
+        assert_eq!(result.total,2);
+        assert_eq!(result.files_changed,1);
+        assert_eq!(result.errors.len(),1);
+        assert_eq!(fs::read_to_string(good).unwrap(),"X X");
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn dense_search_benchmark() {
+        let dir = std::env::temp_dir().join(format!("deditor_dense_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        for i in 0..24 { fs::write(dir.join(format!("{i}.txt")), "needle data\n".repeat(20_000)).unwrap(); }
+        for _ in 0..3 {
+            let start = std::time::Instant::now();
+            let result = find_in_files(vec![dir.to_string_lossy().into_owned()], "needle".into(), true).unwrap();
+            assert_eq!(result.hits.len(), SEARCH_HITS_CAP);
+            assert!(result.truncated);
+            assert_eq!(result.files_scanned, 24);
+            println!("dense search: {:.2} ms", start.elapsed().as_secs_f64() * 1000.0);
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod markdown_image_tests {
+    use super::*;
+    #[test]
+    fn image_folder_defaults_nested_and_rejects_escape() {
+        let dir = std::env::temp_dir().join(format!("deditor_image_test_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let root = dir.to_string_lossy().to_string();
+        let encoded = BASE64.encode(b"self-created-image-fixture");
+        assert!(save_image(root.clone(), "one.png".into(), encoded.clone(), None).unwrap().ends_with("assets/one.png"));
+        save_image(root.clone(), "two.png".into(), encoded.clone(), Some("media/images".into())).unwrap();
+        assert_eq!(fs::read(dir.join("media/images/two.png")).unwrap(), b"self-created-image-fixture");
+        for folder in ["../outside", "/tmp", "C:/bad", "images//bad", "images/..", "a\\..\\b"] {
+            assert!(save_image(root.clone(), "bad.png".into(), encoded.clone(), Some(folder.into())).is_err());
+        }
+        assert!(save_image(root, "../bad.png".into(), encoded, None).is_err());
+        let external = dir.join("external # 中文%20");
+        save_image_to_directory(external.to_string_lossy().into(), "external.png".into(), BASE64.encode(b"external-fixture")).unwrap();
+        assert_eq!(fs::read(external.join("external.png")).unwrap(), b"external-fixture");
+        assert!(save_image_to_directory("relative/path".into(), "x.png".into(), BASE64.encode(b"x")).is_err());
+        assert!(save_image_to_directory(dir.join("../escape").to_string_lossy().into(), "x.png".into(), BASE64.encode(b"x")).is_err());
+        fs::remove_dir_all(dir).unwrap();
     }
 }

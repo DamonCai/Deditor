@@ -15,7 +15,12 @@ type DiskCache = Record<string, DiskEntry>;
 /** In-memory LRU-ish cache; trumped by DiskCache only on cold start. */
 const memCache = new Map<string, string>();
 /** De-dupe concurrent fetches for the same encoded source. */
-const inFlight = new Map<string, Promise<string>>();
+interface PendingSvg {
+  promise: Promise<string>;
+  controller: AbortController;
+  consumers: number;
+}
+const inFlight = new Map<string, PendingSvg>();
 
 // Disk cache lives in localStorage but we mirror it in-memory ONCE on first
 // access. The old code re-read + JSON.parse'd the whole blob on every plantuml
@@ -55,10 +60,7 @@ function scheduleDiskFlush(): void {
   }, 1000);
 }
 
-async function fetchSvg(
-  encoded: string,
-  signal: AbortSignal,
-): Promise<string> {
+async function fetchSvg(encoded: string, signal: AbortSignal): Promise<string> {
   // Fast path: in-memory cache.
   const mem = memCache.get(encoded);
   if (mem) return mem;
@@ -78,40 +80,59 @@ async function fetchSvg(
   if (typeof navigator !== "undefined" && navigator.onLine === false) {
     throw new Error("offline");
   }
-  // Coalesce concurrent fetches of the same diagram.
-  const existing = inFlight.get(encoded);
-  if (existing) return existing;
-  const p = (async () => {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
-    const onOuterAbort = () => ctrl.abort();
-    signal.addEventListener("abort", onOuterAbort);
-    try {
-      const res = await fetch(`${PLANTUML_SERVER}/${encoded}`, {
-        signal: ctrl.signal,
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const svg = await res.text();
-      memCache.set(encoded, svg);
-      const cur = getDisk();
-      cur[encoded] = { svg, ts: Date.now() };
-      scheduleDiskFlush();
-      return svg;
-    } finally {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", onOuterAbort);
-      inFlight.delete(encoded);
-    }
-  })();
-  inFlight.set(encoded, p);
-  return p;
+  // A request belongs to all active views of this diagram. Closing one view
+  // must not abort another view's pending render.
+  let pending = inFlight.get(encoded);
+  if (!pending) {
+    const controller = new AbortController();
+    const entry: PendingSvg = { controller, consumers: 0, promise: Promise.resolve("") };
+    inFlight.set(encoded, entry);
+    entry.promise = (async () => {
+      const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+      try {
+        const res = await fetch(`${PLANTUML_SERVER}/${encoded}`, { signal: controller.signal });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const svg = await res.text();
+        controller.signal.throwIfAborted();
+        memCache.set(encoded, svg);
+        const cur = getDisk();
+        cur[encoded] = { svg, ts: Date.now() };
+        scheduleDiskFlush();
+        return svg;
+      } finally {
+        clearTimeout(timer);
+        if (inFlight.get(encoded) === entry) inFlight.delete(encoded);
+      }
+    })();
+    pending = entry;
+  }
+  const entry = pending;
+  entry.consumers++;
+  return new Promise<string>((resolve, reject) => {
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      signal.removeEventListener("abort", onAbort);
+      entry.consumers--;
+      if (entry.consumers === 0 && inFlight.get(encoded) === entry) {
+        // Release synchronously so an immediate new hydration starts fresh.
+        inFlight.delete(encoded);
+        entry.controller.abort();
+      }
+    };
+    const onAbort = () => {
+      release();
+      reject(new DOMException("aborted", "AbortError"));
+    };
+    entry.promise.then(value => { release(); resolve(value); }, error => { release(); reject(error); });
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function failureMarkup(err: unknown, source: string): string {
@@ -126,9 +147,7 @@ function failureMarkup(err: unknown, source: string): string {
     : tStatic("markdown.plantumlError", { error: raw });
   return (
     `<div class="plantuml-error-msg">${escapeHtml(headline)}</div>` +
-    (source
-      ? `<pre class="plantuml-source">${escapeHtml(source)}</pre>`
-      : "")
+    (source ? `<pre class="plantuml-source">${escapeHtml(source)}</pre>` : "")
   );
 }
 
@@ -139,29 +158,55 @@ function failureMarkup(err: unknown, source: string): string {
  * AbortController so the caller can cancel pending fetches when the
  * preview unmounts or re-renders.
  */
-export function hydratePlantuml(root: HTMLElement): AbortController {
-  const ctrl = new AbortController();
+export function hydratePlantuml(
+  root: HTMLElement,
+): AbortController & { done: Promise<void> } {
+  const ctrl = Object.assign(new AbortController(), {
+    done: Promise.resolve(),
+  });
   const placeholders = root.querySelectorAll<HTMLElement>(
     ".plantuml-diagram[data-plantuml-encoded]",
   );
-  placeholders.forEach((el) => {
-    if (el.dataset.plantumlHydrated === "1") return;
-    const encoded = el.dataset.plantumlEncoded || "";
-    if (!encoded) return;
-    el.dataset.plantumlHydrated = "1";
-    const source = el.dataset.plantumlSource || "";
-    fetchSvg(encoded, ctrl.signal)
-      .then((svg) => {
-        if (ctrl.signal.aborted) return;
-        // Inline the raw SVG. The CSS in styles.css scopes `.preview
-        // .plantuml-diagram svg { max-width: 100% }` so it shrinks to fit.
-        el.innerHTML = svg;
-      })
-      .catch((err) => {
-        if (ctrl.signal.aborted) return;
-        el.classList.add("error");
-        el.innerHTML = failureMarkup(err, source);
-      });
-  });
+  ctrl.done = Promise.all(
+    Array.from(placeholders, (el) => {
+      if (el.dataset.plantumlHydrated === "1") return;
+      const encoded = el.dataset.plantumlEncoded || "";
+      if (!encoded) return;
+      const source = el.dataset.plantumlSource || "";
+      const load = () => {
+        el.dataset.plantumlHydrated = "1";
+        // Abort can be followed by immediate hydration of this same DOM node.
+        // Release the marker now; the old promise must not clear the new one.
+        const releaseMarker = () => { delete el.dataset.plantumlHydrated; };
+        ctrl.signal.addEventListener("abort", releaseMarker, { once: true });
+        return fetchSvg(encoded, ctrl.signal)
+        .then((svg) => {
+          if (ctrl.signal.aborted) return;
+          // Inline the raw SVG. The CSS in styles.css scopes `.preview
+          // .plantuml-diagram svg { max-width: 100% }` so it shrinks to fit.
+          el.innerHTML = svg;
+          el.classList.remove("error");
+        })
+        .catch((err) => {
+          if (ctrl.signal.aborted) return;
+          delete el.dataset.plantumlHydrated;
+          el.classList.add("error");
+          el.innerHTML = failureMarkup(err, source);
+          const retry = document.createElement("button");
+          retry.type = "button";
+          retry.className = "deditor-btn plantuml-retry";
+          retry.textContent = tStatic("markdown.plantumlRetry");
+          retry.onclick = () => {
+            if (ctrl.signal.aborted || !el.isConnected || el.dataset.plantumlHydrated === "1") return;
+            retry.disabled = true;
+            void load();
+          };
+          el.append(retry);
+        })
+        .finally(() => ctrl.signal.removeEventListener("abort", releaseMarker));
+      };
+      return load();
+    }),
+  ).then(() => undefined);
   return ctrl;
 }

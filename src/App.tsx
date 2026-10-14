@@ -1,3 +1,13 @@
+import RecentFiles from "./components/RecentFiles";
+import { handleWindowsFileShortcut } from "./lib/windowsFileShortcuts";
+import { newWindow } from "./lib/editorWindows";
+import { installRecentFiles, handleRecentFilesKey } from "./lib/recentFiles";
+import { installWindowLifecycle, isWindowCloseCommitted, windowEventTarget } from "./lib/editorWindows";
+import { showError } from "./lib/feedback";
+import { tStatic } from "./lib/i18n";
+import { beginPaneResize } from "./lib/paneResize";
+import type { PointerEvent as ReactPointerEvent } from "react";
+import { openEditorSearch } from "./lib/editorSearch";
 import { useEffect, useRef, useState } from "react";
 // @tauri-apps/api/webview transitively imports the full Window class (~62 KB).
 // We only need to listen for the file-drop event; subscribe to its raw Tauri
@@ -20,26 +30,18 @@ interface TauriDragDropPayload {
 // Heavier deps that show up rarely (mermaid, katex, prettier, xmind,
 // the diff/log virtual tabs, export-as-HTML/PDF) stay lazy AND are
 // idle-prefetched in the background — see scheduleIdlePrefetch() below.
-import EditorHost from "./components/EditorHost";
-import EditorSlot from "./components/EditorSlot";
-import Preview from "./components/Preview";
 import TitleBar from "./components/TitleBar";
 import StatusBar from "./components/StatusBar";
 import FileTree from "./components/FileTree";
 import ConfirmDialog from "./components/ConfirmDialog";
 import PromptDialog from "./components/PromptDialog";
-import TabBar from "./components/TabBar";
-import MarkdownToolbar from "./components/MarkdownToolbar";
-import JsonToolbar from "./components/JsonToolbar";
 import GotoAnything from "./components/GotoAnything";
 import GotoSymbol from "./components/GotoSymbol";
 import FindInFiles from "./components/FindInFiles";
 import SettingsDialog from "./components/SettingsDialog";
 import CommandPalette from "./components/CommandPalette";
 import { isEnabled, SHORTCUTS } from "./lib/shortcuts";
-import { useEditorStore, useActiveTabMeta } from "./store/editor";
-import { isMarkdown, isJson } from "./lib/lang";
-import { useT } from "./lib/i18n";
+import { useEditorStore } from "./store/editor";
 import {
   openFile,
   openFileByPath,
@@ -56,46 +58,25 @@ import {
 import { loadPersisted, schedulePersist } from "./lib/persistence";
 import { useFileWatch } from "./lib/fileWatch";
 import { scheduleIdlePrefetch } from "./lib/idlePrefetch";
-import { Button } from "./components/ui/Button";
+import { logError } from "./lib/logger";
+import EditorGroups from "./components/EditorGroups";
 
-type DragKind = "sidebar" | "preview" | null;
+type DragKind = "sidebar" | "preview";
 
 export default function App() {
-  const t = useT();
   // Per-field selectors only — destructuring the whole store re-renders App
   // on every store change (every keystroke, every cursor move). Slicing per
   // field keeps App quiet unless these specific values change.
   const theme = useEditorStore((s) => s.theme);
-  const showPreview = useEditorStore((s) => s.showPreview);
-  const previewMaximized = useEditorStore((s) => s.previewMaximized);
-  const showSidebar = useEditorStore((s) => s.showSidebar);
-  const editorFontSize = useEditorStore((s) => s.editorFontSize);
-  const language = useEditorStore((s) => s.language);
-  // Only structural metadata at this level. Content lives in EditorHost /
-  // EditorSlot / Preview, which subscribe directly. App no longer re-renders
-  // on every keystroke.
-  const activeMeta = useActiveTabMeta();
-  const filePath = activeMeta?.filePath ?? null;
-  const isDiffTab = !!activeMeta?.isDiff;
-  const previewEnabled = !isDiffTab && showPreview && isMarkdown(filePath);
-  // Initial caret + scroll for the active tab. Read imperatively so subscribing
-  // components don't re-render every cursor move; Editor only consumes these
-  // on mount (a fresh instance is created via `key={tab.id}` per active tab).
-  const initialPos = activeMeta
-    ? useEditorStore.getState().tabPositions[activeMeta.id]
-    : undefined;
-
+  const showSidebar = useEditorStore(s => s.showSidebar);
+  const language = useEditorStore(s => s.language);
   const [sidebarPx, setSidebarPx] = useState(240);
   const [previewPct, setPreviewPct] = useState(50);
-  // Editor↔Preview scroll sync. We track the latest line + which side originated
-  // the scroll so each side only reacts to scrolls coming from the OTHER side.
-  const [scrollSync, setScrollSync] = useState<
-    { line: number; from: "editor" | "preview" } | null
-  >(null);
   const [hydrated, setHydrated] = useState(false);
   const zenMode = useEditorStore((s) => s.zenMode);
   const autoSave = useEditorStore((s) => s.autoSave);
-  const splitEditor = useEditorStore((s) => s.splitEditor);
+  const recentFilesOpen = useEditorStore(s => s.recentFilesOpen);
+  const setRecentFilesOpen = useEditorStore(s => s.setRecentFilesOpen);
   const gotoOpen = useEditorStore((s) => s.gotoAnythingOpen);
   const setGotoOpen = useEditorStore((s) => s.setGotoAnythingOpen);
   const settingsOpen = useEditorStore((s) => s.settingsOpen);
@@ -107,7 +88,7 @@ export default function App() {
   const findInFilesOpen = useEditorStore((s) => s.findInFilesOpen);
   const setFindInFilesOpen = useEditorStore((s) => s.setFindInFilesOpen);
   const shortcuts = useEditorStore((s) => s.shortcuts);
-  const dragRef = useRef<DragKind>(null);
+  const stopResize = useRef<(() => void) | null>(null);
   const uiRef = useRef({ sidebarPx, previewPct });
   uiRef.current = { sidebarPx, previewPct };
 
@@ -128,20 +109,42 @@ export default function App() {
     }).catch(() => {});
   }, [language, shortcuts]);
 
-  // Hydrate from localStorage on mount
   useEffect(() => {
+    if (!hydrated) return;
+    let disposed = false;
+    let cleanup: (() => void) | undefined;
+    installWindowLifecycle().then(fn => { if (disposed) fn(); else cleanup = fn; })
+      .catch(error => logError("Install window lifecycle failed", error));
+    return () => { disposed = true; cleanup?.(); };
+  }, [hydrated]);
+
+  useEffect(() => {
+    let disposed = false;
+    let cleanup: (() => void) | undefined;
+    listen<string>("new-window-error", event => {
+      logError("New window failed", event.payload);
+      void showError(tStatic("window.createFailed", { err: event.payload }));
+    }, windowEventTarget()).then(fn => { if (disposed) fn(); else cleanup = fn; }).catch(() => {});
+    return () => { disposed = true; cleanup?.(); };
+  }, []);
+
+  // Restore the session before choosing which optional engines to prefetch.
+  useEffect(() => {
+    let disposed = false;
+    let cancelPrefetch: (() => void) | undefined;
     loadPersisted()
       .then((extra) => {
+        if (disposed) return;
         if (extra?.sidebarPx) setSidebarPx(extra.sidebarPx);
         if (extra?.previewPct) setPreviewPct(extra.previewPct);
       })
-      .finally(() => setHydrated(true));
-    // After the app shell has painted, idle-prefetch the heavy lazy chunks
-    // (Shiki engine, markdown-it, mermaid, katex, prettier, export). The
-    // first time the user does any of those operations, the JS is already
-    // parsed and warm — no chunk-load gap. Best-effort: failures are
-    // silently swallowed; the real call sites handle errors themselves.
-    scheduleIdlePrefetch();
+      .catch((err) => logError("restore session failed", err))
+      .finally(() => {
+        if (disposed) return;
+        setHydrated(true);
+        cancelPrefetch = scheduleIdlePrefetch();
+      });
+    return () => { disposed = true; cancelPrefetch?.(); };
   }, []);
 
   // Persist on any store change (debounced 500ms).
@@ -193,16 +196,35 @@ export default function App() {
     };
   }, [autoSave]);
 
-  // File menu lives in the native macOS app menu (built in Rust). Accelerators
-  // there (Cmd+N / Cmd+O / Cmd+S / etc.) are intercepted by the OS, so we
-  // only handle the shortcuts the menu doesn't own here.
+  useEffect(() => {
+    if (!hydrated) return;
+    return installRecentFiles();
+  }, [hydrated]);
+
+  // macOS file accelerators belong to the OS menu. On Windows WebView2 owns
+  // the bindings and the native menu keeps clickable entries with hints.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (isWindowCloseCommitted()) return;
+      if (e.isComposing) return;
+      if (handleRecentFilesKey(e)) return;
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
       const prefs = useEditorStore.getState().shortcuts;
+      if (handleWindowsFileShortcut(e, prefs, action => {
+        switch (action) {
+          case "file_new": newFile(); break;
+          case "file_new_window": void newWindow(); break;
+          case "file_open": void openFile(); break;
+          case "file_open_folder": void openFolder(); break;
+          case "file_save": void saveFile(); break;
+          case "file_save_as": void saveFileAs(); break;
+          case "file_close_tab": void closeActiveTab(); break;
+        }
+      })) return;
       const k = e.key.toLowerCase();
       if (k === "b" && !e.shiftKey && !e.altKey) {
+        if ((e.target as HTMLElement)?.closest?.('.md-visual-shell[data-readonly="false"] .ProseMirror')) return;
         if (!isEnabled(prefs, "app_toggle_sidebar")) return;
         e.preventDefault();
         useEditorStore.getState().toggleSidebar();
@@ -260,20 +282,24 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey, true);
   }, []);
 
-  // Bridge native File menu clicks to the existing fileio handlers.
+  // Bridge native File and Edit menu clicks to the existing fileio handlers.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     listen<string>("menu-action", (e) => {
+      if (isWindowCloseCommitted()) return;
       switch (e.payload) {
+        case "edit_find": openEditorSearch(); break;
+        case "edit_replace": openEditorSearch(true); break;
         case "file_new": newFile(); break;
+        case "file_recent": useEditorStore.getState().setRecentFilesOpen(!useEditorStore.getState().recentFilesOpen); break;
         case "file_open": openFile(); break;
         case "file_open_folder": openFolder(); break;
         case "file_save": saveFile(); break;
         case "file_save_as": saveFileAs(); break;
         case "file_close_tab": closeActiveTab(); break;
       }
-    })
+    }, windowEventTarget())
       .then((fn) => {
         if (cancelled) fn();
         else unlisten = fn;
@@ -296,6 +322,7 @@ export default function App() {
     // those); listening directly to just DRAG_DROP is one event subscription
     // instead of four AND drops the webview barrel from the bundle.
     listen<TauriDragDropPayload>("tauri://drag-drop", async (event) => {
+      if (isWindowCloseCommitted()) return;
       const filePaths: string[] = [];
       for (const p of event.payload.paths) {
         let kind = "file";
@@ -305,6 +332,7 @@ export default function App() {
           // Treat probe failures as "file" so the existing openMany path
           // can surface a more useful error.
         }
+        if (isWindowCloseCommitted()) return;
         if (kind === "dir") {
           await setWorkspaceByPath(p).catch(() => {});
         } else {
@@ -312,7 +340,7 @@ export default function App() {
         }
       }
       if (filePaths.length > 0) await openMany(filePaths);
-    })
+    }, windowEventTarget())
       .then((fn) => {
         if (cancelled) fn();
         else unlisten = fn;
@@ -325,25 +353,56 @@ export default function App() {
   }, []);
 
   // OS-level "Open With → DEditor" (macOS Finder, Windows file association,
-  // `open -a DEditor file.sql` from a terminal, etc.). Tauri raises a
-  // RunEvent::Opened and our Rust glue re-emits it as `open-file` with the
-  // absolute path string. Reuse the regular openFileByPath flow.
+  // `open -a DEditor file.sql` from a terminal, etc.). Rust queues the paths
+  // in a Mutex-backed buffer because Tauri events are not buffered, and the
+  // RunEvent::Opened fires before React's listener exists on a cold start
+  // — emitting alone would drop the file silently. We drain the queue once
+  // on mount (handles cold start) and again on every "open-file" signal
+  // (handles paths arriving while we're already running). Gated on `hydrated`
+  // so `loadPersisted`'s `replaceTabs` doesn't clobber the just-opened tab.
   useEffect(() => {
+    if (!hydrated) return;
     let unlisten: (() => void) | undefined;
+    let unlistenCloseCancelled: (() => void) | undefined;
     let cancelled = false;
-    listen<string>("open-file", (e) => {
-      if (e.payload) void openFileByPath(e.payload);
-    })
+
+    const drainAndOpen = async () => {
+      if (isWindowCloseCommitted()) return;
+      try {
+        const paths = await invoke<string[]>("drain_pending_open_files");
+        for (const p of paths) {
+          if (cancelled) return;
+          await openFileByPath(p);
+        }
+      } catch (err) {
+        logError("drain_pending_open_files failed", err);
+      }
+    };
+
+    void drainAndOpen();
+    listen("open-file", () => {
+      void drainAndOpen();
+    }, windowEventTarget())
       .then((fn) => {
         if (cancelled) fn();
         else unlisten = fn;
       })
       .catch(() => {});
+    // Paths received after the close snapshot stay queued. If another
+    // window cancels quitting, resume opening those files after all close
+    // cancellation listeners have released the editing guard.
+    listen("window-close-cancelled", () => {
+      queueMicrotask(() => { if (!cancelled) void drainAndOpen(); });
+    }, windowEventTarget()).then(fn => {
+      if (cancelled) fn();
+      else unlistenCloseCancelled = fn;
+    }).catch(() => {});
     return () => {
       cancelled = true;
       unlisten?.();
+      unlistenCloseCancelled?.();
     };
-  }, []);
+  }, [hydrated]);
 
   // Suppress browser-level drag default (so Tauri's native handler wins)
   useEffect(() => {
@@ -356,33 +415,25 @@ export default function App() {
     };
   }, []);
 
-  useEffect(() => {
-    const onMove = (e: MouseEvent) => {
-      const kind = dragRef.current;
-      if (!kind) return;
+  useEffect(() => () => stopResize.current?.(), []);
+  // A mode/tab change can remove the active divider before pointerup arrives.
+  useEffect(() => { stopResize.current?.(); }, [showSidebar, zenMode]);
+  const startResize = (kind: DragKind, event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || event.isPrimary === false) return;
+    stopResize.current?.();
+    stopResize.current = beginPaneResize(event.currentTarget, event.nativeEvent, e => {
       if (kind === "sidebar") {
         setSidebarPx(Math.min(500, Math.max(140, e.clientX)));
       } else {
-        const sidebar = showSidebar ? sidebarPx : 0;
+        const sidebar = !zenMode && showSidebar ? sidebarPx : 0;
         const remaining = window.innerWidth - sidebar;
         const editorWidth = e.clientX - sidebar;
         const pct = (editorWidth / remaining) * 100;
         setPreviewPct(100 - Math.min(85, Math.max(15, pct)));
       }
-    };
-    const onUp = () => {
-      dragRef.current = null;
-      document.body.style.cursor = "";
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-  }, [sidebarPx, showSidebar]);
+    });
+  };
 
-  const editorPct = 100 - previewPct;
 
   return (
     <div className="flex flex-col h-full">
@@ -398,127 +449,11 @@ export default function App() {
             </div>
             <div
               className="splitter"
-              onMouseDown={() => {
-                dragRef.current = "sidebar";
-                document.body.style.cursor = "col-resize";
-              }}
+              onPointerDown={event => startResize("sidebar", event)}
             />
           </>
         )}
-        {!zenMode && !showSidebar && (
-          <div
-            role="button"
-            tabIndex={0}
-            title={t("filetree.expand")}
-            onClick={() => useEditorStore.getState().toggleSidebar()}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                useEditorStore.getState().toggleSidebar();
-              }
-            }}
-            className="sidebar-rail"
-            style={{
-              width: 8,
-              flexShrink: 0,
-              borderRight: "1px solid var(--border)",
-              background: "var(--bg-soft)",
-              cursor: "pointer",
-            }}
-          />
-        )}
-        <div className="flex flex-col flex-1 min-w-0">
-          {!zenMode && <TabBar />}
-          {/* Markdown toolbar is lifted out of the editor pane so it spans the
-              full editor+preview row (still shown when preview is maximized). */}
-          {!isDiffTab && isMarkdown(filePath) && <MarkdownToolbar />}
-          <div className="flex flex-1 min-h-0">
-            {previewEnabled && previewMaximized ? (
-              <div className="flex-1 min-w-0">
-                <Preview
-                  theme={theme}
-                  scrollLine={
-                    scrollSync?.from === "editor" ? scrollSync.line : undefined
-                  }
-                  onScroll={(line) => setScrollSync({ line, from: "preview" })}
-                />
-              </div>
-            ) : (
-              <>
-                <div
-                  style={{ width: previewEnabled ? `${editorPct}%` : "100%" }}
-                  className="min-w-0 flex-1 flex flex-col"
-                >
-                  {!isDiffTab && isJson(filePath) && <JsonToolbar />}
-                  {activeMeta?.hasExternalChange && (
-                    <ExternalChangeBanner tabId={activeMeta.id} />
-                  )}
-                  <div className="flex-1 min-h-0 flex">
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <EditorHost
-                        activeId={activeMeta?.id ?? null}
-                        theme={theme}
-                        fontSize={editorFontSize}
-                        initialCursor={initialPos?.cursor}
-                        initialScrollLine={initialPos?.scrollTopLine}
-                        externalScrollLine={
-                          scrollSync?.from === "preview" ? scrollSync.line : undefined
-                        }
-                        onScroll={(line) => setScrollSync({ line, from: "editor" })}
-                        onPositionChange={(pos) => {
-                          if (activeMeta) {
-                            useEditorStore
-                              .getState()
-                              .setTabPosition(activeMeta.id, pos);
-                          }
-                        }}
-                      />
-                    </div>
-                    {splitEditor && !isDiffTab && activeMeta && (
-                      <>
-                        <div style={{ width: 1, background: "var(--border)", flexShrink: 0 }} />
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <EditorSlot
-                            key={activeMeta.id + "::split"}
-                            tabId={activeMeta.id}
-                            noStateCache
-                            theme={theme}
-                            fontSize={editorFontSize}
-                          />
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </div>
-                {previewEnabled && (
-                  <>
-                    <div
-                      className="splitter"
-                      onMouseDown={() => {
-                        dragRef.current = "preview";
-                        document.body.style.cursor = "col-resize";
-                      }}
-                    />
-                    <div
-                      style={{ width: `${previewPct}%` }}
-                      className="min-w-0"
-                    >
-                      <Preview
-                        theme={theme}
-                        scrollLine={
-                          scrollSync?.from === "editor" ? scrollSync.line : undefined
-                        }
-                        onScroll={(line) =>
-                          setScrollSync({ line, from: "preview" })
-                        }
-                      />
-                    </div>
-                  </>
-                )}
-              </>
-            )}
-          </div>
-        </div>
+        <EditorGroups initialPreviewPct={previewPct} onPreviewPctChange={setPreviewPct} />
       </div>
       {!zenMode && <StatusBar />}
       <ConfirmDialog />
@@ -527,6 +462,7 @@ export default function App() {
           flips. Modules are now eager so opening Cmd+P / Cmd+Shift+P / etc.
           shows the dialog on the same frame as the keystroke — no chunk
           fetch lag. */}
+      {recentFilesOpen && <RecentFiles onClose={() => setRecentFilesOpen(false)} />}
       {gotoOpen && <GotoAnything open onClose={() => setGotoOpen(false)} />}
       {commandPaletteOpen && (
         <CommandPalette open onClose={() => setCommandPaletteOpen(false)} />
@@ -534,48 +470,6 @@ export default function App() {
       {gotoSymbolOpen && <GotoSymbol open onClose={() => setGotoSymbolOpen(false)} />}
       {findInFilesOpen && <FindInFiles open onClose={() => setFindInFilesOpen(false)} />}
       {settingsOpen && <SettingsDialog open onClose={() => setSettingsOpen(false)} />}
-    </div>
-  );
-}
-
-function ExternalChangeBanner({ tabId }: { tabId: string }) {
-  const t = useT();
-  const reload = () => {
-    const tab = useEditorStore.getState().tabs.find((x) => x.id === tabId);
-    if (!tab || tab.externalChange == null) return;
-    const fresh = tab.externalChange;
-    useEditorStore.setState({
-      tabs: useEditorStore.getState().tabs.map((x) =>
-        x.id === tabId ? { ...x, content: fresh, savedContent: fresh, externalChange: undefined } : x,
-      ),
-    });
-  };
-  const dismiss = () => {
-    useEditorStore.setState({
-      tabs: useEditorStore.getState().tabs.map((x) =>
-        x.id === tabId ? { ...x, externalChange: undefined } : x,
-      ),
-    });
-  };
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 12,
-        padding: "8px 12px",
-        background: "rgba(245, 158, 11, 0.15)",
-        borderBottom: "1px solid var(--border)",
-        fontSize: 12,
-      }}
-    >
-      <span style={{ flex: 1, color: "var(--text)" }}>{t("watch.externalChanged")}</span>
-      <Button variant="primary" size="sm" onClick={reload}>
-        {t("watch.reload")}
-      </Button>
-      <Button variant="secondary" size="sm" onClick={dismiss}>
-        {t("watch.keepMine")}
-      </Button>
     </div>
   );
 }

@@ -1,8 +1,10 @@
+import { useModalFocus } from "../lib/useModalFocus";
 import { useEffect, useRef } from "react";
 import { useEditorStore } from "../store/editor";
 import { SHORTCUTS, type ShortcutMeta } from "../lib/shortcuts";
 import { useT } from "../lib/i18n";
 import { Button } from "./ui/Button";
+import { SegmentedControl } from "./ui/SegmentedControl";
 
 interface Props {
   open: boolean;
@@ -13,6 +15,7 @@ const GROUP_ORDER: ShortcutMeta["group"][] = ["file", "nav", "editor"];
 
 export default function SettingsDialog({ open, onClose }: Props) {
   const t = useT();
+  const panelRef = useModalFocus(open, onClose);
   const shortcuts = useEditorStore((s) => s.shortcuts);
   const setShortcutEnabled = useEditorStore((s) => s.setShortcutEnabled);
   const resetShortcuts = useEditorStore((s) => s.resetShortcuts);
@@ -67,7 +70,7 @@ export default function SettingsDialog({ open, onClose }: Props) {
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(0,0,0,0.4)",
+        background: "var(--modal-backdrop)",
         zIndex: 1100,
         display: "flex",
         justifyContent: "center",
@@ -75,6 +78,11 @@ export default function SettingsDialog({ open, onClose }: Props) {
       }}
     >
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t("settings.title")}
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
         style={{
           width: "min(640px, 92vw)",
@@ -102,16 +110,6 @@ export default function SettingsDialog({ open, onClose }: Props) {
           }}
         >
           <span>{t("settings.title")}</span>
-          <Button
-            ref={closeBtnRef}
-            variant="ghost"
-            size="icon"
-            onClick={onClose}
-            aria-label="Close"
-            style={{ fontSize: 16 }}
-          >
-            ×
-          </Button>
         </div>
 
         <div style={{ padding: "12px 16px", flex: 1, overflowY: "auto" }}>
@@ -301,7 +299,7 @@ export default function SettingsDialog({ open, onClose }: Props) {
           <Button variant="secondary" onClick={resetShortcuts}>
             {t("settings.reset")}
           </Button>
-          <Button variant="primary" onClick={onClose}>
+          <Button ref={closeBtnRef} variant="primary" onClick={onClose}>
             {t("settings.done")}
           </Button>
         </div>
@@ -367,45 +365,7 @@ function RadioRow<T extends string>({
       }}
     >
       <span style={{ fontSize: 13, color: "var(--text)", flex: 1 }}>{label}</span>
-      <div
-        role="radiogroup"
-        style={{
-          display: "inline-flex",
-          flexShrink: 0,
-          border: "1px solid var(--border)",
-          borderRadius: 4,
-          overflow: "hidden",
-          background: "var(--bg)",
-        }}
-      >
-        {options.map((opt, i) => {
-          const active = opt.value === value;
-          return (
-            <button
-              key={opt.value}
-              type="button"
-              role="radio"
-              aria-checked={active}
-              onClick={() => onChange(opt.value)}
-              className="deditor-btn"
-              style={{
-                padding: "3px 12px",
-                fontSize: 12,
-                border: "none",
-                borderLeft: i === 0 ? "none" : "1px solid var(--border)",
-                background: active ? "var(--accent)" : "transparent",
-                color: active ? "#fff" : "var(--text)",
-                cursor: "pointer",
-                whiteSpace: "nowrap",
-                transition:
-                  "background 120ms ease, color 120ms ease",
-              }}
-            >
-              {opt.label}
-            </button>
-          );
-        })}
-      </div>
+      <SegmentedControl radio label={label} value={value} options={options} onChange={onChange} />
     </div>
   );
 }

@@ -1,0 +1,551 @@
+/* Single presentation contract, also embedded by the existing HTML export.
+   Editable wrappers consume these values rather than copying block metrics. */
+:is(.md-surface, .preview, .milkdown .ProseMirror.md-document) {
+  --md-font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial,
+    sans-serif;
+  --md-content-width: 860px;
+  --md-document-padding: 32px 32px 72px;
+  --md-body-line-height: 1.85;
+  --md-list-item-space: 0.35em;
+  --md-list-item-indent: 0.15em;
+  --md-list-nested-space: 0.5em;
+  --md-task-size: 14px;
+  --md-task-gap: 0.8em;
+  --md-table-font-scale: 0.9;
+  --md-block-space: 1.4em;
+  --md-diagram-space: 1.2em;
+  --md-image-space: max(16px, 1em);
+}
+/* The live panes expand with the window; standalone export keeps its column. */
+.md-surface.preview.md-document,
+.md-visual-shell .milkdown .ProseMirror.md-document { --md-content-width: 100%; }
+/* Shared document typography for preview and visual editing, independent of IDE chrome.
+   Keep blocks in normal flow: scroll sync relies on their offsetTop values. */
+:is(.preview, .milkdown .ProseMirror.md-document) {
+  --preview-text: #343b46;
+  --preview-heading: #202631;
+  --preview-muted: #606b7a;
+  --preview-link: #2864cf;
+  --preview-code: #7350a2;
+  --preview-code-bg: #f5f6f8;
+  --preview-rule: #e5e8ed;
+  padding: var(--md-document-padding);
+  font-size: calc(16px + var(--md-document-zoom, 0px));
+  line-height: var(--md-body-line-height);
+  color: var(--preview-text);
+  overflow-y: auto;
+  min-width: 0;
+  height: 100%;
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
+  font-family: var(--md-font-family);
+  -webkit-font-smoothing: antialiased;
+}
+.dark :is(.preview, .milkdown .ProseMirror.md-document) {
+  --preview-text: #cbd0d9;
+  --preview-heading: #edf0f5;
+  --preview-muted: #a1a9b6;
+  --preview-link: #8ab4ff;
+  --preview-code: #c6a4ed;
+  --preview-code-bg: #25272c;
+  --preview-rule: #363a42;
+  color-scheme: dark;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) > * {
+  /* Follow the available pane width in both presentation hosts, including
+     window resizing and sidebar/outline toggles. */
+  max-width: var(--md-content-width);
+  margin-left: 0;
+  margin-right: 0;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) h1,
+:is(.preview, .milkdown .ProseMirror.md-document) h2,
+:is(.preview, .milkdown .ProseMirror.md-document) h3,
+:is(.preview, .milkdown .ProseMirror.md-document) h4,
+:is(.preview, .milkdown .ProseMirror.md-document) h5,
+:is(.preview, .milkdown .ProseMirror.md-document) h6 {
+  color: var(--preview-heading);
+  font-weight: 650;
+  margin: 1.7em 0 0.65em;
+  line-height: 1.45;
+  scroll-margin-top: 24px;
+  padding: 0;
+  font-family: inherit;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) h1 {
+  font-size: 2em;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  margin-bottom: 0.8em;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) h2 {
+  font-size: 1.45em;
+  letter-spacing: -0.015em;
+  border-bottom: 1px solid var(--preview-rule);
+  padding-bottom: 0.45em;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) h3 {
+  font-size: 1.25em;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) h4 {
+  font-size: 1.1em;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) h5 {
+  font-size: 1em;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) h6 {
+  font-size: 0.95em;
+  color: var(--preview-muted);
+}
+:is(.preview, .milkdown .ProseMirror.md-document) > :first-child {
+  margin-top: 0;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) :is(h1, h2, h3, h4, h5, h6) + :is(h2, h3, h4, h5, h6) {
+  margin-top: 1em;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) p {
+  margin: 0 0 1em;
+  padding-block: 0;
+  line-height: inherit;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) a {
+  color: var(--preview-link);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--preview-link) 35%, transparent);
+  text-underline-offset: 3px;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) a:hover {
+  text-decoration-color: currentColor;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) a:focus-visible {
+  outline: 2px solid var(--preview-link);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+/* Inline code stays quieter than syntax-highlighted fenced blocks. */
+.md-surface [data-task-indent] { margin-left: calc(var(--md-task-base-indent, -1.4em) + var(--md-task-indent, 0) * 1.8em) !important; }
+:is(.preview, .milkdown .ProseMirror.md-document) code {
+  display: inline;
+  line-height: inherit;
+  background: var(--preview-code-bg);
+  color: var(--preview-code);
+  padding: 0.18em 0.4em;
+  border-radius: 4px;
+  font-size: 0.88em;
+  font-family: var(--font-mono, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace);
+}
+:is(.preview, .milkdown .ProseMirror.md-document) pre {
+  margin: var(--md-block-space) 0;
+  padding: 0;
+  border-radius: 8px;
+  overflow: auto;
+  overflow-wrap: normal;
+  white-space: pre;
+  tab-size: 4;
+  background: var(--preview-code-bg);
+  border: 1px solid var(--preview-rule);
+}
+/* pre > code: reset the inline-code coloring inside fenced blocks. */
+:is(.preview, .milkdown .ProseMirror.md-document) pre code {
+  background: transparent;
+  color: inherit;
+  padding: 18px 20px;
+  display: block;
+  font-size: 13px;
+  line-height: 1.75;
+  border-radius: 0;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) pre.shiki {
+  padding: 18px 20px;
+  /* Shiki owns token colors; the document owns the code block surface. */
+  background-color: var(--preview-code-bg) !important;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) pre.shiki code {
+  padding: 0;
+}
+/* A restrained accent distinguishes quotations without competing with text. */
+:is(.preview, .milkdown .ProseMirror.md-document) blockquote {
+  box-sizing: border-box;
+  margin: var(--md-block-space) 0;
+  padding: 12px 18px;
+  color: var(--preview-muted);
+  border-left: 3px solid color-mix(in srgb, var(--preview-link) 55%, var(--bg));
+  border-radius: 0 6px 6px 0;
+  background: color-mix(in srgb, var(--preview-link) 5%, var(--bg));
+}
+:is(.preview, .milkdown .ProseMirror.md-document) blockquote > :first-child {
+  margin-top: 0;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) blockquote > :last-child {
+  margin-bottom: 0;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) ul,
+:is(.preview, .milkdown .ProseMirror.md-document) ol {
+  padding-left: 1.65em;
+  margin: 0 0 1em;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) ul {
+  --md-list-marker: disc;
+  list-style: disc outside;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) ol {
+  list-style: decimal outside;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) ul ul,
+:is(.preview, .milkdown .ProseMirror.md-document) ol ul {
+  --md-list-marker: circle;
+  list-style: circle outside;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) ul ul ul,
+:is(.preview, .milkdown .ProseMirror.md-document) ol ul ul {
+  --md-list-marker: square;
+  list-style: square outside;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) li {
+  margin: var(--md-list-item-space) 0;
+  padding-left: var(--md-list-item-indent);
+}
+:is(.preview, .milkdown .ProseMirror.md-document) li > :is(ul, ol) {
+  margin-top: var(--md-list-item-space);
+  margin-bottom: var(--md-list-nested-space);
+}
+:is(.preview, .milkdown .ProseMirror.md-document) li > p {
+  margin: 0;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) li > p + p {
+  margin-top: var(--md-list-nested-space);
+}
+:is(.preview, .milkdown .ProseMirror.md-document) li::marker {
+  color: var(--preview-muted);
+}
+:is(.preview, .milkdown .ProseMirror.md-document) li.task-list-item,
+:is(.preview, .milkdown .ProseMirror.md-document) li:has(> input[type="checkbox"]) {
+  list-style: none;
+  margin-left: -1.4em;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) li.task-list-item li.task-list-item { --md-task-base-indent: 0px; margin-left: 0; }
+:is(.preview, .milkdown .ProseMirror.md-document) :is(li.task-list-item, li:has(> .label-wrapper[role="checkbox"])) {
+  min-height: calc(var(--md-body-line-height) * 1em);
+}
+/* One task-control presentation for native preview inputs and editable labels.
+   Explicit appearance keeps disabled inputs identical across browser engines. */
+:is(.preview, .milkdown .ProseMirror.md-document) :is(.task-list-item-checkbox, .label.checked, .label.unchecked) {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  display: block;
+  width: var(--md-task-size);
+  height: var(--md-task-size);
+  padding: 0;
+  border: 1px solid var(--preview-muted);
+  border-radius: 3px;
+  background-color: transparent;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 12px 12px;
+  opacity: 1;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) :is(.task-list-item-checkbox:checked, .label.checked) {
+  border-color: var(--preview-link);
+  background-color: var(--preview-link);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14'%3E%3Cpath d='m3 7 2.5 2.5L11 4' fill='none' stroke='white' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+:is(.preview, .milkdown .ProseMirror.md-document) .task-list-item-checkbox {
+  float: left;
+  margin: calc((var(--md-body-line-height) * 1em - var(--md-task-size)) / 2) var(--md-task-gap) 0 0;
+}
+/* Table: GitHub/Typora style — full border, zebra rows. Left-aligned with
+   the rest of the reading column; if the table is wider than the preview pane
+   it gets its own horizontal scrollbar instead of pushing the pane wider. */
+:is(.preview, .milkdown .ProseMirror.md-document) table {
+  border-collapse: collapse;
+  margin: var(--md-block-space) 0;
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+  font-size: calc(var(--md-table-font-scale) * 1em);
+  line-height: 1.65;
+  /* Wide tables scroll within the document instead of widening its pane. */
+  overflow-wrap: normal;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) th,
+:is(.preview, .milkdown .ProseMirror.md-document) td {
+  border: 1px solid var(--preview-rule);
+  padding: 10px 16px;
+  vertical-align: top;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) th {
+  background: var(--preview-code-bg);
+  color: var(--preview-heading);
+  font-weight: 600;
+  text-align: left;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) tr:nth-child(2n of :not(:has(th))) td {
+  background: color-mix(in srgb, var(--preview-text) 2%, var(--bg));
+}
+:is(.preview, .milkdown .ProseMirror.md-document) hr {
+  border: none;
+  border-top: 1px solid var(--preview-rule);
+  margin: 2.5em 0;
+  height: 0;
+  padding: 0;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 16px 0;
+}
+/* Inline images share the text baseline in both renderers. Standalone images
+   keep the document's block spacing. */
+:is(.preview, .milkdown .ProseMirror.md-document) img[data-md-inline="true"],
+.md-visual-shell .milkdown .md-document .milkdown-image-inline img {
+  display: inline-block;
+  vertical-align: baseline;
+  margin: 0;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) figure:has(> img:only-child) { margin: 16px 0; }
+:is(.preview, .milkdown .ProseMirror.md-document) figure > img:only-child { margin: 0; }
+:is(.preview, .milkdown .ProseMirror.md-document) kbd {
+  padding: 2px 6px;
+  font: 0.8em var(--font-mono, "SF Mono", Menlo, Consolas, monospace);
+  color: var(--preview-muted);
+  background: var(--preview-code-bg);
+  border: 1px solid var(--preview-rule);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 4px 0;
+}
+
+/* Fenced HTML is rendered through the shared sanitizer in both Markdown
+   displays. Keep large SVG/HTML fragments within the document column. */
+:is(.preview, .milkdown .ProseMirror.md-document) .html-render-block {
+  /* Common Tailwind color tokens occur in portable SVG snippets. Supplying
+     their standard values keeps var(--color-step) presentation attributes
+     visible when the Markdown document has no matching stylesheet. */
+  --slate-50: #f8fafc;
+  --slate-200: #e2e8f0;
+  --slate-400: #94a3b8;
+  --slate-600: #475569;
+  --slate-800: #1e293b;
+  --indigo-50: #eef2ff;
+  --indigo-400: #818cf8;
+  --indigo-600: #4f46e5;
+  --indigo-800: #3730a3;
+  --emerald-50: #ecfdf5;
+  --emerald-200: #a7f3d0;
+  --emerald-400: #34d399;
+  --emerald-600: #059669;
+  --emerald-800: #065f46;
+  --sky-50: #f0f9ff;
+  --sky-200: #bae6fd;
+  --sky-400: #38bdf8;
+  --sky-600: #0284c7;
+  --sky-800: #075985;
+  --rose-50: #fff1f2;
+  --rose-400: #fb7185;
+  --rose-600: #e11d48;
+  --rose-800: #9f1239;
+  --amber-50: #fffbeb;
+  --amber-200: #fde68a;
+  --amber-400: #fbbf24;
+  --amber-600: #d97706;
+  --amber-800: #92400e;
+  width: 100%;
+  min-width: 0;
+  margin: var(--md-block-space) 0;
+  overflow: auto;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) .html-render-block > svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  /* Portable SVG snippets are commonly authored for a light canvas and leave
+     some cards transparent (`fill="none"`). Do not let the app's dark page
+     show through those cards; an authored SVG background still paints over
+     this fallback. */
+  background-color: #fff;
+  color-scheme: light;
+}
+
+/* Interactive HTML owns a viewport; scrolling stays inside the document.
+   Static SVG keeps its existing intrinsic sizing above. */
+.md-html-document {
+  display: block;
+  width: 100%;
+  height: 420px;
+  min-height: 180px;
+  border: 0;
+  background: #fff;
+  color-scheme: light;
+  resize: vertical;
+  overflow: auto;
+}
+
+/* PlantUML diagram */
+:is(.preview, .milkdown .ProseMirror.md-document) .plantuml-diagram {
+  display: flex;
+  justify-content: flex-start;
+  margin: var(--md-diagram-space) 0;
+  padding: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-x: auto;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) .plantuml-diagram img,
+:is(.preview, .milkdown .ProseMirror.md-document) .plantuml-diagram svg {
+  max-width: 100%;
+  height: auto;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) .plantuml-diagram .plantuml-loading {
+  color: var(--text-soft);
+  font-size: 12px;
+  font-family: var(--font-mono, "JetBrains Mono", "SF Mono", Menlo, monospace);
+  padding: 8px 12px;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) .plantuml-diagram.error {
+  flex-direction: column;
+  align-items: stretch;
+  color: var(--error-text);
+  background: var(--error-bg);
+  border-color: color-mix(in srgb, var(--error-text) 30%, transparent);
+  font-family: var(--font-mono, "JetBrains Mono", "SF Mono", Menlo, monospace);
+  font-size: 13px;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) .plantuml-diagram.error .plantuml-error-msg {
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) .plantuml-diagram.error .plantuml-source {
+  background: var(--bg-mute);
+  color: var(--text-soft);
+  padding: 8px 12px;
+  font-family: var(--font-mono, "JetBrains Mono", "SF Mono", Menlo, monospace);
+  font-size: 11px;
+  white-space: pre;
+  overflow-x: auto;
+  border-radius: 4px;
+  margin: 0;
+}
+
+/* Mermaid diagram */
+:is(.preview, .milkdown .ProseMirror.md-document) .mermaid-diagram {
+  display: flex;
+  justify-content: flex-start;
+  margin: var(--md-diagram-space) 0;
+  padding: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-x: auto;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) .mermaid-diagram svg {
+  max-width: 100%;
+  height: auto;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) .mermaid-diagram .mermaid-loading {
+  color: var(--text-soft);
+  font-size: 12px;
+  font-family: var(--font-mono, "JetBrains Mono", "SF Mono", Menlo, monospace);
+  padding: 8px 12px;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) .mermaid-diagram.error {
+  flex-direction: column;
+  align-items: stretch;
+  color: var(--error-text);
+  background: var(--error-bg);
+  border-color: color-mix(in srgb, var(--error-text) 30%, transparent);
+  font-family: var(--font-mono, "JetBrains Mono", "SF Mono", Menlo, monospace);
+  font-size: 13px;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) .mermaid-diagram.error .mermaid-error-msg {
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+:is(.preview, .milkdown .ProseMirror.md-document) .mermaid-diagram.error .mermaid-source {
+  background: var(--bg-mute);
+  color: var(--text-soft);
+  padding: 8px 12px;
+  font-family: var(--font-mono, "JetBrains Mono", "SF Mono", Menlo, monospace);
+  font-size: 11px;
+  white-space: pre;
+  overflow-x: auto;
+  border-radius: 4px;
+  margin: 0;
+}
+
+/* Reading mode uses the available width, but wide tables/images must still
+   stay inside the pane. `none` here would override their overflow guards. */
+.preview.preview-fullwidth > *,
+.preview.preview-fullwidth h1,
+.preview.preview-fullwidth h2,
+.preview.preview-fullwidth h3,
+.preview.preview-fullwidth h4,
+.preview.preview-fullwidth h5,
+.preview.preview-fullwidth h6,
+.preview.preview-fullwidth p,
+.preview.preview-fullwidth ul,
+.preview.preview-fullwidth ol,
+.preview.preview-fullwidth pre,
+.preview.preview-fullwidth blockquote,
+.preview.preview-fullwidth table {
+  max-width: 100%;
+}
+
+
+/* Document extensions share the same presentation in both Markdown modes. */
+:is(.preview, .milkdown .ProseMirror.md-document) .md-frontmatter { margin: 1em 0; padding: 0.6em 1em; border: 1px solid var(--preview-rule); border-radius: 6px; color: var(--preview-muted); }
+:is(.preview, .milkdown .ProseMirror.md-document) .md-frontmatter summary { cursor: pointer; font: 0.85em monospace; }
+:is(.preview, .milkdown .ProseMirror.md-document) .md-frontmatter pre { margin-bottom: 0; }
+:is(.preview, .milkdown .ProseMirror.md-document) .md-toc { margin: var(--md-diagram-space) 0; border-left: 2px solid var(--preview-rule); padding-left: 1em; }
+:is(.preview, .milkdown .ProseMirror.md-document) .md-toc ol { list-style: none; padding-left: 0; }
+:is(.preview, .milkdown .ProseMirror.md-document) .md-callout { border-left-color: var(--preview-link); }
+:is(.preview, .milkdown .ProseMirror.md-document) .md-callout-title { display: block; font-size: 0.85em; font-weight: 650; color: var(--preview-link); }
+:is(.preview, .milkdown .ProseMirror.md-document) .md-callout-warning, :is(.preview, .milkdown .ProseMirror.md-document) .md-callout-caution { border-left-color: #c58225; }
+:is(.preview, .milkdown .ProseMirror.md-document) .footnotes { font-size: 0.88em; color: var(--preview-muted); }
+:is(.preview, .milkdown .ProseMirror.md-document) .footnote-ref { font-size: 0.75em; vertical-align: super; }
+
+:is(.preview[data-md-theme="compact"], .md-surface[data-md-theme="compact"] .md-document) { --md-body-line-height: 1.6; line-height: var(--md-body-line-height); }
+:is(.preview[data-md-theme="compact"], .md-surface[data-md-theme="compact"] .md-document) p { margin-top: 0.65em; margin-bottom: 0.65em; }
+
+/* Directly editable alert/footnote content shares the preview spacing. */
+:is(.preview, .milkdown .ProseMirror.md-document) .md-callout-content > :first-child { margin-top: 0; }
+:is(.preview, .milkdown .ProseMirror.md-document) .md-callout-content > :last-child { margin-bottom: 0; }
+:is(.preview, .milkdown .ProseMirror.md-document) .md-footnote-content { display: contents; }
+:is(.preview, .milkdown .ProseMirror.md-document) .footnotes-list { margin: 0; }
+:is(.preview, .milkdown .ProseMirror.md-document) .md-footnote-content > p:last-child { display: inline; }
+:is(.preview, .milkdown .ProseMirror.md-document) .footnote-backref { margin-left: 0.25em; }
+:is(.preview, .milkdown .ProseMirror.md-document) .footnotes { margin-bottom: 0.8em; }
+.milkdown .md-document sup.footnote-ref { cursor: pointer; }
+
+:is(.preview, .milkdown .ProseMirror.md-document) mark { background: #f6d54a70; color: inherit; }
+
+/* Floating footnotes share document typography without affecting its layout. */
+:is(.preview, .milkdown .ProseMirror.md-document).md-footnote-preview { position: fixed; z-index: 90; width: 360px; max-width: calc(100vw - 16px); height: auto; max-height: min(320px, calc(100vh - 16px)); padding: 14px 16px; margin: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); box-shadow: 0 6px 24px #0003; font-size: 14px; }
+.preview.md-footnote-preview .md-footnote-content { display: contents; }
+.preview.md-footnote-preview .md-footnote-preview-content > :first-child { margin-top: 0; }
+.preview.md-footnote-preview .md-footnote-preview-content > :last-child { margin-bottom: 0; }
+.preview.md-footnote-preview .md-footnote-preview-jump { display: block; margin-top: 12px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 4px; color: var(--preview-link); font: inherit; background: var(--bg); cursor: pointer; }
+
+:is(.preview, .milkdown .ProseMirror.md-document) .legacy-diagram { text-align: center; overflow: auto; margin: 1em 0; }
+:is(.preview, .milkdown .ProseMirror.md-document) .legacy-diagram svg { max-width: 100%; height: auto; }
+.dark :is(.preview, .milkdown .ProseMirror.md-document) .legacy-diagram[data-legacy-kind="sequence"] svg { filter: invert(.88) hue-rotate(180deg); }
+
+:is(.preview, .milkdown .ProseMirror.md-document) iframe { max-width: 100%; border: 1px solid var(--border); }
+
+/* Shared fenced-code options apply to the preview and reading surface together. */
+.md-surface :is(.preview, .milkdown .ProseMirror.md-document) pre.shiki,
+.md-surface.preview pre.shiki { tab-size: var(--md-code-indent, 2); }
+.md-surface[data-md-code-wrap="true"] pre.shiki { white-space: pre-wrap; overflow-wrap: anywhere; }
+.md-surface[data-md-code-lines="true"] pre.shiki code { counter-reset: md-code-line; }
+.md-surface[data-md-code-lines="true"] pre.shiki code > .line::before { counter-increment: md-code-line; content: counter(md-code-line); display: inline-block; min-width: 2em; padding-right: 1em; text-align: right; color: var(--preview-muted); opacity: 0.65; user-select: none; }
+/* An empty final source line still occupies a row when line numbers are off. */
+.md-surface pre.shiki code > .line:empty::after { content: "\200b"; }

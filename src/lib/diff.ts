@@ -21,6 +21,44 @@ export interface DiffResult {
   stats: DiffStats;
 }
 
+/** A contiguous changed range, using aligned row indexes (end is exclusive). */
+export interface DiffHunk { start: number; end: number }
+
+export function diffHunks(rows: DiffRow[]): DiffHunk[] {
+  const hunks: DiffHunk[] = [];
+  rows.forEach((row, index) => {
+    if (row.changeType === "eq") return;
+    const previous = hunks[hunks.length - 1];
+    if (previous?.end === index) previous.end++;
+    else hunks.push({ start: index, end: index + 1 });
+  });
+  return hunks;
+}
+
+export type DiffDisplayRow = { kind: "line"; index: number } | { kind: "fold"; start: number; end: number };
+
+/** Keep one unchanged context row next to changes. Expansions are view-only. */
+export function diffDisplayRows(rows: DiffRow[], collapsed: boolean, expanded: ReadonlySet<number>): DiffDisplayRow[] {
+  const result: DiffDisplayRow[] = [];
+  for (let i = 0; i < rows.length;) {
+    if (!collapsed || rows[i].changeType !== "eq") {
+      result.push({ kind: "line", index: i++ });
+      continue;
+    }
+    const start = i;
+    while (i < rows.length && rows[i].changeType === "eq") i++;
+    const from = start === 0 ? start : start + 1;
+    const to = i === rows.length ? i : i - 1;
+    for (let j = start; j < i;) {
+      if (j === from && to > from && !expanded.has(from)) {
+        result.push({ kind: "fold", start: from, end: to });
+        j = to;
+      } else result.push({ kind: "line", index: j++ });
+    }
+  }
+  return result;
+}
+
 /** Run a line-level diff and convert jsdiff's hunk output into row-aligned form
  *  suitable for a side-by-side view. Adjacent removed+added chunks are paired
  *  so a "modified line" shows up on the same row on both sides. */

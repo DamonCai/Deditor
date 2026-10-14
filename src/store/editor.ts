@@ -1,10 +1,15 @@
+import { defaultMarkdownPreferences, type MarkdownPreferences } from "../lib/markdownPreferences";
+import { markdownSession, type MarkdownOrigin } from "../lib/markdownSession";
+import { isMarkdown, isCsv } from "../lib/lang";
 import { create } from "zustand";
+import { createContext, useContext } from "react";
 import { useShallow } from "zustand/shallow";
 import { DEFAULT_SHORTCUTS, type ShortcutId } from "../lib/shortcuts";
 import { isBinaryRenderable } from "../lib/lang";
 
 export type Theme = "light" | "dark";
 export type Lang = "zh" | "en";
+export type CsvMode = "source" | "split" | "read";
 
 /** A closed tab snapshot, just enough state to bring it back via Cmd+Shift+T.
  *  We don't persist these across launches — the stack is a session feature. */
@@ -41,6 +46,10 @@ export interface Tab {
    *  we stash the on-disk content here and surface a banner so the user can
    *  pick "reload from disk" or "keep my edits". Cleared once the user chooses. */
   externalChange?: string;
+  /** The path disappeared while its in-memory tab remains open for Save As. */
+  missingOnDisk?: boolean;
+  /** Temporary size for this open file only; excluded from persistence and reopen history. */
+  zoomFontSize?: number;
 }
 
 export interface TabPosition {
@@ -48,7 +57,26 @@ export interface TabPosition {
   scrollTopLine: number;
 }
 
+export type EditorPaneId = "left" | "right";
+export interface EditorPane {
+  tabIds: string[];
+  activeId: string | null;
+  csvMode: CsvMode;
+  markdownMode: "source" | "split" | "visual";
+  showPreview: boolean;
+  previewMaximized: boolean;
+}
+export const EditorPaneContext = createContext<EditorPaneId | null>(null);
+export const useEditorPaneId = () => useContext(EditorPaneContext);
+export const paneViewKey = (id: string, pane: EditorPaneId | null) => pane === "right" ? `${id}::right` : id;
+
 interface EditorState {
+  panes: { left: EditorPane; right: EditorPane } | null;
+  activePane: EditorPaneId;
+  splitRight: (id?: string) => void;
+  activatePane: (pane: EditorPaneId) => void;
+  mergePanes: () => void;
+  detachPaneTab: (id: string, pane: EditorPaneId) => void;
   tabs: Tab[];
   activeId: string | null;
   workspaces: string[];
@@ -58,9 +86,15 @@ interface EditorState {
   tabPositions: Record<string, TabPosition>;
   theme: Theme;
   language: Lang;
+  csvMode: CsvMode;
+  markdownMode: "source" | "split" | "visual";
   showPreview: boolean;
   showSidebar: boolean;
   previewMaximized: boolean;
+  /** Visibility of the right-side TOC in markdown reading (preview-maximized)
+   *  mode. Has no effect outside reading mode. Persisted. */
+  tocVisible: boolean;
+  markdownSettings: MarkdownPreferences;
   editorFontSize: number;
   /** Path of the file the user marked via "Select for Compare" in the file
    *  tree. Right-clicking another file then offers "Compare with Selected". */
@@ -83,6 +117,8 @@ interface EditorState {
   /** Whether the Goto Anything palette is showing. Lifted to store so the
    *  Command Palette can dispatch it as a runnable action. */
   gotoAnythingOpen: boolean;
+  recentFilesOpen: boolean;
+  recentFiles: string[];
   /** Whether the Command Palette is showing. */
   commandPaletteOpen: boolean;
   gotoSymbolOpen: boolean;
@@ -107,9 +143,8 @@ interface EditorState {
   showMinimap: boolean;
   /** Auto-close brackets / quotes (CodeMirror's `closeBrackets` extension). */
   autoCloseBrackets: boolean;
-  /** Split the editor area into two side-by-side views of the same active
-   *  tab (independent cursor + scroll). Toggled via the command palette /
-   *  shortcut. Tab list itself is unchanged — both views read the same tab. */
+  /** Compatibility flag for two editor groups. The document list remains
+   * shared; each pane owns its tabs, active document and display mode. */
   splitEditor: boolean;
   /** Distraction-free mode hides the title bar, tab bar, sidebar, status
    *  bar — only the editor (and Markdown preview if active) remain. Toggled
@@ -123,7 +158,7 @@ interface EditorState {
    *  formatter setup. */
   formatOnSave: boolean;
 
-  setContent: (content: string, tabId?: string) => void;
+  setContent: (content: string, tabId?: string, origin?: MarkdownOrigin) => void;
   // Open a new tab (or focus existing one for the same path).
   openTab: (filePath: string | null, content: string) => string;
   // Open a side-by-side diff tab. Dedupes on (leftPath, rightPath).
@@ -141,6 +176,7 @@ interface EditorState {
   resetShortcuts: () => void;
   setSettingsOpen: (open: boolean) => void;
   setGotoAnythingOpen: (open: boolean) => void;
+  setRecentFilesOpen: (open: boolean) => void;
   setCommandPaletteOpen: (open: boolean) => void;
   setGotoSymbolOpen: (open: boolean) => void;
   setFindInFilesOpen: (open: boolean) => void;
@@ -179,7 +215,10 @@ interface EditorState {
   togglePreviewMaximized: () => void;
   toggleSidebar: () => void;
   setShowSidebar: (v: boolean) => void;
+  toggleTocVisible: () => void;
+  setTocVisible: (v: boolean) => void;
   setEditorFontSize: (px: number) => void;
+  setEditorZoomFontSize: (tabId: string, px: number | null) => void;
   isActiveDirty: () => boolean;
 }
 
@@ -278,7 +317,7 @@ A Markdown / multi-language code editor built on **Tauri + React + CodeMirror**.
 - \`Cmd/Ctrl+,\` Open Settings
 - \`Cmd/Ctrl+B\` Toggle the file tree sidebar
 - \`Cmd/Ctrl+K\` Toggle Zen mode (hide all chrome)
-- \`Cmd/Ctrl+\\\` Toggle split editor (two views of the same file)
+- \`Cmd/Ctrl+\\\` Toggle left/right editor groups
 - Click a tab in the bar to switch; middle-click to close
 
 ### Editing
@@ -350,7 +389,77 @@ function makeTab(filePath: string | null, content: string): Tab {
 
 const initial = makeTab(null, DEFAULT_CONTENT);
 
-export const useEditorStore = create<EditorState>((set, get) => ({
+function paneSnapshot(s: EditorState): EditorPane {
+  return { tabIds: s.tabs.map(t => t.id), activeId: s.activeId, csvMode: s.csvMode, markdownMode: s.markdownMode, showPreview: s.showPreview, previewMaximized: s.previewMaximized };
+}
+/** Keep legacy global commands pointed at the focused pane, atomically with
+ * opens/closes and mode changes. Document objects remain shared by both panes. */
+function normalizePanes(previous: EditorState, patch: Partial<EditorState>): Partial<EditorState> {
+  const next = { ...previous, ...patch };
+  if (!next.panes) return patch;
+  if (patch.panes !== undefined || patch.activePane !== undefined) {
+    const pane = next.panes[next.activePane];
+    return { ...patch, activeId: pane.activeId, csvMode: pane.csvMode, markdownMode: pane.markdownMode, showPreview: pane.showPreview, previewMaximized: pane.previewMaximized, splitEditor: true };
+  }
+  if ((next.tabs === previous.tabs || next.tabs.length === previous.tabs.length && next.tabs.every((t, i) => t.id === previous.tabs[i].id)) && next.activeId === previous.activeId && next.csvMode === previous.csvMode && next.markdownMode === previous.markdownMode && next.showPreview === previous.showPreview && next.previewMaximized === previous.previewMaximized) return patch;
+  const live = new Set(next.tabs.map(t => t.id));
+  const panes = { ...next.panes };
+  for (const key of ["left", "right"] as const) {
+    const old = panes[key];
+    let tabIds = old.tabIds.filter(id => live.has(id));
+    let activeId = tabIds.includes(old.activeId ?? "") ? old.activeId : tabIds[0] ?? null;
+    if (key === next.activePane && next.activeId && live.has(next.activeId)) {
+      // An open or explicit selection belongs to the focused group. After a
+      // close, prefer its remaining neighbour to the global document order.
+      if (next.activeId !== previous.activeId && live.has(previous.activeId ?? "")) {
+        activeId = next.activeId;
+        if (!tabIds.includes(activeId)) tabIds = [...tabIds, activeId];
+      }
+      for (const tab of next.tabs) if (!previous.tabs.some(t => t.id === tab.id) && !tabIds.includes(tab.id)) { tabIds = [...tabIds, tab.id]; activeId = tab.id; }
+    }
+    const modes = key === next.activePane ? { csvMode: next.csvMode, markdownMode: next.markdownMode, showPreview: next.showPreview, previewMaximized: next.previewMaximized } : old;
+    panes[key] = { tabIds, activeId, csvMode: modes.csvMode, markdownMode: modes.markdownMode, showPreview: modes.showPreview, previewMaximized: modes.previewMaximized };
+  }
+  if (!panes.left.tabIds.length || !panes.right.tabIds.length) {
+    const surviving = panes.left.tabIds.length ? panes.left : panes.right;
+    return { ...patch, panes: null, activePane: "left", splitEditor: false, activeId: surviving.activeId, csvMode: surviving.csvMode, markdownMode: surviving.markdownMode, showPreview: surviving.showPreview, previewMaximized: surviving.previewMaximized };
+  }
+  return { ...patch, panes, activeId: panes[next.activePane].activeId };
+}
+const editorStore = create<EditorState>((rawSet, get) => {
+  const set: typeof rawSet = (patch, replace) => rawSet(state => normalizePanes(state, typeof patch === "function" ? patch(state) : patch) as EditorState, replace as false);
+  return ({
+  panes: null,
+  activePane: "left",
+  splitRight: (id) => {
+    const state = get(), target = id ?? state.activeId;
+    if (!target || !state.tabs.some(t => t.id === target)) return;
+    const left = state.panes?.left ?? paneSnapshot(state);
+    const right = state.panes?.right ?? { ...paneSnapshot(state), tabIds: [], activeId: null };
+    set({ panes: { left, right: { ...right, tabIds: right.tabIds.includes(target) ? right.tabIds : [...right.tabIds, target], activeId: target } }, activePane: "right" });
+  },
+  activatePane: (pane) => {
+    const state = get();
+    if (!state.panes || state.activePane === pane) return;
+    set({ activePane: pane });
+  },
+  mergePanes: () => {
+    const state = get();
+    if (!state.panes) return;
+    // Closing the split keeps every document, including unsaved right-only tabs.
+    const ids = [...new Set([...state.panes.left.tabIds, ...state.panes.right.tabIds])];
+    set({ panes: null, activePane: "left", splitEditor: false, tabs: ids.map(id => state.tabs.find(t => t.id === id)!).filter(Boolean) });
+  },
+  detachPaneTab: (id, pane) => {
+    const state = get(); if (!state.panes) return;
+    const group = state.panes[pane], other = pane === "left" ? "right" : "left";
+    if (!state.panes[other].tabIds.includes(id)) return;
+    const tabIds = group.tabIds.filter(t => t !== id);
+    if (!tabIds.length) {
+      const remaining = state.panes[other];
+      set({ panes: null, activePane: "left", splitEditor: false, activeId: remaining.activeId, csvMode: remaining.csvMode, markdownMode: remaining.markdownMode, showPreview: remaining.showPreview, previewMaximized: remaining.previewMaximized });
+    } else set({ panes: { ...state.panes, [pane]: { ...group, tabIds, activeId: group.activeId === id ? tabIds[Math.min(group.tabIds.indexOf(id), tabIds.length - 1)] : group.activeId } } });
+  },
   tabs: [initial],
   activeId: initial.id,
   workspaces: [],
@@ -361,9 +470,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       ? "dark"
       : "light",
   language: detectLang(),
+  csvMode: "source",
+  markdownMode: "split",
   showPreview: true,
   showSidebar: true,
   previewMaximized: false,
+  tocVisible: false,
+  markdownSettings: { ...defaultMarkdownPreferences },
   editorFontSize: 14,
   compareMarkPath: null,
   activeSelectionLength: 0,
@@ -371,6 +484,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   shortcuts: { ...DEFAULT_SHORTCUTS },
   settingsOpen: false,
   gotoAnythingOpen: false,
+  recentFilesOpen: false,
+  recentFiles: [],
   commandPaletteOpen: false,
   gotoSymbolOpen: false,
   findInFilesOpen: false,
@@ -385,9 +500,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   autoSave: "off",
   formatOnSave: false,
 
-  setContent: (content, tabId) => {
+  setContent: (content, tabId, origin = "command") => {
     const { tabs, activeId } = get();
     const target = tabId ?? activeId;
+    const tab = tabs.find(t => t.id === target);
+    if (tab && !tab.diff && isMarkdown(tab.filePath)) markdownSession(tab.id, tab.content).commit(content, origin);
     set({
       tabs: tabs.map((t) => (t.id === target ? { ...t, content } : t)),
     });
@@ -407,7 +524,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       active &&
       active.filePath === null &&
       active.content === active.savedContent &&
-      tabs.length === 1;
+      tabs.length === 1 && !get().panes;
 
     if (replaceActive) {
       const t = makeTab(filePath, content);
@@ -466,11 +583,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   setShortcuts: (next) => set({ shortcuts: { ...next } }),
   resetShortcuts: () => set({ shortcuts: { ...DEFAULT_SHORTCUTS } }),
-  setSettingsOpen: (open) => set({ settingsOpen: open }),
-  setGotoAnythingOpen: (open) => set({ gotoAnythingOpen: open }),
-  setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
-  setGotoSymbolOpen: (open) => set({ gotoSymbolOpen: open }),
-  setFindInFilesOpen: (open) => set({ findInFilesOpen: open }),
+  setSettingsOpen: (open) => set({ settingsOpen: open, ...(open ? { recentFilesOpen: false } : {}) }),
+  setGotoAnythingOpen: (open) => set({ gotoAnythingOpen: open, ...(open ? { recentFilesOpen: false } : {}) }),
+  setRecentFilesOpen: (open) => set({ recentFilesOpen: open, ...(open ? { settingsOpen: false, gotoAnythingOpen: false, commandPaletteOpen: false, gotoSymbolOpen: false, findInFilesOpen: false } : {}) }),
+  setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open, ...(open ? { recentFilesOpen: false } : {}) }),
+  setGotoSymbolOpen: (open) => set({ gotoSymbolOpen: open, ...(open ? { recentFilesOpen: false } : {}) }),
+  setFindInFilesOpen: (open) => set({ findInFilesOpen: open, ...(open ? { recentFilesOpen: false } : {}) }),
 
   setDirExpanded: (path, expanded) => {
     const cur = get().expandedDirs;
@@ -482,8 +600,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setShowWhitespace: (on) => set({ showWhitespace: on }),
   setShowMinimap: (on) => set({ showMinimap: on }),
   setAutoCloseBrackets: (on) => set({ autoCloseBrackets: on }),
-  toggleSplitEditor: () => set({ splitEditor: !get().splitEditor }),
-  setSplitEditor: (on) => set({ splitEditor: on }),
+  toggleSplitEditor: () => get().panes ? get().mergePanes() : get().splitRight(),
+  setSplitEditor: (on) => on ? get().splitRight() : get().mergePanes(),
   toggleZenMode: () => set({ zenMode: !get().zenMode }),
   setZenMode: (on) => set({ zenMode: on }),
   setAutoSave: (mode) => set({ autoSave: mode }),
@@ -599,7 +717,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   reorderTabs: (fromIdx, toIdx) => {
-    const { tabs, activeId } = get();
+    const { tabs, activeId, panes, activePane } = get();
+    if (panes) {
+      const group = panes[activePane], ids = [...group.tabIds];
+      if (fromIdx < 0 || fromIdx >= ids.length || toIdx < 0 || toIdx > ids.length) return;
+      const [id] = ids.splice(fromIdx, 1); ids.splice(toIdx > fromIdx ? toIdx - 1 : toIdx, 0, id);
+      set({ panes: { ...panes, [activePane]: { ...group, tabIds: ids } } }); return;
+    }
     if (fromIdx < 0 || fromIdx >= tabs.length || toIdx < 0 || toIdx > tabs.length) return;
     // After splice(fromIdx, 1) + splice(toIdx, 0, ...), the tab only changes
     // position if the final index differs. When toIdx > fromIdx the final
@@ -677,25 +801,64 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({ language, tabs });
   },
   togglePreview: () => {
+    const tab = get().tabs.find(t => t.id === get().activeId);
+    if (tab && !tab.diff && isMarkdown(tab.filePath)) { set({ markdownMode: get().markdownMode === "source" ? "split" : "source" }); return; }
+    if (tab && !tab.diff && isCsv(tab.filePath)) { set({ csvMode: get().csvMode === "source" ? "split" : "source" }); return; }
     const next = !get().showPreview;
     // turning preview off also exits maximized
     set({ showPreview: next, previewMaximized: next ? get().previewMaximized : false });
   },
   togglePreviewMaximized: () => {
+    const tab = get().tabs.find(t => t.id === get().activeId);
+    if (tab && !tab.diff && isMarkdown(tab.filePath)) { set({ markdownMode: get().markdownMode === "visual" ? "split" : "visual" }); return; }
+    if (tab && !tab.diff && isCsv(tab.filePath)) { set({ csvMode: get().csvMode === "read" ? "split" : "read" }); return; }
     const next = !get().previewMaximized;
     // entering maximized also turns preview on
     set({ previewMaximized: next, showPreview: next ? true : get().showPreview });
   },
   toggleSidebar: () => set({ showSidebar: !get().showSidebar }),
   setShowSidebar: (v) => set({ showSidebar: v }),
-  setEditorFontSize: (px) =>
-    set({ editorFontSize: Math.max(10, Math.min(28, Math.round(px))) }),
+  toggleTocVisible: () => set({ tocVisible: !get().tocVisible }),
+  setTocVisible: (v) => set({ tocVisible: v }),
+  setEditorFontSize: (px) => {
+    const size = Math.max(10, Math.min(28, Math.round(px)));
+    set({ editorFontSize: size });
+  },
+  setEditorZoomFontSize: (tabId, px) => {
+    if (px !== null && !Number.isFinite(px)) return;
+    const size = px === null ? undefined : Math.max(10, Math.min(28, Math.round(px)));
+    set((state) => ({ tabs: state.tabs.map((tab) => tab.id === tabId
+      ? { ...tab, zoomFontSize: size === state.editorFontSize ? undefined : size }
+      : tab) }));
+  },
   isActiveDirty: () => {
     const { tabs, activeId } = get();
     const t = tabs.find((x) => x.id === activeId);
-    return !!t && t.content !== t.savedContent;
+    return !!t && isTabDirty(t);
   },
-}));
+});
+});
+const rawSetState = editorStore.setState;
+editorStore.setState = (patch, replace) => rawSetState(state => normalizePanes(state, typeof patch === "function" ? patch(state) : patch) as EditorState, replace as false);
+/** Selectors inside a pane see that pane's file and display mode. Imperative
+ * commands keep using the focused global state; pointer/focus capture activates
+ * the destination before its controls run. */
+const paneSnapshots = new WeakMap<EditorState, Partial<Record<EditorPaneId, EditorState>>>();
+function useScopedEditorStore<T>(selector: (state: EditorState) => T): T {
+  const paneId = useEditorPaneId();
+  return editorStore(state => {
+    const pane = paneId && state.panes?.[paneId];
+    if (!pane || !paneId) return selector(state);
+    const cache = paneSnapshots.get(state) ?? {};
+    if (!cache[paneId]) {
+      const documents = new Map(state.tabs.map(tab => [tab.id, tab]));
+      cache[paneId] = { ...state, tabs: pane.tabIds.map(id => documents.get(id)!).filter(Boolean), activeId: pane.activeId, csvMode: pane.csvMode, markdownMode: pane.markdownMode, showPreview: pane.showPreview, previewMaximized: pane.previewMaximized };
+      paneSnapshots.set(state, cache);
+    }
+    return selector(cache[paneId]!);
+  });
+}
+export const useEditorStore = Object.assign(useScopedEditorStore, editorStore);
 
 export function useActiveTab(): Tab | null {
   return useEditorStore(
@@ -717,6 +880,7 @@ export interface ActiveTabMeta {
   filePath: string | null;
   isDiff: boolean;
   hasExternalChange: boolean;
+  missingOnDisk: boolean;
 }
 export function useActiveTabMeta(): ActiveTabMeta | null {
   return useEditorStore(
@@ -728,6 +892,7 @@ export function useActiveTabMeta(): ActiveTabMeta | null {
         filePath: t.filePath,
         isDiff: !!t.diff,
         hasExternalChange: t.externalChange != null,
+        missingOnDisk: !!t.missingOnDisk,
       };
     }),
   );
@@ -748,7 +913,7 @@ export function useActiveTabHeader(): { filePath: string | null; dirty: boolean 
     useShallow((s) => {
       const t = s.tabs.find((x) => x.id === s.activeId);
       if (!t) return null;
-      return { filePath: t.filePath, dirty: t.content !== t.savedContent };
+      return { filePath: t.filePath, dirty: isTabDirty(t) };
     }),
   );
 }
@@ -759,6 +924,23 @@ export function useActiveTabHeader(): { filePath: string | null; dirty: boolean 
 export function useActiveTabContent(): string {
   return useEditorStore(
     (s) => s.tabs.find((x) => x.id === s.activeId)?.content ?? "",
+  );
+}
+
+/** A specific tab's text content (keyed by id). Use this inside per-tab
+ *  components (e.g. PreviewHost's per-tab Preview instance) so each slot
+ *  subscribes only to its own tab's content and a keystroke in tab A doesn't
+ *  re-render tab B's Preview. */
+export function useTabContent(tabId: string | null | undefined): string {
+  return useEditorStore(
+    (s) => (tabId ? s.tabs.find((x) => x.id === tabId)?.content ?? "" : ""),
+  );
+}
+
+/** A specific tab's filePath (keyed by id). */
+export function useTabFilePath(tabId: string | null | undefined): string | null {
+  return useEditorStore(
+    (s) => (tabId ? s.tabs.find((x) => x.id === tabId)?.filePath ?? null : null),
   );
 }
 
@@ -778,5 +960,5 @@ export function useActiveTabExternalChange(): string | null {
 }
 
 export function isTabDirty(t: Tab): boolean {
-  return t.content !== t.savedContent;
+  return !!t.missingOnDisk || t.content !== t.savedContent;
 }

@@ -1,3 +1,5 @@
+import { getVisualEditor } from "../lib/markdownVisualBridge";
+import { useModalFocus } from "../lib/useModalFocus";
 import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useActiveTab } from "../store/editor";
 import { extractSymbols, type Symbol } from "../lib/symbols";
@@ -20,6 +22,7 @@ const MAX_RESULTS = 200;
 
 export default function GotoSymbol({ open, onClose }: Props) {
   const t = useT();
+  const panelRef = useModalFocus(open, onClose);
   const active = useActiveTab();
   const content = active?.content ?? "";
   const filePath = active?.filePath ?? null;
@@ -76,6 +79,8 @@ export default function GotoSymbol({ open, onClose }: Props) {
   const choose = (idx: number) => {
     const r = results[idx];
     if (!r) return;
+    const visual = getVisualEditor();
+    if (visual?.navigate) { visual.navigate(r.sym.line); onClose(); return; }
     const view = getActiveView();
     if (view) {
       const total = view.state.doc.lines;
@@ -116,7 +121,7 @@ export default function GotoSymbol({ open, onClose }: Props) {
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(0,0,0,0.35)",
+        background: "var(--modal-backdrop)",
         zIndex: 1050,
         display: "flex",
         justifyContent: "center",
@@ -124,6 +129,11 @@ export default function GotoSymbol({ open, onClose }: Props) {
       }}
     >
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t("symbol.title")}
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
         style={{
           width: "min(560px, 90vw)",
@@ -138,7 +148,9 @@ export default function GotoSymbol({ open, onClose }: Props) {
         }}
       >
         <input
+          className="deditor-palette-input"
           ref={inputRef}
+          aria-label={t("symbol.title")}
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);

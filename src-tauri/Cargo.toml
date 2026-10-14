@@ -1,6 +1,6 @@
 [package]
 name = "deditor"
-version = "0.8.0"
+version = "1.0.2"
 description = "DEditor - Markdown and multi-language code editor"
 authors = ["DEditor"]
 license = ""
@@ -12,11 +12,19 @@ rust-version = "1.77.2"
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[[test]]
+name = "native_save_shortcut"
+path = "../scripts/test-native-save-shortcut.rs"
+harness = false
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+tauri-utils = "2"
+serde_json = "1.0"
+json-patch = "3"
 
 [dependencies]
-serde_json = "1.0"
+serde_json = { version = "1.0", features = ["raw_value"] }
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2", features = ["protocol-asset"] }
@@ -25,6 +33,8 @@ tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-window-state = "2"
 base64 = "0.22"
+reqwest = { version = "0.13.2", default-features = false, features = ["blocking", "json", "rustls"] }
+quick-xml = "0.38"
 # Data-parallel iteration. Used by find_in_files to scan many small files in
 # parallel across CPU cores — single-threaded scanning was the bottleneck on
 # Cmd+Shift+F over a multi-thousand-file workspace.
@@ -34,6 +44,7 @@ rayon = "1.10"
 # ("Start Dictation…", "Emoji & Symbols", "AutoFill", Speech submenu, …)
 # that bypass our localized labels and stay in the system locale.
 [target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
 objc2 = "0.6"
 objc2-app-kit = "0.3"
 objc2-foundation = "0.3"

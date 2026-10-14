@@ -1,6 +1,9 @@
+import { dropTextHistory } from "./lib/textHistory";
+import { dropMarkdownSession } from "./lib/markdownSession";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import Tooltip from "./components/ui/Tooltip";
 import { installGlobalLogHandlers } from "./lib/logger";
 import { useEditorStore } from "./store/editor";
 // Import the cache module directly (not from components/Editor) so this
@@ -8,6 +11,13 @@ import { useEditorStore } from "./store/editor";
 // lazy-loaded; only its compiled chunk depends on @codemirror/*.
 import { dropEditorStateCache } from "./lib/editorStateCache";
 import "./styles.css";
+
+// JetBrains' fonts are private to its runtime, rather than Windows system fonts.
+// Ship the Windows faces so the same declared stack resolves offline in WebView2.
+if (/Windows/i.test(navigator.userAgent)) {
+  document.documentElement.dataset.platform = "windows";
+  void import("./windows-fonts.css");
+}
 
 installGlobalLogHandlers();
 
@@ -34,12 +44,13 @@ useEditorStore.subscribe((next, prev) => {
   const liveIds = new Set<string>();
   for (const t of a) liveIds.add(t.id);
   for (const t of b) {
-    if (!liveIds.has(t.id)) dropEditorStateCache(t.id);
+    if (!liveIds.has(t.id)) { dropEditorStateCache(t.id); dropMarkdownSession(t.id); dropTextHistory(t.id); }
   }
 });
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <App />
+    <Tooltip />
   </React.StrictMode>,
 );

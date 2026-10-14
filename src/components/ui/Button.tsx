@@ -8,7 +8,7 @@ interface Props extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "style"> {
   /** sm / md = text rows. icon = 24x24 square (toolbar). iconLg = 28x28. */
   size?: "sm" | "md" | "icon" | "iconLg";
   /** Visually-active state for two-state toggles (Aa, ▸ etc). */
-  pressed?: boolean;
+  pressed?: boolean | "mixed";
   style?: CSSProperties;
 }
 
@@ -30,6 +30,7 @@ export const Button = forwardRef<HTMLButtonElement, Props>(function Button(
     style,
     disabled,
     children,
+    title,
     ...rest
   },
   ref,
@@ -43,53 +44,24 @@ export const Button = forwardRef<HTMLButtonElement, Props>(function Button(
       : "5px 12px";
   const fontSize = size === "sm" ? 11 : 12;
 
-  let base: CSSProperties;
-  switch (variant) {
-    case "primary":
-      base = {
-        background: "var(--accent)",
-        color: "#ffffff",
-        border: "1px solid var(--accent)",
-      };
-      break;
-    case "danger":
-      base = {
-        background: "#e55353",
-        color: "#ffffff",
-        border: "1px solid #e55353",
-      };
-      break;
-    case "ghost":
-      base = {
-        background: pressed ? "var(--bg-mute)" : "transparent",
-        color: "var(--text-soft)",
-        border: "none",
-      };
-      break;
-    case "secondary":
-    default:
-      base = {
-        background: pressed ? "var(--bg-mute)" : "transparent",
-        color: "var(--text)",
-        border: "1px solid var(--border)",
-      };
-  }
-
   return (
     <button
       {...rest}
       ref={ref}
+      type={rest.type ?? "button"}
+      aria-pressed={pressed}
+      aria-label={rest["aria-label"] ?? (isIcon ? title : undefined)}
+      data-tooltip={title ?? (isIcon ? rest["aria-label"] : undefined)}
+      title=""
       disabled={disabled}
       data-variant={variant}
-      data-pressed={pressed ? "true" : undefined}
+      data-size={size}
+      data-pressed={pressed === "mixed" ? "mixed" : pressed ? "true" : undefined}
       className={[rest.className ?? "", "deditor-btn"].join(" ").trim()}
       style={{
-        ...base,
         padding,
         fontSize,
         borderRadius: 4,
-        cursor: disabled ? "not-allowed" : "pointer",
-        opacity: disabled ? 0.5 : 1,
         transition: "background 120ms ease, color 120ms ease, border-color 120ms ease",
         whiteSpace: "nowrap",
         ...(isIcon

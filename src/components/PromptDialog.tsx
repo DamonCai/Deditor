@@ -1,3 +1,4 @@
+import { useModalFocus } from "../lib/useModalFocus";
 import { useEffect, useRef } from "react";
 import { create } from "zustand";
 import { tStatic } from "../lib/i18n";
@@ -53,34 +54,40 @@ export default function PromptDialog() {
     }
   }, [open]);
 
-  if (!open) return null;
-
   const close = (v: string | null) => {
     resolve?.(v);
     useDlg.setState({ open: false, resolve: null });
   };
+
+  const panelRef = useModalFocus(open, () => close(null), resolve);
+  if (!open) return null;
 
   return (
     <div
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(0,0,0,0.45)",
+        background: "var(--modal-backdrop)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        zIndex: 1000,
+        zIndex: 3000,
       }}
       onClick={(e) => {
         if (e.target === e.currentTarget) close(null);
       }}
     >
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
         onKeyDown={(e) => {
           if (e.key === "Escape") close(null);
         }}
         style={{
-          minWidth: 380,
+          width: "min(520px, calc(100vw - 32px))",
           maxWidth: 520,
           background: "var(--bg)",
           color: "var(--text)",
@@ -97,7 +104,9 @@ export default function PromptDialog() {
           </div>
         )}
         <input
+          className="deditor-input"
           ref={inputRef}
+          aria-label={label || title}
           defaultValue={initial}
           placeholder={placeholder}
           spellCheck={false}
@@ -109,14 +118,6 @@ export default function PromptDialog() {
           }}
           style={{
             width: "100%",
-            background: "var(--bg-soft)",
-            border: "1px solid var(--border)",
-            color: "var(--text)",
-            borderRadius: 5,
-            padding: "6px 10px",
-            fontSize: 13,
-            outline: "none",
-            boxSizing: "border-box",
             marginBottom: 14,
           }}
         />

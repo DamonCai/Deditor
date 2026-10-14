@@ -1,0 +1,46 @@
+[
+  {
+    "index": 0,
+    "value": "org.xmind.arrowShape.none"
+  },
+  {
+    "index": 1,
+    "value": "org.xmind.arrowShape.dot"
+  },
+  {
+    "index": 2,
+    "value": "org.xmind.arrowShape.triangle"
+  },
+  {
+    "index": 3,
+    "value": "org.xmind.arrowShape.spearhead"
+  },
+  {
+    "index": 4,
+    "value": "org.xmind.arrowShape.square"
+  },
+  {
+    "index": 5,
+    "value": "org.xmind.arrowShape.diamond"
+  },
+  {
+    "index": 6,
+    "value": "org.xmind.arrowShape.herringbone"
+  },
+  {
+    "index": 7,
+    "value": "org.xmind.arrowShape.doublearrow"
+  },
+  {
+    "index": 8,
+    "value": "org.xmind.arrowShape.antiTriangle"
+  },
+  {
+    "index": 9,
+    "value": "org.xmind.arrowShape.attached"
+  },
+  {
+    "index": 10,
+    "value": "org.xmind.arrowShape.hook"
+  }
+]

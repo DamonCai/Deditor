@@ -1,4 +1,5 @@
-import { memo, useCallback, useEffect, useState } from "react";
+import { showError } from "../lib/feedback";
+import { memo, useCallback, useEffect, useId, useRef, useState } from "react";
 import { useShallow } from "zustand/shallow";
 import { useEditorStore, useActiveTabFilePath } from "../store/editor";
 import {
@@ -14,17 +15,26 @@ import {
   setWorkspaceByPath,
   type DirEntry,
 } from "../lib/fileio";
-import { onRefresh } from "../lib/treeRefresh";
+import { notifyRefreshAll, onRefresh } from "../lib/treeRefresh";
 import LangIcon from "./LangIcon";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
 import { promptInput } from "./PromptDialog";
 import { confirmDelete } from "./ConfirmDialog";
 import { logError } from "../lib/logger";
 import { useT, tStatic } from "../lib/i18n";
-import { FiFolder, FiFolderPlus, FiChevronsLeft } from "react-icons/fi";
+import { FiChevronRight, FiCrosshair, FiFolder, FiFolderPlus, FiMoreHorizontal, FiX } from "react-icons/fi";
 import { Button } from "./ui/Button";
 
 const FOLDER_COLOR = "#dcb67a"; // soft amber, matches VSCode default folder icon
+
+function treePath(path: string): string {
+  const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
+  return /^(?:[a-z]:|\/\/)/i.test(normalized) ? normalized.toLowerCase() : normalized;
+}
+
+function containsFile(root: string, file: string): boolean {
+  return treePath(file).startsWith(`${treePath(root)}/`);
+}
 
 interface MenuState {
   x: number;
@@ -44,33 +54,197 @@ function FileTreeImpl() {
   // waking FileTree when contents match.
   const workspaces = useEditorStore(useShallow((s) => s.workspaces));
   const removeWorkspace = useEditorStore((s) => s.removeWorkspace);
-  const toggleSidebar = useEditorStore((s) => s.toggleSidebar);
   const filePath = useActiveTabFilePath();
   const setCompareMarkPath = useEditorStore((s) => s.setCompareMarkPath);
   const [pathInput, setPathInput] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string } | null>(null);
+  const errorId = useId();
+  const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [menu, setMenu] = useState<MenuState | null>(null);
+  const treeRef = useRef<HTMLDivElement>(null);
+  const operation = useRef(0);
+  const [expanding, setExpanding] = useState(false);
+  const [revealRequest, setRevealRequest] = useState<{ path: string; id: number } | null>(null);
+  const activeWorkspace = filePath
+    ? [...workspaces].sort((a, b) => b.length - a.length).find((w) => containsFile(w, filePath))
+    : undefined;
+
+  useEffect(() => {
+    setExpanding(false);
+    setRevealRequest(null);
+    return () => { operation.current++; };
+  }, [workspaces]);
+
+  useEffect(() => {
+    // Files may be created, moved or removed by another app while DEditor is
+    // in the background. Re-list only mounted (visible/expanded) tree folders.
+    let lastRefresh = 0;
+    const refresh = () => {
+      if (document.hidden || Date.now() - lastRefresh < 1000) return;
+      lastRefresh = Date.now();
+      notifyRefreshAll();
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!revealRequest || revealRequest.path !== filePath || !treeRef.current) return;
+    const container = treeRef.current;
+    const reveal = () => {
+      const row = [...container.querySelectorAll<HTMLButtonElement>("[data-file-path]")]
+        .find((el) => treePath(el.dataset.filePath!) === treePath(revealRequest.path));
+      if (!row) return false;
+      row.scrollIntoView({ block: "center", inline: "nearest" });
+      row.focus({ preventScroll: true });
+      setRevealRequest(null);
+      return true;
+    };
+    if (reveal()) return;
+    // Ancestors load asynchronously; reveal only once the actual row exists.
+    const observer = new MutationObserver(() => { if (reveal()) observer.disconnect(); });
+    observer.observe(container, { childList: true, subtree: true });
+    const timeout = setTimeout(() => {
+      observer.disconnect();
+      setRevealRequest(null);
+      setError({ message: t("filetree.locateFailed") });
+    }, 10000);
+    return () => { observer.disconnect(); clearTimeout(timeout); };
+  }, [revealRequest, filePath, t]);
+
+  const collapseAll = () => {
+    operation.current++;
+    setExpanding(false);
+    setRevealRequest(null);
+    const state = useEditorStore.getState();
+    const expandedDirs = { ...state.expandedDirs };
+    for (const path of [...Object.keys(expandedDirs), ...workspaces]) {
+      if (workspaces.some((w) => treePath(w) === treePath(path) || containsFile(w, path))) {
+        expandedDirs[path] = false;
+      }
+    }
+    useEditorStore.setState({ expandedDirs });
+  };
+
+  const expandAll = async () => {
+    const id = ++operation.current;
+    setRevealRequest(null);
+    setError(null);
+    setExpanding(true);
+    const pending = [...workspaces];
+    const expanded = new Set<string>();
+    let failed = false;
+    // Bound accidental expansion of very large workspaces. Collapse cancels
+    // outstanding reads without allowing their result to reopen the tree.
+    while (pending.length && expanded.size < 5000) {
+      const path = pending.shift()!;
+      if (expanded.has(path)) continue;
+      expanded.add(path);
+      try {
+        const entries = await listDir(path);
+        if (id !== operation.current) return;
+        pending.push(...entries.filter((e) => e.is_dir).map((e) => e.path));
+      } catch (err) {
+        if (id !== operation.current) return;
+        logError("Expand directory failed", err);
+        failed = true;
+      }
+    }
+    if (id !== operation.current) return;
+    useEditorStore.setState((state) => ({
+      expandedDirs: { ...state.expandedDirs, ...Object.fromEntries([...expanded].map((p) => [p, true])) },
+    }));
+    setExpanding(false);
+    if (failed || pending.length) setError({ message: t(pending.length ? "filetree.expandLimit" : "filetree.expandFailed") });
+  };
+
+  const locateFile = async () => {
+    if (!filePath) return;
+    const id = ++operation.current;
+    setExpanding(false);
+    setError(null);
+    setRevealRequest(null);
+    if (!activeWorkspace) {
+      await revealInFinder(filePath);
+      return;
+    }
+    const ancestors: Record<string, boolean> = { [activeWorkspace]: true };
+    let parent = activeWorkspace;
+    try {
+      // Use paths returned by the backend, including their separator/casing.
+      // This also detects hidden or removed files without opening a new tab.
+      while (true) {
+        const entries = await listDir(parent);
+        if (id !== operation.current || useEditorStore.getState().tabs.find((tab) => tab.id === useEditorStore.getState().activeId)?.filePath !== filePath) return;
+        if (entries.some((e) => !e.is_dir && treePath(e.path) === treePath(filePath))) break;
+        const child = entries.find((e) => e.is_dir && containsFile(e.path, filePath));
+        if (!child) throw new Error("Current file is not visible in the directory tree");
+        parent = child.path;
+        ancestors[parent] = true;
+      }
+    } catch (err) {
+      if (id !== operation.current) return;
+      logError("Locate current file failed", err);
+      setError({ message: t("filetree.locateFailed") });
+      return;
+    }
+    useEditorStore.setState((state) => ({ expandedDirs: { ...state.expandedDirs, ...ancestors } }));
+    setRevealRequest({ path: filePath, id: operation.current });
+  };
+
+  useEffect(() => {
+    if (!error) return;
+    const timer = setTimeout(() => setError(null), 5000);
+    return () => clearTimeout(timer);
+  }, [error]);
+
+  const reportPathError = (err: unknown) => {
+    const detail = err instanceof Error ? err.message : String(err);
+    const key = /os error (2|3)\b|no such file|not found/i.test(detail)
+      ? "filetree.pathMissing"
+      : /os error (20|267)\b|not a directory/i.test(detail)
+        ? "filetree.pathNotDirectory"
+        : /os error (13|5)\b|permission denied|access.*denied/i.test(detail)
+          ? "filetree.pathDenied"
+          : "filetree.pathFailed";
+    logError("Add workspace failed", err);
+    setError({ message: t(key) });
+  };
 
   const submit = async () => {
     const p = pathInput.trim();
-    if (!p) return;
+    if (!p || busy) return;
     setBusy(true);
     setError(null);
     try {
       await setWorkspaceByPath(p);
       setPathInput("");
     } catch (e) {
-      setError(typeof e === "string" ? e : (e as Error).message);
+      reportPathError(e);
     } finally {
       setBusy(false);
     }
   };
 
+  const chooseFolder = async () => {
+    if (busy) return;
+    setError(null);
+    setBusy(true);
+    try { await openFolder(); }
+    catch (e) { reportPathError(e); }
+    finally { setBusy(false); }
+  };
+
   const openMenu = useCallback((e: React.MouseEvent, items: MenuItem[]) => {
     e.preventDefault();
     e.stopPropagation();
-    setMenu({ x: e.clientX, y: e.clientY, items });
+    const rect = e.currentTarget.getBoundingClientRect();
+    setMenu({ x: e.clientX || rect.left, y: e.clientY || rect.bottom, items });
   }, []);
 
   // Workspace / folder / file context-menu builders are useCallback'd so the
@@ -139,59 +313,71 @@ function FileTreeImpl() {
 
   return (
     <div
-      className="flex flex-col h-full text-sm select-none"
+      className="filetree flex flex-col h-full text-sm select-none"
       style={{ background: "var(--bg-soft)" }}
     >
       <div
-        className="flex items-center gap-1 px-2"
+        className="flex items-center gap-0.5 px-2 shrink-0"
         style={{
           height: 32,
           borderBottom: "1px solid var(--border)",
         }}
       >
         <input
+          ref={inputRef}
           value={pathInput}
-          onChange={(e) => setPathInput(e.target.value)}
+          aria-invalid={!!error}
+          aria-describedby={error ? errorId : undefined}
+          onChange={(e) => { setPathInput(e.target.value); setError(null); }}
           onKeyDown={(e) => {
-            if (e.key === "Enter") submit();
+            if (e.key === "Enter") void submit();
+            if (e.key === "Escape") setError(null);
           }}
           placeholder={t("filetree.pathPlaceholder")}
           spellCheck={false}
           disabled={busy}
-          className="flex-1 min-w-0 px-2 py-1 text-xs rounded outline-none"
-          style={{
-            background: "var(--bg)",
-            border: "1px solid var(--border)",
-            color: "var(--text)",
-          }}
+          className="deditor-input deditor-input--compact flex-1 min-w-0"
         />
         <Button
           variant="ghost"
           size="icon"
-          onClick={openFolder}
+          onClick={() => void chooseFolder()}
+          disabled={busy}
           title={t("filetree.selectFolder")}
         >
           <FiFolderPlus size={16} />
         </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={toggleSidebar}
-          title={t("filetree.collapse")}
-        >
-          <FiChevronsLeft size={16} />
-        </Button>
+        <div className="filetree-toolbar flex items-center gap-0.5 shrink-0"
+          role="group" aria-label={t("filetree.navigation")}>
+          <Button variant="ghost" size="icon" title={t("filetree.locate")}
+            disabled={!filePath} onClick={() => void locateFile()}>
+            <FiCrosshair size={16} aria-hidden="true" />
+          </Button>
+          <Button variant="ghost" size="icon" title={t(expanding ? "filetree.expanding" : "filetree.expandAll")}
+            disabled={!workspaces.length || expanding} onClick={() => void expandAll()}>
+            <ExpandCollapseIcon expand />
+          </Button>
+          <Button variant="ghost" size="icon" title={t("filetree.collapseAll")}
+            disabled={!workspaces.length} onClick={collapseAll}>
+            <ExpandCollapseIcon />
+          </Button>
+        </div>
       </div>
       {error && (
         <div
-          className="px-2 py-1 text-xs"
-          style={{ color: "#ef4444", background: "var(--bg)" }}
+          id={errorId}
+          className="deditor-notice filetree-path-error" role="alert" data-tone="error"
         >
-          {error}
+          <span>{error.message}</span>
+          <Button variant="ghost" size="icon" title={t("common.close")} onClick={() => {
+            setError(null);
+            inputRef.current?.focus();
+          }}><FiX size={14} /></Button>
         </div>
       )}
       <div
-        className="flex-1 py-1"
+        ref={treeRef}
+        className="filetree-workspaces flex-1"
         style={{ overflowY: "auto", overflowX: "hidden" }}
       >
         {workspaces.length === 0 ? (
@@ -207,6 +393,7 @@ function FileTreeImpl() {
               key={w}
               path={w}
               activePath={filePath}
+              showParent={workspaces.some((other) => other !== w && shortName(other) === shortName(w))}
               onWorkspaceContextMenu={onWorkspaceContextMenu}
               onFolderContextMenu={onFolderContextMenu}
               onFileContextMenu={onFileContextMenu}
@@ -244,7 +431,7 @@ async function promptCreate(kind: "file" | "dir", parent: string) {
     }
   } catch (err) {
     logError(`create ${kind} failed`, err);
-    alert(
+    void showError(
       tStatic("filetree.createFailed", {
         err: err instanceof Error ? err.message : String(err),
       }),
@@ -260,7 +447,7 @@ async function promptDelete(path: string, isDir: boolean) {
     await deletePath(path);
   } catch (err) {
     logError("delete failed", err);
-    alert(
+    void showError(
       tStatic("filetree.deleteFailed", {
         err: err instanceof Error ? err.message : String(err),
       }),
@@ -288,7 +475,7 @@ async function promptRename(path: string, isDir: boolean) {
     await renamePath(path, newPath);
   } catch (err) {
     logError("rename failed", err);
-    alert(
+    void showError(
       tStatic("filetree.renameFailed", {
         err: err instanceof Error ? err.message : String(err),
       }),
@@ -303,12 +490,14 @@ function shortName(p: string): string {
 const WorkspaceSection = memo(function WorkspaceSection({
   path,
   activePath,
+  showParent,
   onWorkspaceContextMenu,
   onFolderContextMenu,
   onFileContextMenu,
 }: {
   path: string;
   activePath: string | null;
+  showParent: boolean;
   onWorkspaceContextMenu: (e: React.MouseEvent, w: string) => void;
   onFolderContextMenu: (e: React.MouseEvent, dir: string) => void;
   onFileContextMenu: (e: React.MouseEvent, file: string) => void;
@@ -318,35 +507,49 @@ const WorkspaceSection = memo(function WorkspaceSection({
   // still see their workspaces expanded on first launch.
   const open = useEditorStore((s) => s.expandedDirs[path] !== false);
   const setDirExpanded = useEditorStore((s) => s.setDirExpanded);
+  const contentId = useId();
+  const t = useT();
+  const parent = path.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]+$/, "");
   return (
-    <div style={{ marginBottom: 4 }}>
-      <div
-        onClick={() => setDirExpanded(path, !open)}
-        onContextMenu={(e) => onWorkspaceContextMenu(e, path)}
-        title={path}
-        className="flex items-center gap-1 cursor-pointer"
-        style={{
-          padding: "4px 8px",
-          fontSize: 11,
-          fontWeight: 700,
-          letterSpacing: 0.3,
-          color: "var(--text-soft)",
-          background: "var(--bg-mute)",
-        }}
-      >
-        <span style={{ width: 10, fontSize: 9 }}>{open ? "▼" : "▶"}</span>
-        <span className="truncate flex-1">{shortName(path)}</span>
+    <section className="workspace-section" aria-label={path}>
+      <div className="workspace-header" onContextMenu={(e) => onWorkspaceContextMenu(e, path)}>
+        <button
+          type="button"
+          onClick={() => setDirExpanded(path, !open)}
+          aria-expanded={open}
+          aria-controls={contentId}
+          title={path}
+          className="workspace-toggle"
+        >
+          <Caret open={open} />
+          <FiFolder size={15} className="workspace-icon" aria-hidden="true" />
+          <span className="workspace-label">
+            <span className="workspace-name">{shortName(path)}</span>
+            {showParent && <span className="workspace-parent">{parent}</span>}
+          </span>
+        </button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="workspace-menu"
+          title={t("filetree.folderActions", { name: shortName(path) })}
+          onClick={(e) => onWorkspaceContextMenu(e, path)}
+        >
+          <FiMoreHorizontal size={14} aria-hidden="true" />
+        </Button>
       </div>
-      {open && (
-        <Folder
-          path={path}
-          depth={0}
-          activePath={activePath}
-          onFolderContextMenu={onFolderContextMenu}
-          onFileContextMenu={onFileContextMenu}
-        />
-      )}
-    </div>
+      <div id={contentId}>
+        {open && (
+          <Folder
+            path={path}
+            depth={0}
+            activePath={activePath}
+            onFolderContextMenu={onFolderContextMenu}
+            onFileContextMenu={onFileContextMenu}
+          />
+        )}
+      </div>
+    </section>
   );
 });
 
@@ -365,14 +568,19 @@ const Folder = memo(function Folder({
 }) {
   const [entries, setEntries] = useState<DirEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const loadId = useRef(0);
 
   const load = useCallback(async () => {
+    const id = ++loadId.current;
     try {
       setError(null);
       const list = await listDir(path);
-      setEntries(list);
+      if (id === loadId.current) setEntries(list);
     } catch (e) {
-      setError(String(e));
+      if (id === loadId.current) {
+        setEntries(null);
+        setError(String(e));
+      }
     }
   }, [path]);
 
@@ -382,9 +590,11 @@ const Folder = memo(function Folder({
 
   useEffect(() => {
     return onRefresh((p) => {
-      if (p === path) load();
+      if (p === undefined || p === path) load();
     });
   }, [path, load]);
+
+  useEffect(() => () => { loadId.current++; }, []);
 
   return (
     <div>
@@ -470,14 +680,19 @@ const DirNode = memo(function DirNode({
   const setDirExpanded = useEditorStore((s) => s.setDirExpanded);
   const [entries, setEntries] = useState<DirEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const loadId = useRef(0);
 
   const load = useCallback(async () => {
+    const id = ++loadId.current;
     try {
       setError(null);
       const list = await listDir(entry.path);
-      setEntries(list);
+      if (id === loadId.current) setEntries(list);
     } catch (e) {
-      setError(String(e));
+      if (id === loadId.current) {
+        setEntries(null);
+        setError(String(e));
+      }
     }
   }, [entry.path]);
 
@@ -487,18 +702,24 @@ const DirNode = memo(function DirNode({
 
   useEffect(() => {
     return onRefresh((p) => {
-      if (p === entry.path) {
+      if (p === undefined || p === entry.path) {
         if (open) load();
-        else setEntries(null); // invalidate so next open re-fetches
+        else {
+          loadId.current++;
+          setEntries(null); // invalidate so next open re-fetches
+        }
       }
     });
   }, [entry.path, open, load]);
+
+  useEffect(() => () => { loadId.current++; }, []);
 
   return (
     <div>
       <Row
         depth={depth}
         active={false}
+        expanded={open}
         onClick={() => setDirExpanded(entry.path, !open)}
         onContextMenu={(e) => onFolderContextMenu(e, entry.path)}
         title={entry.path}
@@ -516,8 +737,8 @@ const DirNode = memo(function DirNode({
           )}
           {error && (
             <div
-              className="px-3 py-1 text-xs"
-              style={{ color: "#ef4444", paddingLeft: (depth + 1) * 14 + 12 }}
+              className="deditor-notice" role="alert" data-tone="error"
+              style={{ marginLeft: (depth + 1) * 14 }}
             >
               {error}
             </div>
@@ -549,13 +770,14 @@ const FileNode = memo(function FileNode({
   activePath: string | null;
   onFileContextMenu: (e: React.MouseEvent, file: string) => void;
 }) {
-  const active = entry.path === activePath;
+  const active = activePath !== null && treePath(entry.path) === treePath(activePath);
   const marked = useEditorStore((s) => s.compareMarkPath === entry.path);
   return (
     <Row
       depth={depth}
       active={active}
       marked={marked}
+      filePath={entry.path}
       onClick={() => void openFileByPath(entry.path)}
       onContextMenu={(e) => onFileContextMenu(e, entry.path)}
       title={marked ? `${entry.path}\n(selected for compare)` : entry.path}
@@ -571,73 +793,51 @@ function Row({
   depth,
   active,
   marked,
+  expanded,
   onClick,
   onContextMenu,
   children,
   title,
+  filePath,
 }: {
   depth: number;
   active: boolean;
   marked?: boolean;
+  expanded?: boolean;
   onClick: () => void;
   onContextMenu?: (e: React.MouseEvent) => void;
   children: React.ReactNode;
   title?: string;
+  filePath?: string;
 }) {
-  // The "marked for compare" highlight uses a dedicated background so it
-  // remains visible even when another tab is the active file. Mark > active
-  // visually so the user keeps track of what they staged for comparison.
-  // Selected uses --selection-bg (JetBrains "row highlight" color); hover
-  // uses the gentler --hover-bg overlay so they're visually distinct — you
-  // can tell at a glance which row is selected vs. just under the cursor.
-  const baseBg = marked
-    ? "var(--compare-mark-bg)"
-    : active
-    ? "var(--selection-bg)"
-    : "";
   return (
-    <div
+    <button
+      type="button"
       onClick={onClick}
       onContextMenu={onContextMenu}
       title={title}
-      className="flex items-center gap-1 cursor-pointer truncate"
-      style={{
-        paddingLeft: depth * 14 + 8,
-        paddingRight: 8,
-        height: 22,
-        fontSize: 13,
-        background: baseBg || undefined,
-        color: "var(--text)",
-        boxShadow: marked ? "inset 2px 0 0 var(--accent)" : undefined,
-      }}
-      onMouseEnter={(e) => {
-        if (!marked && !active) e.currentTarget.style.background = "var(--hover-bg)";
-      }}
-      onMouseLeave={(e) => {
-        if (!marked && !active) e.currentTarget.style.background = "";
-      }}
+      className="filetree-row"
+      data-active={active || undefined}
+      data-file-path={filePath}
+      data-marked={marked || undefined}
+      aria-current={active ? "page" : undefined}
+      aria-expanded={expanded}
+      style={{ paddingLeft: depth * 16 + 10 }}
     >
       {children}
-    </div>
+    </button>
   );
 }
 
 function Caret({ open }: { open: boolean }) {
-  return (
-    <span
-      style={{
-        width: 12,
-        display: "inline-block",
-        textAlign: "center",
-        fontSize: 10,
-        color: "var(--text-soft)",
-        transform: open ? "rotate(90deg)" : "rotate(0deg)",
-        transition: "transform 0.1s",
-      }}
-    >
-      ▶
-    </span>
-  );
+  return <FiChevronRight size={12} className="filetree-caret" data-open={open} aria-hidden="true" />;
+}
+
+function ExpandCollapseIcon({ expand = false }: { expand?: boolean }) {
+  return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d={expand ? "m7 8 5-5 5 5 M7 16l5 5 5-5" : "m7 3 5 5 5-5 M7 21l5-5 5 5"} />
+  </svg>;
 }
 
 function Spinner() {
@@ -650,7 +850,7 @@ function Spinner() {
 
 function ErrorLine({ msg }: { msg: string }) {
   return (
-    <div className="px-3 py-2 text-xs" style={{ color: "#ef4444" }}>
+    <div className="deditor-notice" role="alert" data-tone="error">
       {msg}
     </div>
   );

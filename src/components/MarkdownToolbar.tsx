@@ -1,4 +1,12 @@
+import type { ExportSnapshot } from "../lib/markdownExport/document";
+import MarkdownClipboardMenu from "./MarkdownClipboardMenu";
+import MarkdownWritingSettings from "./MarkdownWritingSettings";
+import { getVisualEditor, subscribeVisualEditor } from "../lib/markdownVisualBridge";
+import { markdownHistory } from "../lib/markdownHistory";
+import { markdownSession } from "../lib/markdownSession";
+import { lazy, Suspense, useEffect, useState, useSyncExternalStore } from "react";
 import {
+  FiDownload,
   FiBold,
   FiItalic,
   FiCode,
@@ -10,390 +18,342 @@ import {
   FiPlus,
   FiImage,
   FiCheckSquare,
-  FiDroplet,
-  FiEdit3,
+  FiRotateCcw,
+  FiRotateCw,
+  FiTerminal,
+  FiChevronDown,
+  FiArrowLeft,
 } from "react-icons/fi";
+import { undo, redo, indentLess } from "@codemirror/commands";
 import {
+  captureEditorTarget,
+  getActiveEditorState,
   getActiveView,
-  insertCodeBlock,
-  insertLink,
-  insertText,
+  insertBlock,
   prefixLines,
+  setSelectionColor,
+  setBlockBackground,
+  subscribeActiveEditor,
   wrapSelection,
 } from "../lib/editorBridge";
 import { useEditorStore } from "../store/editor";
 import { useT } from "../lib/i18n";
-import { promptInput } from "./PromptDialog";
 import { Button } from "./ui/Button";
+import PreviewModeSwitch from "./PreviewModeSwitch";
+import MarkdownColorPicker from "./MarkdownColorPicker";
+import MarkdownDiagramPicker from "./MarkdownDiagramPicker";
+import MarkdownInsertDialog, { type InsertKind } from "./MarkdownInsertDialog";
+
+const MarkdownExportDialog = lazy(() => import("./MarkdownExportDialog"));
 
 export default function MarkdownToolbar() {
   const t = useT();
-  const editorFontSize = useEditorStore((s) => s.editorFontSize);
-  const setEditorFontSize = useEditorStore((s) => s.setEditorFontSize);
-  const showPreview = useEditorStore((s) => s.showPreview);
-  const previewMaximized = useEditorStore((s) => s.previewMaximized);
-  const viewMode: "edit" | "split" | "preview" = !showPreview
-    ? "edit"
-    : previewMaximized
-      ? "preview"
-      : "split";
-  const setViewMode = (mode: "edit" | "split" | "preview") => {
-    if (mode === "edit") {
-      useEditorStore.setState({ showPreview: false, previewMaximized: false });
-    } else if (mode === "split") {
-      useEditorStore.setState({ showPreview: true, previewMaximized: false });
-    } else {
-      useEditorStore.setState({ showPreview: true, previewMaximized: true });
-    }
+  const state = useSyncExternalStore(
+    subscribeActiveEditor,
+    getActiveEditorState,
+  );
+  const visual = useSyncExternalStore(subscribeVisualEditor, getVisualEditor);
+  const content = useEditorStore(s => s.tabs.find(t => t.id === s.activeId)?.content ?? "");
+  const activeId = useEditorStore((s) => s.activeId);
+  const session = activeId ? markdownSession(activeId, content) : null;
+  const editorFontSize = useEditorStore((s) => s.tabs.find((tab) => tab.id === s.activeId)?.zoomFontSize ?? s.editorFontSize);
+  const setEditorZoomFontSize = useEditorStore((s) => s.setEditorZoomFontSize);
+  const disabled = visual ? !visual.editable : !state || state.readOnly;
+  const [dialog, setDialog] = useState<{
+    kind: InsertKind;
+    target: NonNullable<ReturnType<typeof captureEditorTarget>>;
+  } | null>(null);
+  const [exportSnapshot, setExportSnapshot] = useState<ExportSnapshot | null>(null);
+  const [color, setColor] = useState("#e53e3e");
+  const [background, setBackground] = useState("#FFF2CC");
+  const [highlight, setHighlight] = useState("#fff59d");
+  useEffect(() => {
+    setDialog(null);
+  }, [activeId]);
+  const run = (action: () => void) => {
+    if (disabled) return;
+    action();
+    const currentVisual = getVisualEditor();
+    if (currentVisual) currentVisual.focus(); else getActiveView()?.focus();
   };
-
-  const onLink = async () => {
-    const url = await promptInput({
-      title: t("md.linkPromptTitle"),
-      label: "URL",
-      placeholder: "https://example.com",
+  const openInsert = (kind: InsertKind) => {
+    if (disabled) return;
+    const target = captureEditorTarget();
+    if (target) setDialog({ kind, target });
+  };
+  const history = (command: typeof undo) =>
+    run(() => {
+      markdownHistory(command === redo);
     });
-    if (url) insertLink(url);
-  };
-
-  const onImage = async () => {
-    // Two-step prompt — keep it simple rather than building a multi-field
-    // dialog. The first input becomes the alt text; the second is the URL.
-    const alt = await promptInput({
-      title: t("md.imagePromptTitle"),
-      label: t("md.imageAltLabel"),
-      initial: t("md.imageDefaultAlt"),
-      placeholder: t("md.imageDefaultAlt"),
-    });
-    if (alt == null) return;
-    const url = await promptInput({
-      title: t("md.imagePromptTitle"),
-      label: t("md.imageUrlLabel"),
-      placeholder: "https://example.com/pic.png",
-    });
-    if (!url) return;
-    insertText(`![${alt}](${url})`);
-  };
-
-  const wrapColor = (cssProp: "color" | "background", hex: string) => {
-    // Wrap the current selection (or empty caret) with an inline span. The
-    // markdown-it config has `html: true` so this round-trips through the
-    // preview as styled text.
-    wrapSelection(`<span style="${cssProp}:${hex}">`, `</span>`);
-    getActiveView()?.focus();
-  };
-
-  return (
-    <div
-      className="flex items-center gap-1 px-2 select-none"
-      style={{
-        height: 32,
-        background: "var(--bg-soft)",
-        borderBottom: "1px solid var(--border)",
-        flexShrink: 0,
-        overflowX: "auto",
-      }}
-    >
-      {/* Inline emphasis */}
-      <ToolbarButton title={t("md.bold")} onClick={() => wrapSelection("**")}>
-        <FiBold size={13} />
-      </ToolbarButton>
-      <ToolbarButton title={t("md.italic")} onClick={() => wrapSelection("*")}>
-        <FiItalic size={13} />
-      </ToolbarButton>
-      <ToolbarButton
+  const selection = state?.selection.main;
+  const selected = visual?.selected ?? (
+    selection && state ? state.sliceDoc(selection.from, selection.to) : "");
+  const heading = visual?.heading ?? (state
+    ? (state.doc
+        .lineAt(state.selection.main.head)
+        .text.match(/^ {0,3}(#{1,6})\s/)?.[1].length ?? 0)
+    : 0);
+  const marked = (marker: string) => visual ? visual.marked(marker) :
+    !!(
+      selection &&
+      state &&
+      ((selected.startsWith(marker) &&
+        selected.endsWith(marker) &&
+        selected.length > marker.length * 2) ||
+        (state.sliceDoc(
+          Math.max(0, selection.from - marker.length),
+          selection.from,
+        ) === marker &&
+          state.sliceDoc(selection.to, selection.to + marker.length) ===
+            marker))
+    );
+  const emphasis = (
+    <>
+      <Tool
+        title={t("md.bold")}
+        disabled={disabled}
+        pressed={marked("**")}
+        onClick={() => run(() => wrapSelection("**"))}
+      >
+        <FiBold />
+      </Tool>
+      <Tool
+        title={t("md.italic")}
+        disabled={disabled}
+        pressed={marked("*") && (!marked("**") || marked("***"))}
+        onClick={() => run(() => wrapSelection("*"))}
+      >
+        <FiItalic />
+      </Tool>
+      <Tool
         title={t("md.strikethrough")}
-        onClick={() => wrapSelection("~~")}
-        label="S̶"
-      />
-      <ToolbarButton title={t("md.inlineCode")} onClick={() => wrapSelection("`")}>
-        <FiCode size={13} />
-      </ToolbarButton>
-      <Divider />
-      {/* Color & highlight — the <input type="color"> sits on top of each
-          button. WebKit's native color picker only opens reliably when the
-          actual click lands on the input, so we make it transparent rather
-          than zero-sized. */}
-      <ColorButton
-        title={t("md.color")}
-        defaultValue="#e53e3e"
-        icon={<FiEdit3 size={13} color="#e53e3e" />}
-        onPick={(hex) => wrapColor("color", hex)}
-      />
-      <ColorButton
-        title={t("md.highlight")}
-        defaultValue="#fff59d"
-        icon={<FiDroplet size={13} color="#d69e2e" />}
-        onPick={(hex) => wrapColor("background", hex)}
-      />
-      <Divider />
-      {/* Headings */}
-      <ToolbarButton
-        title={t("md.h1")}
-        onClick={() => prefixLines("# ")}
-        label="H1"
-      />
-      <ToolbarButton
-        title={t("md.h2")}
-        onClick={() => prefixLines("## ")}
-        label="H2"
-      />
-      <ToolbarButton
-        title={t("md.h3")}
-        onClick={() => prefixLines("### ")}
-        label="H3"
-      />
-      <Divider />
-      {/* Lists & blocks */}
-      <ToolbarButton title={t("md.ulist")} onClick={() => prefixLines("- ")}>
-        <FiList size={13} />
-      </ToolbarButton>
-      <ToolbarButton
-        title={t("md.olist")}
-        onClick={() => prefixLines("1. ")}
-        label="1."
-      />
-      <ToolbarButton
-        title={t("md.tasklist")}
-        onClick={() => prefixLines("- [ ] ")}
+        disabled={disabled}
+        pressed={marked("~~")}
+        onClick={() => run(() => wrapSelection("~~"))}
       >
-        <FiCheckSquare size={13} />
-      </ToolbarButton>
-      <ToolbarButton title={t("md.quote")} onClick={() => prefixLines("> ")}>
-        <FiMessageSquare size={13} />
-      </ToolbarButton>
-      <ToolbarButton title={t("md.hr")} onClick={() => insertText("\n---\n\n")}>
-        <FiMinus size={13} />
-      </ToolbarButton>
-      <Divider />
-      {/* Code & table */}
-      <ToolbarButton
-        title={t("md.codeblock")}
-        onClick={() => insertCodeBlock("")}
-        label="{ }"
-      />
-      <ToolbarButton
-        title={t("md.table")}
-        onClick={() => insertText(t("md.tableTpl"))}
+        <span className="md-strike">S</span>
+      </Tool>
+      <Tool
+        title={t("md.inlineCode")}
+        disabled={disabled}
+        pressed={marked("`")}
+        onClick={() => run(() => wrapSelection("`"))}
       >
-        <FiTable size={13} />
-      </ToolbarButton>
-      <Divider />
-      {/* Link & image */}
-      <ToolbarButton title={t("md.link")} onClick={onLink}>
-        <FiLink size={13} />
-      </ToolbarButton>
-      <ToolbarButton title={t("md.image")} onClick={onImage}>
-        <FiImage size={13} />
-      </ToolbarButton>
-      <div style={{ flex: 1 }} />
-      {/* Editor font size */}
-      <span style={{ fontSize: 11, color: "var(--text-soft)" }}>
-        {t("md.fontSize")}
-      </span>
-      <ToolbarButton
-        title={t("md.smaller")}
-        onClick={() => setEditorFontSize(editorFontSize - 1)}
-      >
-        <FiMinus size={13} />
-      </ToolbarButton>
-      <span
-        style={{
-          fontSize: 11,
-          minWidth: 22,
-          textAlign: "center",
-          color: "var(--text)",
-        }}
-      >
-        {editorFontSize}
-      </span>
-      <ToolbarButton
-        title={t("md.bigger")}
-        onClick={() => setEditorFontSize(editorFontSize + 1)}
-      >
-        <FiPlus size={13} />
-      </ToolbarButton>
-      <Divider />
-      {/* View mode: edit-only / split / preview-only. Rendered as a segmented
-          control so the active mode is clearly visible. Drives
-          showPreview + previewMaximized in the store. */}
-      <SegmentGroup>
-        <SegmentButton
-          isFirst
-          active={viewMode === "edit"}
-          onClick={() => setViewMode("edit")}
-        >
-          {t("md.viewEdit")}
-        </SegmentButton>
-        <SegmentButton
-          active={viewMode === "split"}
-          onClick={() => setViewMode("split")}
-        >
-          {t("md.viewSplit")}
-        </SegmentButton>
-        <SegmentButton
-          active={viewMode === "preview"}
-          onClick={() => setViewMode("preview")}
-        >
-          {t("md.viewPreview")}
-        </SegmentButton>
-      </SegmentGroup>
-    </div>
+        <FiCode />
+      </Tool>
+    </>
   );
-}
-
-function SegmentGroup({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        display: "inline-flex",
-        height: 24,
-        border: "1px solid var(--border)",
-        borderRadius: 5,
-        overflow: "hidden",
-        background: "var(--bg)",
-        flexShrink: 0,
-      }}
+  const headingSelect = (
+    <select
+      className="deditor-input deditor-input--compact md-heading-select"
+      aria-label={t("md.heading")}
+      disabled={disabled}
+      value={heading}
+      onChange={(e) =>
+        run(() =>
+          prefixLines(
+            "#".repeat(Number(e.target.value)) +
+              (Number(e.target.value) ? " " : ""),
+          ),
+        )
+      }
     >
-      {children}
-    </div>
+      <option value={0}>{t("md.paragraph")}</option>
+      {[1, 2, 3, 4, 5, 6].map((n) => (
+        <option key={n} value={n}>
+          H{n}
+        </option>
+      ))}
+    </select>
   );
-}
-
-function SegmentButton({
-  children,
-  active,
-  onClick,
-  isFirst,
-}: {
-  children: React.ReactNode;
-  active: boolean;
-  onClick: () => void;
-  isFirst?: boolean;
-}) {
+  const item = (key: string, action: () => void, icon: React.ReactNode) => (
+    <Tool title={t(key)} disabled={disabled} onClick={() => run(action)}>
+      {icon}
+    </Tool>
+  );
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        height: "100%",
-        padding: "0 10px",
-        fontSize: 12,
-        fontWeight: 600,
-        border: "none",
-        borderLeft: isFirst ? "none" : "1px solid var(--border)",
-        cursor: "pointer",
-        background: active ? "var(--accent)" : "transparent",
-        color: active ? "#fff" : "var(--text)",
-        transition: "background 0.12s",
-      }}
-      onMouseEnter={(e) => {
-        if (!active) e.currentTarget.style.background = "var(--hover-bg)";
-      }}
-      onMouseLeave={(e) => {
-        if (!active) e.currentTarget.style.background = "transparent";
-      }}
-    >
-      {children}
-    </button>
+    <>
+      <div className="md-toolbar-shell md-toolbar-expanded select-none">
+        <div className="md-toolbar-row">
+          <div className="md-tool-group md-tool-group--leading">
+            <Tool
+              title={t("md.undo")}
+              disabled={disabled || !session?.canUndo}
+              onClick={() => history(undo)}
+            >
+              <FiRotateCcw />
+            </Tool>
+            <Tool
+              title={t("md.redo")}
+              disabled={disabled || !session?.canRedo}
+              onClick={() => history(redo)}
+            >
+              <FiRotateCw />
+            </Tool>
+          </div>
+          <div className="md-tool-group md-tool-group--leading">
+            {headingSelect}
+            {emphasis}
+          </div>
+          <div className="md-tool-group">
+            {item("md.underline", () => wrapSelection("<u>", "</u>"), <span style={{ textDecoration: "underline" }}>U</span>)}
+            {item("md.superscript", () => wrapSelection("<sup>", "</sup>"), <span>x<sup>2</sup></span>)}
+            {item("md.subscript", () => wrapSelection("<sub>", "</sub>"), <span>x<sub>2</sub></span>)}
+          </div>
+          <div className="md-tool-group">
+            {item("md.ulist", () => prefixLines("- "), <FiList />)}
+            {item(
+              "md.olist",
+              () => prefixLines("1. "),
+              <span className="md-symbol">1.</span>,
+            )}
+            {item(
+              "md.tasklist",
+              () => prefixLines("- [ ] "),
+              <FiCheckSquare />,
+            )}
+            {item("md.quote", () => prefixLines("> "), <FiMessageSquare />)}
+            {item("md.outdent", () => { if (visual) visual.outdent?.(); else { const view = getActiveView(); if (view) indentLess(view); } }, <FiArrowLeft />)}
+          </div>
+          <div className="md-tool-group md-toolbar-colors">
+            <MarkdownColorPicker
+              key={`text-${activeId}`}
+              title={t("md.color")}
+              value={color}
+              disabled={disabled}
+              onApply={(value) => {
+                setColor(value);
+                run(() => setSelectionColor("color", value));
+              }}
+            />
+            <MarkdownColorPicker
+              key={`highlight-${activeId}`}
+              title={t("md.highlight")}
+              value={highlight}
+              disabled={disabled}
+              variant="highlight"
+              onApply={(value) => {
+                setHighlight(value);
+                run(() => setSelectionColor("background", value));
+              }}
+            />
+            <MarkdownColorPicker
+              key={`background-${activeId}`}
+              title={t("md.background")}
+              value={background}
+              disabled={disabled}
+              variant="background"
+              onClear={() => run(() => setBlockBackground(null))}
+              onApply={(value) => {
+                setBackground(value);
+                run(() => setBlockBackground(value));
+              }}
+            />
+          </div>
+          <div className="md-tool-group">
+            {item("md.link", () => openInsert("link"), <FiLink />)}
+            {item("md.image", () => openInsert("image"), <FiImage />)}
+            {item("md.table", () => openInsert("table"), <FiTable />)}
+            {item(
+              "md.codeblock",
+              () => openInsert("codeblock"),
+              <FiTerminal />,
+            )}
+            {item("md.hr", () => insertBlock("---", 3, 0), <FiMinus />)}
+            {item("md.details", () => {
+              const opening = `<details>\n<summary>${t("md.detailsTitle")}</summary>\n\n`;
+              const body = selected || t("md.detailsBody");
+              insertBlock(`${opening}${body}\n\n</details>`, opening.length, body.length);
+            }, <FiChevronDown />)}
+          </div>
+          <div className="md-tool-group">
+            {item(
+              "md.inlineMath",
+              () => wrapSelection("$"),
+              <span className="md-symbol">ƒ</span>,
+            )}
+            {item(
+              "md.blockMath",
+              () => {
+                const value = selected || "E = mc^2";
+                insertBlock(`$$\n${value}\n$$`, 3, value.length);
+              },
+              <span className="md-symbol">∑</span>,
+            )}
+          </div>
+          <div className="md-tool-group">
+            <MarkdownDiagramPicker key={`mermaid-${activeId}`} family="mermaid" disabled={disabled} />
+            <MarkdownDiagramPicker key={`plantuml-${activeId}`} family="plantuml" disabled={disabled} />
+          </div>
+          <div
+            className="md-tool-group md-font-controls"
+            role="group"
+            aria-label={t("md.editorFontSize")}
+            title={t("md.editorFontSize")}
+          >
+            <Tool
+              title={t("md.smaller")}
+              disabled={disabled || editorFontSize <= 10}
+              onClick={() => activeId && setEditorZoomFontSize(activeId, editorFontSize - 1)}
+            >
+              <FiMinus />
+            </Tool>
+            <output>{editorFontSize}</output>
+            <Tool
+              title={t("md.bigger")}
+              disabled={disabled || editorFontSize >= 28}
+              onClick={() => activeId && setEditorZoomFontSize(activeId, editorFontSize + 1)}
+            >
+              <FiPlus />
+            </Tool>
+          </div>
+          <div className="md-tool-group">
+            <MarkdownClipboardMenu visual={visual} />
+            <Button className="md-toolbar-action" variant="ghost" size="icon" title={t("export.title")} onClick={() => {
+              const current = useEditorStore.getState();
+              const tab = current.tabs.find(tab => tab.id === current.activeId);
+              if (tab) setExportSnapshot({ content: tab.content, filePath: tab.filePath, theme: current.theme, documentTheme: current.markdownSettings.documentTheme, exportTemplate: current.markdownSettings.exportTemplate });
+            }}><FiDownload size={14} aria-hidden="true" /></Button>
+          </div>
+          <MarkdownWritingSettings />
+          <div className="md-toolbar-views">
+            <PreviewModeSwitch markdown />
+          </div>
+        </div>
+      </div>
+      {exportSnapshot && <Suspense fallback={null}><MarkdownExportDialog snapshot={exportSnapshot} onClose={() => setExportSnapshot(null)} /></Suspense>}
+      {dialog && (
+        <MarkdownInsertDialog {...dialog} onClose={() => setDialog(null)} />
+      )}
+    </>
   );
 }
-
-function ToolbarButton({
-  children,
+function Tool({
   title,
   onClick,
-  label,
+  disabled,
   pressed,
+  children,
 }: {
-  children?: React.ReactNode;
   title: string;
   onClick: () => void;
-  label?: string;
+  disabled?: boolean;
   pressed?: boolean;
+  children: React.ReactNode;
 }) {
   return (
     <Button
       variant="ghost"
-      size={label ? "sm" : "icon"}
+      size="icon"
       title={title}
-      onClick={onClick}
+      aria-label={title}
+      disabled={disabled}
       pressed={pressed}
-      style={
-        label
-          ? { height: 24, fontWeight: 600, color: "var(--text)" }
-          : { color: "var(--text)" }
-      }
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={onClick}
+      className="md-tool"
     >
-      {label ?? children}
+      {children}
     </Button>
-  );
-}
-
-function ColorButton({
-  title,
-  defaultValue,
-  icon,
-  onPick,
-}: {
-  title: string;
-  defaultValue: string;
-  icon: React.ReactNode;
-  onPick: (hex: string) => void;
-}) {
-  return (
-    <label
-      title={title}
-      style={{
-        height: 24,
-        padding: "0 5px",
-        position: "relative",
-        display: "inline-flex",
-        alignItems: "center",
-        borderRadius: 4,
-        background: "transparent",
-        cursor: "pointer",
-        color: "var(--text)",
-      }}
-      onMouseEnter={(e) =>
-        (e.currentTarget.style.background = "var(--hover-bg)")
-      }
-      onMouseLeave={(e) =>
-        (e.currentTarget.style.background = "transparent")
-      }
-    >
-      <input
-        type="color"
-        defaultValue={defaultValue}
-        onInput={(e) => onPick((e.target as HTMLInputElement).value)}
-        style={{
-          position: "absolute",
-          inset: 0,
-          width: "100%",
-          height: "100%",
-          opacity: 0,
-          cursor: "pointer",
-          // Zero border / padding so the click target matches the visible button.
-          border: "none",
-          padding: 0,
-          margin: 0,
-          background: "transparent",
-        }}
-      />
-      {icon}
-    </label>
-  );
-}
-
-function Divider() {
-  return (
-    <div
-      style={{
-        width: 1,
-        height: 14,
-        background: "var(--border)",
-        margin: "0 4px",
-      }}
-    />
   );
 }

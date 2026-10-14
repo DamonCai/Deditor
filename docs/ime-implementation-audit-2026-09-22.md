@@ -1,0 +1,93 @@
+# 阅读组合输入与 XMind 候选定位审查
+
+2026-09-22，普通包基线 `57249f6`。只审查自建样例，不访问用户正文；审查 agent 不操作系统输入源或剪贴板，原生 UI 由主 agent 控制。主端测试中切换 ABC/拼音，结束已恢复初始简体拼音。组件 composition 事件不能替代系统候选窗口验收。
+
+## 已读实现
+
+- `compositionViewport.ts` 使用 DOM caret 几何而非可能滞后的 ProseMirror 位置，collapsed range 无矩形时读取相邻字符/空段；wheel/touchmove/pointerdown 释放原锚点，compositionend 后两帧收尾。已有 IME 几何专项覆盖用户滚动优先、超出视口最小滚动及销毁。
+- `markdownComposition.ts` 汇总候选替换为同一历史编辑，最终输入后结算；阅读同步避免在 view/session 仍组合时重建文档。此规则本身不能证明原生输入事件的字符/修饰顺序正确。
+- XMind 标题是可见 `foreignObject` 内的原生 textarea，编辑框随可视区域和缩放调整，没有把候选输入定位到远处的隐藏控件。Enter/Escape 的 composition/isComposing/229 排除已经存在；候选弹窗最终位置由 WK/系统输入法处理，必须实际观察。
+
+首轮没有确定产品缺陷，因此没有凭“尚未验收”修改这些实现，也没有改配对路径。按主端要求优先诊断实际光标移动/保存序列，未扩大运行模拟测试。
+
+## 自建原生操作矩阵
+
+| 项目 | 自建动作 | 核对重点 |
+| --- | --- | --- |
+| IN-03 | `Cursor target: LEFT|RIGHT` 中间用真实拼音开始组词，分别左/右移动再提交；普通 WK textarea 执行同链 | 每个 key/composition/beforeinput/input 的实际顺序、预编辑文字拆分、最终插入位置；不能把平台默认行为先判为产品问题 |
+| IN-04 | `Scroll target: START|END` 开始组词后真实滚轮移动文档，再提交/取消 | DOM selection 未改到其他文本，scroller移动是否由用户请求、是否被拉回；候选视觉位置另截图 |
+| IN-05 | 组词期间真实 Cmd+S，再通过普通 WK textarea 比对同键序列 | 字母 s 何时进入 DOM，是否早于带 meta 的 keydown；最终磁盘与已提交/预编辑状态分别记录，不过滤合法 s |
+| IN-06 | XMind 自建主题实际组词，宽/窄窗口或适当缩放观察候选 | 输入框与候选的实际相对位置；不以 textarea DOM rect 或提交成功代替候选截图 |
+
+## 独立诊断入口
+
+`prepare-native-composition-diagnostic.mjs` 复制已有 dist，注入 `tests/diagnostics/native-composition.ts`，生成独立 `DEditor Composition Diagnostic` / `com.deditor.compositiondiagnostic20260922`。不改 src/dist/Vite；普通产品没有导入该模块。输出目录必须是新的，避免覆盖证据。
+
+```sh
+node scripts/prepare-native-composition-diagnostic.mjs
+npm run tauri -- build --debug --bundles app --config tests/artifacts/native-composition-diagnostic-2026-09-22/tauri.compositiondiagnostic.json
+```
+
+只在标题栏当前文件路径属于本仓库 `tests/artifacts/` 时记录编辑面事件。默认自建文件 `tests/artifacts/native-input-followup-2026-09-22/composition.md`。包括 keydown/up、composition start/update/end、beforeinput/input/textInput、pointerdown、滚轮/滚动、selectionchange、DOM mutation。保存 key/code/keyCode、修饰键、isComposing、isTrusted、inputType/data、DOM文本及选区节点路径/offset、编辑框与父滚动容器位置。
+
+600条自动停止，每条文本最多12000字符；截断字段明确记录，不是产品大小限制。二进制文件写入只针对自己的 `events.json`，避免生成编辑器历史。观察器不 dispatch、不 preventDefault、不更改输入或焦点。capture-microtask 被明确标为 capture 回调后，不保证晚于 React 冒泡；animation-frame 和 DOM mutation 供状态对照。ProseMirror 没有稳定公开实例句柄，因此明确标为未观测，不用私有 DOM 属性冒充公开模型快照。
+
+诊断会读布局，只用于有界事件归因，不能作为性能数据或最终普通包验收。
+
+
+## 首次原生诊断观察（不计 IME 通过）
+
+观察到两次 n/i 输入及滚轮序列（提取seq1–166，`events-direct-input-attempts.json`）。seq125/137为trusted keydown但isComposing=false，129/141为insertText，完全没有compositionstart/update/end。149/151滚动将scrollTop0→800，ProseMirror DOM selection仍为节点路径[2,0]、offset22。Space同样是普通insertText，DOM得到`STARTni |END`；随后scrollTop800→148使普通输入后的caret可见，offset23。系统输入源设置为拼音与实际WebView收到组合事件是不同证据，不能按这段记录声称IN-04通过或IME产品缺陷。
+
+诊断中个别已排队的animation-frame记录可能来自仍挂载但隐藏的源码surface，不能把不同surface文本作前后比较。只读摘要脚本 `read-native-composition-diagnostic.mjs` 以每条capture事件的surface class/selection构建时间线；本轮归因使用相同ProseMirror surface，不将隐藏源码旧值解释为文档回退。
+
+
+## 有效原生组合与滚动观察
+
+重启诊断会话后，seq2为compositionstart，6/20为insertCompositionText(n/ni)，13/26的keydown.isComposing=true，确认此轮确为系统组合输入。seq32/34真实wheel/scroll使scrollTop0→800，DOM selection仍为[2,0] offset22；用户滚动释放原锚点，没有把编辑位置迁到屏幕中新出现段落。
+
+seq37–49按deleteCompositionText→insertFromComposition(`你`)→compositionend完成提交，原插入位置offset20最终成为21，正文为`START你|END`。滚动800保持至提交；seq42 textInput前回到148使提交caret可见，不能将其误读为组合期间不允许用户滚动：wheel后viewport锚定已释放，提交沿用原生/编辑器正常caret可见策略。
+
+seq62 Cmd+S的meta=true、isComposing=false且没有字母s的文本input。主端独立AX确认后保存，磁盘仅有`START|END`→`START你|END`变化，并归档 `scroll-chinese.saved.md`。这是**组合期间滚动及提交后保存**的有效证据，不替代IN-05的活动组合期间保存，也不代表候选窗口视觉位置已通过。有效前79条（含开始撤销动作）归档为 `events-composition-scroll-confirm.json`；后续撤销重做和最终关闭状态由主端补齐。
+
+## 光标移动、取消与活动组合保存
+
+完整221条归档 `events-cursor-and-active-save.json`，以下只比较同一 ProseMirror surface：
+
+- **光标/preedit范围**：seq100开始在`LEFT|RIGHT`的offset19组词，n/ni均为insertCompositionText。seq138 ArrowLeft的isComposing=true；seq140系统compositionupdate的数据直接为`n i`，142/144按该预编辑内容更新到`LEFTn i|RIGHT`。ArrowRight同样在组合期间，没有修改外侧LEFT/RIGHT。此处空格来自平台候选预编辑数据，不是编辑器额外插入的Markdown字符。
+- **取消与保存**：seq156–161 deleteCompositionText→compositionend空字符串，正文精确恢复`LEFT|RIGHT`，选区offset19；172的Cmd+S已是meta=true/isComposing=false。独立读取磁盘 `composition.md`，与已保存的 `scroll-chinese.saved.md` 完全一致，滚动用例提交的“你”保留，光标取消用例没有残留。
+- **活动组合保存仍未通过**：seq178重新组合，208先收到compositionupdate(`ni s`)，210为beforeinput insertCompositionText，212的input已使DOM成为`LEFTni s|RIGHT`；216才收到meta=true/isComposing=true的keydown `s`，晚于文本input约6ms。主端看到dirty。这个序列与此前普通WK textarea的“s先于带Command的keydown进入预编辑”同型，不能通过在编辑器keydown中删除合法s来掩盖上游事件顺序。
+
+主端报告光标移动的预编辑范围行为与普通WK textarea对照一致；本子任务独立核对的是DEditor事件与磁盘，未自行操作控制组UI。IN-03本轮确认文字范围/取消恢复，IN-04确认实际组合滚动与提交位置；候选窗口视觉位置仍无截图证据，IN-05仍需可信的活动组合原生按键链，IN-06不能靠DOM输入框几何判为候选定位通过。本轮未发现可定因产品缺陷，未改产品源码、配对逻辑或pending/completed；所有新增内容仅用于诊断及独立证据记录。
+
+
+## 主端最终闭环与清理
+
+滚动提交后单次 Cmd+Z / Cmd+S 与2524字节baseline完全一致；Cmd+Shift+Z / Cmd+S后关闭并重开，与`scroll-chinese.saved.md`逐字节一致（2527字节，唯一新增“你”）。活动组合保存核查结束以Escape取消，最终`composition.md`仍精确等于该中文副本。普通对照页仅修改临时textarea值，HTML源文件未改。所有自建文档已关闭，普通与组合诊断测试包均退出，系统输入源读取确认为SCIM.ITABC；日常应用未替换。
+
+## 第二轮：候选坐标边界与官方可观察入口
+
+本轮单独复核 IN-03/04，未操作原生 UI，未改产品源码或待办清单。`compositionViewport.ts` 的坐标换算是 `当前 caret 的 viewport 坐标 + 当前 scrollTop - 组合起始 scrollTop`，用于判断起始视口是否已经能看到 caret；没有把文档坐标当屏幕坐标，也没有创建隐藏的输入代理。光标以 DOM selection 为准，用户 wheel/touchmove/pointerdown 会释放锚点；异步帧读取的是当前锚点，销毁取消帧并移除监听。本轮未找到可确定的 IN-03/04 产品反例，因此没有增加原生坐标刷新调用或调整延时。
+
+曾检查图片 alt/caption 原生字段是否会保留旧正文 DOM selection，使外层滚动误追踪正文。最小 DOM 实验中 `input.focus()` 后 selection 转向输入元素，起初的“必然保留正文旧光标”前提不成立；实验仅用于排除该推断，不能证明所有 WebKit 字段行为，也不能计作候选原生验收。未将此假设写成产品修复或增加人为字段限制。
+
+官方资料支持以下定位边界：
+
+- AppKit 的 [`firstRect(forCharacterRange:actualRange:)`](https://developer.apple.com/documentation/appkit/nstextinputclient/firstrect%28forcharacterrange%3Aactualrange%3A%29?language=objc) 给出屏幕坐标中的字符矩形；零长度范围表示插入点，多行范围返回第一行部分。DOM caret 矩形本身不是系统候选窗口矩形，二者不能混为同一证据。
+- [`invalidateCharacterCoordinates()`](https://developer.apple.com/documentation/appkit/nstextinputcontext/invalidatecharactercoordinates%28%29?language=objc) 用于告知输入系统先前查询的字符坐标需要更新。当前没有证明 WebKit 失效通知缺失，故不向产品盲加原生刷新钩子。
+- [WebKit 官方当前主干 `WebViewImpl.mm`](https://github.com/WebKit/WebKit/blob/main/Source/WebKit/UIProcess/mac/WebViewImpl.mm) 的实际异步 `firstRectForCharacterRange` 经页面查询后调用 `convertFromViewToScreen`；同步兼容方法返回 `NSZeroRect` 并标记不应调用。因此额外调用同步 getter 得到零矩形不能证明阅读编辑定位错误。当前主干源码也不等同本机系统 WebKit 的版本证据。
+- [`IMKCandidates.show(_:)`](https://developer.apple.com/documentation/inputmethodkit/imkcandidates/show%28_%3A%29) 属于输入法自身候选面板接口，显示提示用于使面板保持可见并靠近相关文字。贴近屏幕边缘时翻转方向不应判为错位；应用不应绕过 WebKit 创建自己的替代候选框。
+
+可在既有 CUA UI 范围内使用的新入口来自 [Apple《Use the candidate window》](https://support.apple.com/guide/chinese-input-method/use-the-candidate-window-cim12992/mac)：普通拼音输入代码自动显示候选；已经输入代码时，可选中代码，通过菜单栏输入菜单执行 **Show Substitution Candidates（显示替换候选字）**。后者可用于先判断 CUA 能否观察输入法候选面板；它不单独替代活动组合期间滚动/光标移动验收，也无需修改用户输入法设置。
+
+主端后续候选视觉核对最小矩阵：同一自建 `LEFT|RIGHT` 处开始拼音，候选出现时记录 caret 与面板；左右移动后再次记录；随后在 `START|END` 处组合并小幅滚动，使 caret 仍在可见区域，比较面板是否跟随新的屏幕位置；最后大幅滚动使 caret 离屏，记录系统隐藏/重定位行为而不预设必须显示在旧位置。所有截图必须来自 CUA 实际画面，不能以 DOM rect、合成 composition 事件、系统进程存在或提交文字正确代替候选位置。未使用 CG/AX 旁路，也未新增后台原生读取候选坐标的命令。
+
+## 第三轮：目录导航被组合收尾帧覆盖的确定反例
+
+新切入点是滚动容器外的明确用户导航，不重复前两轮文字提交验证。阅读目录位于 `.md-visual-scroll` 的兄弟节点，点击后先更新选区并请求 `scrollIntoView`，随后显式将标题放到距视口顶端16px。原滚动保护仅捕获 scroller 内的 pointerdown，因而组合结束后的两个 rAF 仍保留旧锚点，覆盖目录的最终定位。
+
+新增独立 `scripts/test-markdown-composition-navigation.mjs`，以真实模块、DOM事件传播和受控布局复现相同调用顺序：组合开始→目录外部 pointerdown→compositionend→目标选区/滚动请求→标题距顶16px。修前指定 scrollTop2984 被异步改回2525，断言失败；修后仅把既有 pointerdown 释放监听移到该编辑器的 ownerDocument capture，并对应更新销毁移除。明确指针导航释放旧滚动锚点，不取消组合输入或修改正文；不同文档/窗口不共享监听。
+
+五组定向检查通过：目录最终定位不回跳、结束后待处理帧不覆盖用户导航、普通输入法自动滚动仍受保护、另一document隔离与新组合锚点恢复、销毁取消帧并移除document监听。使用独立缓存，未跑全量测试或构建。几何和事件均为组件控制，因此这是确定代码交互回归的修复证据，**不声称真实候选面板位置已验收**。本轮没有对候选坐标添加原生调用、轮询、延时或文本过滤。
+
+主端原生可用自建 `tests/artifacts/ime-navigation-2026-09-22/composition-outline.md`：顶部 `LEFT|RIGHT` 处拼音组词后实际点目录中的 `Bottom target`，观察最终标题是否保持视口顶部；若系统先提交预编辑，应按实际系统结果保存核对，不能预设点击目录必须取消组合。同目录 `.original.md` 保存原始自建内容。本子任务未操作UI、未修改pending/completed、未提交。

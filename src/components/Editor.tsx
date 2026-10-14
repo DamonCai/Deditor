@@ -1,5 +1,13 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { EditorState, EditorSelection, Compartment } from "@codemirror/state";
+import { isWindowCloseCommitted } from "../lib/windowCloseGuard";
+import { rememberTextState, recordTextUpdate, textHistory, textProjectionSync } from "../lib/textHistory";
+import { documentImageDirectory, markdownImageReference } from "../lib/markdownImageSettings";
+import { markdownSession, markdownViewState, sourceChange } from "../lib/markdownSession";
+import { installMarkdownComposition } from "../lib/markdownComposition";
+import { markdownHistory } from "../lib/markdownHistory";
+import { showError } from "../lib/feedback";
+import { documentStatsField } from "../lib/documentStats";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { EditorState, EditorSelection, Compartment, StateEffect, Transaction } from "@codemirror/state";
 import {
   EditorView,
   keymap,
@@ -39,14 +47,16 @@ import {
 } from "@codemirror/language";
 import { islandDark } from "../lib/islandDarkTheme";
 import { islandLight } from "../lib/islandLightTheme";
-import { detectLang, isMarkdown, isImageFile, isPdfFile, isAudioFile, isVideoFile, isHexFile, isXmindFile } from "../lib/lang";
-import { useEditorStore, type DiffSpec } from "../store/editor";
+import { detectLang, isMarkdown, isCsv, isImageFile, isPdfFile, isAudioFile, isVideoFile, isHexFile, isXmindFile } from "../lib/lang";
+import { useEditorPaneId, paneViewKey, useEditorStore, type DiffSpec } from "../store/editor";
 import DiffView from "./DiffView";
-// XmindView pulls mind-elixir (~113 KB) + its CSS, plus the xmind parsers.
+// XmindView loads the local SVG canvas and lossless XMind document model.
 // Only mounted when a .xmind file is open — lazy-load so non-XMind users
 // never pay for it on cold start.
 const XmindView = lazy(() => import("./XmindView"));
 import { isEnabled } from "../lib/shortcuts";
+import { installEditorFontZoom } from "../lib/editorFontZoom";
+import EditorFontZoomNotice from "./EditorFontZoomNotice";
 import {
   bookmarkExtension,
   toggleBookmark,
@@ -55,14 +65,9 @@ import {
   clearBookmarks,
 } from "../lib/bookmarks";
 import { saveImage } from "../lib/fileio";
-// HTML / PDF export pulls markdown-it + Shiki. Loading lazily — only the
-// "Export HTML" / "Export PDF" right-click menu items use them — keeps
-// Shiki (~150 KB) out of the eager Editor module path.
-const exportHtml = () => import("../lib/export").then((m) => m.exportHtml());
-const exportPdf = () => import("../lib/export").then((m) => m.exportPdf());
 import { codeBlockCompletion } from "../lib/codeBlockComplete";
 import { logError, logInfo } from "../lib/logger";
-import { setActiveView } from "../lib/editorBridge";
+import { setActiveView, getActiveView, notifyActiveEditor } from "../lib/editorBridge";
 import { tStatic, useT } from "../lib/i18n";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
 
@@ -112,16 +117,15 @@ interface Props {
   /** Active tab id. Used to look up / save the per-tab CodeMirror state JSON
    *  so undo/redo history survives switching to another tab and back. */
   tabId?: string;
-  /** True when this is the visible Editor inside its host (EditorHost keeps
+  /** True when this is the focused Editor inside its host (EditorHost keeps
    *  many Editors mounted; only one is active at a time). The active Editor
    *  registers itself with editorBridge so toolbar buttons + undo target the
    *  correct view. Without this flag, the last-mounted Editor would win
    *  forever — buttons would silently mutate a hidden tab. */
   active?: boolean;
-  /** When true, skip the per-tab state cache entirely. Used by the secondary
-   *  Editor in split-view so it doesn't collide with the primary on cache
-   *  reads/writes. Trade-off: secondary view's undo doesn't carry across
-   *  tab switches. */
+  visible?: boolean;
+  /** Skip the cache for ephemeral embedded views. Normal editor groups use
+   * separate cache keys while sharing document history. */
   noStateCache?: boolean;
   /** When set, the active tab is a side-by-side file comparison; we short-
    *  circuit and render DiffView, ignoring CodeMirror entirely. */
@@ -145,26 +149,8 @@ import {
   setEditorStateCache,
 } from "../lib/editorStateCache";
 
-export default function Editor({
-  value,
-  filePath,
-  theme,
-  fontSize,
-  tabId,
-  active,
-  noStateCache,
-  diff,
-  initialCursor,
-  initialScrollLine,
-  externalScrollLine,
-  onChange,
-  onScroll,
-  onPositionChange,
-}: Props) {
-  const t = useT();
-  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
-  const hostRef = useRef<HTMLDivElement>(null);
-
+export default function Editor(props: Props) {
+  const { value, filePath, tabId, diff } = props;
   // Diff tab — render the side-by-side comparison.
   if (diff) {
     return <DiffView spec={diff} />;
@@ -196,11 +182,11 @@ export default function Editor({
       </div>
     );
   }
-  // XMind workbook — read-only viewer (and mind-elixir-backed editor).
+  // XMind workbook — dedicated canvas and document editor.
   if (isXmindFile(filePath) && value.startsWith("data:")) {
     return (
       <Suspense fallback={<div style={{ padding: 16, color: "var(--text-soft)" }}>Loading…</div>}>
-        <XmindView dataUrl={value} filePath={filePath} tabId={tabId} />
+        <XmindView dataUrl={value} filePath={filePath} tabId={tabId} active={props.active} />
       </Suspense>
     );
   }
@@ -210,6 +196,36 @@ export default function Editor({
   if (isHexFile(filePath) && value.startsWith("data:")) {
     return <HexView dataUrl={value} filePath={filePath} />;
   }
+  return <TextEditor {...props} />;
+}
+
+// Keep the text editor's hooks in their own component. Save As or binary
+// hydration can change the renderer without changing the owning tab ID.
+function TextEditor({
+  value,
+  filePath,
+  theme,
+  fontSize,
+  tabId,
+  active,
+  visible = active,
+  noStateCache,
+  initialCursor,
+  initialScrollLine,
+  externalScrollLine,
+  onChange,
+  onScroll,
+  onPositionChange,
+}: Props) {
+  const paneId = useEditorPaneId();
+  const cacheKey = tabId ? paneViewKey(tabId, paneId) : undefined;
+  const t = useT();
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
+  const effectiveFontSize = useEditorStore((s) => s.tabs.find((tab) => tab.id === tabId)?.zoomFontSize ?? fontSize);
+  const [fontZoomRevision, setFontZoomRevision] = useState(0);
+  const dismissFontZoom = useCallback(() => setFontZoomRevision(0), []);
+  const returnEditorFocus = useCallback(() => viewRef.current?.focus(), []);
+  const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const themeCompartment = useRef(new Compartment());
   const langCompartment = useRef(new Compartment());
@@ -231,6 +247,8 @@ export default function Editor({
   // the O(N) doc.toString() + string-compare path. For a 100 KB markdown
   // file that was ~200 KB of allocation per keystroke; now zero.
   const lastEmittedRef = useRef<string | null>(null);
+  const deferredMarkdown = useRef(false);
+  deferredMarkdown.current = visible === false && isMarkdown(filePath);
   const onScrollRef = useRef(onScroll);
   const onPositionChangeRef = useRef(onPositionChange);
   // Suppress outgoing scroll events for this many ms after a programmatic scroll,
@@ -250,7 +268,7 @@ export default function Editor({
     if (positionFlushTimer.current) return;
     positionFlushTimer.current = setTimeout(() => {
       positionFlushTimer.current = null;
-      onPositionChangeRef.current?.({ ...positionRef.current });
+      if (!deferredMarkdown.current) onPositionChangeRef.current?.({ ...positionRef.current });
     }, 200);
   };
 
@@ -285,6 +303,11 @@ export default function Editor({
         // false from `run` falls through to whatever else is bound — same as
         // not registering the key at all from CodeMirror's perspective.
         keymap.of([
+          ...(tabId && isMarkdown(filePath) ? [
+            { key: "Mod-z", run: () => markdownHistory(false, tabId) },
+            { key: "Mod-Shift-z", run: () => markdownHistory(true, tabId) },
+            { key: "Mod-y", run: () => markdownHistory(true, tabId) },
+          ] : []),
           {
             key: "Mod-Alt-ArrowUp",
             run: (view) =>
@@ -322,6 +345,11 @@ export default function Editor({
           ...(isMarkdown(filePath) ? markdownTableKeymap : []),
           ...closeBracketsKeymap,
           ...defaultKeymap,
+          ...(tabId && !isMarkdown(filePath) ? [
+            { key: "Mod-z", run: (view: EditorView) => textHistory(tabId, view) },
+            { key: "Mod-Shift-z", run: (view: EditorView) => textHistory(tabId, view, true) },
+            { key: "Mod-y", run: (view: EditorView) => textHistory(tabId, view, true) },
+          ] : []),
           ...historyKeymap,
           ...searchKeymap,
           ...foldKeymap,
@@ -342,16 +370,23 @@ export default function Editor({
         // literals appear naturally. Enabling globally would noisily decorate
         // identifiers like `rgb(...)` in unrelated code that happens to match.
         colorPreviewSupported(filePath) ? colorPreview() : [],
+        documentStatsField,
         bookmarkExtension(),
         inspectionMarkers(),
         EditorView.updateListener.of((u) => {
+          if (tabId && !isMarkdown(filePath)) recordTextUpdate(tabId, u);
           if (u.docChanged) {
             const next = u.state.doc.toString();
             // Stash before notifying upstream so the resulting React render
             // (which arrives as the `value` prop on the next tick) recognizes
             // its own echo and skips the sync effect's O(N) compare.
             lastEmittedRef.current = next;
+            if (getActiveView() === u.view) setActiveView(u.view, tabId, next);
             onChangeRef.current(next);
+          }
+          if (u.selectionSet && !u.docChanged && getActiveView() === u.view) notifyActiveEditor();
+          if ((u.selectionSet || u.docChanged) && !deferredMarkdown.current && tabId && isMarkdown(filePath)) {
+            markdownViewState(tabId, useEditorStore.getState().tabs.find(t => t.id === tabId)?.content ?? u.state.doc.toString(), paneId).sourceCursor = u.state.selection.main.head;
           }
           if (u.selectionSet || u.docChanged) {
             positionRef.current.cursor = u.state.selection.main.head;
@@ -360,7 +395,7 @@ export default function Editor({
             // range so multi-cursor selections still report a useful total.
             let selLen = 0;
             for (const r of u.state.selection.ranges) selLen += r.to - r.from;
-            useEditorStore.getState().setActiveSelectionLength(selLen);
+            if (getActiveView() === u.view) useEditorStore.getState().setActiveSelectionLength(selLen);
           }
         }),
         themeCompartment.current.of(theme === "dark" ? islandDark : islandLight),
@@ -395,9 +430,11 @@ export default function Editor({
     // (e.g. file was reloaded externally), bail and start fresh — restoring
     // a stale doc would let the user "undo" into content that doesn't exist
     // on disk anymore.
-    const cachedJSON = tabId && !noStateCache ? getEditorStateCache(tabId) : undefined;
+    const cachedJSON = tabId && !noStateCache ? getEditorStateCache(cacheKey!) : undefined;
     let state: EditorState;
-    if (cachedJSON && (cachedJSON as { doc?: string }).doc === value) {
+    if (cachedJSON instanceof EditorState && cachedJSON.doc.toString() === value) {
+      state = cachedJSON.update({ effects: StateEffect.reconfigure.of(extensions) }).state;
+    } else if (cachedJSON && (cachedJSON as { doc?: string }).doc === value) {
       try {
         state = EditorState.fromJSON(
           cachedJSON,
@@ -426,8 +463,18 @@ export default function Editor({
     }
 
     const view = new EditorView({ state, parent: hostRef.current });
+    if (tabId && !isMarkdown(filePath)) rememberTextState(tabId, view.state);
+    const removeFontZoom = installEditorFontZoom(view.scrollDOM, tabId, () => setFontZoomRevision((n) => n + 1));
     viewRef.current = view;
-    setActiveView(view);
+    // Capture native menu/gesture history before CodeMirror's own history plugin.
+    const beforeNativeHistory = (event: InputEvent) => {
+      if (!tabId || !["historyUndo", "historyRedo"].includes(event.inputType) || getActiveView() !== view) return;
+      event.preventDefault(); event.stopPropagation();
+      if (isMarkdown(filePath)) markdownHistory(event.inputType === "historyRedo", tabId);
+      else textHistory(tabId, view, event.inputType === "historyRedo");
+    };
+    view.contentDOM.addEventListener("beforeinput", beforeNativeHistory, true);
+    if (active !== false) setActiveView(view, tabId);
 
     // Restore first-visible line. Defer to next frame so CM has measured layout.
     if (initialScrollLine != null && initialScrollLine > 1) {
@@ -448,22 +495,42 @@ export default function Editor({
     }
 
     // Direct scroll-event listener for smooth, every-frame outgoing sync.
+    // Emits a *fractional* source line (e.g. 42.37) so Preview can interpolate
+    // between adjacent [data-line] markers instead of snapping to the nearest
+    // one. End-of-doc is signalled by emitting `doc.lines + 1` — Preview reads
+    // anything larger than its own source's total line count as "scroll to max"
+    // so reaching the editor's bottom truly anchors the preview's bottom too.
     let scrollRafId = 0;
     const onScrollEvt = () => {
       if (scrollRafId) return;
       scrollRafId = requestAnimationFrame(() => {
         scrollRafId = 0;
-        const top = view.scrollDOM.scrollTop;
+        const dom = view.scrollDOM;
+        const top = dom.scrollTop;
+        const max = Math.max(0, dom.scrollHeight - dom.clientHeight);
         try {
-          const block = view.lineBlockAtHeight(top);
-          const line = view.state.doc.lineAt(block.from).number;
-          // Always track for persistence — even programmatic scrolls reflect
-          // the user's last viewing position.
-          positionRef.current.scrollTopLine = line;
+          let fracLine: number;
+          if (max > 0 && max - top < 2) {
+            // atBottom sentinel — preview will snap to its own scrollMax.
+            fracLine = view.state.doc.lines + 1;
+          } else {
+            const block = view.lineBlockAtHeight(top);
+            const baseLine = view.state.doc.lineAt(block.from).number;
+            const frac =
+              block.height > 0
+                ? Math.max(0, Math.min(1, (top - block.top) / block.height))
+                : 0;
+            fracLine = baseLine + frac;
+          }
+          // Persist integer-rounded line (schema stays compatible with v3).
+          positionRef.current.scrollTopLine = Math.max(
+            1,
+            Math.min(view.state.doc.lines, Math.round(fracLine)),
+          );
           schedulePositionFlush();
           // But don't echo programmatic scrolls back through editor⇄preview sync.
           if (Date.now() >= suppressOutgoingUntil.current) {
-            onScrollRef.current?.(line);
+            onScrollRef.current?.(fracLine);
           }
         } catch {
           /* during destroy / odd states; ignore */
@@ -471,8 +538,14 @@ export default function Editor({
       });
     };
     view.scrollDOM.addEventListener("scroll", onScrollEvt, { passive: true });
+    const composition = tabId && isMarkdown(filePath)
+      ? installMarkdownComposition(view.contentDOM, markdownSession(tabId, useEditorStore.getState().tabs.find(t => t.id === tabId)?.content ?? view.state.doc.toString()), { origin: "source" })
+      : null;
 
     return () => {
+      composition?.destroy();
+      removeFontZoom();
+      view.contentDOM.removeEventListener("beforeinput", beforeNativeHistory, true);
       view.scrollDOM.removeEventListener("scroll", onScrollEvt);
       if (scrollRafId) cancelAnimationFrame(scrollRafId);
       // Final flush so the very last position isn't lost on tab switch / unmount.
@@ -480,21 +553,24 @@ export default function Editor({
         clearTimeout(positionFlushTimer.current);
         positionFlushTimer.current = null;
       }
-      onPositionChangeRef.current?.({ ...positionRef.current });
+      if (!deferredMarkdown.current) onPositionChangeRef.current?.({ ...positionRef.current });
       // Stash state JSON (incl. undo history) for next mount of the same tab.
       if (tabId && !noStateCache) {
         try {
-          setEditorStateCache(tabId, view.state.toJSON({ history: historyField }));
+          if (useEditorStore.getState().tabs.some((t) => t.id === tabId)) {
+            setEditorStateCache(cacheKey!, view.state);
+            if (!deferredMarkdown.current) useEditorStore.getState().setTabPosition(cacheKey!, { ...positionRef.current });
+          }
         } catch {
           /* defensive: never block unmount on a serialization error */
         }
       }
       view.destroy();
       viewRef.current = null;
-      setActiveView(null);
+      if (getActiveView() === view) setActiveView(null);
       // Clear the StatusBar readout so a closed editor's last selection
       // count doesn't linger over the next tab.
-      useEditorStore.getState().setActiveSelectionLength(0);
+      if (!getActiveView()) useEditorStore.getState().setActiveSelectionLength(0);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -506,45 +582,102 @@ export default function Editor({
   // visible Editor wins. Skipped for the split-view secondary (active is
   // undefined there) so the primary tab keeps owning the toolbar even when
   // the user's focus is on the split clone.
-  useEffect(() => {
-    if (!active) return;
+  useLayoutEffect(() => {
     const view = viewRef.current;
     if (!view) return;
-    setActiveView(view);
+    if (active === false) { if (getActiveView() === view) setActiveView(null); return; }
+    if (active === undefined) return;
+    setActiveView(view, tabId);
+    if (tabId && isMarkdown(filePath)) {
+      const cursor = markdownViewState(tabId, useEditorStore.getState().tabs.find(t => t.id === tabId)?.content ?? view.state.doc.toString(), paneId).sourceCursor;
+      if (cursor !== null) view.dispatch({ selection: { anchor: Math.min(view.state.doc.length, cursor) }, scrollIntoView: true });
+    }
+    view.requestMeasure();
+    useEditorStore.getState().setActiveSelectionLength(view.state.selection.ranges.reduce((n, r) => n + r.to - r.from, 0));
   }, [active]);
 
-  // Apply external scroll requests (e.g. from preview).
+  useEffect(() => { viewRef.current?.requestMeasure(); }, [effectiveFontSize]);
+
+  // Apply external scroll requests (e.g. from preview). Accepts a *fractional*
+  // line so preview can drive editor to a sub-line pixel offset; any value
+  // greater than the doc's total line count is treated as an "atBottom"
+  // sentinel and pins the editor's scroll to its max.
+  //
+  // Reading-mode subtlety: while the user is in preview-maximized (reading)
+  // mode the editor pane has `display: none`, which means scrollDOM has
+  // clientHeight === 0 and writes to `scrollTop` are no-ops. If we don't
+  // handle that, navigating preview during reading mode won't update the
+  // editor, and exiting reading mode leaves the editor at its pre-reading
+  // position. Detect the zero-layout case and defer the scroll via a
+  // ResizeObserver — when the editor pane becomes visible again, scrollDOM
+  // gains size and we apply the latest pending line.
   useEffect(() => {
     if (externalScrollLine == null) return;
     const view = viewRef.current;
     if (!view) return;
-    const total = view.state.doc.lines;
-    const lineNum = Math.min(Math.max(1, Math.round(externalScrollLine)), total);
-    try {
-      const line = view.state.doc.line(lineNum);
-      const block = view.lineBlockAt(line.from);
-      suppressOutgoingUntil.current = Date.now() + 200;
-      view.scrollDOM.scrollTop = block.top;
-    } catch {
-      /* doc shorter than expected */
-    }
+    const dom = view.scrollDOM;
+
+    const applyScroll = (): boolean => {
+      // No layout → can't honor the write; tell caller to wait.
+      if (dom.clientHeight === 0) return false;
+      const total = view.state.doc.lines;
+      try {
+        if (externalScrollLine > total) {
+          suppressOutgoingUntil.current = Date.now() + 200;
+          dom.scrollTop = Math.max(0, dom.scrollHeight - dom.clientHeight);
+          return true;
+        }
+        const clamped = Math.max(1, externalScrollLine);
+        const floor = Math.min(total, Math.floor(clamped));
+        const frac = Math.max(0, Math.min(1, clamped - floor));
+        const line = view.state.doc.line(floor);
+        const block = view.lineBlockAt(line.from);
+        const target = block.top + frac * block.height;
+        suppressOutgoingUntil.current = Date.now() + 200;
+        dom.scrollTop = target;
+        return true;
+      } catch {
+        // Doc shorter than expected — treat as applied so we don't loop.
+        return true;
+      }
+    };
+
+    if (applyScroll()) return;
+
+    // Editor isn't laid out right now (likely display:none from reading
+    // mode). Watch for size changes; the first non-zero clientHeight means
+    // the pane is back on screen — apply the pending line then.
+    const observer = new ResizeObserver(() => {
+      if (applyScroll()) observer.disconnect();
+    });
+    observer.observe(dom);
+    return () => observer.disconnect();
   }, [externalScrollLine]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const view = viewRef.current;
     if (!view) return;
     // Fast path: this `value` is our own echo (we just emitted it via the
     // updateListener above). Skip the O(N) doc.toString() + string compare
     // entirely — saves ~200 KB of allocation per keystroke on a 100 KB file.
-    if (lastEmittedRef.current === value) return;
+    // Reading edits already live in the store and shared Markdown history.
+    // Catch the hidden source view up once, before painting it on activation.
+    if (deferredMarkdown.current || lastEmittedRef.current === value) return;
     // Slow path: external source updated `value` (persistence reload,
     // external file watch, programmatic setContent). Diff doc against the
     // new value, replace if different.
-    if (view.state.doc.toString() === value) return;
-    view.dispatch({
-      changes: { from: 0, to: view.state.doc.length, insert: value },
-    });
-  }, [value]);
+    // CodeMirror stores line breaks as LF. A CSV mode toggle must not diff
+    // that projection against raw CRLF offsets or rewrite an untouched file.
+    const incoming = isCsv(filePath) ? value.replace(/\r\n?/g, "\n") : value;
+    if (view.state.doc.toString() === incoming) return;
+    if (isMarkdown(filePath)) {
+      const change = sourceChange(view.state.doc.toString(), incoming);
+      view.dispatch({ changes: { from: change.from, to: change.from + change.removed.length, insert: change.inserted }, annotations: Transaction.addToHistory.of(false) });
+    } else {
+      const change = sourceChange(view.state.doc.toString(), incoming);
+      view.dispatch({ changes: { from: change.from, to: change.from + change.removed.length, insert: change.inserted }, annotations: [textProjectionSync.of(true), Transaction.addToHistory.of(false)] });
+    }
+  }, [value, active, visible, filePath]);
 
   useEffect(() => {
     viewRef.current?.dispatch({
@@ -617,8 +750,8 @@ export default function Editor({
         logInfo(`lang set: ${def.label} for ${filePath ?? "(no path)"}`);
       })
       .catch((err) => {
+        if (cancelled || !viewRef.current) return;
         logError(`load language failed for ${filePath ?? "(no path)"}`, err);
-        if (!viewRef.current) return;
         viewRef.current.dispatch({
           effects: langCompartment.current.reconfigure([]),
         });
@@ -666,11 +799,6 @@ export default function Editor({
         onClick: () => view && openSearchPanel(view),
       },
     ];
-    if (isMarkdown(filePath)) {
-      items.push({ divider: true });
-      items.push({ label: t("titlebar.exportHtml"), onClick: () => void exportHtml() });
-      items.push({ label: t("titlebar.exportPdf"), onClick: () => void exportPdf() });
-    }
     return items;
   };
 
@@ -680,9 +808,10 @@ export default function Editor({
         <div
           ref={hostRef}
           className="h-full w-full overflow-hidden"
-          style={{ ["--editor-font-size" as string]: `${fontSize}px` }}
+          style={{ ["--editor-font-size" as string]: `${effectiveFontSize}px` }}
         />
-        <InspectionsBadge value={value} filePath={filePath} />
+        {tabId && fontZoomRevision > 0 && <EditorFontZoomNotice tabId={tabId} revision={fontZoomRevision}
+          onDismiss={dismissFontZoom} onReturnFocus={returnEditorFocus} />}
       </div>
       {ctxMenu && (
         <ContextMenu
@@ -693,61 +822,6 @@ export default function Editor({
         />
       )}
     </>
-  );
-}
-
-/** IntelliJ-style inspections widget in the editor's top-right corner. We
- *  don't ship a real linter so we surface document stats instead — line/char
- *  counts always, plus an estimated read time for Markdown. Pure decorative
- *  pill; click target reserved for future "jump to next problem" wiring. */
-function InspectionsBadge({
-  value,
-  filePath,
-}: {
-  value: string;
-  filePath: string | null;
-}) {
-  // data: URLs are binary content (image / pdf / hex), the badge is meaningless.
-  if (value.startsWith("data:")) return null;
-  const lines = value === "" ? 0 : value.split("\n").length;
-  const chars = value.length;
-  // Markdown read-time: 300 cn-chars/min OR 200 en-words/min, whichever larger.
-  let readMin = 0;
-  if (isMarkdown(filePath)) {
-    const cjk = (value.match(/[一-鿿]/g) ?? []).length;
-    const words = value.split(/\s+/).filter(Boolean).length;
-    readMin = Math.max(1, Math.round(Math.max(cjk / 300, words / 200)));
-  }
-  return (
-    <div
-      style={{
-        position: "absolute",
-        top: 6,
-        right: 14,
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        padding: "2px 10px",
-        fontSize: 11,
-        color: "var(--text-soft)",
-        background: "color-mix(in srgb, var(--bg-soft) 85%, transparent)",
-        border: "1px solid var(--border)",
-        borderRadius: 999,
-        backdropFilter: "blur(6px)",
-        pointerEvents: "none",
-        userSelect: "none",
-      }}
-    >
-      <span className="tabular-nums">{lines.toLocaleString()} 行</span>
-      <span style={{ opacity: 0.5 }}>·</span>
-      <span className="tabular-nums">{chars.toLocaleString()} 字</span>
-      {readMin > 0 && (
-        <>
-          <span style={{ opacity: 0.5 }}>·</span>
-          <span className="tabular-nums">~{readMin} min</span>
-        </>
-      )}
-    </div>
   );
 }
 
@@ -771,6 +845,7 @@ async function doCut(view: EditorView) {
   } catch {
     /* fall through */
   }
+  if (isWindowCloseCommitted()) return;
   view.dispatch({ changes: { from, to, insert: "" } });
   view.focus();
 }
@@ -782,7 +857,7 @@ async function doPaste(view: EditorView) {
   } catch {
     return;
   }
-  if (!text) return;
+  if (!text || isWindowCloseCommitted()) return;
   const { from, to } = view.state.selection.main;
   view.dispatch({
     changes: { from, to, insert: text },
@@ -812,25 +887,27 @@ async function handleImagePaste(blob: File, mime: string, view: EditorView) {
     baseDir = workspaces[0];
   }
   if (!baseDir) {
-    alert(tStatic("editor.pasteImageNoTarget"));
+    void showError(tStatic("editor.pasteImageNoTarget"));
     return;
   }
   const isMd = isMarkdown(filePath);
   const subtype = mime.split("/")[1]?.toLowerCase() ?? "png";
   const ext = subtype === "jpeg" ? "jpg" : subtype;
+  const folder = isMd ? documentImageDirectory(view.state.doc.toString(), filePath, useEditorStore.getState().markdownSettings.imageDirectory) : "assets";
   const name = `paste-${Date.now()}.${ext}`;
   const buf = await blob.arrayBuffer();
   const base64 = arrayBufferToBase64(buf);
   try {
-    await saveImage(baseDir, name, base64);
-    logInfo(`pasted image saved: assets/${name} (${buf.byteLength} bytes)`);
+    await saveImage(baseDir, name, base64, folder);
+    logInfo(`pasted image saved: ${folder}/${name} (${buf.byteLength} bytes)`);
   } catch (err) {
-    logError(`paste image save failed: assets/${name}`, err);
-    alert(tStatic("editor.saveImageFailed", { err: String(err) }));
+    logError(`paste image save failed: ${folder}/${name}`, err);
+    if (!isWindowCloseCommitted()) void showError(tStatic("editor.saveImageFailed", { err: String(err) }));
     return;
   }
-  const rel = `assets/${name}`;
-  const insert = isMd ? `![](${rel})` : rel;
+  if (isWindowCloseCommitted()) return;
+  const rel = isMd ? markdownImageReference(folder, name) : `${folder}/${name}`;
+  const insert = isMd ? `![](${/[\s()]/.test(rel) ? `<${rel}>` : rel})` : rel;
   const pos = view.state.selection.main.from;
   view.dispatch({
     changes: { from: pos, insert },

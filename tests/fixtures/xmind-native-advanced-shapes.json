@@ -1,0 +1,54 @@
+[
+  {
+    "index": 0,
+    "shape": "org.xmind.topicShape.heart.compact"
+  },
+  {
+    "index": 1,
+    "shape": "org.xmind.topicShape.simpleCloud.compact"
+  },
+  {
+    "index": 2,
+    "shape": "org.xmind.topicShape.star.compact"
+  },
+  {
+    "index": 3,
+    "shape": "org.xmind.topicShape.waterdrop.compact"
+  },
+  {
+    "index": 4,
+    "shape": "org.xmind.topicShape.cutdiamond.compact"
+  },
+  {
+    "index": 5,
+    "shape": "org.xmind.topicShape.shield.compact"
+  },
+  {
+    "index": 6,
+    "shape": "org.xmind.topicShape.fatLeftArrow.compact"
+  },
+  {
+    "index": 7,
+    "shape": "org.xmind.topicShape.fatRightArrow.compact"
+  },
+  {
+    "index": 8,
+    "shape": "org.xmind.topicShape.label.compact"
+  },
+  {
+    "index": 9,
+    "shape": "org.xmind.topicShape.bookmark.compact"
+  },
+  {
+    "index": 10,
+    "shape": "org.xmind.topicShape.singlebreakangle"
+  },
+  {
+    "index": 11,
+    "shape": "org.xmind.topicShape.stack"
+  },
+  {
+    "index": 12,
+    "shape": "org.xmind.topicShape.card"
+  }
+]

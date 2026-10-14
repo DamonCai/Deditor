@@ -1,0 +1,62 @@
+[
+  {
+    "index": 0,
+    "shape": "org.xmind.topicShape.decision.compact"
+  },
+  {
+    "index": 1,
+    "shape": "org.xmind.topicShape.manualInput"
+  },
+  {
+    "index": 2,
+    "shape": "org.xmind.topicShape.predefinedProcess"
+  },
+  {
+    "index": 3,
+    "shape": "org.xmind.topicShape.manualOperation"
+  },
+  {
+    "index": 4,
+    "shape": "org.xmind.topicShape.database"
+  },
+  {
+    "index": 5,
+    "shape": "org.xmind.topicShape.document"
+  },
+  {
+    "index": 6,
+    "shape": "org.xmind.topicShape.multiDocument"
+  },
+  {
+    "index": 7,
+    "shape": "org.xmind.topicShape.delay"
+  },
+  {
+    "index": 8,
+    "shape": "org.xmind.topicShape.data"
+  },
+  {
+    "index": 9,
+    "shape": "org.xmind.topicShape.onPageReference"
+  },
+  {
+    "index": 10,
+    "shape": "org.xmind.topicShape.offPageReference"
+  },
+  {
+    "index": 11,
+    "shape": "org.xmind.topicShape.circle.double"
+  },
+  {
+    "index": 12,
+    "shape": "org.xmind.topicShape.flag"
+  },
+  {
+    "index": 13,
+    "shape": "org.xmind.topicShape.trapezoid"
+  },
+  {
+    "index": 14,
+    "shape": "org.xmind.topicShape.trapezoid.inverse"
+  }
+]

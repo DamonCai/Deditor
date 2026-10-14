@@ -1,0 +1,73 @@
+{
+  "source": "Xmind.app/Contents/Resources/app.asar:renderer/2610.js",
+  "sourceSha256": "1d88d1fc57b1587aaae8a7c65080707b9536ecce0c2aa57a6983308492e39660",
+  "fields": [
+    {
+      "shapeClass": "org.xmind.boundaryShape.rect",
+      "icon": "shape-rectangle"
+    },
+    {
+      "shapeClass": "org.xmind.boundaryShape.roundedRect",
+      "icon": "shape-rounded-rect"
+    },
+    {
+      "shapeClass": "org.xmind.boundaryShape.polygon",
+      "icon": "shape-polygon"
+    },
+    {
+      "shapeClass": "org.xmind.boundaryShape.scallops",
+      "icon": "shape-scallops"
+    },
+    {
+      "shapeClass": "org.xmind.boundaryShape.waves",
+      "icon": "shape-waves"
+    },
+    {
+      "shapeClass": "org.xmind.boundaryShape.tension",
+      "icon": "shape-tension"
+    },
+    {
+      "shapeClass": "org.xmind.boundaryShape.roundedPolygon",
+      "icon": "shape-rounded-polygon"
+    },
+    {
+      "shapeClass": "org.xmind.boundaryShape.focus",
+      "icon": "shape-focus"
+    },
+    {
+      "shapeClass": "org.xmind.boundaryShape.cross",
+      "icon": "shape-cross"
+    },
+    {
+      "shapeClass": "org.xmind.summaryShape.angle",
+      "icon": "summary-straight"
+    },
+    {
+      "shapeClass": "org.xmind.summaryShape.square",
+      "icon": "summary-elbow"
+    },
+    {
+      "shapeClass": "org.xmind.summaryShape.round",
+      "icon": "summary-curve"
+    },
+    {
+      "shapeClass": "org.xmind.summaryShape.curly",
+      "icon": "summary-bright"
+    },
+    {
+      "shapeClass": "org.xmind.summaryShape.straight",
+      "icon": "summary-right-angle"
+    }
+  ],
+  "evidence": "Packaged palette mapping, not a native save/reopen test",
+  "nativeGallery": "2026-09-11: native-group-shapes.xmind opened without repair; nine boundary and five summary shapes viewed in original Xmind.",
+  "geometryFacts": {
+    "source": "renderer/1857.js",
+    "polygon": "Hide boundary title, keep outward edge flat, hull follows inward edges of covered topics",
+    "waves": "Two alternating quadratic lobes per period, control amplitude 2.5",
+    "tension": "One inward quadratic lobe per period, control amplitude 5",
+    "defaultBoundaryTitle": "Left inset 14 + border width; wrap against remaining boundary width; preserve stored title",
+    "defaultSummary": "round",
+    "defaultCallout": "Native master gallery: short 5px gap above owner; green fill and white title when no theme or topic override"
+  }
+}

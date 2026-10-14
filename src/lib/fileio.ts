@@ -1,12 +1,15 @@
+import { saveMarkdownImage } from "./markdownImageStorage";
+import { showError } from "./feedback";
+import { flushDocument, flushDocuments } from "./documentFlush";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { useEditorStore } from "../store/editor";
+import { useEditorStore, type Tab } from "../store/editor";
 import { confirmUnsaved } from "../components/ConfirmDialog";
 import { logError, logInfo, logWarn } from "./logger";
 import { notifyRefresh } from "./treeRefresh";
 import { tStatic } from "./i18n";
-import { isImageFile, isPdfFile, isAudioFile, isVideoFile, isHexFile, isXmindFile } from "./lang";
+import { isMarkdown, isImageFile, isPdfFile, isAudioFile, isVideoFile, isHexFile, isXmindFile, isBinaryRenderable } from "./lang";
 import { formatBuffer } from "./format";
 
 const MD_FILTER = [
@@ -30,6 +33,7 @@ const MD_FILTER = [
     extensions: ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico", "tiff", "tif"],
   },
   { name: "PDF", extensions: ["pdf"] },
+  { name: "XMind", extensions: ["xmind"] },
   {
     name: "Audio",
     extensions: ["mp3", "wav", "ogg", "flac", "m4a", "aac", "opus"],
@@ -55,35 +59,53 @@ function noteRecentDocument(path: string): void {
   invoke("add_recent_document", { path }).catch(() => {});
 }
 
-export async function openFileByPath(path: string) {
+interface OpenFileOptions {
+  /** A caller such as Recent Files already provides its own inline feedback. */
+  reportError?: boolean;
+}
+
+function reportOpenError(path: string, error: unknown, options: OpenFileOptions) {
+  const detail = error instanceof Error ? error.message : String(error);
+  const missing = /os error (2|3)\b|no such file or directory|path not found/i.test(detail);
+  if (missing) {
+    // The directory list may predate an external rename/delete. Drop the
+    // stale row immediately instead of letting every click repeat this error.
+    const separator = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+    if (separator >= 0) {
+      const parent = path.slice(0, separator || 1);
+      notifyRefresh(/^[A-Za-z]:$/.test(parent) ? `${parent}${path[separator]}` : parent);
+    }
+  }
+  if (options.reportError === false) return;
+  void showError(tStatic(missing ? "fileio.openMissing" : "fileio.openFailed", {
+    name: displayName(path),
+    err: detail,
+  }));
+}
+
+export async function openFileByPath(path: string, options: OpenFileOptions = {}) {
   if (isImageFile(path)) {
-    await openBinaryAsDataUrl(path, "image");
-    noteRecentDocument(path);
+    if (await openBinaryAsDataUrl(path, "image", options)) noteRecentDocument(path);
     return;
   }
   if (isPdfFile(path)) {
-    await openBinaryAsDataUrl(path, "pdf");
-    noteRecentDocument(path);
+    if (await openBinaryAsDataUrl(path, "pdf", options)) noteRecentDocument(path);
     return;
   }
   if (isAudioFile(path)) {
-    await openBinaryAsDataUrl(path, "audio");
-    noteRecentDocument(path);
+    if (await openBinaryAsDataUrl(path, "audio", options)) noteRecentDocument(path);
     return;
   }
   if (isVideoFile(path)) {
-    await openBinaryAsDataUrl(path, "video");
-    noteRecentDocument(path);
+    if (await openBinaryAsDataUrl(path, "video", options)) noteRecentDocument(path);
     return;
   }
   if (isHexFile(path)) {
-    await openBinaryAsDataUrl(path, "hex");
-    noteRecentDocument(path);
+    if (await openBinaryAsDataUrl(path, "hex", options)) noteRecentDocument(path);
     return;
   }
   if (isXmindFile(path)) {
-    await openBinaryAsDataUrl(path, "xmind");
-    noteRecentDocument(path);
+    if (await openBinaryAsDataUrl(path, "xmind", options)) noteRecentDocument(path);
     return;
   }
   const { tabs } = useEditorStore.getState();
@@ -99,6 +121,7 @@ export async function openFileByPath(path: string) {
     noteRecentDocument(path);
   } catch (err) {
     logError(`open failed for ${path}`, err);
+    reportOpenError(path, err, options);
   }
 }
 
@@ -170,7 +193,7 @@ export async function openCompare(leftPath: string, rightPath: string): Promise<
     isVideoFile(rightPath) || isHexFile(rightPath) || isXmindFile(rightPath)
   ) {
     logWarn(`compare refused: binary file involved (${leftPath} vs ${rightPath})`);
-    alert(tStatic("filetree.compareBinaryRefused"));
+    void showError(tStatic("filetree.compareBinaryRefused"));
     return;
   }
   try {
@@ -192,18 +215,22 @@ export async function openCompare(leftPath: string, rightPath: string): Promise<
 export async function openBinaryAsDataUrl(
   path: string,
   kind: "image" | "pdf" | "audio" | "video" | "hex" | "xmind",
-): Promise<void> {
+  options: OpenFileOptions = {},
+): Promise<boolean> {
   const { openTab, tabs } = useEditorStore.getState();
   if (tabs.some((t) => t.filePath === path)) {
     openTab(path, "");
-    return;
+    return true;
   }
   try {
     const dataUrl = await readAsDataUrl(path);
     openTab(path, dataUrl);
     logInfo(`opened ${kind}: ${path}`);
+    return true;
   } catch (err) {
     logError(`open ${kind} failed for ${path}`, err);
+    reportOpenError(path, err, options);
+    return false;
   }
 }
 
@@ -256,165 +283,237 @@ function dataUrlToBase64(dataUrl: string): string | null {
   return dataUrl.slice(idx + ";base64,".length);
 }
 
-/** Write a tab's content to disk. data: URLs go through write_binary_file
- *  (we strip the prefix and decode on the Rust side); plain text uses
- *  write_text_file. Lets callers stay agnostic to whether a tab is binary. */
-async function writeTabContent(path: string, content: string): Promise<void> {
-  const b64 = dataUrlToBase64(content);
-  if (b64 != null) {
-    await invoke("write_binary_file", { path, data: b64 });
+/** Serialize saves per tab so an older write cannot finish after a newer one. */
+const saves = new Map<string, Promise<boolean>>();
+function queueSave(id: string, operation: () => Promise<boolean>): Promise<boolean> {
+  const previous = saves.get(id) ?? Promise.resolve(true);
+  const pending = previous.catch(() => false).then(operation);
+  saves.set(id, pending);
+  void pending.finally(() => {
+    if (saves.get(id) === pending) saves.delete(id);
+  }).catch(() => {});
+  return pending;
+}
+
+async function writeTabContent(path: string, content: string, binary: boolean): Promise<void> {
+  if (binary) {
+    const data = dataUrlToBase64(content);
+    if (data == null) throw new Error("Invalid binary document");
+    await invoke("write_binary_file", { path, data });
   } else {
     await invoke("write_text_file", { path, content });
   }
 }
 
-/** Run Prettier on `content` if format-on-save is enabled and the path's
- *  extension has a configured parser. Returns the (possibly-formatted) text.
- *  Errors fall through silently — saving an unformattable file is still
- *  better than refusing to save. */
-async function maybeFormat(content: string, path: string): Promise<string> {
-  if (!useEditorStore.getState().formatOnSave) return content;
-  // data: URLs are binary tabs; never run a text formatter on them.
-  if (content.startsWith("data:")) return content;
+async function maybeFormat(content: string, path: string, binary: boolean): Promise<string> {
+  if (binary || !useEditorStore.getState().formatOnSave) return content;
   try {
-    const formatted = await formatBuffer(content, path);
-    return formatted ?? content;
-  } catch {
+    return (await formatBuffer(content, path)) ?? content;
+  } catch (err) {
+    logError("format on save failed", err);
     return content;
   }
 }
 
-/** Save every dirty tab that has a filePath. Untitled / diff tabs are skipped.
- *  Binary tabs whose content is a data URL go through write_binary_file. */
-export async function saveAllDirty(): Promise<void> {
-  const { tabs, markSaved, activeId, setContent } = useEditorStore.getState();
-  for (const t of tabs) {
-    if (!t.filePath) continue;
-    if (t.diff) continue;
-    if (t.content === t.savedContent) continue;
-    try {
-      const formatted = await maybeFormat(t.content, t.filePath);
-      if (formatted !== t.content) setContent(formatted, t.id);
-      await writeTabContent(t.filePath, formatted);
-      // markSaved only operates on active tab; do it manually for non-active
-      if (t.id === activeId) {
-        markSaved();
-      } else {
-        useEditorStore.setState({
-          tabs: useEditorStore
-            .getState()
-            .tabs.map((x) =>
-              x.id === t.id ? { ...x, savedContent: x.content } : x,
-            ),
-        });
+/** Mark exactly the bytes written, preserving edits made while IPC was pending. */
+function finishSave(snapshot: Tab, path: string, written: string): boolean {
+  useEditorStore.setState((state) => ({
+    tabs: state.tabs.map((tab) => {
+      if (tab.id !== snapshot.id || tab.filePath !== snapshot.filePath) return tab;
+      return {
+        ...tab,
+        filePath: path,
+        content: tab.content === snapshot.content ? written : tab.content,
+        savedContent: written,
+        externalChange: tab.externalChange === snapshot.externalChange ? undefined : tab.externalChange,
+        missingOnDisk: false,
+      };
+    }),
+  }));
+  const current = useEditorStore.getState().tabs.find((t) => t.id === snapshot.id);
+  return !!current && current.filePath === path && current.content === written;
+}
+
+async function saveTab(id: string, saveAs = false, automatic = false): Promise<boolean> {
+  return queueSave(id, async () => {
+    flushDocument(id);
+    const snapshot = useEditorStore.getState().tabs.find((t) => t.id === id);
+    if (!snapshot || snapshot.diff) return false;
+    if (automatic && (!snapshot.filePath || snapshot.externalChange != null || snapshot.missingOnDisk)) return false;
+    const binary = isBinaryRenderable(snapshot.filePath);
+    let target = snapshot.filePath;
+    let chooseTarget = saveAs || !target || !!snapshot.missingOnDisk;
+    if (target && !chooseTarget) {
+      // A deleted source must stay available as a buffer. In particular, an
+      // unchanged buffer cannot report a successful no-op save, and auto-save
+      // must not silently recreate a path that was just removed.
+      try {
+        const [mtime] = await invoke<(number | null)[]>("file_mtimes", { paths: [target] });
+        if (mtime == null) {
+          useEditorStore.setState(state => ({ tabs: state.tabs.map(tab =>
+            tab.id === id && tab.filePath === target ? { ...tab, missingOnDisk: true } : tab,
+          ) }));
+          if (automatic) return false;
+          chooseTarget = true;
+        }
+      } catch (err) { logWarn(`could not check file before save: ${target}`, err); }
+    }
+    if (chooseTarget) {
+      // macOS appends the first filter's extension even when defaultPath already
+      // ends in .xmind. Keep the archive format explicit in Save As.
+      const filters = isXmindFile(snapshot.filePath)
+        ? [{ name: "XMind", extensions: ["xmind"] }]
+        : MD_FILTER;
+      let defaultPath = target ?? "untitled.md";
+      if (target) {
+        const parent = target.slice(0, Math.max(target.lastIndexOf("/"), target.lastIndexOf("\\")));
+        if (parent) {
+          try {
+            const [mtime] = await invoke<(number | null)[]>("file_mtimes", { paths: [parent] });
+            if (mtime == null) defaultPath = displayName(target);
+          } catch { defaultPath = displayName(target); }
+        }
       }
-      logInfo(`auto-saved: ${t.filePath} (${formatted.length} chars)`);
+      target = await save({ filters, defaultPath });
+      if (!target) return false;
+      if (useEditorStore.getState().tabs.some((t) => t.id !== id && t.filePath === target)) {
+        throw new Error(tStatic("fileio.targetAlreadyOpen"));
+      }
+    }
+    if (!target) return false;
+    // A tab may have closed or been renamed while the native dialog was open.
+    if (!useEditorStore.getState().tabs.some((t) => t.id === id && t.filePath === snapshot.filePath)) return false;
+    try {
+      const content = snapshot.filePath && target !== snapshot.filePath && isMarkdown(snapshot.filePath) && isMarkdown(target) && useEditorStore.getState().markdownSettings.preserveImageTargets
+        ? (await import("./markdownImagePaths")).rebaseMarkdownImages(snapshot.content, snapshot.filePath, target) : snapshot.content;
+      const formatted = await maybeFormat(content, target, binary);
+      // Formatting and image-path loading yield to edits, reloads and closes.
+      // Recheck immediately before issuing I/O so a stale automatic save cannot
+      // overwrite a conflict or a document the user has already discarded.
+      const current = useEditorStore.getState().tabs.find((t) => t.id === id);
+      if (!current || current.filePath !== snapshot.filePath ||
+          current.savedContent !== snapshot.savedContent ||
+          current.externalChange !== snapshot.externalChange ||
+          (automatic && (current.content !== snapshot.content || current.missingOnDisk))) return false;
+      if (!chooseTarget && current.missingOnDisk) return false;
+      if (target !== snapshot.filePath || formatted !== snapshot.savedContent) {
+        await writeTabContent(target, formatted, binary);
+      }
+      const clean = finishSave(snapshot, target, formatted);
+      logInfo(`saved: ${target} (${formatted.length} chars)`);
+      return clean;
     } catch (err) {
-      logError(`auto-save failed for ${t.filePath}`, err);
+      logError(`save failed for ${target}`, err);
+      throw err;
     }
-  }
-}
-
-export async function saveFile() {
-  const { tabs, activeId, markSaved, setContent } = useEditorStore.getState();
-  const active = tabs.find((t) => t.id === activeId);
-  if (!active) return;
-  // Diff tabs are read-only — there's nothing to save.
-  if (active.diff) return;
-  if (!active.filePath) return saveFileAs();
-  // No-op fast path: Cmd+S on an unmodified file shouldn't bump mtime. Vite
-  // (and any other HMR / file watcher) treats every mtime change as a real
-  // edit and will fully reload, which causes a visible flash. Skip when
-  // there's nothing to format and nothing to write.
-  if (
-    active.content === active.savedContent &&
-    !useEditorStore.getState().formatOnSave
-  ) {
-    return;
-  }
-  try {
-    const formatted = await maybeFormat(active.content, active.filePath);
-    if (formatted === active.savedContent) {
-      // Format-on-save was on but produced the same bytes already on disk.
-      // Skip the write to avoid an HMR-triggering touch.
-      if (formatted !== active.content) setContent(formatted, active.id);
-      markSaved();
-      return;
-    }
-    if (formatted !== active.content) setContent(formatted, active.id);
-    await writeTabContent(active.filePath, formatted);
-    markSaved();
-    logInfo(`saved: ${active.filePath} (${formatted.length} chars)`);
-  } catch (err) {
-    logError(`save failed for ${active.filePath}`, err);
-    throw err;
-  }
-}
-
-export async function saveFileAs() {
-  const { tabs, activeId, rebindActive } = useEditorStore.getState();
-  const active = tabs.find((t) => t.id === activeId);
-  if (!active) return;
-  if (active.diff) return;
-  const target = await save({
-    filters: MD_FILTER,
-    defaultPath: active.filePath ?? "untitled.md",
   });
-  if (!target) return;
-  try {
-    const formatted = await maybeFormat(active.content, target);
-    await writeTabContent(target, formatted);
-    rebindActive(target, formatted);
-    logInfo(`saved as: ${target} (${formatted.length} chars)`);
-  } catch (err) {
-    logError(`saveAs failed for ${target}`, err);
-    throw err;
+}
+
+export async function saveAllDirty(): Promise<void> {
+  flushDocuments();
+  const ids = useEditorStore.getState().tabs
+    .filter((t) => t.filePath && !t.diff && !t.missingOnDisk && t.content !== t.savedContent && t.externalChange == null)
+    .map((t) => t.id);
+  for (const id of ids) {
+    try { await saveTab(id, false, true); }
+    catch (err) { logError(`auto-save failed for tab ${id}`, err); }
   }
+}
+
+async function saveManually(id: string, saveAs = false): Promise<boolean> {
+  const tab = useEditorStore.getState().tabs.find(t => t.id === id);
+  try {
+    return await saveTab(id, saveAs);
+  } catch (err) {
+    // Menu and palette actions intentionally do not await saves. Handle the
+    // failure here, including errors raised by the native Save As dialog.
+    logError(`manual save failed for tab ${id}`, err);
+    void showError(tStatic("fileio.saveFailed", {
+      name: displayName(tab?.filePath ?? null),
+      err: err instanceof Error ? err.message : String(err),
+    }));
+    return false;
+  }
+}
+
+export async function saveFile(): Promise<boolean> {
+  const id = useEditorStore.getState().activeId;
+  return id ? saveManually(id) : false;
+}
+
+export async function saveFileAs(): Promise<boolean> {
+  const id = useEditorStore.getState().activeId;
+  return id ? saveManually(id, true) : false;
+}
+
+export async function saveTabAs(id: string): Promise<boolean> {
+  return saveManually(id, true);
 }
 
 export function newFile() {
   useEditorStore.getState().newUntitled();
 }
 
-export async function closeActiveTab() {
-  const { tabs, activeId, closeTab } = useEditorStore.getState();
-  const active = tabs.find((t) => t.id === activeId);
-  if (!active) return;
-  if (active.content !== active.savedContent) {
-    const choice = await confirmUnsaved(
-      tStatic("fileio.unsavedClose", { name: displayName(active.filePath) }),
-    );
-    if (choice === "cancel") return;
-    if (choice === "save") {
-      try {
-        await saveFile();
-      } catch {
-        return;
-      }
-    }
-  }
-  closeTab(active.id);
+const closingTabs = new Map<string, Promise<boolean>>();
+export async function closeActiveTab(): Promise<boolean> {
+  const id = useEditorStore.getState().activeId;
+  return id ? closeTabById(id) : false;
 }
 
-export async function closeTabById(id: string) {
-  const { tabs, closeTab } = useEditorStore.getState();
-  const t = tabs.find((x) => x.id === id);
-  if (!t) return;
-  if (t.content !== t.savedContent) {
-    useEditorStore.getState().setActive(id);
-    const choice = await confirmUnsaved(
-      tStatic("fileio.unsavedClose", { name: displayName(t.filePath) }),
-    );
-    if (choice === "cancel") return;
-    if (choice === "save") {
-      try {
-        await saveFile();
-      } catch {
-        return;
+export function closeTabById(id: string): Promise<boolean> {
+  const state = useEditorStore.getState();
+  const other = state.activePane === "left" ? "right" : "left";
+  if (state.panes?.[state.activePane].tabIds.includes(id) && state.panes[other].tabIds.includes(id)) {
+    flushDocument(id);
+    state.detachPaneTab(id, state.activePane);
+    return Promise.resolve(true);
+  }
+  const existing = closingTabs.get(id);
+  if (existing) return existing;
+  const pending = (async () => {
+    flushDocument(id);
+    const tab = useEditorStore.getState().tabs.find((t) => t.id === id);
+    if (!tab) return true;
+    if (tab.content !== tab.savedContent || tab.missingOnDisk) {
+      useEditorStore.getState().setActive(id);
+      const choice = await confirmUnsaved(
+        tStatic("fileio.unsavedClose", { name: displayName(tab.filePath) }),
+      );
+      if (choice === "cancel") return false;
+      if (choice === "discard" && isMarkdown(tab.filePath)) {
+        // Keep a recoverable checkpoint even if the last persistence debounce has not run.
+        const latest = useEditorStore.getState().tabs.find(t => t.id === id);
+        if (latest) await invoke("record_markdown_draft", {path: latest.filePath ?? `untitled:${id}`, content: latest.content}).catch(error => logWarn(`Markdown draft history: ${error}`));
+      }
+      if (choice === "save") {
+        if (!await saveManually(id)) return false;
       }
     }
+    if (useEditorStore.getState().tabs.some((t) => t.id === id)) {
+      useEditorStore.getState().closeTab(id);
+      try {
+        // Load lazily: restoration itself imports the binary-file reader here.
+        const { flushPersist } = await import("./persistence");
+        await flushPersist();
+      } catch (error) {
+        logError("failed to persist closed tab", error);
+        return false;
+      }
+    }
+    return true;
+  })();
+  closingTabs.set(id, pending);
+  void pending.finally(() => closingTabs.delete(id)).catch(() => {});
+  return pending;
+}
+
+export async function closeOtherTabs(keepId: string): Promise<void> {
+  const state = useEditorStore.getState();
+  const ids = (state.panes?.[state.activePane].tabIds ?? state.tabs.map(t => t.id)).filter(id => id !== keepId);
+  for (const id of ids) {
+    if (!await closeTabById(id)) return;
   }
-  closeTab(id);
+  useEditorStore.getState().setActive(keepId);
 }
 
 export async function openFolder() {
@@ -457,8 +556,9 @@ export async function saveImage(
   baseDir: string,
   name: string,
   data: string,
+  folder = "assets",
 ): Promise<string> {
-  return invoke<string>("save_image", { dir: baseDir, name, data });
+  return saveMarkdownImage(baseDir, name, data, folder);
 }
 
 export async function createFile(parentDir: string, name: string): Promise<string> {
@@ -492,7 +592,7 @@ export async function revealInFinder(path: string): Promise<void> {
     await revealItemInDir(path);
   } catch (err) {
     logError(`reveal in finder failed: ${path}`, err);
-    alert(
+    void showError(
       tStatic("fileio.cantOpenLocation", {
         err: err instanceof Error ? err.message : String(err),
       }),
@@ -501,6 +601,8 @@ export async function revealInFinder(path: string): Promise<void> {
 }
 
 export async function renamePath(from: string, to: string): Promise<void> {
+  const { rebaseMarkdownImages } = await import("./markdownImagePaths");
+  flushDocuments();
   await invoke("rename_path", { from, to });
   logInfo(`renamed: ${from} -> ${to}`);
   // Refresh both ends in case from/to were under different parents (defensive;
@@ -517,19 +619,19 @@ export async function renamePath(from: string, to: string): Promise<void> {
   let anyChanged = false;
   const remapped = tabs.map((t) => {
     if (!t.filePath) return t;
-    if (t.filePath === from) {
-      anyChanged = true;
-      return { ...t, filePath: to };
-    }
-    if (t.filePath.startsWith(from + "/") || t.filePath.startsWith(from + "\\")) {
-      anyChanged = true;
-      const rest = t.filePath.slice(from.length);
-      return { ...t, filePath: to + rest };
-    }
-    return t;
+    const filePath = t.filePath === from ? to : t.filePath.startsWith(from + "/") || t.filePath.startsWith(from + "\\") ? to + t.filePath.slice(from.length) : t.filePath;
+    if (filePath !== t.filePath) anyChanged = true;
+    return filePath === t.filePath ? t : { ...t, filePath };
   });
-  if (anyChanged) {
-    useEditorStore.setState({ tabs: remapped });
+  if (anyChanged) useEditorStore.setState({ tabs: remapped });
+  if (useEditorStore.getState().markdownSettings.preserveImageTargets && tabs.some(t => t.filePath && isMarkdown(t.filePath))) {
+    for (const tab of tabs) {
+      if (!tab.filePath || !isMarkdown(tab.filePath)) continue;
+      const path = remapped.find(t => t.id === tab.id)!.filePath!;
+      if (!isMarkdown(path)) continue;
+      const updated = rebaseMarkdownImages(tab.content, tab.filePath, path, { from, to });
+      if (updated !== tab.content) useEditorStore.getState().setContent(updated, tab.id, "command");
+    }
   }
   // Keep the compare mark in sync if it pointed at the renamed file.
   const { compareMarkPath, setCompareMarkPath } = useEditorStore.getState();
@@ -554,14 +656,13 @@ export async function deletePath(path: string): Promise<void> {
     if (mark && (mark === path || mark.startsWith(path + "/") || mark.startsWith(path + "\\"))) {
       useEditorStore.getState().setCompareMarkPath(null);
     }
-    // Close any tabs pointing at the deleted path or under it (if it was a dir)
-    const { tabs, closeTab } = useEditorStore.getState();
-    for (const t of tabs) {
-      if (!t.filePath) continue;
-      if (t.filePath === path || t.filePath.startsWith(path + "/") || t.filePath.startsWith(path + "\\")) {
-        closeTab(t.id);
-      }
-    }
+    // Keep open buffers recoverable. Deleting a folder marks every contained
+    // tab; Save As can bind each one to a new location.
+    useEditorStore.setState(state => ({ tabs: state.tabs.map(tab =>
+      tab.filePath && (tab.filePath === path || tab.filePath.startsWith(path + "/") || tab.filePath.startsWith(path + "\\"))
+        ? { ...tab, missingOnDisk: true, externalChange: undefined }
+        : tab,
+    ) }));
   } catch (err) {
     logError(`delete failed: ${path}`, err);
     throw err;

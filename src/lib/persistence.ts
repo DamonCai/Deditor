@@ -1,3 +1,4 @@
+import { normalizeMarkdownPreferences, type MarkdownPreferences } from "./markdownPreferences";
 import { invoke } from "@tauri-apps/api/core";
 import {
   useEditorStore,
@@ -9,6 +10,7 @@ import {
 import { logInfo, logWarn } from "./logger";
 import { isBinaryRenderable } from "./lang";
 import { readAsDataUrl } from "./fileio";
+import { captureRecoverySnapshot, RecoveryEncoder } from "./recoveryTransport";
 
 // localStorage keys are LEGACY: persistence now lives in a real file managed
 // by the Rust side (see read_app_state / write_app_state). We still read these
@@ -19,9 +21,11 @@ const KEY_V2 = "deditor:state:v2";
 const KEY_V1 = "deditor:state:v1";
 
 interface PersistedTab {
+  recoveryId?: string;
   filePath: string | null;
   content: string;
   savedContent: string;
+  missingOnDisk?: boolean;
   // v3+: per-tab view state. Optional so older snapshots still parse.
   cursor?: number;
   scrollTopLine?: number;
@@ -37,8 +41,17 @@ interface PersistedV3 {
   showSidebar: boolean;
   sidebarPx: number;
   previewPct: number;
+  markdownSettings?: Partial<MarkdownPreferences>;
   editorFontSize?: number;
+  /** Legacy global zoom snapshot: migrate its configured baseline only. */
+  editorBaseFontSize?: number;
+  csvMode?: "source" | "split" | "read";
+  /** "read" is accepted only for migrating the removed Markdown mode. */
+  markdownMode?: "source" | "split" | "visual" | "read";
   previewMaximized?: boolean;
+  /** Right-side TOC visibility in markdown reading mode. Default true. */
+  tocVisible?: boolean; // Legacy expanded state; hover outlines start unpinned.
+  tocPinned?: boolean;
   language?: Lang;
   /** Per-shortcut enable map. Optional so older snapshots keep loading. */
   shortcuts?: Record<string, boolean>;
@@ -137,6 +150,8 @@ async function readRaw(): Promise<string | null> {
   } catch (err) {
     logWarn("read_app_state failed; falling back to localStorage", err);
   }
+  // Secondary windows must never inherit the primary window's legacy session.
+  if (typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__?.metadata?.currentWindow?.label?.startsWith("editor-")) return null;
   // Fallback / migration path: read whatever the previous (localStorage)
   // backend wrote. The very next save flushes it back into the file, after
   // which the localStorage keys get swept (see doSave).
@@ -152,6 +167,12 @@ async function readRaw(): Promise<string | null> {
 }
 
 export async function loadPersisted(): Promise<UiExtras | null> {
+  // Secondary windows start with an empty document even if no snapshot exists.
+  const secondary = typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__?.metadata?.currentWindow?.label?.startsWith("editor-");
+  if (secondary) {
+    const id = newId();
+    useEditorStore.getState().replaceTabs([{ id, filePath: null, content: "", savedContent: "" }], id);
+  }
   const raw = await readRaw();
   if (!raw) return null;
 
@@ -190,8 +211,8 @@ export async function loadPersisted(): Promise<UiExtras | null> {
     const t = data.tabs[i];
     const disk = settled[i];
     if (!t.filePath) {
-      // Untitled tab: just restore its content as-is.
-      const id = newId();
+      // Preserve recovery identity across restarts, without trusting duplicate ids.
+      const id = t.recoveryId && /^[a-zA-Z0-9-]{1,80}$/.test(t.recoveryId) && !restored.some(tab => tab.id === t.recoveryId) ? t.recoveryId : newId();
       restored.push({
         id,
         filePath: null,
@@ -202,29 +223,30 @@ export async function loadPersisted(): Promise<UiExtras | null> {
       continue;
     }
     if (isBinaryRenderable(t.filePath)) {
-      // Binary-rendered files (image / pdf / audio / video). If the file is
-      // gone, drop the tab.
-      if (disk == null) continue;
+      // A deleted binary may still have its in-memory data URL in recovery.
+      if (disk == null && !t.missingOnDisk) continue;
       const id = newId();
       restored.push({
         id,
         filePath: t.filePath,
-        content: disk,
-        savedContent: disk,
+        content: disk ?? t.content,
+        savedContent: disk ?? t.savedContent,
+        missingOnDisk: disk == null,
       });
       continue;
     }
     // Named text tab.
     if (disk == null) {
-      // File is gone. If user had unsaved edits, demote to untitled to
-      // preserve them; otherwise drop the tab.
-      if (t.content !== t.savedContent) {
+      // Keep a recoverable named buffer when the source disappeared. Clean
+      // missing tabs carry their content explicitly in the persisted state.
+      if (t.missingOnDisk || t.content !== t.savedContent) {
         const id = newId();
         restored.push({
           id,
-          filePath: null,
+          filePath: t.filePath,
           content: t.content,
-          savedContent: "",
+          savedContent: t.savedContent,
+          missingOnDisk: true,
         });
         stashPos(id, t);
       }
@@ -261,14 +283,21 @@ export async function loadPersisted(): Promise<UiExtras | null> {
   if (data.language === "zh" || data.language === "en") {
     store.setLanguage(data.language);
   }
-  if (typeof data.editorFontSize === "number") {
-    store.setEditorFontSize(data.editorFontSize);
+  useEditorStore.setState({ markdownSettings: normalizeMarkdownPreferences(data.markdownSettings) });
+  const configuredFontSize = data.editorBaseFontSize ?? data.editorFontSize;
+  if (typeof configuredFontSize === "number" && Number.isFinite(configuredFontSize)) {
+    store.setEditorFontSize(configuredFontSize);
   }
 
   useEditorStore.setState({
+    csvMode: data.csvMode === "split" || data.csvMode === "read" ? data.csvMode : "source",
+    markdownMode: data.markdownMode === "read" ? "visual"
+      : data.markdownMode === "source" || data.markdownMode === "split" || data.markdownMode === "visual" ? data.markdownMode
+      : !data.showPreview ? "source" : data.previewMaximized ? "visual" : "split",
     showPreview: data.showPreview,
     showSidebar: data.showSidebar,
     previewMaximized: data.previewMaximized ?? false,
+    tocVisible: data.tocPinned ?? false,
   });
 
   if (data.shortcuts && typeof data.shortcuts === "object") {
@@ -320,14 +349,47 @@ export async function loadPersisted(): Promise<UiExtras | null> {
   };
 }
 
-let saveTimer: ReturnType<typeof setTimeout> | null = null;
-
-export function schedulePersist(extras: UiExtras): void {
+let persistencePaused = false;
+export function pausePersistence(): () => void {
+  persistencePaused = true;
   if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => doSave(extras), 500);
+  saveTimer = null;
+  let resumed = false;
+  return () => {
+    if (resumed) return;
+    resumed = true;
+    persistencePaused = false;
+    // Another window may fail its close after this one has already flushed.
+    // Capture edits made during that wait even if the user stops typing.
+    if (latestExtras) schedulePersist(latestExtras);
+  };
 }
 
-function doSave(extras: UiExtras): void {
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let latestExtras: UiExtras | null = null;
+let pendingWrite: Promise<void> = Promise.resolve();
+const recoveryEncoder = new RecoveryEncoder();
+
+export function schedulePersist(extras: UiExtras): void {
+  latestExtras = extras;
+  if (persistencePaused) return;
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    void doSave(extras).catch((err) => logWarn("write_app_state failed", err));
+  }, 500);
+}
+
+/** Persist a completed close without leaving its recovery state on a timer. */
+export function flushPersist(): Promise<void> {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = null;
+  // Persistence starts after session hydration, when the UI supplies its sizes.
+  if (!latestExtras) return pendingWrite;
+  return doSave(latestExtras);
+}
+
+function doSave(extras: UiExtras): Promise<void> {
   const s = useEditorStore.getState();
   // Diff tabs are ephemeral — drop them before persisting so they don't show
   // up empty on next launch.
@@ -352,23 +414,29 @@ function doSave(extras: UiExtras): void {
       //    user's unsaved edits survive a relaunch.
       const binary = isBinaryRenderable(t.filePath);
       const dirty = t.content !== t.savedContent;
-      const skipContent = binary || (t.filePath != null && !dirty);
+      const skipContent = !t.missingOnDisk && (binary || (t.filePath != null && !dirty));
       return {
+        recoveryId: t.id,
         filePath: t.filePath,
         content: skipContent ? "" : t.content,
         savedContent: skipContent ? "" : t.savedContent,
+        missingOnDisk: !!t.missingOnDisk,
         cursor: pos?.cursor,
         scrollTopLine: pos?.scrollTopLine,
       };
     }),
     activeIndex,
     theme: s.theme,
+    csvMode: s.csvMode,
+    markdownMode: s.markdownMode,
     showPreview: s.showPreview,
     showSidebar: s.showSidebar,
     sidebarPx: extras.sidebarPx,
     previewPct: extras.previewPct,
+    markdownSettings: s.markdownSettings,
     editorFontSize: s.editorFontSize,
     previewMaximized: s.previewMaximized,
+    tocPinned: s.tocVisible,
     language: s.language,
     shortcuts: s.shortcuts,
     expandedDirs: s.expandedDirs,
@@ -380,17 +448,30 @@ function doSave(extras: UiExtras): void {
     autoSave: s.autoSave,
     formatOnSave: s.formatOnSave,
   };
-  invoke("write_app_state", { content: JSON.stringify(base) })
+  const captured = captureRecoverySnapshot(base);
+  // An older in-flight snapshot must finish before a close snapshot is written.
+  // Capture the state above now, but derive deltas only from the last successful
+  // write. A slow/failed write must not shift the baseline of a queued close.
+  const write = pendingWrite.then(async () => {
+    let prepared = recoveryEncoder.prepareCaptured(captured);
+    if (!await invoke<boolean>("write_app_state_incremental", { packet: prepared.packet })) {
+      prepared = recoveryEncoder.prepareCaptured(captured, true);
+      if (!await invoke<boolean>("write_app_state_incremental", { packet: prepared.packet })) throw new Error("Recovery resync failed");
+    }
+    prepared.acknowledge();
+  });
+  pendingWrite = write.catch(() => {});
+  return write
     .then(() => {
       // Sweep legacy localStorage once we know the file write succeeded —
       // otherwise an interrupted migration could lose the snapshot.
       try {
+        if ((window as any).__TAURI_INTERNALS__?.metadata?.currentWindow?.label?.startsWith("editor-")) return;
         localStorage.removeItem(KEY_V3);
         localStorage.removeItem(KEY_V2);
         localStorage.removeItem(KEY_V1);
       } catch {
         /* private mode etc.; harmless */
       }
-    })
-    .catch((err) => logWarn("write_app_state failed", err));
+    });
 }

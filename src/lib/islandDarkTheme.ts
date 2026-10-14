@@ -105,10 +105,11 @@ const editorTheme = EditorView.theme(
   { dark: true },
 );
 
-const highlightStyle = HighlightStyle.define([
+export const highlightStyle = HighlightStyle.define([
   { tag: t.keyword, color: PALETTE.keyword },
   { tag: [t.controlKeyword, t.moduleKeyword, t.operatorKeyword], color: PALETTE.keyword },
-  { tag: [t.name, t.deleted, t.character], color: PALETTE.variable },
+  { tag: [t.name, t.character], color: PALETTE.variable },
+  { tag: t.deleted, color: "#f07878" },
   { tag: [t.macroName], color: PALETTE.fn },
   { tag: [t.propertyName], color: PALETTE.property },
   { tag: [t.null], color: PALETTE.constant },

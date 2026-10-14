@@ -1,9 +1,9 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/shallow";
-import { FiChevronDown, FiPlus, FiX } from "react-icons/fi";
+import { FiChevronDown, FiPlus, FiX, FiColumns } from "react-icons/fi";
 import { LuGitCompare } from "react-icons/lu";
-import { useEditorStore, isTabDirty, type Tab } from "../store/editor";
-import { closeTabById, newFile, revealInFinder } from "../lib/fileio";
+import { useEditorPaneId, useEditorStore, isTabDirty, type Tab } from "../store/editor";
+import { closeTabById, closeOtherTabs, newFile, revealInFinder } from "../lib/fileio";
 import { useT, tStatic } from "../lib/i18n";
 import LangIcon from "./LangIcon";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
@@ -28,6 +28,8 @@ function toEncodedPath(path: string): string {
 // splitter drag) don't re-run TabBar's body. Internal store subscriptions
 // still wake it when relevant fields change.
 function TabBarImpl() {
+  const paneId = useEditorPaneId();
+  const split = useEditorStore(s => !!s.panes);
   const t = useT();
   // Per-field selectors. tabs is shallow-compared so a keystroke (which mutates
   // tabs[].content but keeps the same object identity for all other tabs)
@@ -36,12 +38,55 @@ function TabBarImpl() {
   const tabs = useEditorStore(useShallow((s) => s.tabs));
   const activeId = useEditorStore((s) => s.activeId);
   const setActive = useEditorStore((s) => s.setActive);
-  const closeOthers = useEditorStore((s) => s.closeOthers);
   const reorderTabs = useEditorStore((s) => s.reorderTabs);
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const [overflowOpen, setOverflowOpen] = useState(false);
+  const [hiddenTabIds, setHiddenTabIds] = useState<string[]>([]);
   const stripRef = useRef<HTMLDivElement>(null);
   const overflowBtnRef = useRef<HTMLButtonElement>(null);
+  const overflowId = paneId ? `tab-overflow-dropdown-${paneId}` : "tab-overflow-dropdown";
+  const tabOrder = JSON.stringify(tabs.map((tab) => tab.id));
+  const hiddenTabs = tabs.filter((tab) => hiddenTabIds.includes(tab.id));
+
+  const measureOverflow = useCallback(() => {
+    const strip = stripRef.current;
+    if (!strip) return;
+    const bounds = strip.getBoundingClientRect();
+    // Include the space returned when the dropdown button disappears, so
+    // showing the button cannot itself keep an otherwise fitting tab hidden.
+    const available = strip.clientWidth + (overflowBtnRef.current?.getBoundingClientRect().width ?? 0);
+    const next = strip.scrollWidth <= available + 1 ? [] :
+      [...strip.querySelectorAll<HTMLElement>("[data-tab-id]")]
+        .filter((el) => {
+          const rect = el.getBoundingClientRect();
+          return rect.left < bounds.left - 1 || rect.right > bounds.right + 1;
+        })
+        .map((el) => el.dataset.tabId!);
+    setHiddenTabIds((previous) => previous.length === next.length && previous.every((id, i) => id === next[i]) ? previous : next);
+    if (!next.length) setOverflowOpen(false);
+  }, []);
+
+  useLayoutEffect(() => {
+    const strip = stripRef.current;
+    if (!strip) return;
+    let frame = 0;
+    const schedule = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measureOverflow);
+    };
+    const observer = new ResizeObserver(schedule);
+    observer.observe(strip);
+    strip.querySelectorAll<HTMLElement>("[data-tab-id]").forEach((el) => observer.observe(el));
+    strip.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("resize", schedule);
+    measureOverflow();
+    return () => {
+      observer.disconnect();
+      strip.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", schedule);
+      cancelAnimationFrame(frame);
+    };
+  }, [tabOrder, measureOverflow]);
 
   const dragState = useRef<{ fromIdx: number; startX: number } | null>(null);
   const dropIndicator = useRef<number | null>(null);
@@ -81,11 +126,11 @@ function TabBarImpl() {
       tabEls.forEach((el) => { el.style.borderLeft = ""; el.style.borderRight = ""; });
       dropIndicator.current = insertBeforeIdx;
       if (insertBeforeIdx != null && insertBeforeIdx < tabEls.length) {
-        tabEls[insertBeforeIdx].style.borderLeft = "3px solid #4f8cff";
+        tabEls[insertBeforeIdx].style.borderLeft = "3px solid var(--accent)";
       }
       if (insertBeforeIdx === tabEls.length) {
         const last = tabEls[tabEls.length - 1];
-        if (last) last.style.borderRight = "3px solid #4f8cff";
+        if (last) last.style.borderRight = "3px solid var(--accent)";
       }
     };
 
@@ -117,13 +162,16 @@ function TabBarImpl() {
     };
   }, [reorderTabs]);
 
-  // Scroll active tab into view whenever it changes
-  useLayoutEffect(() => {
+  const revealTab = useCallback((id: string | null) => {
     const strip = stripRef.current;
     if (!strip) return;
-    const el = strip.querySelector<HTMLElement>(`[data-tab-id="${activeId}"]`);
+    const el = strip.querySelector<HTMLElement>(`[data-tab-id="${id}"]`);
     if (el) el.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [activeId]);
+    measureOverflow();
+  }, [measureOverflow]);
+
+  // Scroll active tab into view whenever it changes.
+  useLayoutEffect(() => { revealTab(activeId); }, [activeId, revealTab]);
 
   // Stable callbacks so memo'd TabItem children don't all re-render when
   // some unrelated tab field changes. They receive tab data via params
@@ -142,7 +190,8 @@ function TabBarImpl() {
       e.stopPropagation();
       // Read tabs length imperatively so the handler doesn't have to depend
       // on tabs (which changes ref on every keystroke).
-      const tabsLen = useEditorStore.getState().tabs.length;
+      const state = useEditorStore.getState();
+      const tabsLen = state.panes?.[paneId ?? state.activePane].tabIds.length ?? state.tabs.length;
       const items: MenuItem[] = [];
       if (tab.filePath) {
         const path = tab.filePath;
@@ -171,15 +220,18 @@ function TabBarImpl() {
         });
         items.push({ divider: true });
       }
+      items.push({ label: t("split.right"), onClick: () => useEditorStore.getState().splitRight(tab.id) });
+      if (useEditorStore.getState().panes) items.push({ label: t("split.merge"), onClick: () => useEditorStore.getState().mergePanes() });
+      items.push({ divider: true });
       items.push({ label: t("tabbar.close"), onClick: () => closeTabById(tab.id) });
       items.push({
         label: t("tabbar.closeOthers"),
-        onClick: () => closeOthers(tab.id),
+        onClick: () => void closeOtherTabs(tab.id),
         disabled: tabsLen <= 1,
       });
       setMenu({ x: e.clientX, y: e.clientY, items });
     },
-    [t, closeOthers],
+    [t, paneId],
   );
 
   return (
@@ -218,17 +270,23 @@ function TabBarImpl() {
       </div>
       <Button
         variant="ghost"
+        size="icon"
         onClick={newFile}
         title={t("tabbar.newTab")}
         style={iconBtnStyle}
       >
         <FiPlus size={14} />
       </Button>
-      <Button
+      <Button variant="ghost" size="icon" style={iconBtnStyle} title={t(split ? "split.merge" : "split.right")}
+        onClick={() => useEditorStore.getState().toggleSplitEditor()}><FiColumns size={14} /></Button>
+      {hiddenTabs.length > 0 && <Button
         ref={overflowBtnRef}
         variant="ghost"
+        size="icon"
         onClick={() => setOverflowOpen((v) => !v)}
-        title={t("tabbar.allTabs", { n: tabs.length })}
+        title={t("tabbar.hiddenTabs", { n: hiddenTabs.length })}
+        aria-expanded={overflowOpen}
+        aria-controls={overflowOpen ? overflowId : undefined}
         style={{ ...iconBtnStyle, position: "relative" }}
       >
         <FiChevronDown size={14} />
@@ -242,16 +300,19 @@ function TabBarImpl() {
             lineHeight: 1,
           }}
         >
-          {tabs.length}
+          {hiddenTabs.length}
         </span>
-      </Button>
-      {overflowOpen && (
+      </Button>}
+      {overflowOpen && hiddenTabs.length > 0 && (
         <OverflowDropdown
-          tabs={tabs}
+          id={overflowId}
+          tabs={hiddenTabs}
           activeId={activeId}
           anchorRef={overflowBtnRef}
           onPick={(id) => {
             setActive(id);
+            // The active tab can also be outside the strip after manual scroll.
+            revealTab(id);
             setOverflowOpen(false);
           }}
           onClose={(id) => {
@@ -353,39 +414,21 @@ const TabItem = memo(function TabItem({
       >
         {name}
       </span>
-      <span
+      <Button variant="ghost" size="icon"
         onClick={(e) => {
           e.stopPropagation();
           onTabClose(tab.id);
         }}
         title={tStatic("tabbar.closeShortcut")}
-        style={{
-          width: 16,
-          height: 16,
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          borderRadius: 3,
-          fontSize: 14,
-          lineHeight: 1,
-          color: "var(--text-soft)",
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = "var(--hover-bg)";
-          e.currentTarget.style.color = "var(--text)";
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = "";
-          e.currentTarget.style.color = "var(--text-soft)";
-        }}
-      >
-        {dirty ? "●" : "×"}
-      </span>
+        style={{ width: 20, height: 20 }}>
+        {dirty ? <span style={{ fontSize: 10 }}>●</span> : <FiX size={14} />}
+      </Button>
     </div>
   );
 });
 
 function OverflowDropdown({
+  id,
   tabs,
   activeId,
   anchorRef,
@@ -393,6 +436,7 @@ function OverflowDropdown({
   onClose,
   onDismiss,
 }: {
+  id: string;
   tabs: Tab[];
   activeId: string | null;
   anchorRef: React.RefObject<HTMLButtonElement>;
@@ -408,15 +452,26 @@ function OverflowDropdown({
   useLayoutEffect(() => {
     const btn = anchorRef.current;
     if (!btn) return;
-    const r = btn.getBoundingClientRect();
-    setPos({ top: r.bottom + 2, right: window.innerWidth - r.right });
+    const updatePosition = () => {
+      const r = btn.getBoundingClientRect();
+      const next = { top: r.bottom + 2, right: window.innerWidth - r.right };
+      setPos((previous) => previous.top === next.top && previous.right === next.right ? previous : next);
+    };
+    updatePosition();
+    const observer = new ResizeObserver(updatePosition);
+    if (btn.parentElement) observer.observe(btn.parentElement);
+    window.addEventListener("resize", updatePosition);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updatePosition);
+    };
   }, [anchorRef]);
 
   useEffect(() => {
     const onDocDown = (e: MouseEvent) => {
       const target = e.target as Node;
       if (anchorRef.current?.contains(target)) return;
-      const dd = document.getElementById("tab-overflow-dropdown");
+      const dd = document.getElementById(id);
       if (dd?.contains(target)) return;
       onDismiss();
     };
@@ -444,7 +499,7 @@ function OverflowDropdown({
 
   return (
     <div
-      id="tab-overflow-dropdown"
+      id={id}
       style={{
         position: "fixed",
         top: pos.top,
@@ -462,20 +517,13 @@ function OverflowDropdown({
     >
       <div style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>
         <input
+          className="deditor-input deditor-input--compact"
           autoFocus
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           placeholder={t("tabbar.searchPlaceholder", { n: tabs.length })}
           style={{
             width: "100%",
-            background: "var(--bg-soft)",
-            border: "1px solid var(--border)",
-            color: "var(--text)",
-            borderRadius: 4,
-            padding: "4px 8px",
-            fontSize: 12,
-            outline: "none",
-            boxSizing: "border-box",
           }}
         />
       </div>
@@ -548,33 +596,15 @@ function OverflowDropdown({
                   </span>
                 )}
               </div>
-              <span
+              <Button variant="ghost" size="icon"
                 onClick={(e) => {
                   e.stopPropagation();
                   onClose(tb.id);
                 }}
                 title={t("tabbar.close")}
-                style={{
-                  width: 18,
-                  height: 18,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  borderRadius: 3,
-                  color: "var(--text-soft)",
-                  flexShrink: 0,
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "var(--border)";
-                  e.currentTarget.style.color = "var(--text)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "";
-                  e.currentTarget.style.color = "var(--text-soft)";
-                }}
-              >
-                <FiX size={12} />
-              </span>
+                style={{ width: 20, height: 20 }}>
+                <FiX size={14} />
+              </Button>
             </div>
           );
         })}

@@ -1,0 +1,11 @@
+// Self-created documents preloaded in memory; no user file access.
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import Visual from '../src/components/MarkdownVisualEditor';
+import Preview from '../src/components/Preview';
+import { useEditorStore } from '../src/store/editor';
+import '../src/styles.css';
+const source = '# 文件链接验收\n\n[中文 文件.md](file:///generated/%E4%B8%AD%E6%96%87%20%E6%96%87%E4%BB%B6.md)\n\n[绝对路径](/generated/%E4%B8%AD%E6%96%87%20%E6%96%87%E4%BB%B6.md)\n\n[上级相对路径](../generated/relative.md)\n\n[相对路径](./relative.md)\n\n[网页](https://example.com)\n';
+useEditorStore.setState({tabs:[{id:'links',filePath:'/generated/links.md',content:source,savedContent:source},{id:'local',filePath:'/generated/中文 文件.md',content:'# 本地文件打开成功\n\n中文文件正文。\n',savedContent:'# 本地文件打开成功\n\n中文文件正文。\n'},{id:'relative',filePath:'/generated/relative.md',content:'# 相对路径打开成功\n',savedContent:'# 相对路径打开成功\n'}],activeId:'links',language:'zh',theme:'light',markdownMode:'visual',autoSave:'off'});
+function Review(){const tabs=useEditorStore(s=>s.tabs),id=useEditorStore(s=>s.activeId),theme=useEditorStore(s=>s.theme);return <div style={{height:'100vh',display:'flex',flexDirection:'column'}}><nav>{tabs.map(tab=><button key={tab.id} onClick={()=>useEditorStore.setState({activeId:tab.id})}>{tab.filePath?.split('/').pop()}</button>)}<button onClick={()=>{const next=theme==='light'?'dark':'light';document.documentElement.classList.toggle('dark',next==='dark');useEditorStore.setState({theme:next});}}>切换主题</button><output data-testid="file-state">{JSON.stringify({activeFile:tabs.find(t=>t.id===id)?.filePath,sourceUnchanged:tabs.find(t=>t.id==='links')?.content===source})}</output></nav><div style={{display:'flex',flex:1,minHeight:0}}><section aria-label="实时预览" style={{width:'50%',minWidth:0,display:'flex',flexDirection:'column'}}><h2>实时预览</h2><Preview tabId={id!} active theme={theme}/></section><section aria-label="阅读编辑" style={{width:'50%',minWidth:0,display:'flex',flexDirection:'column'}}><h2>阅读编辑</h2><Visual tabId={id!} theme={theme}/></section></div></div>}
+const root=createRoot(document.getElementById('root')!);root.render(<Review/>);if(import.meta.hot)import.meta.hot.dispose(()=>root.unmount());

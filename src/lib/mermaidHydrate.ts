@@ -4,20 +4,28 @@ import { tStatic } from "./i18n";
 /** mermaid is ~700 KB; load it lazily only when a `.mermaid-diagram`
  *  placeholder appears. Cached after first import. */
 let mermaidPromise: Promise<typeof import("mermaid").default> | null = null;
-let initializedTheme: "light" | "dark" | null = null;
+let initializedTheme: string | null = null;
+let renderQueue: Promise<unknown> = Promise.resolve();
 
-async function getMermaid(theme: "light" | "dark") {
+async function getMermaid(theme: "light" | "dark", forExport = false) {
   if (!mermaidPromise) {
     mermaidPromise = import("mermaid").then((m) => m.default);
   }
   const m = await mermaidPromise;
-  if (initializedTheme !== theme) {
+  if (initializedTheme !== `${theme}-${forExport}`) {
     m.initialize({
       startOnLoad: false,
       securityLevel: "loose",
+      // Mermaid's web-embed defaults replace valid local diagrams above 50k
+      // characters or reject them above 500 edges. Keep the complete document;
+      // layout work remains serialized and obsolete queued renders cancellable.
+      maxTextSize: Number.MAX_SAFE_INTEGER,
+      maxEdges: Number.MAX_SAFE_INTEGER,
+      htmlLabels: !forExport,
+      flowchart: { htmlLabels: !forExport },
       theme: theme === "dark" ? "dark" : "default",
     });
-    initializedTheme = theme;
+    initializedTheme = `${theme}-${forExport}`;
   }
   return m;
 }
@@ -44,29 +52,17 @@ let renderCounter = 0;
 export function hydrateMermaid(
   root: HTMLElement,
   theme: "light" | "dark",
-): AbortController {
-  const ctrl = new AbortController();
+  forExport = false,
+): AbortController & { done: Promise<void> } {
+  const ctrl = Object.assign(new AbortController(), {
+    done: Promise.resolve(),
+  });
   const placeholders = root.querySelectorAll<HTMLElement>(
     ".mermaid-diagram[data-mermaid-source]",
   );
   if (placeholders.length === 0) return ctrl;
 
-  void (async () => {
-    let mermaid;
-    try {
-      mermaid = await getMermaid(theme);
-    } catch (err) {
-      logWarn("mermaid load failed", err);
-      placeholders.forEach((el) => {
-        if (ctrl.signal.aborted) return;
-        if (el.dataset.mermaidHydrated === "1") return;
-        el.dataset.mermaidHydrated = "1";
-        el.classList.add("error");
-        el.innerHTML = failureMarkup(err, el.dataset.mermaidSource || "");
-      });
-      return;
-    }
-
+  ctrl.done = (async () => {
     for (const el of Array.from(placeholders)) {
       if (ctrl.signal.aborted) return;
       if (el.dataset.mermaidHydrated === "1") continue;
@@ -75,12 +71,25 @@ export function hydrateMermaid(
       el.dataset.mermaidHydrated = "1";
       const id = `mermaid-${++renderCounter}`;
       try {
-        const { svg, bindFunctions } = await mermaid.render(id, source);
-        if (ctrl.signal.aborted) return;
+        // Initialization and rendering share one queue: export's light/SVG-text
+        // settings cannot race with a dark preview or change another diagram.
+        const task = renderQueue.then(async () => {
+          // A newer document can replace this root while another render holds
+          // the queue. Do not spend diagram layout work on its stale source.
+          if (ctrl.signal.aborted) return;
+          const mermaid = await getMermaid(theme, forExport);
+          if (ctrl.signal.aborted) return;
+          return mermaid.render(id, source);
+        });
+        renderQueue = task.catch(() => undefined);
+        const result = await task;
+        if (ctrl.signal.aborted || !result) return;
+        const { svg, bindFunctions } = result;
         el.innerHTML = svg;
         if (bindFunctions) bindFunctions(el);
       } catch (err) {
         if (ctrl.signal.aborted) return;
+        logWarn("mermaid render failed", err);
         // mermaid leaves a stray <svg id="..."> behind in document.body when
         // render fails; clean it up so the DOM doesn't accumulate junk.
         document.getElementById(id)?.remove();

@@ -1,3 +1,5 @@
+import { newWindow } from "./editorWindows";
+import { getVisualEditor } from "./markdownVisualBridge";
 /** Command Palette registry. Each command is a discoverable, runnable action
  *  the user can find via Cmd+Shift+P. We keep the list small and focused: app
  *  actions that have meaningful keyboard / menu equivalents elsewhere. CodeMirror
@@ -47,6 +49,8 @@ function runOnEditor(cmd: (v: import("@codemirror/view").EditorView) => boolean)
 
 export const COMMANDS: Command[] = [
   // File
+  { id: "cmd.file.recent", labelKey: "recent.title", shortcut: "Cmd/Ctrl+E", group: "nav", run: () => useEditorStore.getState().setRecentFilesOpen(true) },
+  { id: "cmd.file.newWindow", labelKey: "shortcut.file.newWindow", shortcut: "Cmd/Ctrl+Shift+N", group: "file", run: newWindow },
   { id: "cmd.file.new",          labelKey: "cmd.file.new",          shortcut: "Cmd/Ctrl+N",        group: "file", run: () => void newFile() },
   { id: "cmd.file.open",         labelKey: "cmd.file.open",         shortcut: "Cmd/Ctrl+O",        group: "file", run: () => void openFile() },
   { id: "cmd.file.openFolder",   labelKey: "cmd.file.openFolder",   shortcut: "Cmd/Ctrl+Shift+O",  group: "file", run: () => void openFolder() },
@@ -183,23 +187,25 @@ export const COMMANDS: Command[] = [
     shortcut: "Cmd/Ctrl+Shift+I",
     group: "editor",
     run: async () => {
-      const view = getActiveView();
-      if (!view) return;
+      const view = getActiveView(), visual = getVisualEditor();
+      if (!view && !visual?.editable) return;
       const { tabs, activeId, setContent } = useEditorStore.getState();
       const active = tabs.find((t) => t.id === activeId);
       if (!active || active.diff || !active.filePath) return;
       try {
-        const text = view.state.doc.toString();
+        const text = visual ? active.content : view!.state.doc.toString();
         const formatted = await formatBuffer(text, active.filePath);
         if (formatted == null || formatted === text) return;
+        const current = useEditorStore.getState();
+        if (current.activeId !== active.id || current.tabs.find(t => t.id === active.id)?.content !== text) return;
         setContent(formatted, active.id);
         // Replace the editor's doc in-place so cursor lands at the start (cleanest
         // safe spot — Prettier may have reflowed every line below the cursor).
-        view.dispatch({
+        view?.dispatch({
           changes: { from: 0, to: view.state.doc.length, insert: formatted },
           selection: { anchor: 0 },
         });
-        view.focus();
+        if (visual) visual.focus(); else view?.focus();
         logInfo(`formatDocument: rewrote ${active.filePath}`);
       } catch (e) {
         logError("formatDocument failed", e);

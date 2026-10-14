@@ -1,12 +1,28 @@
+import { markdownBackground } from "./markdownBackground";
+import { loadMarkdownMath, markdownMathHtml } from "./markdownMath";
+import { needsHtmlDocument } from "./htmlDocument";
+import type { PluginSimple } from "markdown-it";
+import mark from "markdown-it-mark";
+import sub from "markdown-it-sub";
+import sup from "markdown-it-sup";
+import { markdownEmoji } from "./markdownShorthand";
+import footnote from "markdown-it-footnote";
+import { markdownExtensions } from "./markdownExtensions";
 import MarkdownIt from "markdown-it";
 import anchor from "markdown-it-anchor";
 import taskLists from "markdown-it-task-lists";
+import { markdownTableLists } from "./markdownTableLists";
+import { markdownTaskIndent } from "./markdownListIndent";
 import { ensureLanguage, getHighlighter } from "./highlight";
+import { MarkdownHighlightCache } from "./markdownHighlightCache";
 import { detectLang } from "./lang";
 import { tStatic } from "./i18n";
+import { normalizeMarkdownFences } from "./markdownFence";
 
 const PLANTUML_LANGS = new Set(["plantuml", "puml", "uml"]);
 const MERMAID_LANGS = new Set(["mermaid"]);
+const HTML_PREVIEW_LANGS = new Set(["html"]);
+const fenceHighlightCache = new MarkdownHighlightCache();
 
 // Lazy loaders for the two heavy plugins:
 //   - katex (~628 KB minified) — only docs with `$...$` need this
@@ -16,7 +32,7 @@ const MERMAID_LANGS = new Set(["mermaid"]);
 // Cache: once loaded, the promise is reused (returns instantly).
 let katexLoaded = false;
 let katexLoading: Promise<void> | null = null;
-async function loadKatex(): Promise<void> {
+export async function loadKatex(): Promise<void> {
   if (katexLoaded) return;
   if (!katexLoading) {
     katexLoading = (async () => {
@@ -25,8 +41,13 @@ async function loadKatex(): Promise<void> {
         // The CSS provides the math glyph layout — must be present before
         // KaTeX HTML is mounted into the preview.
         import("katex/dist/katex.min.css"),
+        loadMarkdownMath(),
       ]);
-      md.use(katex);
+      // Node/CJS packages can expose the plugin under a second default wrapper.
+      md.use(typeof katex === "function" ? katex : (katex as { default: PluginSimple }).default);
+      for (const kind of ["math_inline", "math_inline_block", "math_inline_bare_block", "math_block"]) {
+        md.renderer.rules[kind] = (tokens, index, _options, env) => markdownMathHtml(tokens[index].content, kind !== "math_inline", env.__mathSource ?? "", env.__mathAutoNumber === true, kind === "math_inline" ? undefined : env.__mathBlockIndex++);
+      }
       katexLoaded = true;
     })();
   }
@@ -87,18 +108,59 @@ function renderPlantumlPlaceholder(source: string, line: number, encoded: string
   );
 }
 
+function renderHtmlPlaceholder(source: string, line: number): string {
+  // Keep fenced HTML inert until the shared display sanitizer mounts it. This
+  // lets Preview and the visual editor render the same markup without letting
+  // a closing tag escape this placeholder before sanitization.
+  return `<div class="html-render-block" data-line="${line}" data-html-source="${escapeAttr(source)}"></div>`;
+}
+
 const md = new MarkdownIt({
   // Allow inline HTML so `<span style="color:…">` / `<mark>` / `<sup>` etc.
   // emitted by the toolbar's Color / Highlight buttons render as expected.
-  // Local editor on local content — no XSS surface to worry about.
+  // Active block HTML is rendered in a separate document by the display host.
   html: true,
   linkify: true,
   breaks: false,
   typographer: false,
 });
+// Local documents are opened by the host's link handler, just like relative paths.
+// Retain markdown-it's checks for every other protocol.
+const validateMarkdownLink = md.validateLink.bind(md);
+md.validateLink = href => /^file:/i.test(href) || validateMarkdownLink(href);
+
+const originalHtmlBlock = md.renderer.rules.html_block!;
+md.renderer.rules.html_block = (tokens, index, options, env, renderer) => {
+  const token = tokens[index];
+  return needsHtmlDocument(token.content)
+    ? renderHtmlPlaceholder(token.content, token.map ? token.map[0] + 1 : 0)
+    : originalHtmlBlock(tokens, index, options, env, renderer);
+};
 
 md.use(anchor, { permalink: false });
+md.use(markdownTableLists);
+md.use(markdownBackground);
 md.use(taskLists, { enabled: false });
+md.use(markdownTaskIndent);
+md.use(footnote);
+md.use(mark).use(sub).use(sup).use(markdownEmoji);
+md.use(markdownExtensions);
+// Both hosts use separate editable-sized footer items. Backlinks live outside
+// the content boundary, so changing footnote prose never mutates view-owned links.
+md.renderer.rules.footnote_block_open = () => "";
+md.renderer.rules.footnote_block_close = () => "";
+md.renderer.rules.footnote_open = (tokens, i, _options, env) => {
+  const n = tokens[i].meta.id + 1;
+  const label = env.footnotes?.list?.[tokens[i].meta.id]?.label ?? "";
+  env.__footnoteBacklinks = "";
+  return `<section class="footnotes" data-md-footnote-definition="${escapeAttr(label)}">${n === 1 ? '<hr class="footnotes-sep">' : ''}<ol class="footnotes-list" start="${n}"><li class="footnote-item" id="fn${n}" data-footnote-label="${escapeAttr(label)}"><div class="md-footnote-content">`;
+};
+const footnoteAnchor = md.renderer.rules.footnote_anchor!;
+md.renderer.rules.footnote_anchor = (tokens, i, options, env, renderer) => {
+  env.__footnoteBacklinks += footnoteAnchor(tokens, i, options, env, renderer);
+  return "";
+};
+md.renderer.rules.footnote_close = (_tokens, _i, _options, env) => `</div>${env.__footnoteBacklinks}</li></ol></section>\n`;
 // KaTeX is registered lazily by renderMarkdown() when the source actually
 // contains math — see loadKatex().
 
@@ -118,7 +180,7 @@ md.renderer.rules.fence = (tokens, idx, options, env, self) => {
   return originalFence(tokens, idx, options, env, self);
 };
 
-["paragraph_open", "heading_open", "blockquote_open", "list_item_open"].forEach(
+["paragraph_open", "heading_open", "blockquote_open", "list_item_open", "table_open"].forEach(
   (rule) => {
     const original = md.renderer.rules[rule];
     md.renderer.rules[rule] = (tokens, idx, options, env, self) => {
@@ -145,35 +207,87 @@ md.renderer.rules.image = (tokens, idx, options, env, self) => {
   const token = tokens[idx];
   const srcAttr = token.attrGet("src") ?? "";
   if (srcAttr) token.attrSet("data-raw-src", srcAttr);
+  if (tokens.some((other, index) => index !== idx && (other.type !== "text" || other.content.trim()))) token.attrSet("data-md-inline", "true");
   return originalImage(tokens, idx, options, env, self);
 };
 
+/** Heading routing uses the exact parser/slug policy used by the real preview. */
+export function markdownHeadingTargets(source: string) {
+  return md.parse(source, {}).filter(token => token.type === "heading_open").map(token => ({
+    id: token.attrGet("id") ?? "", line: (token.map?.[0] ?? 0) + 1,
+  }));
+}
+
 export interface RenderOptions {
   theme: "light" | "dark";
+  documentSource?: string;
+  mathAutoNumber?: boolean;
+  mathOrdinal?: number;
+}
+
+export interface MarkdownToc { line: number; headings: { level: number; id: string; text: string }[] }
+
+/** Structured output from the same parser as the full preview. A preserved TOC
+ * can patch its text-only rows without parsing/sanitizing thousands of HTML nodes. */
+export async function readMarkdownTocs(source: string, opts: RenderOptions): Promise<Map<number, MarkdownToc>> {
+  const parsedSource = normalizeMarkdownFences(source);
+  if (sourceMaybeHasKatex(parsedSource)) await loadKatex();
+  const env = { __mathSource: opts.documentSource ?? source, __mathAutoNumber: opts.mathAutoNumber, __mathBlockIndex: opts.mathOrdinal ?? 0 };
+  const tokens = md.parse(parsedSource, env);
+  const result = new Map<number, MarkdownToc>();
+  for (const token of tokens) if (token.type === "deditor_toc" && token.map) {
+    const line = token.map[0] + 1;
+    result.set(line, { line, headings: token.meta.headings });
+  }
+  return result;
+}
+
+/** A TOC needs the full parser context (duplicate slugs, references and nested
+ * headings), but none of the unrelated table/code HTML or its DOM. */
+export async function renderMarkdownTocs(source: string, opts: RenderOptions): Promise<Map<number, string>> {
+  const parsedSource = normalizeMarkdownFences(source);
+  if (sourceMaybeHasKatex(parsedSource)) await loadKatex();
+  const env = { __mathSource: opts.documentSource ?? source, __mathAutoNumber: opts.mathAutoNumber, __mathBlockIndex: opts.mathOrdinal ?? 0 };
+  const tokens = md.parse(parsedSource, env);
+  const result = new Map<number, string>();
+  for (const token of tokens) {
+    if (token.type === "deditor_toc" && token.map) {
+      result.set(token.map[0] + 1, md.renderer.render([token], md.options, env).trimEnd());
+    }
+  }
+  return result;
 }
 
 export async function renderMarkdown(
   source: string,
   opts: RenderOptions,
 ): Promise<string> {
+  const parsedSource = normalizeMarkdownFences(source);
   // Lazy-load KaTeX only if the source LOOKS like it might have math.
   // Wrong positives (a `$` in code) are harmless — the plugin just won't
   // find valid expressions to render. The real win is on the 99% of docs
   // that have no math: we skip 628 KB of parse + load.
-  if (sourceMaybeHasKatex(source)) {
+  if (sourceMaybeHasKatex(parsedSource)) {
     await loadKatex();
   }
-  const hl = await getHighlighter();
-  const tokens = md.parse(source, {});
-  // Pre-scan for plantuml — if any fence is plantuml, load the encoder once
-  // before the synchronous render pass below.
+  const env: Record<string, unknown> = {__mathSource:opts.documentSource ?? source, __mathAutoNumber:opts.mathAutoNumber, __mathBlockIndex:opts.mathOrdinal ?? 0};
+  const tokens = md.parse(parsedSource, env);
+  // Load optional engines only when a fence needs them. HTML, diagrams and
+  // documents without ordinary code should not wait for Shiki startup.
   let needsPlantuml = false;
+  let needsHighlighter = false;
   for (const t of tokens) {
     if (t.type !== "fence") continue;
     const lang = (t.info || "").trim().split(/\s+/)[0].toLowerCase();
-    if (PLANTUML_LANGS.has(lang)) { needsPlantuml = true; break; }
+    if (PLANTUML_LANGS.has(lang)) needsPlantuml = true;
+    else if (lang !== "flow" && lang !== "sequence"
+      && !MERMAID_LANGS.has(lang) && !HTML_PREVIEW_LANGS.has(lang)) needsHighlighter = true;
   }
-  const plantumlEnc = needsPlantuml ? (await loadPlantumlEncoder()).default : null;
+  const [plantumlModule, hl] = await Promise.all([
+    needsPlantuml ? loadPlantumlEncoder() : Promise.resolve(null),
+    needsHighlighter ? getHighlighter() : Promise.resolve(null),
+  ]);
+  const plantumlEnc = plantumlModule?.default ?? null;
 
   const highlighted = new Map<number, string>();
   const shikiTheme = opts.theme === "dark" ? "one-dark-pro" : "github-light";
@@ -200,26 +314,44 @@ export async function renderMarkdown(
       highlighted.set(i, renderPlantumlPlaceholder(t.content, line, encoded));
       continue;
     }
+    if (lang === "flow" || lang === "sequence") {
+      highlighted.set(i, `<div class="legacy-diagram" data-line="${t.map ? t.map[0] + 1 : 0}" data-legacy-kind="${lang}" data-legacy-source="${escapeAttr(t.content)}">${tStatic("md.diagramLoading")}</div>`);
+      continue;
+    }
     if (MERMAID_LANGS.has(lang)) {
       const line = t.map ? t.map[0] + 1 : 0;
       highlighted.set(i, renderMermaid(t.content, line));
       continue;
     }
+    if (HTML_PREVIEW_LANGS.has(lang)) {
+      const line = t.map ? t.map[0] + 1 : 0;
+      highlighted.set(i, renderHtmlPlaceholder(t.content, line));
+      continue;
+    }
+    if (!hl) throw new Error("Missing Markdown code highlighter");
     const resolved = await ensureLanguage(hl, lang);
+    // markdown-it terminates fence content with a newline. It separates the
+    // final body line from the closing fence; Shiki would count it as another
+    // display line. Remove exactly one so intentional blank lines survive.
+    const code = t.content.replace(/\n$/, "");
+    const cachedHtml = fenceHighlightCache.get(code, resolved, shikiTheme);
+    if (cachedHtml !== undefined) {
+      highlighted.set(i, cachedHtml);
+      continue;
+    }
     try {
-      highlighted.set(
-        i,
-        hl.codeToHtml(t.content, { lang: resolved, theme: shikiTheme }),
-      );
+      const html = hl.codeToHtml(code, { lang: resolved, theme: shikiTheme });
+      fenceHighlightCache.set(code, resolved, shikiTheme, html);
+      highlighted.set(i, html);
     } catch {
       highlighted.set(
         i,
-        hl.codeToHtml(t.content, { lang: "text", theme: shikiTheme }),
+        hl.codeToHtml(code, { lang: "text", theme: shikiTheme }),
       );
     }
   }
 
-  return md.renderer.render(tokens, md.options, { __highlighted: highlighted });
+  return md.renderer.render(tokens, md.options, { ...env, __highlighted: highlighted });
 }
 
 export async function renderCode(
@@ -232,6 +364,10 @@ export async function renderCode(
   const resolved = await ensureLanguage(hl, langDef.shiki);
   const shikiTheme = opts.theme === "dark" ? "one-dark-pro" : "github-light";
   try {
+    if (resolved === "text" && langDef.shiki === "text" && langDef.label !== "Text") {
+      const { renderLanguageFallback } = await import("./codeHighlightFallback");
+      return await renderLanguageFallback(source, langDef, opts.theme);
+    }
     return hl.codeToHtml(source, { lang: resolved, theme: shikiTheme });
   } catch {
     return hl.codeToHtml(source, { lang: "text", theme: shikiTheme });
