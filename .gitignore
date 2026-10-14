@@ -162,4 +162,4 @@ $RECYCLE.BIN/
 /test
 /package-lock.json
 
-# Commit package-lock.json and src-tauri/Cargo.lock for reproducible installs.
+# npm lockfile is local in this repository; Cargo.lock remains tracked.

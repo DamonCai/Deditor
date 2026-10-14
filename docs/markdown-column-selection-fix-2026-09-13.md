@@ -21,7 +21,7 @@ ProseMirror 的 `CellSelection` 保留原生 DOM 范围，用 `ProseMirror-hides
 轮 2 — 边界与普通文字选择。
 
 - 期望：空格、空单元格、列表和格式内容不扩大列选区；切回文字后高亮恢复。
-- 实测：`tests/markdown-column-selection-review.html` 亮色两格复制仅含中列；暗色720px容器反向三格选区仅 `[1,1] / [2,1] / [3,1]`。隐藏状态下表格各格 `::selection` 背景透明；回到 Shift+方向键选字后隐藏类消失、原主题色恢复。原生暗色选中“故障感知”亦正常显示。
+- 实测：`tests/markdown-column-selection-review.html` 亮色两格复制仅含中列；暗色720px容器反向三格选区仅 `[1,1] / [2,1] / [3,1]`。隐藏状态下表格各格 `::selection` 背景透明；回到 Shift+方向键选字后隐藏类消失、原主题色恢复。原生暗色选中“示例工作项乙”亦正常显示。
 - 结果：通过。720px为浏览器容器，非原生窄窗结论。
 
 轮 3 — 操作回归和构建。

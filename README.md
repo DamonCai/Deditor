@@ -61,7 +61,7 @@ XMind 版本与模板兼容性仍在持续核对，详见[验收范围](docs/xmi
 准备 Node.js 22 / 24、npm 和 Rust stable。macOS 需要 Xcode Command Line Tools；Windows 需要 Microsoft C++ Build Tools 和 WebView2。
 
 ```sh
-npm ci
+npm install
 ```
 
 | 操作 | macOS | Windows（PowerShell） |

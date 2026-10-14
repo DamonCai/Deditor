@@ -1,6 +1,6 @@
 # HTML 动态渲染修复（2026-09-20）
 
-用户提供 `gateway-traffic-flow.html`：图形、字段列表和交互全部由内联 JavaScript 创建。原 HTML 预览同时设置空 sandbox 和 `script-src 'none'`，实际浏览器复现只有标题、工具栏和空框，图形节点数为 0。
+用户提供一个由内联 JavaScript 创建图形、字段列表和交互的 HTML 样例。原 HTML 预览同时设置空 sandbox 和 `script-src 'none'`，实际浏览器复现只有标题、工具栏和空框，图形节点数为 0。
 
 ## 修改
 
@@ -21,7 +21,7 @@
 
 ## 边界和清理
 
-- 原文件只读，前后 SHA-256 均为 `0ce6c8e4cc506648d4a19bf5be00961ae41d9d7041e5f828cb849e136481d1d7`，副本完全一致；未打开其链接指向的其他用户文件。
+- 原文件只读，前后哈希一致（哈希值不入库），副本完全一致；未打开其链接指向的其他用户文件。
 - 独立原生包：`DEditor HTML Script Review.app`，标识 `com.deditor.htmlscriptreview20260920`。仅注入本次副本与自建隔离样例，未读取日常应用状态。
 - 原生 UI 工具先报 `AXError.cannotComplete`，按 bundle ID 重试又超时，没有取得可靠画面或交互证据，因此 **macOS 原生交互未验收**，Windows 亦未验收。测试结束检查独立包进程已不存在；没有终止日常 DEditor 进程，也没有替换日常安装应用。
 - 未测试远程脚本服务或本地外链脚本的原生加载；当前用户文件全部使用内联脚本。

@@ -11,7 +11,7 @@
 ## 实际产品流程
 
 1. PicGo Core 的 `/upload` 对同一自建图返回 `success: true` 和 `https://litter.catbox.moe/uywj5u.png`，证明服务端使用真实 Litterbox 上传器。
-2. DEditor 原生文件对话框打开自建 Markdown，右侧实时预览先显示本地图。写作设置中 PicGo 地址为默认 `127.0.0.1:36677/upload`，点击“Upload this document’s local images”。首次图床响应 HTTP 412 `No file!`，产品显示“Uploaded 0, skipped 0, failed 1”，引用保持原样；这次失败不计通过。再次操作时，PicGo Core 日志记录收到扩展 Windows 路径 `\\?\D:\WorkSoft\Deditor\tests\artifacts\windows-build\picgo-probe-2026-10-08.png`，变换后的图片为 338 字节，远端返回 `https://litter.catbox.moe/j2rjim.png`，接口状态 200。
+2. DEditor 原生文件对话框打开自建 Markdown，右侧实时预览先显示本地图。写作设置中 PicGo 地址为默认 `127.0.0.1:36677/upload`，点击“Upload this document’s local images”。首次图床响应 HTTP 412 `No file!`，产品显示“Uploaded 0, skipped 0, failed 1”，引用保持原样；这次失败不计通过。再次操作时，PicGo Core 日志记录收到扩展 Windows 路径 `\\?\<仓库目录>\tests\artifacts\windows-build\picgo-probe-2026-10-08.png`，变换后的图片为 338 字节，远端返回 `https://litter.catbox.moe/j2rjim.png`，接口状态 200。
 3. DEditor 显示“Uploaded 1, skipped 0, failed 0”，源码引用变为 `![蓝底橙色方块](https://litter.catbox.moe/j2rjim.png)`，标签变脏。`Ctrl+S` 后标签恢复已保存状态；磁盘文件保留原文其余字节，远程引用文件长 111 字节，本地 PNG 仍为 338 字节。
 4. `curl` 独立请求新链接取得 HTTP 200、`image/png`、338 字节。DEditor 在保存后显示蓝底橙色方块；关闭标签，再由系统文件对话框重开同一 Markdown，等待网络图加载后再次显示方块。此处的重显是 WebView2 真实渲染证据，不以可访问性树中的图片 alt 文字替代。
 

@@ -31,7 +31,7 @@ macOS 使用 Cmd，Windows 使用 Ctrl。快捷键会随当前编辑区有所区
 使用 Node.js 22 或 24 系列、npm、Rust stable。Cargo 声明的最低 Rust 版本为 1.77.2，但实际构建还受锁定依赖的工具链要求影响。macOS 需要 Xcode Command Line Tools；Windows 需要 Microsoft C++ Build Tools 和 WebView2。Linux 可用于开发，需要 WebKitGTK 等系统依赖，当前主要交付目标仍为 macOS / Windows。
 
 ```sh
-npm ci
+npm install
 ```
 
 macOS：
@@ -88,7 +88,7 @@ cargo test --release --manifest-path src-tauri/Cargo.toml -- --test-threads=1
 npm run perf:all
 ```
 
-`test:all` 汇总 Markdown 文档层、阅读编辑集成、通用组件、XMind、导出、语言高亮及文件图标测试。各项也可单独执行：
+`test:all` 原本汇总 Markdown 文档层、阅读编辑集成、通用组件、XMind、导出、语言高亮及文件图标测试。2026-10-14 的 `main` 快照缺少其中不少 `scripts/test-*` 文件，运行前须核对入口；不能把旧记录的通过结果算作当前工作区的测试。各项命令定义见 `package.json`：
 
 | 命令 | 范围 |
 | --- | --- |
@@ -104,11 +104,11 @@ npm run perf:all
 
 浏览器隔离验证入口为 `tests/markdown-visual-review.html`；`?typora&parity` 增加化学公式、编号引用和旧式图表等完整样例；`?long&sections=500` 测量复杂长文输入与模式切换。`?parity&presentation` 并排运行真实 Preview 与阅读编辑，使用同一自建样例核对布局。`?complex&parity` 使用 300 余行完整自建 Markdown 核对 H1–H6、多级嵌套、表格、代码、公式、图表、定宽图片、脚注、目录、提示块和文末编辑。`?interaction` 检查长文输入、搜索和光标稳定性；`?scroll` 检查高图表、长代码及文末输入时的位置变化。`?ime` 使用中文长文，提供组词事件和额外滚动的模拟按钮，用于检查输入法滚动保护；模拟测试不等同于原生候选字验收。测试只使用自建样例，不读取用户已有文档或正式应用历史。`tests/artifacts/`、截图和安装包被 Git 忽略；需要迁移时单独保存。
 
-自动化测试不能代替真实输入法、原生保存对话框、重启恢复及双平台交互。中文组词期间已加入可视区保护，修复后的真实 IME、部分原生交互和复杂语法兼容性仍有待验收项，见 [Markdown 实施记录](markdown-visual-editing-verification-2026-09-11.md)及[本次提交验证记录](markdown-release-verification-2026-09-11.md)。P0–P3 的当前范围和验收状态见[执行清单](markdown-typora-roadmap-2026-09-11.md)及[本次扩展验证](markdown-p1p3-verification-2026-09-12.md)。字体调整后的非导出差距、图片路径修复和行内收起性能测量见[非导出检查记录](markdown-non-export-audit-2026-09-12.md)。直接编辑、简写、按文档图片目录、原生图片整理和后续长文优化见[非导出扩展实施记录](markdown-extended-editing-2026-09-12.md)。固定 Typora 核对清单及本次功能补齐、历史恢复、复杂文档和压力测试的结论见[补齐与验收记录](markdown-typora-implementation-2026-09-12.md)。最新组词历史修复与未完成的原生验收见 [P0 输入验证](markdown-p0-input-verification-2026-09-11.md)。XMind 状态见[独立验收矩阵](xmind-acceptance-matrix-2026-09-11.md)。
+自动化测试不能代替真实输入法、原生保存对话框、重启恢复及双平台交互。当前未完成动作只看[待办](pending-tasks.md)，已完成范围见[完成记录](completed-tasks.md)。历史 Markdown 与 XMind 验收分别从[架构上下文](markdown-visual-editing-context-2026-09-11.md)和[验收矩阵](xmind-acceptance-matrix-2026-09-11.md)进入；旧文档中的待办状态是当时快照。
 
 ## 架构与持久化
 
-长文输入和原生光标的最新结果见[验证记录](markdown-native-caret-long-document-2026-09-12.md)。测试页 `?long&sections=500` 可生成 6303 行复杂样例；普通连续输入、跨模式撤销和共享样式已有操作证据，真实中文候选、Windows 以及长时间大文档压力测试仍未完成。
+长文输入和原生光标的最新结果见验证记录。测试页 `?long&sections=500` 可生成 6303 行复杂样例；普通连续输入、跨模式撤销和共享样式已有操作证据，真实中文候选、Windows 以及长时间大文档压力测试仍未完成。
 
 | 层次 | 主要位置与职责 |
 | --- | --- |

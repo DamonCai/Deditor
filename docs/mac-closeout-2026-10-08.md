@@ -66,7 +66,7 @@
 
 ## 钉钉便签往返（CLIP-01，按应用能力记录）
 
-重新获取实时原生状态后，成功进入阿里钉的便签页并创建一个本轮空白便签 `Clipboard acceptance`。未发送聊天消息，也未编辑原有便签。此前原生连接中断和状态变化没有被计为成功。
+重新获取实时原生状态后，成功进入钉钉的便签页并创建一个本轮空白便签 `Clipboard acceptance`。未发送聊天消息，也未编辑原有便签。此前原生连接中断和状态变化没有被计为成功。
 
 自建 `clipboard.md` 在 DEditor Visual 全选后通过真实 Command+C 复制，钉钉便签 Command+V 接收，再全选复制回 DEditor 新建标签并保存为 `dingtalk-roundtrip.md`：标题、粗体、链接地址与中文保留；接收端将普通空格转为 NBSP，斜体不保留，表格变为连续文字 `NameValueAlpha42中文内容`。
 
