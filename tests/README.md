@@ -4,7 +4,7 @@
 
 | 用途 | 入口 |
 | --- | --- |
-| 阅读编辑综合样例 | [Markdown 页面](markdown-visual-review.html)：`?complex&parity`、`?scroll`、`?ime` 等 |
+| 阅读编辑综合样例 | [Markdown 页面](markdown-visual-review.html)：`?complex&parity`、`?scroll`、`?ime`、`?underscore`、`?ampersand` 等 |
 | XMind 自建样例 | [XMind 页面](xmind-review.html)：`?probe=...`、`?dark` |
 | README 截图复现 | [展示页面](readme-showcase.html)：`?scene=diagram`、`split`、`map` |
 | 其余独立样例 | [统一页面](review.html)，加 `?case=markdown-table-audit-review` 等模块文件名（不含 `.tsx` 或 `.ts`） |

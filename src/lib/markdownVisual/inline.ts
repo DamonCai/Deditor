@@ -1,6 +1,7 @@
 import { $markSchema } from "@milkdown/kit/utils";
 import { remarkStringifyOptionsCtx } from "@milkdown/kit/core";
 import type { Ctx } from "@milkdown/kit/ctx";
+import { decodeHTMLStrict } from "entities";
 import type { SourceNode } from "./document";
 const tags: Record<string, string> = { deditor_underline: "u", deditor_sup: "sup", deditor_sub: "sub" };
 const kinds = ["deditor_color", "deditor_background", ...Object.keys(tags)];
@@ -65,8 +66,20 @@ export const faithfulInlineHtml = $markSchema("deditor_html", () => ({
   } },
   toMarkdown: { match: mark => mark.type.name === "deditor_html", runner: (state, mark) => { state.withMark(mark, "deditor_html", undefined, { opening: mark.attrs.opening }); } },
 }));
+// Keep text serialization readable when a block changes shape. Intraword
+// underscores cannot form emphasis; ampersands need escaping only for entities.
+export function plainUnneededTextEscapes(value: string) {
+  const plain = value.replace(/(?<=[\p{L}\p{N}])\\_(?=[\p{L}\p{N}])/gu, "_");
+  return plain
+    .replace(/(?<!\\)\\&/g, (escape, offset: number) => {
+      const entity = plain.slice(offset + 1).match(/^&(?:#[xX][\da-fA-F]+|#\d+|[A-Za-z][A-Za-z\d]*);/)?.[0];
+      return entity && decodeHTMLStrict(entity) !== entity ? escape : "&";
+    });
+}
 export function configureInlineSerialization(ctx: Ctx) {
   ctx.update(remarkStringifyOptionsCtx, prev => ({ ...prev, handlers: { ...prev.handlers,
+    text: (node, parent, state, info) => plainUnneededTextEscapes(
+      prev.handlers?.text?.(node, parent, state, info) ?? state.safe(node.value, info)),
     deditor_html: (node: { opening: string }, _parent: unknown, state: { containerPhrasing: (node: unknown, info: unknown) => string }, info: unknown) => node.opening + state.containerPhrasing(node, info) + `</${node.opening.match(/^<([a-z]+)/i)?.[1] ?? "span"}>`,
     ...Object.fromEntries(kinds.map(kind => [kind, (node: { color: string }, _parent: unknown, state: { containerPhrasing: (node: unknown, info: unknown) => string }, info: unknown) => opening(kind, node.color) + state.containerPhrasing(node, info) + `</${tags[kind] ?? "span"}>`])),
   } }));
