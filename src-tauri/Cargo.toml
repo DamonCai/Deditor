@@ -1,6 +1,6 @@
 [package]
 name = "deditor"
-version = "1.0.2"
+version = "1.0.3"
 description = "DEditor - Markdown and multi-language code editor"
 authors = ["DEditor"]
 license = ""
