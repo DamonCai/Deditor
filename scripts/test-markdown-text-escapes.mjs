@@ -5,11 +5,12 @@ import remarkGfm from 'remark-gfm';
 import remarkStringify from 'remark-stringify';
 import { configureInlineSerialization } from '../src/lib/markdownVisual/inline.ts';
 
-let options = {
+const originalOptions = {
   encode: [],
   // Milkdown's plain text handler calls safe with an empty encode list.
   handlers: { text: (node, _parent, state, info) => state.safe(node.value, { ...info, encode: [] }) },
 };
+let options = originalOptions;
 configureInlineSerialization({ update: (_key, change) => { options = change(options); } });
 const processor = unified().use(remarkParse).use(remarkStringify, options);
 const item = (value) => ({ type: 'list', ordered: false, spread: false, children: [
@@ -58,4 +59,28 @@ for (const [name, block] of [
   assert.equal(gfm.parse(markdown).children[0].type, block.type, `${name} round trip`);
 }
 
-console.log('plain text serialization: 16 list cases and 4 block types passed');
+// Compare syntax trees, not just visible text: escaping must not introduce or
+// remove links, emphasis, HTML or other nodes. Some GFM autolinks are already
+// normalized by the upstream handler, so compare its parse as the baseline.
+const baseline = unified().use(remarkParse).use(remarkGfm).use(remarkStringify, originalOptions);
+const normalized = tree => JSON.stringify(tree, (key, value) => key === 'position' ? undefined : value);
+let combinations = 0;
+const atoms = ['a', 'b', '_', '&', String.fromCharCode(92), 'copy;', 'amp;', '<', '>', '*', '中文', 'www.x.com', 'https://x.com', '&#65;', 'a@b.com'];
+const compare = tree => {
+  const actual = gfm.stringify(tree), previous = baseline.stringify(tree);
+  assert.equal(normalized(gfm.parse(actual)), normalized(baseline.parse(previous)), JSON.stringify({tree, actual, previous}));
+  combinations++;
+};
+for (const a of atoms) for (const b of atoms) for (const c of atoms) {
+  compare({type:'root', children:[{type:'paragraph', children:[{type:'text', value:a+b+c}]}]});
+}
+for (const value of ['a_b', 'AT&T', '&copy;', '&copy', '\\&copy;', 'a_b_c', 'a_中文_3', '&#00000065;', '&#x0000041;', '&unknown;', 'a_\\_b', 'a_&amp;', '&NewLine;']) {
+  for (const type of ['strong', 'emphasis', 'delete', 'link']) {
+    for (const before of ['a', '_', '&', String.fromCharCode(92), '']) for (const after of ['b', '_', 'copy;', String.fromCharCode(92), '']) {
+      const marked = {type, children:[{type:'text', value}]};
+      if (type === 'link') Object.assign(marked, {url:'https://example.com', title:null});
+      compare({type:'root', children:[{type:'paragraph', children:[{type:'text', value:before}, marked, {type:'text', value:after}]}]});
+    }
+  }
+}
+console.log(`plain text serialization: 16 list cases, 4 block types and ${combinations} semantic comparisons passed`);

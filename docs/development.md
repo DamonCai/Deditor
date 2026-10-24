@@ -88,10 +88,13 @@ cargo test --release --manifest-path src-tauri/Cargo.toml -- --test-threads=1
 npm run perf:all
 ```
 
-`test:all` 原本汇总 Markdown 文档层、阅读编辑集成、通用组件、XMind、导出、语言高亮及文件图标测试。2026-10-14 的 `main` 快照缺少其中不少 `scripts/test-*` 文件，运行前须核对入口；不能把旧记录的通过结果算作当前工作区的测试。各项命令定义见 `package.json`：
+`test:all` 自 2026-10-25 起运行当前可执行基线：文本序列化、阅读组件、Rust 库测试及生产构建。范围及旧入口缺失清单见 [测试入口](../tests/README.md)，不代表历史 Markdown/XMind/导出等全套回归或原生验收。其他历史命令仍须先核对文件是否存在；定义见 `package.json`：
 
-| 命令 | 范围 |
+| 命令（历史别名先核对缺失清单） | 范围 |
 | --- | --- |
+| `npm run test:markdown-text-escapes` | 当前文本序列化与解析树对照 |
+| `npm run test:markdown-current` | 当前列表转换、保存替身、历史、整表移动及异常路径 |
+| `npm run test:native-core` | 当前 Rust 库测试；不代表系统输入与拖放验收 |
 | `npm run test:markdown-visual` | 原文保真、源位置映射、共用历史、语法边界 |
 | `npm run test:markdown-visual:integration` | 阅读组件、保存/另存、失败恢复、表格、模式切换及旧设置迁移 |
 | `npm run test:regression` | 编辑器、HTML、工具条、文件操作及 XMind 组件回归 |
