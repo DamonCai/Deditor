@@ -38,6 +38,7 @@
 
 ## 原生包与本地数据
 
+- 每次 GitHub 发布说明都附上“macOS 未公证版本安装”三步：安装前在 DMG 所在目录执行 `xattr -cr DEditor_1.0.3_aarch64.dmg`，安装应用到 `/Applications`，安装后执行 `xattr -cr /Applications/DEditor.app`。发布时必须将示例 DMG 文件名替换为本次实际附件名（版本和架构），不要沿用旧版本；文案模板见 [开发与维护](docs/development.md#发布说明)。
 - 正式包保留 `src-tauri/tauri.conf.json` 文件关联。Review/Diagnostic 隔离包必须在覆盖配置里写 `bundle.fileAssociations: []`；`src-tauri/build.rs` 会拒绝改名但继承关联的包。旧测试包若曾污染 macOS“打开方式”，还须核对 Launch Services 与 Finder 菜单，见 [测试入口](tests/README.md)。
 - 不把隔离包安装成日常应用，不修改用户真实文件；需要打包和原生操作时先按当前任务授权判断。
 - `src-tauri/target/`、`dist/` 是可重建产物。普通清理见 `scripts/clean.sh --dry-run`；`--all` 还删除依赖，不作日常清理。`tests/artifacts/` 独立管理。

@@ -79,6 +79,16 @@ MSI / NSIS 安装包位于 `src-tauri/target/release/bundle/msi/` 和 `nsis/`。
 npx tauri build --config tests/markdown-native-review.conf.json --bundles app
 ```
 
+## 发布说明
+
+每次 GitHub 发布说明都须附上以下 macOS 未公证处理步骤。发布前将 DMG 文件名替换为该版本实际附件名（包括版本和架构），并核对对应下载资源存在；不要沿用 1.0.2 等旧文件名。当前 1.0.3 Apple Silicon 的完整文案为：
+
+### macOS 未公证版本安装
+
+1. 安装前，在 DMG 所在目录打开终端，执行 `xattr -cr DEditor_1.0.3_aarch64.dmg`。
+2. 打开 DMG，将 `DEditor.app` 拖入“应用程序”（`/Applications`）。
+3. 安装后，执行 `xattr -cr /Applications/DEditor.app`，再启动应用。
+
 ## 测试与验证
 
 ```sh

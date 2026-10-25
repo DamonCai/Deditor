@@ -43,6 +43,14 @@ DEditor 是面向 macOS 和 Windows 的本地编辑器。在排版后的 Markdow
 
 草稿恢复、历史版本和可选自动保存围绕本地文件工作。Markdown 可导出 HTML、PDF、DOCX、PPTX，图表可导出 SVG。核心编辑可离线使用；PlantUML、远程图片和图床需要网络。
 
+## macOS 未公证版本安装
+
+以下以 1.0.3 Apple Silicon 安装包为例；其它版本或架构请使用实际下载的 DMG 文件名。
+
+1. 安装前，在 DMG 所在目录打开终端，执行 `xattr -cr DEditor_1.0.3_aarch64.dmg`。
+2. 打开 DMG，将 `DEditor.app` 拖入“应用程序”（`/Applications`）。
+3. 安装后，执行 `xattr -cr /Applications/DEditor.app`，再启动应用。
+
 ## 本地构建
 
 需要 Node.js 22 或 24、npm、Rust stable。macOS 另需 Xcode Command Line Tools；Windows 另需 Microsoft C++ Build Tools 与 WebView2。
