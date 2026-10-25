@@ -88,7 +88,7 @@ cargo test --release --manifest-path src-tauri/Cargo.toml -- --test-threads=1
 npm run perf:all
 ```
 
-`test:all` 自 2026-10-25 起运行当前可执行基线：文本序列化、阅读组件、Rust 库测试及生产构建。范围及旧入口缺失清单见 [测试入口](../tests/README.md)，不代表历史 Markdown/XMind/导出等全套回归或原生验收。其他历史命令仍须先核对文件是否存在；定义见 `package.json`：
+`test:all` 自 2026-10-25 起运行当前可执行基线：文本序列化、阅读组件、表格生命周期、系统拖放分派、Rust 库测试及生产构建。Windows 额外运行 `npm run test:windows-current`，覆盖 Ctrl/CRLF 组件路径和 PowerShell 5.1/7 打包脚本。范围及旧入口缺失清单见 [测试入口](../tests/README.md)，不代表历史 Markdown/XMind/导出等全套回归或原生验收。其他历史命令仍须先核对文件是否存在；定义见 `package.json`：
 
 | 命令（历史别名先核对缺失清单） | 范围 |
 | --- | --- |

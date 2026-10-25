@@ -108,7 +108,7 @@ pub fn upload(path: &Path, endpoint: &str, token: Option<&str>) -> Result<String
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{io::Write, net::TcpListener, thread};
+    use std::{io::Write, net::{TcpListener, TcpStream}, thread};
     const SVG: &[u8] = b"<svg xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"2\" height=\"2\"/></svg>";
     fn server(responses: Vec<Vec<u8>>) -> (String, thread::JoinHandle<Vec<String>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -119,10 +119,17 @@ mod tests {
             for response in responses {
                 let deadline = std::time::Instant::now() + Duration::from_secs(8);
                 let mut stream = loop {
-                    if let Ok((stream, _)) = listener.accept() { break stream; }
+                    match listener.accept() {
+                        Ok((stream, _)) => break stream,
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {},
+                        Err(error) => panic!("Could not accept test request: {error}"),
+                    }
                     assert!(std::time::Instant::now() < deadline, "No test request arrived");
                     thread::sleep(Duration::from_millis(5));
                 };
+                // Windows inherits the listener's nonblocking mode on accept.
+                // Only accept is polled; request reads use the timeout below.
+                stream.set_nonblocking(false).unwrap();
                 stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
                 let mut request = Vec::new();
                 let mut buffer = [0u8; 1024];
@@ -143,6 +150,20 @@ mod tests {
     }
     fn response(status: &str, headers: &str, body: &[u8]) -> Vec<u8> {
         [format!("HTTP/1.1 {status}\r\nConnection: close\r\nContent-Length: {}\r\n{headers}\r\n", body.len()).as_bytes(), body].concat()
+    }
+    #[test]
+    fn markdown_images_fixture_waits_for_a_split_request_body() {
+        let reply = response("200 OK", "", b"ok");
+        let (url, handle) = server(vec![reply.clone()]);
+        let mut stream = TcpStream::connect(url.strip_prefix("http://").unwrap()).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        stream.write_all(b"POST /split HTTP/1.1\r\nContent-Length: 4\r\n\r\na").unwrap();
+        thread::sleep(Duration::from_millis(50));
+        stream.write_all(b"bcd").unwrap();
+        let mut actual = Vec::new();
+        stream.read_to_end(&mut actual).unwrap();
+        assert_eq!(actual, reply);
+        assert_eq!(handle.join().unwrap(), ["POST /split HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcd"]);
     }
     #[test]
     fn markdown_images_download_uses_content_not_filename_and_follows_redirect() {

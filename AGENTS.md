@@ -8,7 +8,7 @@
 - 最新待办以 [pending-tasks](docs/pending-tasks.md) 为准。2026-10-14 时剩 WIN-04（Windows 文件管理器真实拖放到目标窗口）和 CLIP-03（跨显示器持续拖选）两项。已完成范围见 [completed-tasks](docs/completed-tasks.md)。待验收不等于未实现。
 - 2026-10-14 阅读编辑移动图块保留落点视口；长图重建期间保留旧高度；表格增加顶部整表拖动手柄，复用落点、边缘滚动、取消、同父排序和 Alt+↑/↓。当轮 35 组图表/表格、108 阅读集成、149 通用及生产构建通过；浏览器长图滚动和整表拖动已验，未新增原生验收。细节见 [图块与整表拖动记录](docs/markdown-block-drag-2026-10-14.md)。
 - Windows 1.0.2 安装曾被打包进程重定向到 Codex 的 LocalCache。后续重装必须从同一用户的非打包进程核对真实 EXE、快捷方式目标与图标，不能只看安装进程中的 `Test-Path`。见 [Windows 验收记录](docs/windows-acceptance-2026-10-08.md)。
-- 2026-10-25 重建 `test:all` 为当前可执行基线（文本序列化、7 组阅读组件、Rust 库测试及生产构建），范围小于历史全套。其他历史 `test:*` 仍有缺失脚本，使用前核对文件。旧总入口和缺失清单见 [tests/README](tests/README.md)，不得把未运行或历史结果记为本轮通过。
+- 2026-10-25 `test:all` 为当前可执行基线（文本序列化、7 组阅读组件、表格生命周期、系统拖放分派、Rust 库测试及生产构建）；Windows 专项为 `test:windows-current`。范围小于历史全套，其他历史 `test:*` 仍有缺失脚本，使用前核对文件。旧总入口和缺失清单见 [tests/README](tests/README.md)，不得把未运行或历史结果记为本轮通过。
 
 ## 工作边界
 

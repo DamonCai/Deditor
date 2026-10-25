@@ -1975,7 +1975,9 @@ mod markdown_image_tests {
         fs::create_dir_all(&dir).unwrap();
         let root = dir.to_string_lossy().to_string();
         let encoded = BASE64.encode(b"self-created-image-fixture");
-        assert!(save_image(root.clone(), "one.png".into(), encoded.clone(), None).unwrap().ends_with("assets/one.png"));
+        let default_path = save_image(root.clone(), "one.png".into(), encoded.clone(), None).unwrap();
+        assert!(std::path::Path::new(&default_path).ends_with(std::path::Path::new("assets").join("one.png")));
+        assert_eq!(fs::read(default_path).unwrap(), b"self-created-image-fixture");
         save_image(root.clone(), "two.png".into(), encoded.clone(), Some("media/images".into())).unwrap();
         assert_eq!(fs::read(dir.join("media/images/two.png")).unwrap(), b"self-created-image-fixture");
         for folder in ["../outside", "/tmp", "C:/bad", "images//bad", "images/..", "a\\..\\b"] {

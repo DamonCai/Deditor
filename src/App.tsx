@@ -1,5 +1,6 @@
 import RecentFiles from "./components/RecentFiles";
 import { handleWindowsFileShortcut } from "./lib/windowsFileShortcuts";
+import { createNativeFileDropHandler } from "./lib/nativeFileDrop";
 import { newWindow } from "./lib/editorWindows";
 import { installRecentFiles, handleRecentFilesKey } from "./lib/recentFiles";
 import { installWindowLifecycle, isWindowCloseCommitted, windowEventTarget } from "./lib/editorWindows";
@@ -73,6 +74,8 @@ export default function App() {
   const [sidebarPx, setSidebarPx] = useState(240);
   const [previewPct, setPreviewPct] = useState(50);
   const [hydrated, setHydrated] = useState(false);
+  const hydrationComplete = useRef(false);
+  const nativeFileDrop = useRef<ReturnType<typeof createNativeFileDropHandler> | null>(null);
   const zenMode = useEditorStore((s) => s.zenMode);
   const autoSave = useEditorStore((s) => s.autoSave);
   const recentFilesOpen = useEditorStore(s => s.recentFilesOpen);
@@ -141,6 +144,8 @@ export default function App() {
       .catch((err) => logError("restore session failed", err))
       .finally(() => {
         if (disposed) return;
+        hydrationComplete.current = true;
+        nativeFileDrop.current?.ready();
         setHydrated(true);
         cancelPrefetch = scheduleIdlePrefetch();
       });
@@ -317,30 +322,19 @@ export default function App() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
+    const drop = createNativeFileDropHandler({
+      isClosing: isWindowCloseCommitted,
+      pathKind: path => invoke<string>("path_kind", { path }),
+      addWorkspace: setWorkspaceByPath,
+      openFiles: openMany,
+    });
+    nativeFileDrop.current = drop;
+    if (hydrationComplete.current) drop.ready();
     // The full onDragDropEvent helper from @tauri-apps/api/webview also
     // subscribes to DRAG_ENTER / DRAG_OVER / DRAG_LEAVE (we ignore all of
     // those); listening directly to just DRAG_DROP is one event subscription
     // instead of four AND drops the webview barrel from the bundle.
-    listen<TauriDragDropPayload>("tauri://drag-drop", async (event) => {
-      if (isWindowCloseCommitted()) return;
-      const filePaths: string[] = [];
-      for (const p of event.payload.paths) {
-        let kind = "file";
-        try {
-          kind = await invoke<string>("path_kind", { path: p });
-        } catch {
-          // Treat probe failures as "file" so the existing openMany path
-          // can surface a more useful error.
-        }
-        if (isWindowCloseCommitted()) return;
-        if (kind === "dir") {
-          await setWorkspaceByPath(p).catch(() => {});
-        } else {
-          filePaths.push(p);
-        }
-      }
-      if (filePaths.length > 0) await openMany(filePaths);
-    }, windowEventTarget())
+    listen<TauriDragDropPayload>("tauri://drag-drop", event => drop.handle(event.payload.paths), windowEventTarget())
       .then((fn) => {
         if (cancelled) fn();
         else unlisten = fn;
@@ -348,6 +342,8 @@ export default function App() {
       .catch(() => {});
     return () => {
       cancelled = true;
+      drop.dispose();
+      if (nativeFileDrop.current === drop) nativeFileDrop.current = null;
       unlisten?.();
     };
   }, []);

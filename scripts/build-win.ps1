@@ -12,7 +12,7 @@ $ErrorActionPreference = "Stop"
 Set-Location "$PSScriptRoot\.."
 
 if ([string]::IsNullOrWhiteSpace($Version)) {
-    $Version = (Get-Content "package.json" -Raw | ConvertFrom-Json).version
+    $Version = (Get-Content "package.json" -Raw -Encoding UTF8 | ConvertFrom-Json).version
 }
 
 # ---------------------------------------------------------------------------
@@ -86,25 +86,30 @@ if ($Version -notmatch '^\d+\.\d+\.\d+$') {
 }
 Write-Host "Bumping version -> $Version"
 
+function Update-BuildManifest([string]$Path, [string]$Pattern, [string]$Replacement) {
+    # Windows PowerShell 5.1 defaults to the system code page. Keep manifest
+    # metadata and comments as UTF-8 on both Windows PowerShell and PowerShell 7.
+    $manifestPath = Join-Path (Get-Location).Path $Path
+    $content = [System.IO.File]::ReadAllText($manifestPath)
+    $updated = $content -replace $Pattern, $Replacement
+    if ($updated -cne $content) {
+        [System.IO.File]::WriteAllText($manifestPath, $updated, (New-Object System.Text.UTF8Encoding($false)))
+    }
+}
+
 # src-tauri/Cargo.toml — `(?m)^version = "..."` only matches a line whose
 # first character is `v`. Dependencies use inline tables (`tauri = { version =
 # "2", ... }`) where `version` isn't at line start, so they're untouched.
-$cargo = Get-Content "src-tauri\Cargo.toml" -Raw
-$cargo = $cargo -replace '(?m)^version = "[^"]*"', ('version = "' + $Version + '"')
-Set-Content -NoNewline -Path "src-tauri\Cargo.toml" -Value $cargo
+Update-BuildManifest "src-tauri\Cargo.toml" '(?m)^version = "[^"]*"' ('version = "' + $Version + '"')
 
 # src-tauri/tauri.conf.json — only the top-level "version" key exists in
 # our config (no plugin or build sub-object uses that key), so a global
 # replace is safe. PowerShell's -replace has no "count" parameter.
-$conf = Get-Content "src-tauri\tauri.conf.json" -Raw
-$conf = $conf -replace '"version":\s*"[^"]*"', ('"version": "' + $Version + '"')
-Set-Content -NoNewline -Path "src-tauri\tauri.conf.json" -Value $conf
+Update-BuildManifest "src-tauri\tauri.conf.json" '"version":\s*"[^"]*"' ('"version": "' + $Version + '"')
 
 # package.json — top-level "version" only (npm dependency entries are
 # `"<name>": "<range>"`, never `"version": "..."`).
-$pkg = Get-Content "package.json" -Raw
-$pkg = $pkg -replace '"version":\s*"[^"]*"', ('"version": "' + $Version + '"')
-Set-Content -NoNewline -Path "package.json" -Value $pkg
+Update-BuildManifest "package.json" '"version":\s*"[^"]*"' ('"version": "' + $Version + '"')
 
 # --- Install deps if needed ---
 if (-not (Test-Path node_modules)) {
@@ -128,7 +133,7 @@ Write-Host ""
 
 if (Test-Path "$bundleDir\msi") {
     Write-Host "MSI installer (copied next to this script):"
-    Get-ChildItem "$bundleDir\msi\*.msi" | ForEach-Object {
+    Get-ChildItem "$bundleDir\msi\DEditor_${Version}_*.msi" | ForEach-Object {
         Copy-Item -Force $_.FullName -Destination $scriptsDir
         Write-Host "  $scriptsDir\$($_.Name)"
     }
@@ -137,7 +142,7 @@ if (Test-Path "$bundleDir\msi") {
 if (Test-Path "$bundleDir\nsis") {
     Write-Host ""
     Write-Host "NSIS .exe installer (copied next to this script):"
-    Get-ChildItem "$bundleDir\nsis\*.exe" | ForEach-Object {
+    Get-ChildItem "$bundleDir\nsis\DEditor_${Version}_*.exe" | ForEach-Object {
         Copy-Item -Force $_.FullName -Destination $scriptsDir
         Write-Host "  $scriptsDir\$($_.Name)"
     }
