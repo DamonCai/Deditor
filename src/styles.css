@@ -788,3 +788,18 @@ body.deditor-pane-resizing, body.deditor-pane-resizing * {
 ::highlight(deditor-search-current) { background: rgba(255, 152, 0, 0.7); }
 .dark ::highlight(deditor-search) { background: rgba(255, 213, 79, 0.22); }
 .dark ::highlight(deditor-search-current) { background: rgba(255, 152, 0, 0.45); }
+
+/* App update controls stay scoped outside document rendering. */
+.update-backdrop { position: fixed; inset: 0; z-index: 1200; background: var(--modal-backdrop); display: flex; align-items: center; justify-content: center; }
+.update-dialog { width: min(600px, 92vw); max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow-modal); font-size: 13px; }
+.update-dialog h2 { font-size: 14px; margin: 0; padding: 14px 16px; background: var(--bg-soft); border-bottom: 1px solid var(--border); }
+.update-content { line-height: 1.5; padding: 0 16px 12px; overflow-y: auto; }
+.update-content p { margin: 12px 0; }
+.update-details { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 14px; align-items: baseline; }
+.update-details dt { color: var(--text-soft); }
+.update-details dd { margin: 0; overflow-wrap: anywhere; }
+.update-digest { overflow-wrap: anywhere; font-family: monospace; font-size: 11px; user-select: text; }
+.update-notes { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.update-error { color: var(--error-text); }
+.update-content progress { width: 100%; accent-color: var(--accent); }
+.update-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); }

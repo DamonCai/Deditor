@@ -40,6 +40,7 @@ import GotoAnything from "./components/GotoAnything";
 import GotoSymbol from "./components/GotoSymbol";
 import FindInFiles from "./components/FindInFiles";
 import SettingsDialog from "./components/SettingsDialog";
+import UpdateDialog from "./components/UpdateDialog";
 import CommandPalette from "./components/CommandPalette";
 import { isEnabled, SHORTCUTS } from "./lib/shortcuts";
 import { useEditorStore } from "./store/editor";
@@ -76,6 +77,7 @@ export default function App() {
   const [hydrated, setHydrated] = useState(false);
   const hydrationComplete = useRef(false);
   const nativeFileDrop = useRef<ReturnType<typeof createNativeFileDropHandler> | null>(null);
+  const [updatesOpen, setUpdatesOpen] = useState(false);
   const zenMode = useEditorStore((s) => s.zenMode);
   const autoSave = useEditorStore((s) => s.autoSave);
   const recentFilesOpen = useEditorStore(s => s.recentFilesOpen);
@@ -294,6 +296,7 @@ export default function App() {
     listen<string>("menu-action", (e) => {
       if (isWindowCloseCommitted()) return;
       switch (e.payload) {
+        case "app_check_updates": setUpdatesOpen(true); break;
         case "edit_find": openEditorSearch(); break;
         case "edit_replace": openEditorSearch(true); break;
         case "file_new": newFile(); break;
@@ -465,7 +468,8 @@ export default function App() {
       )}
       {gotoSymbolOpen && <GotoSymbol open onClose={() => setGotoSymbolOpen(false)} />}
       {findInFilesOpen && <FindInFiles open onClose={() => setFindInFilesOpen(false)} />}
-      {settingsOpen && <SettingsDialog open onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <SettingsDialog open onClose={() => setSettingsOpen(false)} onCheckUpdates={() => setUpdatesOpen(true)} />}
+      {updatesOpen && <UpdateDialog onClose={() => setUpdatesOpen(false)} />}
     </div>
   );
 }

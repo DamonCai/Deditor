@@ -114,11 +114,18 @@ fi
 
 # --- Build ---
 echo "Building production bundle..."
+# Seal the whole app bundle even without a Developer ID certificate. A linker
+# signature alone does not cover Info.plist or resources. Keep configured identities.
+if [ -z "${APPLE_SIGNING_IDENTITY:-}" ] && [ -z "$(node -p "require('./src-tauri/tauri.conf.json').bundle.macOS?.signingIdentity || ''")" ]; then
+  export APPLE_SIGNING_IDENTITY="-"
+fi
+export DEDITOR_BUILD_TIME="$(node -p 'Math.floor(Date.now() / 1000)')"
 # shellcheck disable=SC2086
 npm run tauri build -- $TARGET_ARG
 
 # --- Locate artifacts ---
 BUNDLE_DIR="src-tauri/target/${TARGET_DIR}release/bundle"
+codesign --verify --deep --strict "$BUNDLE_DIR/macos/DEditor.app"
 
 echo
 echo "Build complete."
@@ -150,7 +157,7 @@ if [ -d "$BUNDLE_DIR/dmg" ]; then
   # Strip the auto-injected .VolumeIcon.icns from every freshly built DMG
   # before re-applying the file-level Finder icon (the convert step below
   # would otherwise drop the resource fork anyway).
-  for dmg in "$BUNDLE_DIR/dmg"/*.dmg; do
+  for dmg in "$BUNDLE_DIR/dmg"/DEditor_"$VERSION"_*.dmg; do
     [ -e "$dmg" ] || continue
     strip_volumeicon "$dmg" || echo "  (warning: failed to strip .VolumeIcon.icns from $(basename "$dmg"))"
   done
@@ -166,7 +173,7 @@ if [ -d "$BUNDLE_DIR/dmg" ]; then
        && sips -i "$TMP_PNG" >/dev/null 2>&1 \
        && DeRez -only icns "$TMP_PNG" > "$TMP_RSRC" 2>/dev/null \
        && [ -s "$TMP_RSRC" ]; then
-      for dmg in "$BUNDLE_DIR/dmg"/*.dmg; do
+      for dmg in "$BUNDLE_DIR/dmg"/DEditor_"$VERSION"_*.dmg; do
         [ -e "$dmg" ] || continue
         Rez -append "$TMP_RSRC" -o "$dmg" 2>/dev/null && SetFile -a C "$dmg" 2>/dev/null
       done
@@ -175,9 +182,11 @@ if [ -d "$BUNDLE_DIR/dmg" ]; then
   fi
 
   echo "DMG installer (copied next to this script):"
-  for dmg in "$BUNDLE_DIR/dmg"/*.dmg; do
+  for dmg in "$BUNDLE_DIR/dmg"/DEditor_"$VERSION"_*.dmg; do
     [ -e "$dmg" ] || continue
-    cp -f "$dmg" "$SCRIPTS_DIR/"
+    hdiutil verify "$dmg" >/dev/null
+    node scripts/update-metadata.mjs "$dmg"
+    cp -f "$dmg" "$dmg.build.json" "$SCRIPTS_DIR/"
     echo "  $SCRIPTS_DIR/$(basename "$dmg")"
   done
 fi

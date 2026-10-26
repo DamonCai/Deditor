@@ -9,11 +9,12 @@ import { SegmentedControl } from "./ui/SegmentedControl";
 interface Props {
   open: boolean;
   onClose: () => void;
+  onCheckUpdates: () => void;
 }
 
 const GROUP_ORDER: ShortcutMeta["group"][] = ["file", "nav", "editor"];
 
-export default function SettingsDialog({ open, onClose }: Props) {
+export default function SettingsDialog({ open, onClose, onCheckUpdates }: Props) {
   const t = useT();
   const panelRef = useModalFocus(open, onClose);
   const shortcuts = useEditorStore((s) => s.shortcuts);
@@ -162,6 +163,11 @@ export default function SettingsDialog({ open, onClose }: Props) {
                 topBorder
               />
             </div>
+          </section>
+
+          <section style={{ marginBottom: 16 }}>
+            <h3 style={sectionH3}>{t("updates.title")}</h3>
+            <Button onClick={onCheckUpdates}>{t("updates.check")}</Button>
           </section>
 
           {/* Editor section */}

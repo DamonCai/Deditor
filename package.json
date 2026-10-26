@@ -56,7 +56,7 @@
     "test:editor-windows": "node scripts/test-editor-windows.mjs && node scripts/test-windows-file-shortcuts.mjs",
     "test:native-save-shortcut": "cargo test --manifest-path src-tauri/Cargo.toml --test native_save_shortcut",
     "test:native-bundle-isolation": "node scripts/test-native-bundle-isolation.mjs",
-    "test:all": "npm run test:markdown-text-escapes && npm run test:markdown-current && npm run test:markdown-table-lifecycle && npm run test:native-file-drop && npm run test:native-core && npm run build",
+    "test:all": "npm run test:markdown-text-escapes && npm run test:markdown-current && npm run test:markdown-table-lifecycle && npm run test:native-file-drop && node scripts/test-updates.mjs && npm run test:native-core && npm run build",
     "test:native-file-drop": "node scripts/test-native-file-drop.mjs",
     "test:windows-current": "node scripts/test-markdown-windows.mjs && node scripts/test-build-win.mjs && npm run test:native-file-drop",
     "test:markdown-input-clipboard": "node scripts/test-markdown-input-clipboard-audit.mjs",
@@ -124,7 +124,8 @@
     "test:markdown-colors": "node scripts/test-markdown-colors.mjs",
     "perf:markdown-colors": "node --expose-gc scripts/perf-markdown-colors.mjs",
     "test:markdown-current": "node scripts/test-markdown-current.mjs",
-    "test:native-core": "cargo test --manifest-path src-tauri/Cargo.toml --lib -- --test-threads=1"
+    "test:native-core": "cargo test --manifest-path src-tauri/Cargo.toml --lib -- --test-threads=1",
+    "test:updates": "node scripts/test-updates.mjs && cargo test --manifest-path src-tauri/Cargo.toml --lib updates:: -- --test-threads=1"
   },
   "dependencies": {
     "@codemirror/commands": "^6.7.1",

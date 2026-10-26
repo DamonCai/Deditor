@@ -120,6 +120,7 @@ if (-not (Test-Path node_modules)) {
 
 # --- Build ---
 Write-Host "Building production bundle..."
+$env:DEDITOR_BUILD_TIME = [string][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
 npm run tauri build
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -134,7 +135,10 @@ Write-Host ""
 if (Test-Path "$bundleDir\msi") {
     Write-Host "MSI installer (copied next to this script):"
     Get-ChildItem "$bundleDir\msi\DEditor_${Version}_*.msi" | ForEach-Object {
+        node scripts/update-metadata.mjs $_.FullName
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         Copy-Item -Force $_.FullName -Destination $scriptsDir
+        Copy-Item -Force "$($_.FullName).build.json" -Destination $scriptsDir
         Write-Host "  $scriptsDir\$($_.Name)"
     }
 }
@@ -143,7 +147,10 @@ if (Test-Path "$bundleDir\nsis") {
     Write-Host ""
     Write-Host "NSIS .exe installer (copied next to this script):"
     Get-ChildItem "$bundleDir\nsis\DEditor_${Version}_*.exe" | ForEach-Object {
+        node scripts/update-metadata.mjs $_.FullName
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         Copy-Item -Force $_.FullName -Destination $scriptsDir
+        Copy-Item -Force "$($_.FullName).build.json" -Destination $scriptsDir
         Write-Host "  $scriptsDir\$($_.Name)"
     }
 }

@@ -872,8 +872,10 @@ dependencies = [
  "quick-xml",
  "rayon",
  "reqwest",
+ "semver",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
@@ -881,6 +883,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-window-state",
  "tauri-utils",
+ "tempfile",
 ]
 
 [[package]]

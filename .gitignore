@@ -163,3 +163,6 @@ $RECYCLE.BIN/
 /package-lock.json
 
 # npm lockfile is local in this repository; Cargo.lock remains tracked.
+
+# Installer build metadata is uploaded alongside the generated packages.
+/scripts/DEditor*.build.json

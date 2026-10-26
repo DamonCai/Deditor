@@ -54,6 +54,14 @@ Windows：
 
 只启动前端可用 `npm run dev`。普通浏览器不提供 Tauri 的文件和系统接口，不能据此前端页面代替完整桌面应用。
 
+## 检查更新与发布信息
+
+应用菜单的「检查更新」和设置页的「软件更新」从 `DamonCai/Deditor` 的 GitHub Releases 查询最新正式版，不在启动时自动联网。应用按操作系统及架构选择安装包，显示版本、构建时间、发布时间、安装包更新时间和 SHA-256。用户选定保存位置后下载，大小和 SHA-256 均通过才保留文件；失败会清理临时文件并保护原目标文件。安装由用户保存工作后手动完成。
+
+同版本不能用安装包 SHA-256 与已安装的可执行文件直接比较，也不能把 GitHub 上传时间等同于构建时间。`build-mac.sh` / `build-win.ps1` 会为本次构建注入同一个 `DEDITOR_BUILD_TIME`，并在安装包最终处理后生成 `<安装包文件名>.build.json`，包含版本、文件名、构建时间、大小和 SHA-256。发布时将对应 JSON 和安装包一起上传到同一 GitHub Release；不要手改 JSON，也不要将旧安装包与本次生成的 JSON 混用。更改安装包内容后必须重新生成元数据。
+
+只有元数据与选中安装包的名称、版本、大小及 SHA-256 一致（GitHub 提供 digest 时也须匹配）时，才比较构建时间判断同版本新构建。旧发布缺少有效元数据时会显示「版本号相同，构建差异待核对」，提供更新时间和校验值供核对，仍可下载重装。无匹配架构或无有效 SHA-256 时提供发布页入口。直接使用 `tauri build` 不会自动生成发布 JSON；正式发布请使用平台构建脚本。构建时间依赖构建机时钟，同版本应使用同一套准确时间来源；常规发版仍建议递增版本号。
+
 ## 打包
 
 macOS：
@@ -63,7 +71,7 @@ macOS：
 ./scripts/build-mac.sh --universal
 ```
 
-DMG 复制到 `scripts/`，原始构建位于 `src-tauri/target/release/bundle/`。
+DMG 及对应 `.build.json` 复制到 `scripts/`，原始构建位于 `src-tauri/target/release/bundle/`。未配置 `APPLE_SIGNING_IDENTITY` 或 `bundle.macOS.signingIdentity` 时，脚本使用 Tauri 的 ad-hoc 身份 `-` 对完整应用包签名，随后验证资源签名和最终 DMG 校验和；已有签名配置继续生效。ad-hoc 不等于 Apple 公证，安装说明见下文。
 
 Windows：
 

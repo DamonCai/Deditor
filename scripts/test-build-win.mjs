@@ -37,6 +37,7 @@ for (const host of hosts) {
     mkdirSync(join(dir, 'scripts'), { recursive: true });
     mkdirSync(join(dir, 'node_modules'));
     copyFileSync(join(root, 'scripts', 'build-win.ps1'), join(dir, 'scripts', 'build-win.ps1'));
+    copyFileSync(join(root, 'scripts', 'update-metadata.mjs'), join(dir, 'scripts', 'update-metadata.mjs'));
     for (const [kind, suffix] of [['msi', 'x64_en-US.msi'], ['nsis', 'x64-setup.exe']]) {
       const bundleDir = join(dir, 'src-tauri', 'target', 'release', 'bundle', kind);
       mkdirSync(bundleDir, { recursive: true });
@@ -51,6 +52,8 @@ for (const host of hosts) {
     }
     for (const suffix of ['x64_en-US.msi', 'x64-setup.exe']) {
       assert.equal(existsSync(join(dir, 'scripts', `DEditor_${test.version}_${suffix}`)), test.status === 0, `${host}/${test.name}: current installer copy`);
+      assert.equal(existsSync(join(dir, 'scripts', `DEditor_${test.version}_${suffix}.build.json`)), test.status === 0, `${host}/${test.name}: current installer metadata copy`);
+      assert.equal(existsSync(join(dir, 'scripts', `DEditor_1.0.2_${suffix}.build.json`)), false, `${host}/${test.name}: no stale metadata`);
       assert.equal(existsSync(join(dir, 'scripts', `DEditor_1.0.2_${suffix}`)), false, `${host}/${test.name}: stale installer must stay in its original bundle directory`);
     }
     console.log(`PASS ${host}: ${test.name}`);

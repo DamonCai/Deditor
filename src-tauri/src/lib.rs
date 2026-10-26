@@ -11,6 +11,7 @@ mod markdown_images;
 mod markdown_history;
 mod markdown_state;
 mod recovery_transport;
+mod updates;
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
@@ -963,6 +964,7 @@ struct MenuLabels {
     window: &'static str,
     // App submenu (macOS)
     about: &'static str,
+    check_updates: &'static str,
     services: &'static str,
     hide: &'static str,
     hide_others: &'static str,
@@ -999,6 +1001,7 @@ fn labels_for(lang: &str) -> MenuLabels {
             edit: "编辑",
             window: "窗口",
             about: "关于 DEditor",
+            check_updates: "检查更新…",
             services: "服务",
             hide: "隐藏 DEditor",
             hide_others: "隐藏其他",
@@ -1029,6 +1032,7 @@ fn labels_for(lang: &str) -> MenuLabels {
             edit: "Edit",
             window: "Window",
             about: "About DEditor",
+            check_updates: "Check for Updates…",
             services: "Services",
             hide: "Hide DEditor",
             hide_others: "Hide Others",
@@ -1098,6 +1102,7 @@ fn build_and_set_menu(
 
     let app_menu = SubmenuBuilder::new(app, "DEditor")
         .item(&about_item)
+        .item(&MenuItemBuilder::new(l.check_updates).id("app_check_updates").build(app)?)
         .separator()
         .item(&services_item)
         .separator()
@@ -1341,7 +1346,7 @@ fn install_app_menu(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Erro
                     if let Some(window) = editor_windows::target(&app) { let _ = app.emit_to(window.label(), "new-window-error", error); }
                 }
             });
-        } else if id.starts_with("file_") || matches!(id.as_str(), "edit_find" | "edit_replace") {
+        } else if id.starts_with("file_") || matches!(id.as_str(), "edit_find" | "edit_replace" | "app_check_updates") {
             if let Some(window) = editor_windows::target(app_handle) { let _ = app_handle.emit_to(window.label(), "menu-action", id); }
         }
     });
@@ -1512,6 +1517,8 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            updates::check_for_updates,
+            updates::download_update,
             read_text_file,
             write_text_file,
             write_binary_file,

@@ -1,4 +1,11 @@
 fn main() {
+  println!("cargo:rerun-if-env-changed=DEDITOR_BUILD_TIME");
+  let built_at = std::env::var("DEDITOR_BUILD_TIME").unwrap_or_else(|_| {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+      .expect("Clock must be after Unix epoch").as_secs().to_string()
+  });
+  assert!(built_at.parse::<u64>().is_ok_and(|value| value > 0), "Invalid DEDITOR_BUILD_TIME");
+  println!("cargo:rustc-env=DEDITOR_BUILD_TIME={built_at}");
   // Use the same platform/CLI merge as tauri-build. Checking only the tracked
   // review configs misses ad-hoc --config overrides used for native acceptance.
   println!("cargo:rerun-if-env-changed=TAURI_CONFIG");
