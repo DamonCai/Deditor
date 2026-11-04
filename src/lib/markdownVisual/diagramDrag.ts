@@ -12,11 +12,15 @@ export function movingBlockHeight(view: EditorView, node: ProseNode) {
   return layout?.node === node ? layout.height : 0;
 }
 
+export function isDiagramBlock(node: ProseNode) {
+  return node.type.name === 'code_block' && /^(mermaid|plantuml|puml|uml)$/i.test(node.attrs.language ?? '');
+}
+
 /** Move within the containing block list, preserving quote/list nesting. */
 function blockMoveTarget(view: EditorView, from: number, to: number) {
   if (!view.editable || isWindowCloseCommitted()) return false;
   const node = view.state.doc.nodeAt(from);
-  if (!node || !(node.type.name === 'table' || node.type.name === 'code_block' && /^(mermaid|plantuml|puml|uml)$/i.test(node.attrs.language ?? ''))) return false;
+  if (!node || !(node.type.name === 'table' || isDiagramBlock(node))) return false;
   const start = view.state.doc.resolve(from), end = view.state.doc.resolve(to);
   if (start.parent !== end.parent || to >= from && to <= from + node.nodeSize) return false;
   // Check the complete resulting parent, including required leading paragraphs in list items.
@@ -56,10 +60,12 @@ export function blockDrag(view: EditorView, dom: HTMLElement, handle: HTMLButton
   const line = document.createElement('div'); line.className = 'md-diagram-drop-line'; line.hidden = true;
   line.setAttribute('aria-hidden', 'true');
   const clear = () => {
-    const previous = drag; drag = undefined;
+    const previous = drag;
+    if (!previous) return;
+    drag = undefined;
     cancelAnimationFrame(frame); frame = 0; line.remove();
     dom.classList.remove('md-diagram-dragging');
-    if (previous && handle.hasPointerCapture?.(previous.pointer)) handle.releasePointerCapture(previous.pointer);
+    if (handle.hasPointerCapture?.(previous.pointer)) handle.releasePointerCapture(previous.pointer);
     window.removeEventListener('pointermove', moving, true);
     window.removeEventListener('pointerup', finish, true);
     window.removeEventListener('pointercancel', clear);

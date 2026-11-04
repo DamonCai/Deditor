@@ -50,6 +50,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { extendedTableCells, configureTableEditing } from "../lib/markdownVisual/tableLists";
 import { inlineSchemas, faithfulInlineHtml, configureInlineSerialization } from "../lib/markdownVisual/inline";
 import { codeView } from "../lib/markdownVisual/codeView";
+import { isDiagramBlock } from "../lib/markdownVisual/diagramDrag";
 import { codeBlockSchema, inlineNodesCursorPlugin, remarkInlineLinkPlugin, remarkPreserveEmptyLinePlugin, syncHeadingIdPlugin, wrapInHeadingInputRule } from "@milkdown/kit/preset/commonmark";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CrepeBuilder } from "@milkdown/crepe/builder";
@@ -64,7 +65,7 @@ import { EditorStatus, editorViewCtx, parserCtx, serializerCtx, editorViewOption
 import { history } from "@milkdown/kit/plugin/history";
 import { trailing } from "@milkdown/kit/plugin/trailing";
 import { handleTableKeys } from "../lib/markdownVisual/tableKeys";
-import { TextSelection, Selection } from "@milkdown/kit/prose/state";
+import { NodeSelection, TextSelection, Selection } from "@milkdown/kit/prose/state";
 import type { EditorView } from "@milkdown/kit/prose/view";
 import SearchPanel from "./SearchPanel";
 import { useEditorPaneId, paneViewKey, useEditorStore, useTabContent, useTabFilePath } from "../store/editor";
@@ -194,7 +195,13 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
         inlineUploadPlaceholderText: t("md.imageUrlLabel"), blockUploadPlaceholderText: t("md.imageUrlLabel"), blockCaptionPlaceholderText: t("md.imageTitleLabel") })
       .addFeature(latex);
     crepe.editor.use(faithfulTableSelection).use(markdownContextMenu(tabId, () => !cancelled && activeRef.current)).use(clipboardImages.plugin).use(shorthandRemark).use(highlightRemark).use(shorthandMarks.flat()).use(emojiSchema).use(shorthandInputRules).config(configureShorthand).use(editableBlockquote).use(footnoteReference).use(footnoteDefinition).use(footnoteUpdates).use(footnoteOrder).use(inlineSourceSchema).use(absoluteHeadingInputRule).use(activeBlockHint).use(sharedHeadingIds).use(faithfulParagraph).use(shadedHeading).use(faithfulLink).use(faithfulInlineHtml).use(faithfulImage).use(faithfulInlineImage).use(extendedTableCells.flat()).config(configureTableEditing).use(inlineSchemas.flat()).config(configureInlineSerialization).use(frontmatter).use(rawRemark(mdx)).use(rawSchema);
-    crepe.editor.config(ctx => ctx.update(editorViewOptionsCtx, prev => ({ ...prev, attributes: { class: "md-document", "aria-label": t("md.visualEditor"), spellcheck: "false" },
+    crepe.editor.config(ctx => ctx.update(editorViewOptionsCtx, prev => ({ ...prev, attributes: ({ selection }) => ({
+      // A document-wide :has() under ::selection makes WebKit rescan the
+      // retained editors while it resolves native caret styles on tab changes.
+      class: selection instanceof NodeSelection && isDiagramBlock(selection.node) ? "md-document md-diagram-selected" : "md-document",
+      "aria-label": t("md.visualEditor"),
+      spellcheck: "false",
+    }),
       handleKeyDown: (view, event) => handleSelectedBlockExit(view, event) || handleTableKeys(view, event),
       handlePaste: (view, event, slice) => clipboardImages.paste(view, event) || pasteTableClipboard(view, event, slice) || pastePlainText(view, event, slice, ctx.get(parserCtx)),
       clipboardTextSerializer: clipboardText,
@@ -546,7 +553,9 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
     if (!active) {
       rt.view.dom.dispatchEvent(new Event("deditor-diagram-overview-close"));
       if (wasActive.current) {
-        rt.closeInline(); rt.view.dom.blur(); rt.session.endComposition(); rt.session.breakGroup();
+        rt.closeInline();
+        if (rt.view.dom.ownerDocument.activeElement === rt.view.dom) rt.view.dom.blur();
+        rt.session.endComposition(); rt.session.breakGroup();
         setSearchOpen(false);
       }
       if (getVisualEditor()?.owner === owner.current) setVisualEditor(null);
@@ -559,9 +568,6 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
       rt.restoreCursor(); rt.outline();
     }
     if (readonly) rt.closeInline();
-    // The hidden slot is inert. Toggling contenteditable on a very large DOM
-    // would rebuild browser editing/accessibility state on every mode switch.
-    if (root.current) root.current.inert = !visible;
     if (rt.crepe.readonly !== readonly) {
       rt.crepe.setReadonly(readonly);
       rt.view.dom.dispatchEvent(new Event("deditor-editable-change"));
@@ -654,7 +660,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
     {!ready && !error && <div className="deditor-notice" role="status">{t("md.visualLoading")}</div>}
     <div className="md-visual-layout preview-reading-host preview-reading-host--reading">
       <div ref={scroller} className="md-visual-scroll md-outline-canvas" onScroll={() => { const rt = runtime.current; if (rt && visible) rt.position.visualScroll = scroller.current?.scrollTop ?? 0; }}>
-        <div ref={root} className="md-visual-content" />
+        <div ref={root} className="md-visual-content" {...{ inert: visible ? undefined : "" }} />
       </div>
       <MarkdownOutline items={headings.map(item => ({...item, id: String(item.pos)}))} current={String(activeHeading)} active={active} navigate={id => {
         const pos = Number(id), rt = runtime.current, scroll = scroller.current;

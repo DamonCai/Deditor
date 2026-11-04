@@ -41,6 +41,7 @@ export {getVisualEditor} from './src/lib/markdownVisualBridge';
 export {markdownHistory} from './src/lib/markdownHistory';
 export {saveFile} from './src/lib/fileio';
 export {renderMarkdown} from './src/lib/markdown';
+export {markdownDisplayHtml} from './src/lib/markdownDisplay';
 `,resolveDir:process.cwd()},outfile:output,bundle:true,format:'esm',platform:'node',packages:'external',loader:{'.css':'empty'},plugins:[{name:'isolated-io',setup(b){
  b.onResolve({filter:/.*/},a=>a.path.endsWith('.css')?{path:'css',namespace:'stub'}:stubs[a.path]?{path:a.path,namespace:'stub'}:a.path.endsWith('/feedback')?{path:'feedback',namespace:'stub'}:undefined);
  b.onLoad({filter:/.*/,namespace:'stub'},a=>({contents:a.path==='css'?'':a.path==='feedback'?'export const showError=async()=>{};':stubs[a.path],loader:'js'}));
@@ -105,6 +106,57 @@ try {
   const readonlyHandle=document.querySelector('.md-table-drag');
   if(readonlyHandle)await act(async()=>readonlyHandle.dispatchEvent(new window.KeyboardEvent('keydown',{key:'ArrowUp',altKey:true,bubbles:true,cancelable:true})));
   assert.equal(content(),moved,'readonly does not move');
+ });
+ await test('fixed Markdown HTML stays in its own viewport',async()=>{
+  const overlay = '<div style="position: fixed; inset: 0; z-index: 2147483647"><button>Example</button><iframe srcdoc="<p>Nested page</p>"></iframe></div>';
+  const original = '# Before\n\n' + overlay + '\n\n<details style="position: relative"><summary>Details</summary>Ordinary markup</details>\n\n## After\n';
+  await setSource(original);
+  const editor = document.querySelector('.ProseMirror');
+  const frame = editor.querySelector('iframe.md-html-document');
+  assert.ok(frame?.srcdoc.includes('<button>Example</button>'));
+  assert.match(frame.srcdoc, /srcdoc="[^"]*Nested page/);
+  assert.ok(frame.getAttribute('sandbox').includes('allow-scripts'));
+  assert.ok(editor.querySelector('details > summary'));
+  assert.equal(editor.querySelector('h2').textContent,'After');
+  assert.equal(content(),original);
+  const inline = document.createElement('template');
+  inline.innerHTML = app.markdownDisplayHtml(await app.renderMarkdown('Before <span style="POSITION: fixed !important">Overlay</span> after',{theme:'light'}));
+  assert.equal(inline.content.querySelector('p').textContent,'Before  after');
+  assert.ok(inline.content.querySelector('iframe[data-html-document]')?.dataset.htmlDocument.includes('Overlay'));
+  const unclosed = '<div style="position:fixed">Overlay\n\n## Next heading\n';
+  inline.innerHTML = app.markdownDisplayHtml(await app.renderMarkdown(unclosed,{theme:'light'}));
+  assert.equal(inline.content.querySelector('h2')?.textContent,'Next heading');
+  assert.ok(!inline.content.querySelector('iframe[data-html-document]')?.dataset.htmlDocument.includes('Next heading'));
+  const exported = await app.renderMarkdown(unclosed,{theme:'light',isolateFixedHtml:false});
+  assert.ok(exported.includes('<div style="position:fixed">Overlay'));
+ });
+ await test('diagram selection only suppresses native highlight while the block is selected',async()=>{
+  const original = 'Text\n\n```mermaid\n```\n\nAfter\n';
+  await setSource(original);
+  const editor = document.querySelector('.ProseMirror');
+  const diagram = editor.querySelector('.md-diagram-block');
+  assert.ok(diagram);
+  assert.equal(editor.classList.contains('md-diagram-selected'),false);
+  await act(async()=>diagram.querySelector('.md-diagram-family').click());
+  assert.ok(diagram.classList.contains('ProseMirror-selectednode'));
+  assert.ok(editor.classList.contains('md-diagram-selected'));
+  await act(async()=>app.getVisualEditor().navigate(1,1));
+  assert.equal(editor.classList.contains('md-diagram-selected'),false);
+  assert.equal(content(),original);
+ });
+ await test('select all and delete with a footnote preserves source gaps and history',async()=>{
+  const original = 'Intro[^n]\r\n\r\nAnother paragraph\r\n\r\n[^n]: Note\r\n';
+  await setSource(original);
+  app.getVisualEditor().focus();
+  const editor = document.querySelector('.ProseMirror');
+  const keydown = (key, keyCode, ctrlKey = false) =>
+    editor.dispatchEvent(new window.KeyboardEvent('keydown', { key, keyCode, ctrlKey, bubbles: true, cancelable: true }));
+  await act(async()=>{keydown('a',65,true);keydown('Backspace',8);});
+  const deleted = '\r\n'.repeat(5);
+  assert.equal(content(),deleted);
+  await act(async()=>app.saveFile());assert.equal(writes.at(-1).content,deleted);
+  await act(async()=>app.markdownHistory());assert.equal(content(),original);
+  await act(async()=>app.markdownHistory(true));assert.equal(content(),deleted);
  });
  await test('save failure preserves dirty source',async()=>{
   await setSource('Generated unsaved text\n');failed=true;

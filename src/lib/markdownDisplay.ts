@@ -5,7 +5,7 @@ import { hydratePlantuml } from "./plantumlHydrate";
 import { hydrateLocalImages } from "./localImgHydrate";
 import { hydrateHtmlBlocks } from "./htmlBlockHydrate";
 import { HTML_PREVIEW_SANDBOX } from "./htmlPreview";
-import { needsHtmlDocument } from "./htmlDocument";
+import { fixedHtmlElements, needsHtmlDocument } from "./htmlDocument";
 import { hydrateHtmlFrames } from "./htmlFrameHydrate";
 import { tStatic } from "./i18n";
 
@@ -46,6 +46,22 @@ function sanitizedFragment(html: string | HTMLTemplateElement) {
   return clean;
 }
 
+function isolateFrame(frame: HTMLIFrameElement) {
+  frame.setAttribute("sandbox", HTML_PREVIEW_SANDBOX);
+  frame.setAttribute("referrerpolicy", "no-referrer");
+  frame.setAttribute("loading", "lazy");
+  frame.removeAttribute("allow");
+}
+
+function htmlDocumentFrame(source: string) {
+  const frame = document.createElement("iframe");
+  frame.className = "md-html-document";
+  frame.title = tStatic("html.previewTitle");
+  frame.dataset.htmlDocument = source;
+  isolateFrame(frame);
+  return frame;
+}
+
 /** Both hosts mount the same sanitized renderer output. Diagram source is inert
  * metadata: restore it after sanitization, which can reject arrows in attributes. */
 export function markdownDisplayHtml(html: string): string {
@@ -68,22 +84,28 @@ export function markdownDisplayHtml(html: string): string {
   clean.content.querySelectorAll<HTMLElement>(".html-render-block").forEach(element => {
     const source = element.getAttribute("data-html-source") ?? "";
     element.removeAttribute("data-html-source");
-    if (needsHtmlDocument(source)) {
-      const frame = document.createElement("iframe");
-      frame.className = "md-html-document";
-      frame.title = tStatic("html.previewTitle");
-      frame.dataset.htmlDocument = source;
-      element.replaceChildren(frame);
-    } else element.replaceChildren(sanitizedFragment(source).content);
+    if (needsHtmlDocument(source)) element.replaceChildren(htmlDocumentFrame(source));
+    else element.replaceChildren(sanitizedFragment(source).content);
   });
   for (const frame of clean.content.querySelectorAll("iframe")) {
     const src = frame.getAttribute("src") ?? "";
     // Relative/local documents and authored srcdoc are valid embeds, too.
     if (/^\s*(?:javascript|vbscript):/i.test(src)) {frame.remove();continue;}
-    frame.setAttribute("sandbox", HTML_PREVIEW_SANDBOX);
-    frame.setAttribute("referrerpolicy", "no-referrer");
-    frame.setAttribute("loading", "lazy");
-    frame.removeAttribute("allow");
+    isolateFrame(frame);
+  }
+  // The host viewport includes the file tree and toolbar. Fixed HTML needs
+  // a document viewport of its own, including when authored inside a paragraph.
+  for (const element of fixedHtmlElements(clean.content)) {
+    if (!clean.content.contains(element)) continue;
+    // The detached subtree is serialized into the frame. Restore nested srcdoc
+    // values here because the host no longer hydrates those frames individually.
+    for (const embed of [element, ...element.querySelectorAll("iframe[data-html-document]")]) {
+      const source = embed.getAttribute("data-html-document");
+      if (embed.localName !== "iframe" || source === null) continue;
+      embed.setAttribute("srcdoc", source);
+      embed.removeAttribute("data-html-document");
+    }
+    element.replaceWith(htmlDocumentFrame(element.outerHTML));
   }
   return clean.innerHTML;
 }

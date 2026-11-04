@@ -59,7 +59,11 @@ export function rawView(filePath: string | null, tabId: string, documentContext?
       const source = useEditorStore.getState().tabs.find(t => t.id === tabId)?.content ?? "";
       const indexed = documentContext?.();
       const { ast, definitions } = indexed?.source === source ? indexed : sourceContext(view, source);
-      let index = 0; view.state.doc.forEach((_node, offset, i) => { if (offset === getPos()) index = i; });
+      const doc = view.state.doc, pos = getPos();
+      // getPos itself walks preceding view siblings. Resolve it once and
+      // retain the first source range fallback for non-top-level positions.
+      const resolved = pos !== undefined && pos >= 0 && pos < doc.content.size ? doc.resolve(pos) : null;
+      const index = resolved?.depth === 0 ? resolved.index() : 0;
       const start = ast[index] ? range(ast[index])[0] : 0;
       const line = source.slice(0, start).split("\n").length;
       const options = { theme };

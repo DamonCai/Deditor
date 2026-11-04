@@ -132,7 +132,7 @@ md.validateLink = href => /^file:/i.test(href) || validateMarkdownLink(href);
 const originalHtmlBlock = md.renderer.rules.html_block!;
 md.renderer.rules.html_block = (tokens, index, options, env, renderer) => {
   const token = tokens[index];
-  return needsHtmlDocument(token.content)
+  return needsHtmlDocument(token.content, env.__isolateFixedHtml !== false)
     ? renderHtmlPlaceholder(token.content, token.map ? token.map[0] + 1 : 0)
     : originalHtmlBlock(tokens, index, options, env, renderer);
 };
@@ -223,6 +223,7 @@ export interface RenderOptions {
   documentSource?: string;
   mathAutoNumber?: boolean;
   mathOrdinal?: number;
+  isolateFixedHtml?: boolean;
 }
 
 export interface MarkdownToc { line: number; headings: { level: number; id: string; text: string }[] }
@@ -270,7 +271,7 @@ export async function renderMarkdown(
   if (sourceMaybeHasKatex(parsedSource)) {
     await loadKatex();
   }
-  const env: Record<string, unknown> = {__mathSource:opts.documentSource ?? source, __mathAutoNumber:opts.mathAutoNumber, __mathBlockIndex:opts.mathOrdinal ?? 0};
+  const env: Record<string, unknown> = {__mathSource:opts.documentSource ?? source, __mathAutoNumber:opts.mathAutoNumber, __mathBlockIndex:opts.mathOrdinal ?? 0, __isolateFixedHtml:opts.isolateFixedHtml};
   const tokens = md.parse(parsedSource, env);
   // Load optional engines only when a fence needs them. HTML, diagrams and
   // documents without ordinary code should not wait for Shiki startup.

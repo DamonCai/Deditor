@@ -66,12 +66,16 @@ export const activeBlockHint = $prose(() => new Plugin({
       const editing = active === view.dom || active instanceof HTMLElement && view.dom.contains(active) && active.isContentEditable;
       const block = getBlockHint(view.state);
       const target = block ? view.nodeDOM(block.from) : null;
-      hint.hidden = !view.editable || !editing || !(target instanceof HTMLElement);
-      if (hint.hidden || !block || !(target instanceof HTMLElement)) return;
+      if (!view.editable || !editing || !block || !(target instanceof HTMLElement)) {
+        hint.hidden = true;
+        return;
+      }
       const rect = target.getBoundingClientRect(), viewport = scroller.getBoundingClientRect();
-      hint.textContent = block.label;
+      const top = rect.top - viewport.top + scroller.scrollTop + 4;
+      if (hint.textContent !== block.label) hint.textContent = block.label;
       // Absolute gutter positioning leaves list markers, nested content and table cells untouched.
-      hint.style.top = `${rect.top - viewport.top + scroller.scrollTop + 4}px`;
+      hint.style.top = `${top}px`;
+      hint.hidden = false;
     };
     const schedule = () => { if (!frame) frame = requestAnimationFrame(refresh); };
     scroller.addEventListener("scroll", schedule, true);

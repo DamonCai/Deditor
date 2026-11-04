@@ -197,6 +197,7 @@ export async function prepareDocument(
   const template = document.createElement("template");
   template.innerHTML = await renderMarkdown(snapshot.content, {
     theme,
+    isolateFixedHtml: false,
   });
   // Keep original image references inert until the exporter embeds them. TXT
   // exports must not trigger even an incidental remote image request.
@@ -274,6 +275,7 @@ export async function listDiagrams(
   const template = document.createElement("template");
   template.innerHTML = await renderMarkdown(snapshot.content, {
     theme: "light",
+    isolateFixedHtml: false,
   });
   return Array.from(
     template.content.querySelectorAll<HTMLElement>(

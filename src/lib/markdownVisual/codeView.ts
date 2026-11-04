@@ -1,4 +1,4 @@
-import { blockDrag, movingBlockHeight } from "./diagramDrag";
+import { blockDrag, isDiagramBlock, movingBlockHeight } from "./diagramDrag";
 import { diagramOverview } from "./diagramOverview";
 import { exitBlockSource } from "./blockExit";
 import { diagramSplit } from "./diagramSplit";
@@ -29,7 +29,7 @@ export function codeView(tabId: string, initialTheme: "light" | "dark" | (() => 
     type DiagramMode = "edit" | "split" | "preview";
     let diagramMode: DiagramMode = "preview";
     let renderTimer: ReturnType<typeof setTimeout> | undefined;
-    const hasDiagramModes = () => ["mermaid", "plantuml", "puml", "uml"].includes(String(node.attrs.language ?? "").toLowerCase());
+    const hasDiagramModes = () => isDiagramBlock(node);
     let controllers: AbortController[] = [];
     let renderedSource: string | null = null, pendingSource: string | null = null;
     const dom = document.createElement("section"); dom.className = "md-code-block"; dom.contentEditable = "false";

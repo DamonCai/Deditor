@@ -6,7 +6,9 @@ const MarkdownVisualEditor = lazy(() => import("./MarkdownVisualEditor"));
 const MarkdownVisualSlot = memo(function MarkdownVisualSlot({ tabId, active, focused = true, theme }: { tabId: string; active: boolean; focused?: boolean; theme: "light" | "dark" }) {
   const visited = useRef(false);
   if (active) visited.current = true;
-  return <div ref={element => { if (element) element.inert = !active; }} style={{ display: active ? "block" : "none", flex: "1 1 0", minWidth: 0, height: "100%" }} aria-hidden={!active}>
+  // React 18 forwards inert as a string attribute. Commit it together with
+  // display so restoring focus doesn't lay out the document between writes.
+  return <div {...{ inert: active ? undefined : "" }} style={{ display: active ? "block" : "none", flex: "1 1 0", minWidth: 0, height: "100%" }} aria-hidden={!active}>
     {visited.current && <Suspense fallback={null}><MarkdownVisualEditor tabId={tabId} active={active} focused={focused} theme={theme} /></Suspense>}
   </div>;
 });

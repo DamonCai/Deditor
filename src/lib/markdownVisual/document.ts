@@ -395,9 +395,11 @@ export class MarkdownDocument {
       const newNodes=newBody.slice(first,newEnd), raw=newNodes.map(index=>serialize(after[index])).join(eol+eol);
       // Remove only body spans: definitions between them retain their exact original bytes.
       for(let i=first;i<oldEnd;i++)replace(oldBody[i],undefined,0);
-      if(raw) {
-        const leading=at>0&&!this.source.slice(0,at).endsWith(eol+eol)?eol+eol:"";
-        const edit={from:at,to:at,insert:leading+raw+(at<this.source.length?eol+eol:"")};edits.push(edit);
+      if(newNodes.length) {
+        const leading=raw&&at>0&&!this.source.slice(0,at).endsWith(eol+eol)?eol+eol:"";
+        // A full deletion can leave one empty paragraph. It needs a source
+        // anchor even though it contributes no bytes to the saved document.
+        const edit={from:at,to:at,insert:leading+raw+(raw&&at<this.source.length?eol+eol:"")};edits.push(edit);
         let offset=leading.length;
         newNodes.forEach(index=>{const part=serialize(after[index]);assigned.set(index,{ast:editingBlock(part,definitions),edit,relative:offset});offset+=part.length+2*eol.length;});
       }
@@ -424,7 +426,20 @@ export class MarkdownDocument {
       if(entry.edit)return offsetSourceTree(entry.ast,entry.edit.from+shift(entry.edit.from,entry.edit)+(entry.relative??0));
       return offsetSourceTree(entry.ast,shift(range(entry.ast)[0]));
     });
-    for(const edit of [...edits].reverse())this.source=this.source.slice(0,edit.from)+edit.insert+this.source.slice(edit.to);
+    if (edits.every((edit, index) => index === 0 || edits[index - 1].to <= edit.from)) {
+      // Build disjoint edits in one pass instead of repeatedly slicing a
+      // shrinking document when deleting hundreds of blocks with footnotes.
+      const parts: string[] = [];
+      let offset = 0;
+      for (const { from, to, insert } of edits) {
+        parts.push(this.source.slice(offset, from), insert);
+        offset = to;
+      }
+      parts.push(this.source.slice(offset));
+      this.source = parts.join("");
+    } else {
+      for (const edit of [...edits].reverse()) this.source = this.source.slice(0, edit.from) + edit.insert + this.source.slice(edit.to);
+    }
     this.doc=next;return this.source;
   }
   private textRanges(node: ProseNode, index: number, start: number) {
