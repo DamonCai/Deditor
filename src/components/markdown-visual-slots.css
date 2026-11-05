@@ -1,0 +1,24 @@
+.md-visual-host {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+}
+
+.md-visual-slot {
+  position: absolute;
+  inset: 0;
+}
+
+.md-visual-slot[aria-hidden="true"] {
+  display: none;
+}
+
+@supports selector(:has(iframe)) {
+  /* Preserve native visibility transitions for embedded pages and media. */
+  .md-visual-slot[aria-hidden="true"]:not(:has(iframe:not(.md-visual-frame), iframe[data-editor-frame-media], video, audio, object, embed)) {
+    display: block;
+    visibility: hidden;
+    opacity: 0;
+  }
+}

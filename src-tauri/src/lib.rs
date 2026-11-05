@@ -56,13 +56,54 @@ fn dirs_home() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+fn read_text_document(path: &std::path::Path) -> std::io::Result<String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::FileTypeExt;
+        // Opening a named pipe for reading can wait forever for a writer.
+        // It is not a text document and may have replaced a restored path.
+        if fs::metadata(path).is_ok_and(|metadata| metadata.file_type().is_fifo()) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "cannot open a named pipe as a text document",
+            ));
+        }
+    }
+    fs::read_to_string(path)
+}
+
+#[cfg(all(test, unix))]
+#[test]
+fn text_open_does_not_wait_for_a_named_pipe_writer() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("blocked.md");
+    assert!(std::process::Command::new("mkfifo")
+        .arg(&path)
+        .status()
+        .unwrap()
+        .success());
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || tx.send(read_text_document(&path)).ok());
+    let error = rx
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .expect("opening a text document must not wait for a pipe writer")
+        .unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+}
+
 #[tauri::command]
-fn read_text_file(path: String) -> Result<String, String> {
-    log::debug!("read_text_file: {}", path);
-    fs::read_to_string(expand(&path)).map_err(|e| {
-        log::warn!("read_text_file failed: {} -- {}", path, e);
-        e.to_string()
+async fn read_text_file(path: String) -> Result<String, String> {
+    // Tauri dispatches synchronous commands on the WebView thread. A slow
+    // volume must not block the window, including during session restoration.
+    tauri::async_runtime::spawn_blocking(move || {
+        log::debug!("read_text_file: {}", path);
+        read_text_document(&expand(&path)).map_err(|e| {
+            log::warn!("read_text_file failed: {} -- {}", path, e);
+            e.to_string()
+        })
     })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Hard cap on binary preview size. base64 expands ~33% so the in-memory
@@ -493,8 +534,14 @@ fn delete_path(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn list_dir(path: String) -> Result<Vec<DirEntry>, String> {
-    let resolved = expand(&path);
+async fn list_dir(path: String) -> Result<Vec<DirEntry>, String> {
+    tauri::async_runtime::spawn_blocking(move || list_directory(&path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn list_directory(path: &str) -> Result<Vec<DirEntry>, String> {
+    let resolved = expand(path);
     log::debug!("list_dir: {}", resolved.display());
     let mut out = Vec::new();
     let read = fs::read_dir(&resolved).map_err(|e| {
@@ -1685,7 +1732,7 @@ mod ipc_bench {
         let mut times = Vec::new();
         for _ in 0..3 {
             let t = Instant::now();
-            let v = list_dir(path.clone()).unwrap();
+            let v = list_directory(&path).unwrap();
             times.push(t.elapsed().as_secs_f64() * 1000.0);
             assert_eq!(v.len(), 5000);
         }
@@ -1704,7 +1751,7 @@ mod ipc_bench {
         let mut times = Vec::new();
         for _ in 0..5 {
             let t = Instant::now();
-            list_dir(path.clone()).unwrap();
+            list_directory(&path).unwrap();
             times.push(t.elapsed().as_secs_f64() * 1000.0);
         }
         println!(

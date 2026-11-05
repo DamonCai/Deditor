@@ -1,4 +1,6 @@
+import { isHtmlElement } from "../lib/markdownVisual/dom";
 import { initialNodeViews } from "../lib/markdownVisual/initialNodeViews";
+import { cacheInitialMarkdown, forgetInitialMarkdown, getInitialMarkdown } from "../lib/markdownVisual/initialDocumentCache";
 import { markdownSpelling } from "../lib/markdownVisual/spelling";
 import { isWindowCloseCommitted } from "../lib/windowCloseGuard";
 import { markdownSearchHighlights, searchHighlightsKey, navigationHighlightMeta, scrollSearchMatch } from "../lib/markdownVisual/searchHighlights";
@@ -177,9 +179,11 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
     };
     const clipboardImages = imageClipboard(upload, () => activeRef.current && !readonlyRef.current && !cancelled && !isWindowCloseCommitted(), () => session.breakGroup());
     const initialSource = sourceRef.current;
+    const cached = getInitialMarkdown(tabId, initialSource, mdx);
+    let cacheTimer: ReturnType<typeof setTimeout> | undefined;
     const codeNodeView = codeView(tabId, () => themeRef.current);
     let sourceDocument: MarkdownDocument | undefined;
-    const crepe = new CrepeBuilder({ root: host, defaultValue: normalizeMarkdownFences(initialSource) })
+    const crepe = new CrepeBuilder({ root: host, defaultValue: cached?.value ?? normalizeMarkdownFences(initialSource) })
       .addFeature(codeMirror)
       .addFeature(table, {
         addRowIcon: tableIcon(t("md.addRow"), "plus"), addColIcon: tableIcon(t("md.addColumn"), "plus"),
@@ -253,8 +257,16 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
       crepe.editor.action(ctx => {
         const view = ctx.get(editorViewCtx), parse = ctx.get(parserCtx), serialize = ctx.get(serializerCtx);
         const parseSource = (value: string) => parse(normalizeMarkdownFences(value));
-        const document = new MarkdownDocument(initialSource, parseSource, serialize, mdx, view.state.doc);
+        const document = new MarkdownDocument(initialSource, parseSource, serialize, mdx, view.state.doc, cached?.ast);
         sourceDocument = document;
+        if (!cached && initialSource.length >= 48 * 1024) {
+          // Keep serialization out of initialization. Only retain the matching
+          // original projection; edits and external reloads own their history.
+          const initialSnapshot = document.snapshot();
+          cacheTimer = setTimeout(() => {
+            if (!cancelled && document.source === initialSource) cacheInitialMarkdown(tabId, initialSource, mdx, initialSnapshot);
+          }, 500);
+        }
         let inlineEditing: ReturnType<typeof installInlineSource> | undefined;
         let enterOperation = false;
         let selectionDeleteOperation = false;
@@ -460,13 +472,15 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
         view.dom.addEventListener("keydown", enterKey, true);
         const cleanupEnd = installDocumentEnd(view, scroller.current!);
         cleanupInput = () => { cleanupEnd(); composition.destroy(); view.dom.removeEventListener("beforeinput", beforeInput, true); view.dom.removeEventListener("keydown", enterKey, true); };
-        const restoreCursor = () => {
+        const restoreCursor = (freshScroll = false) => {
           const cursorPosition = Math.min(view.state.doc.content.size, position.sourceCursor === null ? position.visualSelection.head : document.positionAtSource(position.sourceCursor));
           view.dispatch(view.state.tr.setSelection(Selection.near(view.state.doc.resolve(cursorPosition))));
-          if (scroller.current) scroller.current.scrollTop = position.visualScroll;
+          // A newly mounted scroller already starts at zero. Setting it
+          // anyway forces a synchronous layout of the entire document.
+          if (scroller.current && (!freshScroll || position.visualScroll !== 0)) scroller.current.scrollTop = position.visualScroll;
         };
         runtime.current = { session, position, crepe, view, document, sync, flush, closeInline: () => inlineEditing?.close(), outline, publish, restoreCursor };
-        if (activeRef.current) { sync(sourceRef.current); restoreCursor(); }
+        if (activeRef.current) { sync(sourceRef.current); restoreCursor(true); }
         cleanupFlush = registerDocumentFlush(tabId, () => { if (activeRef.current) flush(); });
         cleanupAccessibility = installMarkdownAccessibility(view);
         crepe.setReadonly(readonlyRef.current);
@@ -509,6 +523,8 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
       if (outgoing && activeRef.current && useEditorStore.getState().tabs.find(tab => tab.id === tabId)?.content === outgoing.document.source) outgoing.flush();
       session.breakGroup(); if (activeRef.current) position.visualScroll = scroller.current?.scrollTop ?? position.visualScroll;
       cancelled = true; releaseBindings();
+      clearTimeout(cacheTimer);
+      if (!useEditorStore.getState().tabs.some(tab => tab.id === tabId)) forgetInitialMarkdown(tabId);
       if (getVisualEditor()?.owner === owner.current) setVisualEditor(null);
       void dispose(); host.remove();
     };
@@ -535,7 +551,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
         const origin = scroll.getBoundingClientRect().top;
         const positions = headingPositions.current.flatMap(({pos}) => {
           const node = rt.view.nodeDOM(pos - 1);
-          return node instanceof HTMLElement ? [{pos, top: node.getBoundingClientRect().top - origin + scroll.scrollTop}] : [];
+          return isHtmlElement(node) ? [{pos, top: node.getBoundingClientRect().top - origin + scroll.scrollTop}] : [];
         });
         const index = outlineActiveIndex(positions.map(item => item.top), scroll.scrollTop, scroll.clientHeight, scroll.scrollHeight);
         setActiveHeading(positions[index]?.pos ?? -1);
@@ -553,6 +569,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
     if (!active) {
       rt.view.dom.dispatchEvent(new Event("deditor-diagram-overview-close"));
       if (wasActive.current) {
+        rt.view.dom.dispatchEvent(new Event("deditor-visual-deactivate"));
         rt.closeInline();
         if (rt.view.dom.ownerDocument.activeElement === rt.view.dom) rt.view.dom.blur();
         rt.session.endComposition(); rt.session.breakGroup();
@@ -667,7 +684,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
         if (!rt || !scroll) return;
         select(pos); rt.view.focus();
         const node = rt.view.nodeDOM(pos - 1);
-        if (node instanceof HTMLElement) scroll.scrollTo({top: Math.max(0, node.getBoundingClientRect().top - scroll.getBoundingClientRect().top + scroll.scrollTop - 16), behavior: "auto"});
+        if (isHtmlElement(node)) scroll.scrollTo({top: Math.max(0, node.getBoundingClientRect().top - scroll.getBoundingClientRect().top + scroll.scrollTop - 16), behavior: "auto"});
         clickedHeading.current = {pos, scrollTop: scroll.scrollTop}; setActiveHeading(pos);
       }} />
     </div>

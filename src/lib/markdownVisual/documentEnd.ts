@@ -1,3 +1,4 @@
+import { isHtmlElement } from "./dom";
 import { NodeSelection, TextSelection } from "@milkdown/kit/prose/state";
 import type { EditorView } from "@milkdown/kit/prose/view";
 import { exitBlockSource } from "./blockExit";
@@ -8,12 +9,12 @@ export function installDocumentEnd(view: EditorView, scroller: HTMLElement) {
     if (!view.editable || view.composing || event.button !== 0 || event.ctrlKey || event.metaKey || event.altKey) return;
     const target = event.target;
     // Ignore controls and all content inside a block (including nested editors).
-    if (!(target instanceof HTMLElement) || !target.contains(view.dom)) return;
+    if (!(isHtmlElement(target)) || !target.contains(view.dom)) return;
     const last = view.state.doc.lastChild;
     if (!last) return;
     const pos = view.state.doc.content.size - last.nodeSize;
     const dom = view.nodeDOM(pos);
-    if (!(dom instanceof HTMLElement) || event.clientY <= dom.getBoundingClientRect().bottom) return;
+    if (!(isHtmlElement(dom)) || event.clientY <= dom.getBoundingClientRect().bottom) return;
     const rect = view.dom.getBoundingClientRect();
     if (event.clientX < rect.left || event.clientX > rect.right) return;
     event.preventDefault();

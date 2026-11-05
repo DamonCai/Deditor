@@ -138,9 +138,11 @@ export class MarkdownDocument {
   private positions = new WeakMap<ProseNode, { ast: SourceNode; start: number; ranges: { from: number; to: number; pos: number; end: number }[] }>();
   private sourceOffsets: { doc: ProseNode; ast: SourceNode[]; source: string; values: Map<number, number> } | undefined;
   private parse: (source: string) => ProseNode;
-  constructor(source: string, parse: (source: string) => ProseNode, private serialize: (doc: ProseNode) => string, private mdx = false, initialDoc?: ProseNode) {
+  constructor(source: string, parse: (source: string) => ProseNode, private serialize: (doc: ProseNode) => string, private mdx = false, initialDoc?: ProseNode, initialAst?: readonly SourceNode[]) {
     this.parse = value => parse(normalizeMarkdownFences(value));
-    this.source = source; this.doc = initialDoc ?? this.parse(source); this.index();
+    this.source = source; this.doc = initialDoc ?? this.parse(source);
+    if (initialAst?.length === this.doc.childCount) this.ast = initialAst.slice();
+    else this.index();
   }
   private index() {
     this.ast = this.mdx && this.source ? [{ type: "deditorRaw", value: this.source, position: { start: { offset: 0 }, end: { offset: this.source.length } } }] : editingTree(this.source).children ?? [];

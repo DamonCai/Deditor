@@ -13,7 +13,7 @@ import { EditorState, Prec } from "@codemirror/state";
 import { basicSetup } from "codemirror";
 import { indentWithTab } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
-import { clearMarkdownFragmentContext, readMarkdownTocFragment, renderMarkdownFragment } from "../markdownFragments";
+import { clearMarkdownFragmentContext, needsMarkdownFragmentContext, readMarkdownTocFragment, renderMarkdownFragment } from "../markdownFragments";
 import { MarkdownTocView } from "./tocView";
 import { hydrateLocalImages } from "../localImgHydrate";
 import { documentImageRoot } from "../markdownImageSettings";
@@ -59,17 +59,23 @@ export function rawView(filePath: string | null, tabId: string, documentContext?
       const source = useEditorStore.getState().tabs.find(t => t.id === tabId)?.content ?? "";
       const indexed = documentContext?.();
       const { ast, definitions } = indexed?.source === source ? indexed : sourceContext(view, source);
-      const doc = view.state.doc, pos = getPos();
-      // getPos itself walks preceding view siblings. Resolve it once and
-      // retain the first source range fallback for non-top-level positions.
-      const resolved = pos !== undefined && pos >= 0 && pos < doc.content.size ? doc.resolve(pos) : null;
-      const index = resolved?.depth === 0 ? resolved.index() : 0;
-      const start = ast[index] ? range(ast[index])[0] : 0;
-      const line = source.slice(0, start).split("\n").length;
+      const raw = node.textContent + "\n\n" + definitions;
+      const line = () => {
+        const doc = view.state.doc, pos = getPos();
+        // Only context-dependent fragments need a source line. getPos itself
+        // walks preceding view siblings, and splitting the source prefix
+        // once per ordinary raw block scales poorly in long documents.
+        const resolved = pos !== undefined && pos >= 0 && pos < doc.content.size ? doc.resolve(pos) : null;
+        const index = resolved?.depth === 0 ? resolved.index() : 0;
+        const start = ast[index] ? range(ast[index])[0] : 0;
+        return source.slice(0, start).split("\n").length;
+      };
+      const tocSource = /^\s*\[(?:toc|\[toc\])\]\s*$/i.test(node.textContent);
+      const sourceLine = tocSource || needsMarkdownFragmentContext(raw) ? line() : 0;
       const options = { theme };
       const renderPreview = async () => {
-        if (/^\s*\[(?:toc|\[toc\])\]\s*$/i.test(node.textContent)) {
-          const toc = await readMarkdownTocFragment(source, line, options, view);
+        if (tocSource) {
+          const toc = await readMarkdownTocFragment(source, sourceLine, options, view);
           if (destroyed || version !== generation) return;
           if (toc) {
             tocView ??= new MarkdownTocView(); tocView.update(toc);
@@ -77,7 +83,7 @@ export function rawView(filePath: string | null, tabId: string, documentContext?
             return;
           }
         }
-        const html = await renderMarkdownFragment(node.textContent + "\n\n" + definitions, source, line, options, view);
+        const html = await renderMarkdownFragment(raw, source, sourceLine, options, view);
         if (destroyed || version !== generation) return;
         tocView = undefined;
         preview.innerHTML = markdownDisplayHtml(html);
@@ -135,7 +141,7 @@ export function rawView(filePath: string | null, tabId: string, documentContext?
       // Let the destination receive focus and the current CM update finish
       // before destroying its DOM; never steal focus back from neighboring prose.
       queueMicrotask(() => {
-        if (!destroyed && active && cm === active && !dom.contains(document.activeElement)) close(false);
+        if (!destroyed && active && cm === active && !dom.contains(dom.ownerDocument.activeElement)) close(false);
       });
     };
     dom.addEventListener("focusout", blur);
@@ -179,9 +185,10 @@ export function rawView(filePath: string | null, tabId: string, documentContext?
       });
       return nodes;
     };
-    let context = contextNodes(), refreshQueued = false;
+    const watchesContext = () => /\[\^|^\s*\[(?:toc|\[toc\])\]/im.test(node.textContent);
+    let context = watchesContext() ? contextNodes() : [], refreshQueued = false;
     const documentChanged = () => {
-      if (!/\[\^|^\s*\[(?:toc|\[toc\])\]/im.test(node.textContent)) return;
+      if (!watchesContext()) return;
       const next = contextNodes();
       const unchanged = next.length === context.length && next.every((child, index) => child.eq(context[index]));
       context = next;

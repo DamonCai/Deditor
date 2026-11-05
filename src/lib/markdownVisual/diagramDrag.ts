@@ -1,3 +1,4 @@
+import { editorWindow, isHtmlElement } from "./dom";
 import type { Node as ProseNode } from '@milkdown/kit/prose/model';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { NodeSelection } from '@milkdown/kit/prose/state';
@@ -42,7 +43,7 @@ export function moveBlock(view: EditorView, from: number, to: number) {
   const tr = view.state.tr.delete(from, from + node.nodeSize).insert(dest, node);
   tr.setSelection(NodeSelection.create(tr.doc, dest));
   const element = view.nodeDOM(from);
-  movingLayouts.set(view, { node, height: element instanceof HTMLElement ? element.getBoundingClientRect().height : 0 });
+  movingLayouts.set(view, { node, height: isHtmlElement(element) ? element.getBoundingClientRect().height : 0 });
   try {
     view.dispatch(tr.setMeta('deditor-list-operation', true).setMeta('uiEvent', 'drop'));
   } finally { movingLayouts.delete(view); }
@@ -56,6 +57,8 @@ export function moveBlock(view: EditorView, from: number, to: number) {
 export function blockDrag(view: EditorView, dom: HTMLElement, handle: HTMLButtonElement, getPos: () => number | undefined) {
   type Drag = { doc: ProseNode; from: number; pointer: number; x: number; y: number; currentX: number; currentY: number; active: boolean; target?: number };
   let drag: Drag | undefined, frame = 0;
+  const owner = dom.ownerDocument;
+  const events = editorWindow(dom);
   const scroll = view.dom.closest<HTMLElement>('.md-visual-scroll');
   const line = document.createElement('div'); line.className = 'md-diagram-drop-line'; line.hidden = true;
   line.setAttribute('aria-hidden', 'true');
@@ -66,11 +69,11 @@ export function blockDrag(view: EditorView, dom: HTMLElement, handle: HTMLButton
     cancelAnimationFrame(frame); frame = 0; line.remove();
     dom.classList.remove('md-diagram-dragging');
     if (handle.hasPointerCapture?.(previous.pointer)) handle.releasePointerCapture(previous.pointer);
-    window.removeEventListener('pointermove', moving, true);
-    window.removeEventListener('pointerup', finish, true);
-    window.removeEventListener('pointercancel', clear);
-    window.removeEventListener('blur', clear);
-    window.removeEventListener('keydown', cancelKey, true);
+    events.removeEventListener('pointermove', moving, true);
+    events.removeEventListener('pointerup', finish, true);
+    events.removeEventListener('pointercancel', clear);
+    events.removeEventListener('blur', clear);
+    events.removeEventListener('keydown', cancelKey, true);
     scroll?.removeEventListener('scroll', indicate);
   };
   const valid = () => !!drag && view.editable && view.state.doc === drag.doc && view.dom.isConnected && !isWindowCloseCommitted() && !dom.closest('[inert]');
@@ -84,7 +87,7 @@ export function blockDrag(view: EditorView, dom: HTMLElement, handle: HTMLButton
     let target: { pos: number; y: number; left: number; width: number } | undefined;
     resolved.parent.forEach((child, offset) => {
       const pos = base + offset, element = view.nodeDOM(pos);
-      if (!(element instanceof HTMLElement) || target && drag!.currentY < target.y) return;
+      if (!(isHtmlElement(element)) || target && drag!.currentY < target.y) return;
       const rect = element.getBoundingClientRect();
       if (drag!.currentY < rect.top + rect.height / 2) {
         target ??= { pos, y: rect.top, left: rect.left, width: rect.width };
@@ -116,7 +119,7 @@ export function blockDrag(view: EditorView, dom: HTMLElement, handle: HTMLButton
     drag.currentX = event.clientX; drag.currentY = event.clientY;
     if (!drag.active && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < 5) return;
     if (!drag.active) {
-      drag.active = true; dom.classList.add('md-diagram-dragging'); document.body.append(line);
+      drag.active = true; dom.classList.add('md-diagram-dragging'); owner.body.append(line);
       frame = requestAnimationFrame(autoscroll);
     }
     event.preventDefault(); indicate();
@@ -136,9 +139,9 @@ export function blockDrag(view: EditorView, dom: HTMLElement, handle: HTMLButton
     clear(); event.preventDefault(); event.stopPropagation(); handle.focus({ preventScroll: true });
     drag = { doc: view.state.doc, from, pointer: event.pointerId, x: event.clientX, y: event.clientY, currentX: event.clientX, currentY: event.clientY, active: false };
     handle.setPointerCapture?.(event.pointerId);
-    window.addEventListener('pointermove', moving, true); window.addEventListener('pointerup', finish, true);
-    window.addEventListener('pointercancel', clear); window.addEventListener('blur', clear);
-    window.addEventListener('keydown', cancelKey, true); scroll?.addEventListener('scroll', indicate);
+    events.addEventListener('pointermove', moving, true); events.addEventListener('pointerup', finish, true);
+    events.addEventListener('pointercancel', clear); events.addEventListener('blur', clear);
+    events.addEventListener('keydown', cancelKey, true); scroll?.addEventListener('scroll', indicate);
   };
   const key = (event: KeyboardEvent) => {
     if (!event.altKey || !['ArrowUp', 'ArrowDown'].includes(event.key) || dom.querySelector('dialog[open]')) return;

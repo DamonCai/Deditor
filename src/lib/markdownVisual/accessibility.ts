@@ -1,3 +1,4 @@
+import { isHtmlElement } from "./dom";
 import type { EditorView } from "@milkdown/kit/prose/view";
 import { tStatic } from "../i18n";
 /** Add keyboard semantics to the upstream list labels without changing node data. */
@@ -38,7 +39,7 @@ export function installMarkdownAccessibility(view: EditorView) {
       if (element.matches(".label-wrapper")) labels.add(element);
     };
     for (const record of records) {
-      const element = record.target instanceof HTMLElement ? record.target : record.target.parentElement;
+      const element = isHtmlElement(record.target) ? record.target : record.target.parentElement;
       if (!element || !view.dom.contains(element)) continue;
       collect(element);
       // Nested task text contributes to each ancestor task's accessible name.
@@ -50,7 +51,7 @@ export function installMarkdownAccessibility(view: EditorView) {
         }
       }
       for (const added of record.addedNodes) {
-        if (!(added instanceof HTMLElement) || !view.dom.contains(added)) continue;
+        if (!(isHtmlElement(added)) || !view.dom.contains(added)) continue;
         collect(added);
         added.querySelectorAll<HTMLElement>(".handle[data-show], .label-wrapper").forEach(collect);
       }

@@ -1,3 +1,4 @@
+import { isDomElement } from "./dom";
 import { blockDrag, isDiagramBlock, movingBlockHeight } from "./diagramDrag";
 import { diagramOverview } from "./diagramOverview";
 import { exitBlockSource } from "./blockExit";
@@ -14,7 +15,7 @@ import { useEditorStore } from "../../store/editor";
 import { indentUnit } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { LanguageDescription } from "@codemirror/language";
-import { markdownDisplayHtml, hydrateMarkdownDisplay } from "../markdownDisplay";
+import { markdownDisplayTemplate, hydrateMarkdownDisplay } from "../markdownDisplay";
 import { renderMarkdown } from "../markdown";
 import { codePresentation } from "./codePresentation";
 import { tStatic } from "../i18n";
@@ -231,10 +232,20 @@ export function codeView(tabId: string, initialTheme: "light" | "dark" | (() => 
       const token = ++generation;
       pendingSource = renderKey;
       controllers.forEach(controller => controller.abort()); controllers = [];
-      const staging = document.createElement("div");
       void renderMarkdown(source, { theme, documentSource, mathAutoNumber: settings.mathAutoNumber, mathOrdinal: ordinal }).then(async html => {
         if (destroyed || token !== generation) return;
-        staging.innerHTML = markdownDisplayHtml(html);
+        const fragment = markdownDisplayTemplate(html).content;
+        const pre = fragment.firstElementChild;
+        // Shiki produces inert pre/code/span markup. Mount that projection
+        // once: cloning it for hydration only invalidates layout a second time.
+        if (pre?.matches("pre.shiki") && fragment.childElementCount === 1 && !pre.querySelector(":not(code, span)")) {
+          preview.replaceChildren(fragment);
+          dom.style.minHeight = "";
+          renderedSource = renderKey; pendingSource = null;
+          return;
+        }
+        const staging = document.createElement("div");
+        staging.append(fragment);
         if (renderedSource === null && !preview.hasChildNodes()) {
           preview.append(...Array.from(staging.cloneNode(true).childNodes));
         }
@@ -256,7 +267,7 @@ export function codeView(tabId: string, initialTheme: "light" | "dark" | (() => 
     // crossing the diagram boundary into the neighboring paragraph.
     const previewMouseDown = (event: MouseEvent) => {
       if (!view.editable || event.button !== 0 || overview.isOpen) return;
-      if (event.target instanceof Element && event.target.closest("audio,video,iframe,button,input,select,textarea,summary,a")) return;
+      if (isDomElement(event.target) && event.target.closest("audio,video,iframe,button,input,select,textarea,summary,a")) return;
       event.preventDefault();
       if (hasDiagramModes()) { selectNode(); return; }
       expanded = true; render();
@@ -279,11 +290,11 @@ export function codeView(tabId: string, initialTheme: "light" | "dark" | (() => 
     };
     const collapse = (event: FocusEvent) => {
       if (hasDiagramModes()) return;
-      if (dom.contains(event.relatedTarget as Node | null) || event.relatedTarget instanceof Element && event.relatedTarget.closest(".md-editor-menu")) return;
+      if (dom.contains(event.relatedTarget as Node | null) || isDomElement(event.relatedTarget) && event.relatedTarget.closest(".md-editor-menu")) return;
       if (expanded) { expanded = false; render(); }
     };
     const menuClosed = () => queueMicrotask(() => {
-      if (!destroyed && !hasDiagramModes() && expanded && !dom.contains(document.activeElement)) { expanded = false; render(); }
+      if (!destroyed && !hasDiagramModes() && expanded && !dom.contains(dom.ownerDocument.activeElement)) { expanded = false; render(); }
     });
     view.dom.addEventListener("deditor-contextmenu-close", menuClosed);
     dom.addEventListener("focusout", collapse);

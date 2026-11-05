@@ -1,3 +1,4 @@
+import { isDomElement } from "./dom";
 import { Fragment, Slice, type Node as ProseNode } from "@milkdown/kit/prose/model";
 import type { EditorView } from "@milkdown/kit/prose/view";
 import { CellSelection, isInTable, selectedRect } from "@milkdown/kit/prose/tables";
@@ -98,7 +99,7 @@ export function installPlainClipboardShortcuts(view: EditorView, enabled: () => 
     const key = event.key.toLowerCase();
     if (!enabled() || isWindowCloseCommitted() || event.defaultPrevented || event.isComposing || view.composing ||
       event.altKey || !(event.metaKey || event.ctrlKey) || !event.shiftKey || !['c', 'v'].includes(key)) return;
-    const target = event.target instanceof Element ? event.target : null;
+    const target = isDomElement(event.target) ? event.target : null;
     const codeRoot = target?.closest<HTMLElement>('.cm-editor');
     const code = codeRoot ? CodeView.findFromDOM(codeRoot) : null;
     if (target?.closest('input,textarea,select') && !code) return;

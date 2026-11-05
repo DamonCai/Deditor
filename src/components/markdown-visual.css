@@ -75,7 +75,7 @@
 .md-code-block[data-diagram-mode="split"] .cm-scroller { overflow: auto; }
 .md-code-block .md-diagram-modes .deditor-segment:focus-visible { outline-offset: -2px; }
 .md-code-block .md-diagram-modes .deditor-segment[data-selected="true"]:focus-visible { outline-color: var(--on-accent); }
-.md-diagram-divider { position: relative; background: var(--border); cursor: col-resize; touch-action: none; z-index: 1; }
+.md-diagram-divider { position: relative; background: var(--border); cursor: col-resize; z-index: 1; }
 /* The visible rule is one pixel; its larger hit area makes dragging easy. */
 .md-diagram-divider::after { content: ""; position: absolute; inset: 0 -5px; }
 .md-diagram-divider:hover, .md-diagram-divider:focus-visible, .md-diagram-resizing > .md-diagram-divider { background: var(--accent); }
@@ -334,7 +334,12 @@
 .md-diagram-zoom .deditor-btn { min-width: 28px; }
 
 /* Diagram ordering uses an explicit handle, leaving preview and source selection intact. */
-.md-diagram-drag.deditor-btn, .md-table-drag.deditor-btn { flex: 0 0 24px; width: 24px; height: 24px; padding: 0 !important; display: inline-flex; align-items: center; justify-content: center; font-size: 18px; cursor: grab; touch-action: none; user-select: none; }
+.md-diagram-drag.deditor-btn, .md-table-drag.deditor-btn { flex: 0 0 24px; width: 24px; height: 24px; padding: 0 !important; display: inline-flex; align-items: center; justify-content: center; font-size: 18px; cursor: grab; user-select: none; }
+/* Touch suppression is needed only for direct touch input. On desktop
+   WebKit, each non-auto handle adds work to the entire scroller's event map. */
+@media (any-pointer: coarse) {
+  .md-diagram-divider, .md-diagram-drag.deditor-btn, .md-table-drag.deditor-btn { touch-action: none; }
+}
 .md-diagram-drag.deditor-btn:active, .md-table-drag.deditor-btn:active { cursor: grabbing; }
 .md-table-drag.deditor-btn { display: flex; margin-bottom: 4px; }
 .md-diagram-dragging { outline: 2px solid var(--accent); }

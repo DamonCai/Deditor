@@ -1,3 +1,4 @@
+import { editorWindow } from "./dom";
 import { $prose } from "@milkdown/kit/utils";
 import { Plugin, TextSelection } from "@milkdown/kit/prose/state";
 import { splitListItem } from "@milkdown/kit/prose/schema-list";
@@ -138,6 +139,7 @@ export const markdownInputAssist = $prose(() => {
       },
     },
     view(view) {
+      const events = editorWindow(view.dom);
       popup = document.createElement("div"); popup.className = "md-emoji-suggestions"; popup.setAttribute("role", "listbox");
       popup.setAttribute("aria-label", useEditorStore.getState().language === "zh" ? "表情候选" : "Emoji suggestions");
       view.dom.parentElement!.append(popup);
@@ -159,8 +161,8 @@ export const markdownInputAssist = $prose(() => {
         choices = next; popup!.replaceChildren();
         if (!choices.length) return;
         const coords = view.coordsAtPos(to);
-        popup!.style.left = `${Math.max(4, Math.min(coords.left, window.innerWidth - 260))}px`;
-        popup!.style.top = `${Math.max(4, Math.min(coords.bottom + 4, window.innerHeight - 240))}px`;
+        popup!.style.left = `${Math.max(4, Math.min(coords.left, events.innerWidth - 260))}px`;
+        popup!.style.top = `${Math.max(4, Math.min(coords.bottom + 4, events.innerHeight - 240))}px`;
         choices.forEach((name, i) => {
           const button = document.createElement("button"); button.type = "button"; button.className = "deditor-btn";
           button.setAttribute("role", "option"); button.setAttribute("aria-selected", String(i === index)); button.textContent = `:${name}:`;
@@ -168,9 +170,9 @@ export const markdownInputAssist = $prose(() => {
         });
       };
       const blur = () => clear();
-      view.dom.addEventListener("blur", blur); view.dom.addEventListener("compositionstart", blur);
-      const scroll = () => clear(); window.addEventListener("scroll", scroll, true);
-      return {update, destroy() {view.dom.removeEventListener("blur", blur); view.dom.removeEventListener("compositionstart", blur); window.removeEventListener("scroll", scroll, true); popup?.remove(); popup = null;}};
+      view.dom.addEventListener("blur", blur); view.dom.addEventListener("compositionstart", blur); view.dom.addEventListener("deditor-visual-deactivate", blur);
+      const scroll = () => clear(); events.addEventListener("scroll", scroll, true);
+      return {update, destroy() {view.dom.removeEventListener("blur", blur); view.dom.removeEventListener("compositionstart", blur); view.dom.removeEventListener("deditor-visual-deactivate", blur); events.removeEventListener("scroll", scroll, true); popup?.remove(); popup = null;}};
     },
   });
 });

@@ -1,3 +1,4 @@
+import { isInputElement } from "./dom";
 import { markdownSession } from "../markdownSession";
 import { useEditorStore } from "../../store/editor";
 import { imageBlockSchema } from "@milkdown/kit/component/image-block";
@@ -63,7 +64,7 @@ export function accessibleImageView(original: NodeViewConstructor, language: "zh
     const result = original(initial, view, getPos, decorations, innerDecorations);
     const dom = result.dom as HTMLElement;
     const fieldBoundary = (event: FocusEvent) => {
-      if (!view.editable || !(event.target instanceof HTMLInputElement)) return;
+      if (!view.editable || !(isInputElement(event.target))) return;
       const state = useEditorStore.getState();
       const tab = state.tabs.find(tab => tab.id === (tabId ?? state.activeId));
       if (tab) markdownSession(tab.id, tab.content).breakGroup();
@@ -86,10 +87,10 @@ export function accessibleImageView(original: NodeViewConstructor, language: "zh
       label.hidden = !view.editable;
       // An actual metadata change (including undo/redo) supersedes the field's
       // last committed value. Unrelated renders still preserve a focused draft.
-      if (document.activeElement !== input || displayedWidth !== node.attrs.width) input.value = node.attrs.width ? String(node.attrs.width) : "";
-      if (document.activeElement !== altInput || displayedAlt !== node.attrs.alt) altInput.value = node.attrs.alt;
+      if (dom.ownerDocument.activeElement !== input || displayedWidth !== node.attrs.width) input.value = node.attrs.width ? String(node.attrs.width) : "";
+      if (dom.ownerDocument.activeElement !== altInput || displayedAlt !== node.attrs.alt) altInput.value = node.attrs.alt;
       const caption = dom.querySelector<HTMLInputElement>(".caption-input");
-      if (caption && (document.activeElement !== caption || displayedCaption !== node.attrs.caption)) caption.value = node.attrs.caption ?? "";
+      if (caption && (dom.ownerDocument.activeElement !== caption || displayedCaption !== node.attrs.caption)) caption.value = node.attrs.caption ?? "";
       displayedWidth = node.attrs.width; displayedAlt = node.attrs.alt; displayedCaption = node.attrs.caption;
       dom.querySelectorAll("img").forEach(img => {
         if (img.alt !== node.attrs.alt) img.alt = node.attrs.alt;
@@ -99,7 +100,7 @@ export function accessibleImageView(original: NodeViewConstructor, language: "zh
     };
     const captionInput = (event: Event) => {
       const field = event.target;
-      if (!(field instanceof HTMLInputElement) || !field.classList.contains("caption-input")) return;
+      if (!(isInputElement(field)) || !field.classList.contains("caption-input")) return;
       // The upstream one-second timer can commit stale text after undo or
       // deletion. Caption edits share the same immediate history as alt/width.
       event.stopImmediatePropagation();

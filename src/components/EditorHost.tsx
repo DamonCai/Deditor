@@ -9,6 +9,7 @@ import { isBinaryRenderable } from "../lib/lang";
 interface Props {
   activeId: string | null;
   focused?: boolean;
+  deferFirstSourceView?: boolean;
   theme: "light" | "dark";
   fontSize: number;
   initialCursor?: number;
@@ -24,6 +25,7 @@ interface Props {
 const EditorHost = memo(function EditorHost({
   activeId,
   focused = true,
+  deferFirstSourceView = false,
   theme,
   fontSize,
   initialCursor,
@@ -58,17 +60,16 @@ const EditorHost = memo(function EditorHost({
   const recent = useRetainedTabs(activeId, tabIds);
   const pinned = useEditorStore(useShallow((s) => s.tabs.filter((t) => isBinaryRenderable(t.filePath)).map((t) => t.id)));
 
-  const [mounted, setMounted] = useState<Set<string>>(
-    () => new Set(activeId ? [activeId] : []),
-  );
+  const visitId = deferFirstSourceView ? null : activeId;
+  const [mounted, setMounted] = useState<Set<string>>(() => new Set(visitId ? [visitId] : []));
 
   // Track visited tabs; the recent/pinned filter below controls live DOM.
   useEffect(() => {
-    if (!activeId) return;
+    if (!visitId) return;
     setMounted((prev) =>
-      prev.has(activeId) ? prev : new Set([...prev, activeId]),
+      prev.has(visitId) ? prev : new Set([...prev, visitId]),
     );
-  }, [activeId]);
+  }, [visitId]);
 
   // Drop mounted entries for tabs that have been closed (so the Editor
   // instance can be garbage-collected).

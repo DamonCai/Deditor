@@ -65,6 +65,11 @@ function htmlDocumentFrame(source: string) {
 /** Both hosts mount the same sanitized renderer output. Diagram source is inert
  * metadata: restore it after sanitization, which can reject arrows in attributes. */
 export function markdownDisplayHtml(html: string): string {
+  return markdownDisplayTemplate(html).innerHTML;
+}
+
+/** Reuse the sanitized tree when the caller mounts DOM instead of HTML. */
+export function markdownDisplayTemplate(html: string): HTMLTemplateElement {
   const original = document.createElement("template"); original.innerHTML = html;
   const clean = sanitizedFragment(original);
   for (const kind of ["mermaid", "plantuml", "legacy"]) {
@@ -107,7 +112,7 @@ export function markdownDisplayHtml(html: string): string {
     }
     element.replaceWith(htmlDocumentFrame(element.outerHTML));
   }
-  return clean.innerHTML;
+  return clean;
 }
 
 export interface MarkdownDisplayOptions {

@@ -58,12 +58,16 @@ export function diagramOverview(dom: HTMLElement, bar: HTMLElement, body: HTMLEl
     preview.scrollLeft = x * zoom / old - preview.clientWidth / 2;
     preview.scrollTop = y * zoom / old - preview.clientHeight / 2;
   };
+  const zoomByWheel = (event: WheelEvent) => {
+    if (open && (event.ctrlKey || event.metaKey)) { event.preventDefault(); event.stopPropagation(); setZoom(zoom * Math.exp(-event.deltaY * .002)); }
+  };
   minus.onclick = () => setZoom(zoom / 1.25); plus.onclick = () => setZoom(zoom * 1.25);
   percent.onclick = () => setZoom(1);
   fit.onclick = () => { fitting = true; update(); preview.scrollTop = preview.scrollLeft = 0; };
   const close = (restoreFocus = true) => {
     if (!open) return;
     open = false;
+    preview.removeEventListener("wheel", zoomByWheel);
     resizeObserver?.disconnect(); mutationObserver?.disconnect();
     document.removeEventListener("deditor-close-diagram-overview", deactivate);
     if (frame) cancelAnimationFrame(frame); frame = 0;
@@ -84,6 +88,7 @@ export function diagramOverview(dom: HTMLElement, bar: HTMLElement, body: HTMLEl
     hostScroll = dom.closest<HTMLElement>(".md-visual-scroll"); scrollTop = hostScroll?.scrollTop ?? 0;
     dom.style.height = `${dom.getBoundingClientRect().height}px`;
     fitting = true; zoom = 1; open = true;
+    preview.addEventListener("wheel", zoomByWheel, { passive: false });
     controls.hidden = false; dialog.append(bar, body); dom.append(dialog);
     button.textContent = tStatic("md.diagramExitOverview"); button.setAttribute("aria-label", tStatic("md.diagramExitOverview")); button.title = tStatic("md.diagramExitOverview");
     button.setAttribute("aria-expanded", "true");
@@ -101,9 +106,6 @@ export function diagramOverview(dom: HTMLElement, bar: HTMLElement, body: HTMLEl
     if (event.isComposing || (event.target as Element).closest('.md-editor-menu, [role="dialog"]:not(.md-diagram-overview)')) return;
     if (event.key === "Escape") { event.preventDefault(); event.stopImmediatePropagation(); close(); }
   }, true);
-  preview.addEventListener("wheel", event => {
-    if (open && (event.ctrlKey || event.metaKey)) { event.preventDefault(); event.stopPropagation(); setZoom(zoom * Math.exp(-event.deltaY * .002)); }
-  }, { passive: false });
   return { button, controls, refresh, close, get isOpen() { return open; },
     setEnabled(value: boolean) { if (!value) close(false); button.hidden = !value; },
     destroy() { close(false); disposed = true; dialog.remove(); },

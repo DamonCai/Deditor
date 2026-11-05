@@ -1,3 +1,4 @@
+import { editorWindow, isDomNode } from "./dom";
 import { $prose } from '@milkdown/kit/utils';
 import { parserCtx } from '@milkdown/kit/core';
 import { Plugin, Selection } from '@milkdown/kit/prose/state';
@@ -19,6 +20,7 @@ let nextId = 0;
 /** Slash commands replace only a standalone top-level paragraph, as one edit. */
 export const markdownQuickInsert = $prose(ctx => new Plugin({
   view(view) {
+    const events = editorWindow(view.dom);
     const id = `md-quick-insert-${++nextId}`;
     let menu: HTMLDivElement | undefined, signature = '', dismissed = '', index = 0;
     let matches = items;
@@ -66,8 +68,8 @@ export const markdownQuickInsert = $prose(ctx => new Plugin({
       const hint = document.createElement('p'); hint.textContent = tStatic(matches.length ? 'md.quickInsertHint' : 'md.quickInsertEmpty'); menu.append(hint);
       view.dom.closest('.md-visual-shell')?.append(menu);
       const rect = view.coordsAtPos(view.state.selection.head), bounds = menu.getBoundingClientRect();
-      menu.style.left = `${Math.max(4, Math.min(rect.left, window.innerWidth - bounds.width - 4))}px`;
-      menu.style.top = `${Math.max(4, rect.bottom + bounds.height + 6 > window.innerHeight ? rect.top - bounds.height - 6 : rect.bottom + 6)}px`;
+      menu.style.left = `${Math.max(4, Math.min(rect.left, events.innerWidth - bounds.width - 4))}px`;
+      menu.style.top = `${Math.max(4, rect.bottom + bounds.height + 6 > events.innerHeight ? rect.top - bounds.height - 6 : rect.bottom + 6)}px`;
       view.dom.setAttribute('aria-controls', id); highlight();
     };
     const key = (event: KeyboardEvent) => {
@@ -79,14 +81,14 @@ export const markdownQuickInsert = $prose(ctx => new Plugin({
       event.preventDefault(); event.stopImmediatePropagation();
     };
     const dismiss = () => { dismissed = signature; close(); };
-    const scroll = (event: Event) => { if (!(event.target instanceof Node) || !menu?.contains(event.target)) dismiss(); };
-    const outside = (event: MouseEvent) => { if (event.target instanceof Node && !menu?.contains(event.target)) dismiss(); };
+    const scroll = (event: Event) => { if (!(isDomNode(event.target)) || !menu?.contains(event.target)) dismiss(); };
+    const outside = (event: MouseEvent) => { if (isDomNode(event.target) && !menu?.contains(event.target)) dismiss(); };
     view.dom.addEventListener('keydown', key, true);
     view.dom.addEventListener('blur', dismiss); view.dom.addEventListener('compositionstart', dismiss);
-    window.addEventListener('mousedown', outside); window.addEventListener('resize', dismiss); window.addEventListener('scroll', scroll, true);
+    window.addEventListener('mousedown', outside); if (events !== window) events.addEventListener('mousedown', outside); window.addEventListener('resize', dismiss); view.dom.addEventListener('deditor-visual-deactivate', dismiss); events.addEventListener('scroll', scroll, true);
     return { update, destroy() {
       close(); view.dom.removeEventListener('keydown', key, true); view.dom.removeEventListener('blur', dismiss); view.dom.removeEventListener('compositionstart', dismiss);
-      window.removeEventListener('mousedown', outside); window.removeEventListener('resize', dismiss); window.removeEventListener('scroll', scroll, true);
+      window.removeEventListener('mousedown', outside); if (events !== window) events.removeEventListener('mousedown', outside); window.removeEventListener('resize', dismiss); view.dom.removeEventListener('deditor-visual-deactivate', dismiss); events.removeEventListener('scroll', scroll, true);
     } };
   },
 }));

@@ -30,21 +30,24 @@ globalThis.mdInvoke=async(command,args)=>{
  if(command==='read_text_file')return '';
 };
 const stubs={
- '@tauri-apps/api/core':'export const invoke=(...a)=>globalThis.mdInvoke(...a); export const convertFileSrc=p=>p;',
+ '@tauri-apps/api/core':'export const invoke=(...a)=>globalThis.mdInvoke(...a); export const convertFileSrc=p=>p; export const isTauri=()=>false;',
  '@tauri-apps/plugin-dialog':'export const save=async()=>"/generated/renamed.md"; export const open=async()=>null;',
  '@tauri-apps/plugin-opener':'export const openUrl=async()=>{}; export const openPath=async()=>{}; export const revealItemInDir=async()=>{};',
 };
 await build({stdin:{contents:`
 export {default as Visual} from './src/components/MarkdownVisualEditor';
+export {default as EditorPane} from './src/components/EditorPane';
 export {useEditorStore} from './src/store/editor';
 export {getVisualEditor} from './src/lib/markdownVisualBridge';
+export {getActiveView} from './src/lib/editorBridge';
 export {markdownHistory} from './src/lib/markdownHistory';
 export {saveFile} from './src/lib/fileio';
 export {renderMarkdown} from './src/lib/markdown';
 export {markdownDisplayHtml} from './src/lib/markdownDisplay';
+export {retainVisualTabs, VISUAL_OVERFLOW_BYTES, VISUAL_OVERFLOW_IDLE_MS} from './src/lib/retainedVisualTabs';
 `,resolveDir:process.cwd()},outfile:output,bundle:true,format:'esm',platform:'node',packages:'external',loader:{'.css':'empty'},plugins:[{name:'isolated-io',setup(b){
- b.onResolve({filter:/.*/},a=>a.path.endsWith('.css')?{path:'css',namespace:'stub'}:stubs[a.path]?{path:a.path,namespace:'stub'}:a.path.endsWith('/feedback')?{path:'feedback',namespace:'stub'}:undefined);
- b.onLoad({filter:/.*/,namespace:'stub'},a=>({contents:a.path==='css'?'':a.path==='feedback'?'export const showError=async()=>{};':stubs[a.path],loader:'js'}));
+ b.onResolve({filter:/.*/},a=>/\.css(?:\?raw)?$/.test(a.path)?{path:'css',namespace:'stub'}:stubs[a.path]?{path:a.path,namespace:'stub'}:a.path.endsWith('/feedback')?{path:'feedback',namespace:'stub'}:undefined);
+ b.onLoad({filter:/.*/,namespace:'stub'},a=>({contents:a.path==='css'?'export default "";':a.path==='feedback'?'export const showError=async()=>{};':stubs[a.path],loader:'js'}));
 }}],logLevel:'silent'});
 const app=await import(pathToFileURL(output));
 const store=app.useEditorStore, root=createRoot(document.getElementById('root'));
@@ -64,6 +67,17 @@ const setSource = async value => {
  assert.ok(app.getVisualEditor()?.editable);
 };
 try {
+ await test('visual cache respects pane budgets, expiry, close and media exclusions',async()=>{
+  const ids=Array.from({length:12},(_,i)=>String(i));
+  const costs=new Map(ids.filter(id=>id!=='1').map(id=>[id,app.VISUAL_OVERFLOW_BYTES/4]));
+  const retain=(visits,active,live=ids,now=10,panes=1,enabled=true)=>app.retainVisualTabs(visits,active,live,costs,now,panes,enabled);
+  const visits=ids.reduce((old,id,i)=>retain(old,id,ids,i),[]);
+  assert.deepEqual(visits.filter(v=>v.extra).map(v=>v.id),['0','2','3']);
+  assert.deepEqual(retain(visits,'11',ids,10,2).filter(v=>v.extra).map(v=>v.id),['2','3']);
+  assert.deepEqual(retain(visits,null,['0','2','3','11']).map(v=>[v.id,!!v.extra]),[['0',true],['2',true],['3',true],['11',false]]);
+  assert.deepEqual(retain(visits,'11',ids,app.VISUAL_OVERFLOW_IDLE_MS+11).map(v=>v.id),ids.slice(4));
+  assert.deepEqual(retain(visits,'11',ids,10,1,false).map(v=>v.id),ids.slice(4));
+ });
  for (const [name,value] of [
   ['plain words','AT&T a_b 中文_测试'],
   ['literal entities','&copy; &#65; &unknown;'],
@@ -106,6 +120,21 @@ try {
   const readonlyHandle=document.querySelector('.md-table-drag');
   if(readonlyHandle)await act(async()=>readonlyHandle.dispatchEvent(new window.KeyboardEvent('keydown',{key:'ArrowUp',altKey:true,bubbles:true,cancelable:true})));
   assert.equal(content(),moved,'readonly does not move');
+ });
+ await test('inline formula output repeats and equation references stay current',async()=>{
+  const formula = number => '# Math\n\nInline $x_1$ and $x_1$. Reference $\\eqref{goal}$.\n\n$$\na \\tag{' + number + '}\\label{goal}\n$$\n';
+  for (const number of [7, 9]) {
+   const original = formula(number);
+   await setSource(original);
+   const editor = document.querySelector('.ProseMirror');
+   const repeated = [...editor.querySelectorAll('[data-type="math_inline"][data-value="x_1"]')];
+   assert.equal(repeated.length,2);
+   assert.ok(repeated[0].querySelector('.katex'));
+   assert.equal(repeated[0].innerHTML,repeated[1].innerHTML);
+   const reference = editor.querySelector('[data-type="math_inline"] a[href="#md-equation-goal"]');
+   assert.ok(reference?.textContent.includes(String(number)));
+   assert.equal(content(),original);
+  }
  });
  await test('fixed Markdown HTML stays in its own viewport',async()=>{
   const overlay = '<div style="position: fixed; inset: 0; z-index: 2147483647"><button>Example</button><iframe srcdoc="<p>Nested page</p>"></iframe></div>';
@@ -164,6 +193,27 @@ try {
   try{await act(async()=>app.saveFile());}catch{}finally{failed=false;}
   assert.equal(content(),before);assert.equal(writes.length,count);
   assert.notEqual(store.getState().tabs[0].savedContent,before);
+ });
+ await test('reading-only visits defer source views and preserve the cursor on first source edit',async()=>{
+  const value=Array.from({length:180},(_,index)=>'Paragraph '+(index+1)).join('\n\n')+'\n';
+  await act(async()=>{
+   store.setState({tabs:[{id:'c',filePath:'/generated/c.md',content:value,savedContent:value}],activeId:'c',markdownMode:'visual'});
+   root.render(React.createElement(app.EditorPane));
+   await pause(120);
+  });
+  assert.equal(app.getVisualEditor()?.tabId,'c');
+  assert.equal(document.querySelector('.cm-editor'),null,'visual-only file does not allocate a source view');
+  await act(async()=>app.getVisualEditor().navigate(239,3));
+  const cursor=store.getState().tabPositions.c?.cursor;
+  assert.ok(cursor>1000);
+  await act(async()=>{store.setState({markdownMode:'source'});await pause(120);});
+  const sourceView=app.getActiveView();
+  assert.ok(sourceView);
+  assert.equal(sourceView.state.selection.main.head,cursor);
+  assert.equal(sourceView.state.doc.toString(),value);
+  await act(async()=>{store.setState({markdownMode:'visual'});await pause(120);});
+  await act(async()=>{store.setState({markdownMode:'source'});await pause(120);});
+  assert.equal(app.getActiveView(),sourceView,'an already visited source view is retained');
  });
  assert.deepEqual(runtimeErrors,[]);
  console.log(`${passed} live component groups passed (isolated IPC, no native acceptance)`);

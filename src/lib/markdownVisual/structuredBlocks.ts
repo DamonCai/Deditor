@@ -1,3 +1,4 @@
+import { isHtmlElement } from "./dom";
 import { footnoteReferenceSchema, footnoteDefinitionSchema } from "@milkdown/kit/preset/gfm";
 import { $prose } from "@milkdown/kit/utils";
 import { blockquoteSchema } from "@milkdown/kit/preset/commonmark";
@@ -119,7 +120,7 @@ export const footnoteNodeView: NodeViewConstructor = (initial, view, getPos) => 
     const info = footnoteContext(view.state.doc).get(key(node.attrs.identifier));
     const pos = definition ? info?.references[occurrence] : info?.definition;
     if (pos === undefined) return;
-    const target = view.nodeDOM(pos); if (target instanceof HTMLElement) target.scrollIntoView({ block: "nearest" });
+    const target = view.nodeDOM(pos); if (isHtmlElement(target)) target.scrollIntoView({ block: "nearest" });
     if (view.editable) { view.dispatch(view.state.tr.setSelection(Selection.near(view.state.doc.resolve(pos + (definition ? 0 : 1)))).scrollIntoView()); view.focus(); }
   };
   link.onclick = event => jump(event);

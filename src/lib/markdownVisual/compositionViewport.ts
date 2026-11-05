@@ -49,39 +49,44 @@ export function installCompositionViewport(editor: HTMLElement, scroller: HTMLEl
       frame = 0; reconcile();
       if (!composing) {
         if (--settlingFrames > 0) schedule();
-        else anchor = null;
+        else release();
       }
     });
   };
-  const start = () => { composing = true; anchor = scroller.scrollTop; schedule(); };
+  const start = () => {
+    composing = true; anchor = scroller.scrollTop;
+    scroller.addEventListener("wheel", release, { passive: true });
+    scroller.addEventListener("touchmove", release, { passive: true });
+    doc.addEventListener("pointerdown", release, true);
+    schedule();
+  };
   const end = () => { composing = false; settlingFrames = 2; schedule(); };
   // A deliberate scroll or a new mouse selection always wins over IME anchoring.
   // Outline and other navigation controls live outside the scrolling editor;
   // their explicit positioning must also survive composition's queued frames.
-  const release = () => { anchor = null; };
+  const release = () => {
+    anchor = null;
+    scroller.removeEventListener("wheel", release);
+    scroller.removeEventListener("touchmove", release);
+    doc.removeEventListener("pointerdown", release, true);
+  };
   editor.addEventListener("compositionstart", start, true);
   editor.addEventListener("compositionend", end, true);
   editor.addEventListener("input", schedule, true);
   doc.addEventListener("selectionchange", schedule);
   scroller.addEventListener("scroll", schedule, { passive: true });
-  scroller.addEventListener("wheel", release, { passive: true });
-  scroller.addEventListener("touchmove", release, { passive: true });
-  doc.addEventListener("pointerdown", release, true);
   return {
     handleScroll() {
       if (anchor === null) return false;
       reconcile(); schedule(); return true;
     },
     destroy() {
-      destroyed = true; anchor = null; win.cancelAnimationFrame(frame);
+      destroyed = true; release(); win.cancelAnimationFrame(frame);
       editor.removeEventListener("compositionstart", start, true);
       editor.removeEventListener("compositionend", end, true);
       editor.removeEventListener("input", schedule, true);
       doc.removeEventListener("selectionchange", schedule);
       scroller.removeEventListener("scroll", schedule);
-      scroller.removeEventListener("wheel", release);
-      scroller.removeEventListener("touchmove", release);
-      doc.removeEventListener("pointerdown", release, true);
     },
   };
 }

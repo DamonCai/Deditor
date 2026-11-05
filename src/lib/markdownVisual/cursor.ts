@@ -1,3 +1,4 @@
+import { isHtmlElement } from "./dom";
 import { $prose } from "@milkdown/kit/utils";
 import { Plugin, TextSelection, type EditorState } from "@milkdown/kit/prose/state";
 import { Decoration, DecorationSet, type EditorView } from "@milkdown/kit/prose/view";
@@ -27,7 +28,7 @@ export const nativeMarkdownCursor = $prose(() => {
     if (!view.hasFocus() || view.composing || !view.state.selection.empty || view.state.storedMarks?.length !== 0) return;
     const $pos = terminalHtml(view.state); if (!$pos) return;
     const block = view.nodeDOM($pos.before());
-    if (!(block instanceof HTMLElement)) return;
+    if (!(isHtmlElement(block))) return;
     const anchor = block.querySelector("[data-md-mark-boundary]");
     if (!anchor) return;
     const offset = Array.prototype.indexOf.call(block.childNodes, anchor) + 1;
@@ -85,7 +86,7 @@ export const nativeMarkdownCursor = $prose(() => {
         if (atom?.isInline && atom.isAtom && !atom.isText && atom.type.name !== "hardbreak"
           && $click.parent.childAfter($click.parentOffset + atom.nodeSize).node?.type.name === "hardbreak") {
           const dom = view.nodeDOM(pos);
-          if (dom instanceof HTMLElement) {
+          if (isHtmlElement(dom)) {
             const rect = dom.getBoundingClientRect();
             if (rect.width > 0 && event.clientX >= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom) {
               view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, pos + atom.nodeSize)));
@@ -96,7 +97,7 @@ export const nativeMarkdownCursor = $prose(() => {
         const $pos = terminalHtml(view.state, pos); if (!$pos) return false;
         const block = view.nodeDOM($pos.before());
         const last = block?.lastChild;
-        if (!(last instanceof HTMLElement)) return false;
+        if (!(isHtmlElement(last))) return false;
         const rect = last.getBoundingClientRect();
         // A click inside the key cap keeps editing it; blank space after it
         // selects the outside affinity without inserting a spacer into source.

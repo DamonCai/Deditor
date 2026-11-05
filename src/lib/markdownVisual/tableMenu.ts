@@ -1,3 +1,4 @@
+import { appViewportOffset, editorWindow, isDomElement, isInputElement, isDomNode, isHtmlElement } from "./dom";
 import { $prose } from "@milkdown/kit/utils";
 import { Plugin, Selection } from "@milkdown/kit/prose/state";
 import { CellSelection, TableMap, selectedRect, isInTable, deleteColumn, deleteTable } from "@milkdown/kit/prose/tables";
@@ -55,9 +56,10 @@ export function deleteTableRows(view: EditorView) {
 export const tableMenuPlacement = $prose(() => new Plugin({
   view(view) {
     let menu: HTMLElement | undefined;
+    const events = editorWindow(view.dom);
     const close = () => { menu?.remove(); menu = undefined; };
     const open = (event: MouseEvent | KeyboardEvent) => {
-      if (!view.editable || !(event.target instanceof Element)) return;
+      if (!view.editable || !(isDomElement(event.target))) return;
       const keyboard = event.type === 'keydown';
       const selection = view.state.selection;
       const cell = keyboard ? selection instanceof CellSelection
@@ -128,41 +130,44 @@ export const tableMenuPlacement = $prose(() => new Plugin({
       action('md.clearCells', 'M4 4h16v16H4z M9 9l6 6 M15 9l-6 6', () => clearTableCells(view));
       action('md.deleteRow', 'M4 3h16v6H4z M4 15h16v6H4z M8 12h8', () => deleteTableRows(view));
       action('md.deleteColumn', 'M3 4h6v16H3z M15 4h6v16h-6z M12 8v8', () => deleteTableColumns(view));
-      menu.onmousedown = e => { if (!(e.target instanceof HTMLInputElement)) e.preventDefault(); e.stopPropagation(); };
+      menu.onmousedown = e => { if (!(isInputElement(e.target))) e.preventDefault(); e.stopPropagation(); };
       menu.onkeydown = e => {
         if (e.key === 'Escape') { e.preventDefault(); close(); view.focus(); }
-        else if (e.key === 'Tab' || e.key === 'Enter' && e.target instanceof HTMLInputElement) {
+        else if (e.key === 'Tab' || e.key === 'Enter' && isInputElement(e.target)) {
           e.preventDefault(); const controls = Array.from(menu!.querySelectorAll<HTMLElement>('button:not(:disabled),input'));
-          const i = controls.indexOf(document.activeElement as HTMLElement); controls[(i + (e.shiftKey ? controls.length - 1 : 1)) % controls.length]?.focus();
+          const i = controls.indexOf(menu!.ownerDocument.activeElement as HTMLElement); controls[(i + (e.shiftKey ? controls.length - 1 : 1)) % controls.length]?.focus();
         }
-        else if (!(e.target instanceof HTMLInputElement) && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+        else if (!(isInputElement(e.target)) && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
           e.preventDefault(); const buttons = Array.from(menu!.querySelectorAll<HTMLButtonElement>('button:not(:disabled),input'));
-          const i = buttons.indexOf(document.activeElement as HTMLButtonElement);
+          const i = buttons.indexOf(menu!.ownerDocument.activeElement as HTMLButtonElement);
           buttons[(i + (e.key === 'ArrowDown' ? 1 : buttons.length - 1)) % buttons.length].focus();
         }
       };
       // Outside the content DOM: menu text never enters clipboard or Markdown.
-      view.dom.closest('.md-visual-shell')?.append(menu);
+      (events === window ? view.dom.closest('.md-visual-shell') : document.body)?.append(menu);
+      const offset = events === window ? {x: 0, y: 0} : appViewportOffset(cell);
       const rect = cell.getBoundingClientRect(), bounds = menu.getBoundingClientRect();
       const x = keyboard ? rect.left : (event as MouseEvent).clientX, y = keyboard ? rect.bottom : (event as MouseEvent).clientY;
-      menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - bounds.width - 4))}px`;
-      menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - bounds.height - 4))}px`;
+      menu.style.left = `${Math.max(4, Math.min(x + offset.x, window.innerWidth - bounds.width - 4))}px`;
+      menu.style.top = `${Math.max(4, Math.min(y + offset.y, window.innerHeight - bounds.height - 4))}px`;
       menu.querySelector('button')?.focus();
     };
     const key = (event: KeyboardEvent) => { if (event.key === 'ContextMenu' || event.key === 'F10' && event.shiftKey) open(event); };
-    const outside = (event: Event) => { if (!(event.target instanceof Node) || !menu?.contains(event.target)) close(); };
+    const outside = (event: Event) => { if (!(isDomNode(event.target)) || !menu?.contains(event.target)) close(); };
     view.dom.addEventListener('contextmenu', open);
     view.dom.addEventListener('keydown', key);
     window.addEventListener('mousedown', outside);
     window.addEventListener('blur', close);
+    if (events !== window) events.addEventListener('mousedown', outside);
+    view.dom.addEventListener('deditor-visual-deactivate', close);
     const scroll = view.dom.closest<HTMLElement>(".md-visual-scroll");
     const pending = new Set<HTMLElement>(); let frame = 0, focusFrame = 0;
     const place = (menu: HTMLElement) => {
       const handle = menu.parentElement;
       if (!handle || handle.dataset.show !== "true" || menu.dataset.show !== "true" || !menu.isConnected) return;
       const viewport = scroll?.getBoundingClientRect();
-      const left = Math.max(0, viewport?.left ?? 0) + 4, right = Math.min(window.innerWidth, viewport?.right ?? window.innerWidth) - 4;
-      const top = Math.max(0, viewport?.top ?? 0) + 4, bottom = Math.min(window.innerHeight, viewport?.bottom ?? window.innerHeight) - 4;
+      const left = Math.max(0, viewport?.left ?? 0) + 4, right = Math.min(events.innerWidth, viewport?.right ?? events.innerWidth) - 4;
+      const top = Math.max(0, viewport?.top ?? 0) + 4, bottom = Math.min(events.innerHeight, viewport?.bottom ?? events.innerHeight) - 4;
       const anchor = handle.getBoundingClientRect(), width = menu.offsetWidth, height = menu.offsetHeight;
       const x = Math.max(left, Math.min(anchor.left, right - width));
       const below = anchor.bottom + 8, above = anchor.top - height - 8;
@@ -177,7 +182,7 @@ export const tableMenuPlacement = $prose(() => new Plugin({
     const all = () => {view.dom.querySelectorAll<HTMLElement>('.cell-handle .button-group[data-show="true"]').forEach(menu => pending.add(menu));schedule();};
     const observer = new MutationObserver(records => {
       records.forEach(record => {
-        if (!(record.target instanceof HTMLElement)) return;
+        if (!(isHtmlElement(record.target))) return;
         const target = record.target;
         if (target.matches('.cell-handle .button-group')) pending.add(target);
         else if (target.matches('.cell-handle')) target.querySelectorAll<HTMLElement>('.button-group').forEach(menu => pending.add(menu));
@@ -186,12 +191,12 @@ export const tableMenuPlacement = $prose(() => new Plugin({
     });
     observer.observe(view.dom, {subtree:true,attributes:true,attributeFilter:['data-show']});
     const focusAfterAdd = (event: MouseEvent) => {
-      if (!(event.target instanceof Element) || !event.target.closest('.milkdown-table-block .line-handle .add-button')) return;
+      if (!(isDomElement(event.target)) || !event.target.closest('.milkdown-table-block .line-handle .add-button')) return;
       if (focusFrame) cancelAnimationFrame(focusFrame);
       focusFrame = requestAnimationFrame(() => {focusFrame = 0;if(view.editable)view.focus();});
     };
     view.dom.addEventListener('click',focusAfterAdd,true);
-    scroll?.addEventListener('scroll',all,{passive:true}); window.addEventListener('resize',all);
-    return { update(_view, previous) { if (!previous.doc.eq(view.state.doc) || !view.editable) close(); }, destroy() {close();view.dom.removeEventListener('contextmenu',open);view.dom.removeEventListener('keydown',key);window.removeEventListener('mousedown',outside);window.removeEventListener('blur',close);observer.disconnect();view.dom.removeEventListener('click',focusAfterAdd,true);if(focusFrame)cancelAnimationFrame(focusFrame);scroll?.removeEventListener('scroll',all);window.removeEventListener('resize',all);if(frame)cancelAnimationFrame(frame);pending.clear();}};
+    scroll?.addEventListener('scroll',all,{passive:true}); events.addEventListener('resize',all);
+    return { update(_view, previous) { if (!previous.doc.eq(view.state.doc) || !view.editable) close(); }, destroy() {close();view.dom.removeEventListener('contextmenu',open);view.dom.removeEventListener('keydown',key);window.removeEventListener('mousedown',outside);window.removeEventListener('blur',close);if(events!==window)events.removeEventListener('mousedown',outside);view.dom.removeEventListener('deditor-visual-deactivate',close);observer.disconnect();view.dom.removeEventListener('click',focusAfterAdd,true);if(focusFrame)cancelAnimationFrame(focusFrame);scroll?.removeEventListener('scroll',all);events.removeEventListener('resize',all);if(frame)cancelAnimationFrame(frame);pending.clear();}};
   },
 }));

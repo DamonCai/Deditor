@@ -1,5 +1,7 @@
-/** A shared, transient footnote preview. It lives outside the editable document. */
+/** A shared, transient footnote preview. It lives outside the editable owner. */
 export function installFootnotePreview(container: HTMLElement, language: "zh" | "en") {
+  const owner = container.ownerDocument;
+  const viewport = owner.defaultView ?? window;
   let popup: HTMLElement | null = null, anchor: HTMLAnchorElement | null = null;
   let suppressFocus = false;
   const focusAnchor = (target: HTMLAnchorElement | null) => { suppressFocus = true; target?.focus({ preventScroll: true }); suppressFocus = false; };
@@ -14,8 +16,8 @@ export function installFootnotePreview(container: HTMLElement, language: "zh" | 
     if (!popup || !anchor) return;
     const rect = anchor.getBoundingClientRect();
     const bounds = popup.getBoundingClientRect();
-    popup.style.left = `${Math.max(8, Math.min(window.innerWidth - bounds.width - 8, rect.left))}px`;
-    popup.style.top = `${Math.max(8, rect.bottom + bounds.height + 8 <= window.innerHeight ? rect.bottom + 6 : rect.top - bounds.height - 6)}px`;
+    popup.style.left = `${Math.max(8, Math.min(viewport.innerWidth - bounds.width - 8, rect.left))}px`;
+    popup.style.top = `${Math.max(8, rect.bottom + bounds.height + 8 <= viewport.innerHeight ? rect.bottom + 6 : rect.top - bounds.height - 6)}px`;
   };
   const show = (link: HTMLAnchorElement) => {
     clearTimer(); if (anchor === link) return;
@@ -23,7 +25,7 @@ export function installFootnotePreview(container: HTMLElement, language: "zh" | 
     const definition = Array.from(container.querySelectorAll<HTMLElement>(".footnote-item[id]")).find(el => `#${el.id}` === href);
     if (!definition) return;
     close(); anchor = link;
-    popup = document.createElement("aside"); popup.id = id; popup.className = "preview md-footnote-preview";
+    popup = owner.createElement("aside"); popup.id = id; popup.className = "preview md-footnote-preview";
     popup.setAttribute("role", "dialog"); popup.setAttribute("aria-label", language === "zh" ? "脚注预览" : "Footnote preview");
     popup.contentEditable = "false"; popup.tabIndex = -1;
     // Clone the already-rendered content, so math, formatting and hydrated
@@ -49,11 +51,11 @@ export function installFootnotePreview(container: HTMLElement, language: "zh" | 
       el.onclick = event => { event.preventDefault(); const target = originalLinks[index]; close(); target?.click(); };
     });
     body.querySelectorAll(".md-footnote-content").forEach(el => el.replaceWith(...Array.from(el.childNodes)));
-    const content = document.createElement("div"); content.className = "md-footnote-preview-content"; content.append(...Array.from(body.childNodes));
-    const jump = document.createElement("button"); jump.type = "button"; jump.className = "md-footnote-preview-jump";
+    const content = owner.createElement("div"); content.className = "md-footnote-preview-content"; content.append(...Array.from(body.childNodes));
+    const jump = owner.createElement("button"); jump.type = "button"; jump.className = "md-footnote-preview-jump";
     jump.textContent = language === "zh" ? "转到脚注" : "Go to footnote";
     jump.onclick = () => { const target = anchor; close(); target?.click(); };
-    popup.append(content, jump); document.body.append(popup); link.setAttribute("aria-describedby", id);
+    popup.append(content, jump); owner.body.append(popup); link.setAttribute("aria-describedby", id);
     popup.addEventListener("pointerenter", clearTimer); popup.addEventListener("pointerleave", deferClose);
     position();
   };
@@ -75,13 +77,13 @@ export function installFootnotePreview(container: HTMLElement, language: "zh" | 
     if (!popup) return;
     if (event.key === "Tab") {
       const focusable = Array.from(popup.querySelectorAll<HTMLElement>("a[href], button"));
-      if (!event.shiftKey && document.activeElement === anchor) { event.preventDefault(); focusable[0]?.focus({ preventScroll: true }); return; }
-      if (event.shiftKey && document.activeElement === focusable[0]) { event.preventDefault(); const target = anchor; close(); focusAnchor(target); return; }
-      if (!event.shiftKey && document.activeElement === focusable.at(-1)) { const target = anchor; close(); focusAnchor(target); }
+      if (!event.shiftKey && owner.activeElement === anchor) { event.preventDefault(); focusable[0]?.focus({ preventScroll: true }); return; }
+      if (event.shiftKey && owner.activeElement === focusable[0]) { event.preventDefault(); const target = anchor; close(); focusAnchor(target); return; }
+      if (!event.shiftKey && owner.activeElement === focusable.at(-1)) { const target = anchor; close(); focusAnchor(target); }
       return;
     }
     if (event.key !== "Escape") return;
-    const returnFocus = popup.contains(document.activeElement), target = anchor;
+    const returnFocus = popup.contains(owner.activeElement), target = anchor;
     close(); if (returnFocus) focusAnchor(target);
     event.preventDefault(); event.stopPropagation();
   };
@@ -89,7 +91,9 @@ export function installFootnotePreview(container: HTMLElement, language: "zh" | 
   // Content changes invalidate clones, preventing stale definitions after edits.
   const observer = new MutationObserver(records => { if (popup && records.some(r => r.type !== "attributes" || r.attributeName !== "aria-describedby")) close(); });
   observer.observe(container, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["src", "href", "id"] });
+  container.addEventListener("deditor-visual-deactivate", close);
+  if (viewport !== window) viewport.addEventListener("blur", close);
   container.addEventListener("pointerover", enter); container.addEventListener("pointerout", leave); container.addEventListener("focusin", enter);
-  document.addEventListener("focusin", focus); document.addEventListener("keydown", key, true); document.addEventListener("scroll", scroll, true); window.addEventListener("resize", close);
-  return () => { close(); observer.disconnect(); container.removeEventListener("pointerover", enter); container.removeEventListener("pointerout", leave); container.removeEventListener("focusin", enter); document.removeEventListener("focusin", focus); document.removeEventListener("keydown", key, true); document.removeEventListener("scroll", scroll, true); window.removeEventListener("resize", close); };
+  owner.addEventListener("focusin", focus); owner.addEventListener("keydown", key, true); owner.addEventListener("scroll", scroll, true); window.addEventListener("resize", close);
+  return () => { close(); observer.disconnect(); if (viewport !== window) viewport.removeEventListener("blur", close); container.removeEventListener("deditor-visual-deactivate", close); container.removeEventListener("pointerover", enter); container.removeEventListener("pointerout", leave); container.removeEventListener("focusin", enter); owner.removeEventListener("focusin", focus); owner.removeEventListener("keydown", key, true); owner.removeEventListener("scroll", scroll, true); window.removeEventListener("resize", close); };
 }

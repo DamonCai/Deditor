@@ -41,6 +41,7 @@ export default function EditorPane({ initialPreviewPct = 50, onPreviewPctChange 
   const showPreview = isMarkdown(filePath) ? markdownMode !== "source" : csvFile ? csvMode !== "source" : htmlShowPreview;
   const previewMaximized = isMarkdown(filePath) ? markdownMode === "visual" : csvFile ? csvMode === "read" : htmlPreviewMaximized;
   const previewEnabled = !isDiffTab && showPreview && (isMarkdown(filePath) || htmlFile || csvFile);
+  const visualMarkdown = previewEnabled && markdownMode === "visual" && isMarkdown(filePath);
   // Initial caret + scroll for the active tab. Read imperatively so subscribing
   // components don't re-render every cursor move; Editor only consumes these
   // on mount (a fresh instance is created via `key={tab.id}` per active tab).
@@ -84,7 +85,7 @@ export default function EditorPane({ initialPreviewPct = 50, onPreviewPctChange 
   return (
         <section className="editor-group flex flex-col flex-1 min-w-0" data-editor-pane={paneId} data-focused={focused}
           onPointerDownCapture={activate} onClickCapture={activate} onContextMenuCapture={activate} onFocusCapture={activate}>
-          {!zenMode && <TabBar />}
+          {!zenMode && <TabBar deferReveal={visualMarkdown} />}
           {/* Markdown toolbar is lifted out of the editor pane so it spans the
               full editor+preview row (still shown when preview is maximized). */}
           {!isDiffTab && isMarkdown(filePath) && <MarkdownToolbar />}
@@ -95,15 +96,9 @@ export default function EditorPane({ initialPreviewPct = 50, onPreviewPctChange 
             <ExternalChangeBanner tabId={activeMeta.id} />
           )}
           {isMarkdown(filePath) && !activeMeta?.missingOnDisk && activeMeta?.hasExternalChange && <ExternalChangeBanner tabId={activeMeta.id} />}
-          {/* Editor + Preview row. Editor pane is ALWAYS mounted (display:none
-              in reading mode) — not for memory but for sync correctness: when
-              the user navigates preview to a section while in reading mode,
-              the active editor's externalScrollLine effect needs to fire so
-              the editor follows. Unmounting+remounting the editor pane on
-              every reading-mode toggle would also re-mount EditorHost and
-              every visited tab's editor, undoing all the warm CodeMirror
-              state. Consistent with EditorHost's existing "keep visited
-              editors alive" pattern. */}
+          {/* Retain mounted source views across mode changes. In visual Markdown
+              mode the visual bridge owns navigation and saves the source cursor,
+              so documents that have never shown their source can defer CodeMirror. */}
           <div className="flex flex-1 min-h-0">
             <div
               key="editor-pane"
@@ -128,6 +123,7 @@ export default function EditorPane({ initialPreviewPct = 50, onPreviewPctChange 
                     <EditorHost
                       activeId={activeTabId}
                       focused={focused && !(previewEnabled && previewMaximized)}
+                      deferFirstSourceView={visualMarkdown}
                       theme={theme}
                       fontSize={editorFontSize}
                       initialCursor={initialPos?.cursor}
@@ -160,7 +156,7 @@ export default function EditorPane({ initialPreviewPct = 50, onPreviewPctChange 
                 onPointerDown={event => startResize(event)}
               />
             )}
-            <MarkdownVisualHost focused={focused} activeId={activeTabId} active={previewEnabled && markdownMode === "visual" && isMarkdown(filePath)} theme={theme} />
+            <MarkdownVisualHost focused={focused} activeId={activeTabId} active={visualMarkdown} theme={theme} />
             {(previewEnabled || (!isDiffTab && csvFile)) && !(isMarkdown(filePath) && markdownMode === "visual") && (
               <div
                 key="preview-pane"

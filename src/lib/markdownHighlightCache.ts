@@ -1,4 +1,4 @@
-/** In-memory fence output only; source positions are attached after lookup. */
+/** In-memory rendered HTML; source positions are attached after lookup. */
 export class MarkdownHighlightCache {
   private entries = new Map<string, { html: string; bytes: number }>();
   private bytes = 0;

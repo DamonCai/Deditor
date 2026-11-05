@@ -1,3 +1,4 @@
+import { appViewportOffset, editorWindow, isDomElement, isDomNode } from "./dom";
 import { isWindowCloseCommitted } from "../windowCloseGuard";
 import { $prose } from '@milkdown/kit/utils';
 import { Plugin, AllSelection, Selection } from '@milkdown/kit/prose/state';
@@ -14,9 +15,10 @@ export const markdownContextMenu = (tabId: string, enabled: () => boolean) => $p
   view(view) {
     let menu: HTMLElement | undefined, disposed = false;
     const host = view.dom.parentElement!;
+    const events = editorWindow(view.dom);
     const close = () => { if (!menu) return; menu.remove(); menu = undefined; view.dom.dispatchEvent(new Event('deditor-contextmenu-close')); };
     const open = (event: MouseEvent | KeyboardEvent) => {
-      if (!enabled() || event.defaultPrevented || !(event.target instanceof Element)) return;
+      if (!enabled() || event.defaultPrevented || !(isDomElement(event.target))) return;
       if (event.target.closest('input,select,textarea') && !event.target.closest('.cm-editor')) return;
       const keyboard = event.type === 'keydown';
       const target = event.target, cmRoot = target.closest<HTMLElement>('.cm-editor');
@@ -55,7 +57,7 @@ export const markdownContextMenu = (tabId: string, enabled: () => boolean) => $p
           await navigator.clipboard.writeText(cmState!.sliceDoc(from, to));
           if (cut) { if (!guard()) return; cm.dispatch({ changes: { from, to, insert: '' }, userEvent: 'delete.cut' }); }
         } else {
-          await writeMarkdownClipboard(clipboardPayload(view, '', ctx.get(serializerCtx)), 'rich');
+          await writeMarkdownClipboard(clipboardPayload(view, '', ctx.get(serializerCtx)), 'rich', view.dom.ownerDocument);
           if (cut) { if (!guard()) return; view.dispatch(view.state.tr.deleteSelection().setMeta('deditor-list-operation', true).scrollIntoView()); }
         }
       };
@@ -90,21 +92,26 @@ export const markdownContextMenu = (tabId: string, enabled: () => boolean) => $p
         if (e.key === 'Escape' || e.key === 'Tab') { e.preventDefault(); close(); focus(); }
         else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
           e.preventDefault(); const items = Array.from(menu!.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
-          const at = items.indexOf(document.activeElement as HTMLButtonElement);
+          const at = items.indexOf(menu!.ownerDocument.activeElement as HTMLButtonElement);
           items[(at + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
         }
       };
-      (target.closest('dialog.md-diagram-overview[open]') ?? view.dom.closest('.md-visual-shell'))?.append(menu);
+      const container = target.closest('dialog.md-diagram-overview[open]') ?? (events === window ? view.dom.closest('.md-visual-shell') : document.body);
+      container?.append(menu);
+      const viewport = editorWindow(menu);
+      const offset = viewport === events ? {x: 0, y: 0} : appViewportOffset(target);
       const rect = target.getBoundingClientRect(), bounds = menu.getBoundingClientRect();
       const x = keyboard ? rect.left : (event as MouseEvent).clientX, y = keyboard ? rect.bottom : (event as MouseEvent).clientY;
-      menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - bounds.width - 4))}px`;
-      menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - bounds.height - 4))}px`;
+      menu.style.left = `${Math.max(4, Math.min(x + offset.x, viewport.innerWidth - bounds.width - 4))}px`;
+      menu.style.top = `${Math.max(4, Math.min(y + offset.y, viewport.innerHeight - bounds.height - 4))}px`;
       menu.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
     };
     const key = (event: KeyboardEvent) => { if (event.key === 'ContextMenu' || event.key === 'F10' && event.shiftKey) open(event); };
-    const outside = (event: Event) => { if (!(event.target instanceof Node) || !menu?.contains(event.target)) close(); };
+    const outside = (event: Event) => { if (!(isDomNode(event.target)) || !menu?.contains(event.target)) close(); };
     host.addEventListener('contextmenu', open); host.addEventListener('keydown', key);
     window.addEventListener('mousedown', outside); window.addEventListener('blur', close);
-    return { update(_view, previous) { if (!previous.doc.eq(view.state.doc)) close(); }, destroy() { disposed = true; close(); host.removeEventListener('contextmenu', open); host.removeEventListener('keydown', key); window.removeEventListener('mousedown', outside); window.removeEventListener('blur', close); } };
+    if (events !== window) events.addEventListener('mousedown', outside);
+    view.dom.addEventListener('deditor-visual-deactivate', close);
+    return { update(_view, previous) { if (!previous.doc.eq(view.state.doc)) close(); }, destroy() { disposed = true; close(); host.removeEventListener('contextmenu', open); host.removeEventListener('keydown', key); view.dom.removeEventListener('deditor-visual-deactivate', close); if (events !== window) events.removeEventListener('mousedown', outside); window.removeEventListener('mousedown', outside); window.removeEventListener('blur', close); } };
   },
 }));

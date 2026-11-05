@@ -1,3 +1,4 @@
+import { isHtmlElement } from "./dom";
 import { $prose } from "@milkdown/kit/utils";
 import { Plugin, TextSelection, NodeSelection, type EditorState } from "@milkdown/kit/prose/state";
 import { Decoration, DecorationSet } from "@milkdown/kit/prose/view";
@@ -63,10 +64,10 @@ export const activeBlockHint = $prose(() => new Plugin({
     const refresh = () => {
       frame = 0;
       const active = view.dom.ownerDocument.activeElement;
-      const editing = active === view.dom || active instanceof HTMLElement && view.dom.contains(active) && active.isContentEditable;
+      const editing = active === view.dom || isHtmlElement(active) && view.dom.contains(active) && active.isContentEditable;
       const block = getBlockHint(view.state);
       const target = block ? view.nodeDOM(block.from) : null;
-      if (!view.editable || !editing || !block || !(target instanceof HTMLElement)) {
+      if (!view.editable || !editing || !block || !(isHtmlElement(target))) {
         hint.hidden = true;
         return;
       }

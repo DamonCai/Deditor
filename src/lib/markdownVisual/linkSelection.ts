@@ -1,3 +1,4 @@
+import { isDomElement } from "./dom";
 import type { Ctx } from "@milkdown/kit/ctx";
 import type { EditorView } from "@milkdown/kit/prose/view";
 import type { SelectionBookmark } from "@milkdown/kit/prose/state";
@@ -11,7 +12,7 @@ export function installLinkSelection(ctx: Ctx, view: EditorView, boundary: () =>
   let disposed = false;
   const host = view.dom.parentElement ?? view.dom;
   const captureConfirmation = (event: Event) => {
-    if (!saved || !isActive() || !view.editable || !(event.target instanceof Element)) return;
+    if (!saved || !isActive() || !view.editable || !(isDomElement(event.target))) return;
     if (event.type === "keydown" && ((event as KeyboardEvent).key !== "Enter" || (event as KeyboardEvent).isComposing)) return;
     if (event.type === "pointerdown" && !event.target.closest(".confirm")) return;
     const popup = event.target.closest(".milkdown-link-edit");

@@ -9,6 +9,7 @@ import { tStatic } from "./lib/i18n";
 import { beginPaneResize } from "./lib/paneResize";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { openEditorSearch } from "./lib/editorSearch";
+import { observeEditorFrameDocuments } from "./lib/editorFrame";
 import { useEffect, useRef, useState } from "react";
 // @tauri-apps/api/webview transitively imports the full Window class (~62 KB).
 // We only need to listen for the file-drop event; subscribe to its raw Tauri
@@ -286,7 +287,15 @@ export default function App() {
     // and consumes them before bubble-phase listeners fire. Capture lets us
     // intercept first; we then preventDefault to stop the default action.
     window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
+    const stopFrames = observeEditorFrameDocuments((doc, frame) => {
+      const win = doc.defaultView;
+      const onFrameKey = (event: KeyboardEvent) => {
+        if (frame.isConnected && !frame.closest('[hidden], [inert], [aria-hidden="true"]')) onKey(event);
+      };
+      win?.addEventListener("keydown", onFrameKey, true);
+      return () => win?.removeEventListener("keydown", onFrameKey, true);
+    });
+    return () => { window.removeEventListener("keydown", onKey, true); stopFrames(); };
   }, []);
 
   // Bridge native File and Edit menu clicks to the existing fileio handlers.

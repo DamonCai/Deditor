@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { activeEditorElement, closeEditorFrameDiagramOverviews, observeEditorFrameDocuments } from "./editorFrame";
 
 const stack: HTMLElement[] = [];
 function topPanel() {
@@ -29,10 +30,9 @@ export function useModalFocus(
     if (!open || !panel) return;
     // Release a diagram in the native top layer before focusing an app dialog.
     document.dispatchEvent(new window.Event("deditor-close-diagram-overview"));
-    const previous =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
+    closeEditorFrameDiagramOverviews();
+    const active = activeEditorElement();
+    const previous = active && typeof (active as HTMLElement).focus === "function" ? active as HTMLElement : null;
     stack.push(panel);
     const focusable = () =>
       Array.from(panel.querySelectorAll<HTMLElement>(selectors)).filter(
@@ -67,16 +67,25 @@ export function useModalFocus(
     };
     document.addEventListener("keydown", onKey, true);
     document.addEventListener("focusin", onFocus);
+    const stopFrames = observeEditorFrameDocuments((doc) => {
+      doc.addEventListener("keydown", onKey, true);
+      doc.addEventListener("focusin", onFocus);
+      return () => {
+        doc.removeEventListener("keydown", onKey, true);
+        doc.removeEventListener("focusin", onFocus);
+      };
+    });
     return () => {
       stack.splice(stack.indexOf(panel), 1);
       document.removeEventListener("keydown", onKey, true);
       document.removeEventListener("focusin", onFocus);
+      stopFrames();
       if (previous?.isConnected) {
         previous.focus();
         // Embedded editors can collapse on blur while a dialog is open. Their
         // hidden input cannot receive focus; the outer editor restores its
         // selection and reopens the embedded editor when focused instead.
-        if (document.activeElement !== previous) {
+        if (activeEditorElement() !== previous) {
           previous.parentElement?.closest<HTMLElement>('[contenteditable="true"]')?.focus();
         }
       }

@@ -1,3 +1,4 @@
+import { editorWindow, isDomElement, isDomNode } from "./dom";
 import { $prose } from '@milkdown/kit/utils';
 import { Plugin } from '@milkdown/kit/prose/state';
 import { CellSelection, TableMap, moveTableColumn, moveTableRow } from '@milkdown/kit/prose/tables';
@@ -19,7 +20,7 @@ export function installTableDrop(view: EditorView) {
     ? Array.from(table.rows) : Array.from(table.rows[0]?.cells ?? []);
   const start = (event: DragEvent) => {
     generation++; pending = undefined;
-    if (!view.editable || !(event.target instanceof Element)) return;
+    if (!view.editable || !(isDomElement(event.target))) return;
     const handle = event.target.closest<HTMLElement>('[data-role="row-drag-handle"], [data-role="col-drag-handle"]');
     if (!handle || !view.dom.contains(handle)) return;
     const wrapper = handle.parentElement;
@@ -49,12 +50,12 @@ export function installTableDrop(view: EditorView) {
     const { axis, from, pos } = drag;
     if (view.state.doc !== drag.doc || !view.state.doc.nodeAt(pos - 1)?.eq(drag.node)) return;
     const host = view.nodeDOM(pos - 1);
-    const table = host instanceof Element ? host.querySelector<HTMLTableElement>('.table-wrapper > table') : null;
+    const table = isDomElement(host) ? host.querySelector<HTMLTableElement>('.table-wrapper > table') : null;
     const wrapper = table?.parentElement?.parentElement;
     if (!table || !wrapper) return;
     // An outside drop cancels this table move without consuming unrelated drop handlers.
     wrapper.querySelectorAll<HTMLElement>('.drag-preview, .line-handle').forEach(element => { element.dataset.show = 'false'; });
-    if (!(event.target instanceof Node) || !wrapper.contains(event.target)) return;
+    if (!(isDomNode(event.target)) || !wrapper.contains(event.target)) return;
     event.preventDefault();
     event.stopPropagation();
     const to = Math.max(0, tableDropIndex(elements(table, axis), axis === 'row' ? event.clientY : event.clientX, axis));
@@ -72,12 +73,13 @@ export function installTableDrop(view: EditorView) {
     view.focus();
   };
   view.dom.addEventListener('dragstart', start, true);
-  window.addEventListener('drop', drop, true);
-  window.addEventListener('dragend', clear, true);
+  const events = editorWindow(view.dom);
+  events.addEventListener('drop', drop, true);
+  events.addEventListener('dragend', clear, true);
   return () => {
     view.dom.removeEventListener('dragstart', start, true);
-    window.removeEventListener('drop', drop, true);
-    window.removeEventListener('dragend', clear, true);
+    events.removeEventListener('drop', drop, true);
+    events.removeEventListener('dragend', clear, true);
   };
 }
 export const accurateTableDrop = $prose(() => new Plugin({ view: view => ({ destroy: installTableDrop(view) }) }));

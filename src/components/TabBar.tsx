@@ -24,10 +24,10 @@ function toEncodedPath(path: string): string {
     .join(sep);
 }
 
-// Zero props — wrap default export in memo so App re-renders (scroll-sync,
+// Wrap default export in memo so App re-renders (scroll-sync,
 // splitter drag) don't re-run TabBar's body. Internal store subscriptions
 // still wake it when relevant fields change.
-function TabBarImpl() {
+function TabBarImpl({ deferReveal = false }: { deferReveal?: boolean }) {
   const paneId = useEditorPaneId();
   const split = useEditorStore(s => !!s.panes);
   const t = useT();
@@ -170,8 +170,15 @@ function TabBarImpl() {
     measureOverflow();
   }, [measureOverflow]);
 
-  // Scroll active tab into view whenever it changes.
-  useLayoutEffect(() => { revealTab(activeId); }, [activeId, revealTab]);
+  useLayoutEffect(() => {
+    if (!deferReveal) { revealTab(activeId); return; }
+    // Reveal before the next paint, after the reading editor has restored
+    // selection and focus. Measuring the strip earlier forces WebKit to lay
+    // out the newly visible document in the middle of that restoration.
+    let cancelled = false;
+    queueMicrotask(() => { if (!cancelled) revealTab(activeId); });
+    return () => { cancelled = true; };
+  }, [activeId, deferReveal, revealTab]);
 
   // Stable callbacks so memo'd TabItem children don't all re-render when
   // some unrelated tab field changes. They receive tab data via params

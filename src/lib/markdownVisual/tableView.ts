@@ -1,3 +1,4 @@
+import { isHtmlElement, isDomNode } from "./dom";
 import { blockDrag } from './diagramDrag';
 import { tStatic } from '../i18n';
 import type { NodeViewConstructor } from '@milkdown/kit/prose/view';
@@ -57,7 +58,7 @@ export function stableTableView(create: NodeViewConstructor): NodeViewConstructo
     const update = result.update?.bind(result), stopEvent = result.stopEvent?.bind(result);
     let current = node;
     const applyIndent = (value: typeof node) => {
-      if (!(result.dom instanceof HTMLElement)) return;
+      if (!(isHtmlElement(result.dom))) return;
       const level = Number.isSafeInteger(value.attrs.indent) && value.attrs.indent > 0 ? value.attrs.indent : 0;
       result.dom.style.marginInlineStart = level ? `${level * 2}em` : '';
       result.dom.style.maxWidth = level ? `calc(100% - ${level * 2}em)` : '';
@@ -74,11 +75,11 @@ export function stableTableView(create: NodeViewConstructor): NodeViewConstructo
       return accepted;
     };
     result.stopEvent = event => {
-      if (event.target instanceof Node && handle.contains(event.target)) return true;
+      if (isDomNode(event.target) && handle.contains(event.target)) return true;
       // The upstream delayed NodeSelection races mouse drag and can replace
       // a complete row selection with one paragraph after the mouse is up.
       if ((event.type === 'mousedown' || event.type === 'pointerdown')
-        && event.target instanceof Node && result.contentDOM?.contains(event.target)) return false;
+        && isDomNode(event.target) && result.contentDOM?.contains(event.target)) return false;
       return stopEvent?.(event) ?? false;
     };
     return result;

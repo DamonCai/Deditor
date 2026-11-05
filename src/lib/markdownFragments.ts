@@ -33,9 +33,13 @@ function contextTemplate(entry: FragmentContext, options: RenderOptions) {
     return template;
   }));
 }
+export function needsMarkdownFragmentContext(raw: string) {
+  return /\[\^|^\s*\[(?:toc|\[toc\])\]|^\s*(?:>\s*)*#{1,6}\s/im.test(raw);
+}
+
 /** References and document directives need the same context as the full preview. */
 export async function renderMarkdownFragment(raw: string, source: string, line: number, options: RenderOptions, owner?: object) {
-  if (!/\[\^|^\s*\[(?:toc|\[toc\])\]|^\s*(?:>\s*)*#{1,6}\s/im.test(raw)) return renderMarkdown(raw, options);
+  if (!needsMarkdownFragmentContext(raw)) return renderMarkdown(raw, options);
   const entry = context(source, options, owner);
   if (/^\s*\[(?:toc|\[toc\])\]\s*(?:\n|$)/i.test(raw)) {
     const tocs = await (entry.tocs ??= retryable(entry, renderMarkdownTocs(source, options)));
