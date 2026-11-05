@@ -1,0 +1,10 @@
+{
+  "productName": "DEditor Search Diagnostic",
+  "identifier": "com.deditor.searchdiagnostic20261105",
+  "build": {
+    "frontendDist": "../dist",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {"windows": [{"title":"DEditor Search Diagnostic","url":"index.html","width":1000,"height":740,"devtools":true}]},
+  "bundle": {"fileAssociations": []}
+}

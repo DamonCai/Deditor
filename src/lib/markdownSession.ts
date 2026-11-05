@@ -30,6 +30,7 @@ export class MarkdownSession {
   private composition: { source: string; origin: MarkdownOrigin } | null = null;
   visualSelection = { anchor: 1, head: 1 };
   visualScroll = 0;
+  visualAnchor?: { source: string; pos: number; offset: number };
   sourceCursor: number | null = null;
   constructor(public source: string) {}
   get canUndo() { return this.past.length > 0 || !!this.composition && this.composition.source !== this.source; }
@@ -117,7 +118,7 @@ export function markdownSession(id: string, source: string) {
   else session.sync(source);
   return session;
 }
-interface ViewPosition { visualSelection: { anchor: number; head: number }; visualScroll: number; sourceCursor: number | null }
+interface ViewPosition { visualSelection: { anchor: number; head: number }; visualScroll: number; sourceCursor: number | null; visualAnchor?: { source: string; pos: number; offset: number } }
 const rightPositions = new Map<string, ViewPosition>();
 export function markdownViewState(id: string, source: string, pane: string | null): ViewPosition {
   const session = markdownSession(id, source);

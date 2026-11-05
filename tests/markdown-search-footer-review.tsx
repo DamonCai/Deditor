@@ -1,6 +1,7 @@
 import React from 'react';
 import {createRoot} from 'react-dom/client';
 import Visual from '../src/components/MarkdownVisualEditor';
+import VisualFrame from '../src/components/MarkdownVisualFrame';
 import Editor from '../src/components/Editor';
 import {useEditorStore} from '../src/store/editor';
 import {openEditorSearch} from '../src/lib/editorSearch';
@@ -14,8 +15,9 @@ function Review(){
  React.useEffect(()=>{document.documentElement.classList.toggle('dark',theme==='dark');},[theme]);
  return <div style={{height:'100vh',width:narrow?720:'100%',display:'flex',flexDirection:'column'}}>
  <div><button onClick={()=>{const next=mode==='visual'?'source':'visual';setMode(next);useEditorStore.setState({markdownMode:next as 'visual'|'source'});}}>Switch mode</button><button onClick={()=>openEditorSearch()}>Find</button><button onClick={()=>setNarrow(!narrow)}>720px</button><button onClick={()=>useEditorStore.setState({theme:theme==='light'?'dark':'light'})}>Theme</button><button onClick={()=>setReadonly(!readonly)}>Readonly</button><button onClick={()=>markdownHistory()}>Undo</button><button onClick={()=>markdownHistory(true)}>Redo</button></div>
- <div style={{flex:1,minHeight:0}}>{mode==='visual'?<Visual tabId="search-footer" theme={theme} readonly={readonly}/>:<Editor theme={theme} fontSize={16} value={content} tabId="search-footer" filePath="/generated/search-footer.md" onChange={value=>useEditorStore.getState().setContent(value,'search-footer')}/>}</div>
+ <div style={{flex:1,minHeight:0}}>{mode==='visual'?(new URLSearchParams(location.search).has('frame')?<VisualFrame active><Visual tabId="search-footer" theme={theme} readonly={readonly}/></VisualFrame>:<Visual tabId="search-footer" theme={theme} readonly={readonly}/>):<Editor theme={theme} fontSize={16} value={content} tabId="search-footer" filePath="/generated/search-footer.md" onChange={value=>useEditorStore.getState().setContent(value,'search-footer')}/>}</div>
  <output data-testid="fidelity">{content===sample?'Original unchanged':'Edited'}</output>
  </div>;
 }
 const root=createRoot(document.getElementById('root')!);root.render(<Review/>);if(import.meta.hot)import.meta.hot.dispose(()=>root.unmount());
+window.addEventListener('error',event=>{const output=document.createElement('pre');output.setAttribute('role','alert');output.textContent=String(event.error?.stack??event.message);document.body.append(output);});

@@ -21,8 +21,10 @@ import { codePresentation } from "./codePresentation";
 import { tStatic } from "../i18n";
 import { markdownHistory } from "../markdownHistory";
 import { logError } from "../logger";
+import { plainCodePreview } from "./plainCodePreview";
 
-export function codeView(tabId: string, initialTheme: "light" | "dark" | (() => "light" | "dark")) {
+export function codeView(tabId: string, initialTheme: "light" | "dark" | (() => "light" | "dark"),
+  defer?: (element: HTMLElement, render: () => void) => (() => void) | undefined) {
   return (initial: ProseNode, view: ProseView, getPos: () => number | undefined): NodeView => {
     let theme = typeof initialTheme === "function" ? initialTheme() : initialTheme;
     let node = initial, updating = false, generation = 0, languageGeneration = 0, destroyed = false, expanded = false;
@@ -33,6 +35,9 @@ export function codeView(tabId: string, initialTheme: "light" | "dark" | (() => 
     const hasDiagramModes = () => isDiagramBlock(node);
     let controllers: AbortController[] = [];
     let renderedSource: string | null = null, pendingSource: string | null = null;
+    let near = true, plainSource: string | null = null, toolbarLayout = "";
+    let stopDeferred = () => {};
+    const ordinaryCode = () => !/^(?:html|mermaid|plantuml|puml|uml|latex|flow|sequence)(?:\s|$)/i.test(String(node.attrs.language ?? "").trim());
     const dom = document.createElement("section"); dom.className = "md-code-block"; dom.contentEditable = "false";
     const selectBlock = document.createElement("button"); selectBlock.className = "md-code-select"; selectBlock.type = "button";
     selectBlock.textContent = "⋮⋮"; selectBlock.title = tStatic("md.selectCodeBlock"); selectBlock.setAttribute("aria-label", tStatic("md.selectCodeBlock"));
@@ -109,6 +114,7 @@ export function codeView(tabId: string, initialTheme: "light" | "dark" | (() => 
     let cm: EditorView | null = null;
     const ensureEditor = () => {
       if (cm) return cm;
+      near = true; stopDeferred();
       cm = new EditorView({ parent: editor, state: EditorState.create({ doc: node.textContent, extensions: [basicSetup, wrapping.of(settings.codeWrap ? EditorView.lineWrapping : []), indentation.of(indentUnit.of(" ".repeat(settings.codeIndent))),
       themeCompartment.of(EditorView.theme({}, { dark: theme === "dark" })), presentationCompartment.of(presentation), languageCompartment.of([]), editableCompartment.of([EditorView.editable.of(view.editable), EditorState.readOnly.of(!view.editable)]),
       Prec.highest(keymap.of([
@@ -146,7 +152,7 @@ export function codeView(tabId: string, initialTheme: "light" | "dark" | (() => 
         }
       }),
     ] }) });
-      configure(); loadLanguage(); return cm;
+      configure(); loadLanguage(); loadPresentation(); return cm;
     };
     const loadLanguage = () => {
       if (!cm) return;
@@ -156,6 +162,7 @@ export function codeView(tabId: string, initialTheme: "light" | "dark" | (() => 
       else cm?.dispatch({ effects: languageCompartment.reconfigure([]) });
     };
     const loadPresentation = () => {
+      if (!cm) return;
       const token = ++presentationGeneration;
       void codePresentation(node.attrs.language ?? "", theme).then(extension => {
         if (destroyed || token !== presentationGeneration) return;
@@ -168,6 +175,17 @@ export function codeView(tabId: string, initialTheme: "light" | "dark" | (() => 
       const diagram = ["mermaid", "plantuml", "puml", "uml", "latex", "flow", "sequence"].includes(lang);
       dom.dataset.kind = lang === "latex" ? "math" : diagram ? "diagram" : "code";
       const threeModes = hasDiagramModes();
+      const customCss = useEditorStore.getState().markdownSettings.customCss.trim();
+      const layout = customCss || threeModes ? "full" : lang === "html" ? "html" : "code";
+      if (layout !== toolbarLayout) {
+        toolbarLayout = layout;
+        // Ordinary fences have no diagram actions. Keep their inactive controls
+        // detached, and restore the original order before a language/CSS change
+        // can make them relevant. Visible controls and their handlers stay live.
+        bar.replaceChildren(...(layout === "full"
+          ? [dragHandle, language, family, toggle, modes, overview.controls, overview.button, remove, copy]
+          : layout === "html" ? [language, toggle, copy] : [language, copy]));
+      }
       // Diagram previews stay in document flow and follow the rendered SVG height,
       // including after mode switches, source edits and split-pane resizing.
       dom.classList.toggle("md-diagram-block", threeModes);
@@ -219,6 +237,14 @@ export function codeView(tabId: string, initialTheme: "light" | "dark" | (() => 
       }
       if (renderTimer) { clearTimeout(renderTimer); renderTimer = undefined; }
       if (preview.hidden || renderKey === renderedSource || renderKey === pendingSource) return;
+      if (!ordinaryCode()) { near = true; stopDeferred(); }
+      if (!near && !expanded) {
+        if (plainSource !== renderKey) {
+          preview.replaceChildren(plainCodePreview(code, view.dom.ownerDocument));
+          plainSource = renderKey;
+        }
+        return;
+      }
       const moveHeight = movingBlockHeight(view, node);
       if (moveHeight) dom.style.minHeight = `${moveHeight}px`;
       if (threeModes && !code.trim()) {
@@ -341,7 +367,11 @@ export function codeView(tabId: string, initialTheme: "light" | "dark" | (() => 
     view.dom.addEventListener("deditor-writing-change", settingsChanged);
     view.dom.addEventListener("deditor-theme-change", themeChanged);
     view.dom.addEventListener("deditor-document-change", documentChanged);
-    configure(); loadLanguage(); loadPresentation(); render();
+    if (defer && ordinaryCode()) {
+      const cancel = defer(dom, () => { near = true; render(); });
+      if (cancel) { near = false; stopDeferred = cancel; }
+    }
+    configure(); loadLanguage(); render();
     return { dom, stopEvent: () => true, ignoreMutation: () => true,
       setSelection(anchor, head) {
         if (!view.editable) return;
@@ -363,7 +393,7 @@ export function codeView(tabId: string, initialTheme: "light" | "dark" | (() => 
         if (languageChanged) { loadLanguage(); loadPresentation(); }
         if (textChanged || languageChanged || language.readOnly === view.editable) render(textChanged && !languageChanged);
         return true;
-      }, destroy() { drag.destroy(); overview.destroy(); preview.removeEventListener("mousedown", previewMouseDown, true); view.dom.removeEventListener("deditor-diagram-overview-close", closeOverview); split.destroy(); view.dom.removeEventListener("deditor-contextmenu-close", menuClosed); view.dom.removeEventListener("deditor-writing-change", settingsChanged); view.dom.removeEventListener("deditor-theme-change", themeChanged); view.dom.removeEventListener("deditor-document-change", documentChanged); view.dom.removeEventListener("deditor-editable-change", modeChanged); view.dom.removeEventListener("deditor-restore-focus", restoreFocus); dom.removeEventListener("focusout", collapse); destroyed = true; generation++; if (renderTimer) clearTimeout(renderTimer); controllers.forEach(controller => controller.abort()); cm?.destroy(); },
+      }, destroy() { stopDeferred(); drag.destroy(); overview.destroy(); preview.removeEventListener("mousedown", previewMouseDown, true); view.dom.removeEventListener("deditor-diagram-overview-close", closeOverview); split.destroy(); view.dom.removeEventListener("deditor-contextmenu-close", menuClosed); view.dom.removeEventListener("deditor-writing-change", settingsChanged); view.dom.removeEventListener("deditor-theme-change", themeChanged); view.dom.removeEventListener("deditor-document-change", documentChanged); view.dom.removeEventListener("deditor-editable-change", modeChanged); view.dom.removeEventListener("deditor-restore-focus", restoreFocus); dom.removeEventListener("focusout", collapse); destroyed = true; generation++; if (renderTimer) clearTimeout(renderTimer); controllers.forEach(controller => controller.abort()); cm?.destroy(); },
     };
   };
 }

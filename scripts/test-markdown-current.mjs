@@ -36,6 +36,7 @@ const stubs={
 };
 await build({stdin:{contents:`
 export {default as Visual} from './src/components/MarkdownVisualEditor';
+export {default as VisualFrame} from './src/components/MarkdownVisualFrame';
 export {default as EditorPane} from './src/components/EditorPane';
 export {useEditorStore} from './src/store/editor';
 export {getVisualEditor} from './src/lib/markdownVisualBridge';
@@ -47,9 +48,15 @@ export {markdownDisplayHtml} from './src/lib/markdownDisplay';
 export {SourceTreeCache} from './src/lib/markdownVisual/sourceTreeCache';
 export {sourceTree,reuseStartupSourceTrees} from './src/lib/markdownVisual/document';
 export {prepareSourceSyntax} from './src/lib/markdownVisual/sourceParser';
+export {parseSourceSyntax} from './src/lib/markdownVisual/sourceSyntax';
+export {plainCodePreview} from './src/lib/markdownVisual/plainCodePreview';
+export {captureViewportAnchor,restoreViewportAnchor} from './src/lib/markdownVisual/viewportAnchor';
+export {EditorView as CodeMirrorView} from '@codemirror/view';
+export {outlineActiveIndex,outlineActiveIndexOrdered} from './src/lib/markdownOutline';
 export {retainVisualTabs, VISUAL_OVERFLOW_BYTES, VISUAL_OVERFLOW_IDLE_MS} from './src/lib/retainedVisualTabs';
 `,resolveDir:process.cwd()},outfile:output,bundle:true,format:'esm',platform:'node',packages:'external',loader:{'.css':'empty'},plugins:[{name:'isolated-io',setup(b){
  b.onResolve({filter:/.*/},a=>/\.css(?:\?raw)?$/.test(a.path)?{path:'css',namespace:'stub'}:stubs[a.path]?{path:a.path,namespace:'stub'}:a.path.endsWith('/feedback')?{path:'feedback',namespace:'stub'}:undefined);
+ b.onLoad({filter:/markdownVisual\/initialSourceTree\.ts$/},a=>({contents:fs.readFileSync(a.path,'utf8').replace('remark.parse = parse;', 'globalThis.mdVerifyInitialSyntax?.({remark, original, input, tree}); remark.parse = parse;'),loader:'ts'}));
  b.onLoad({filter:/.*/,namespace:'stub'},a=>({contents:a.path==='css'?'export default "";':a.path==='feedback'?'export const showError=async()=>{};':stubs[a.path],loader:'js'}));
 }}],logLevel:'silent'});
 const app=await import(pathToFileURL(output));
@@ -70,6 +77,48 @@ const setSource = async value => {
  assert.ok(app.getVisualEditor()?.editable);
 };
 try {
+ await test('reading search opens inside an isolated document',async()=>{
+  await setSource('# Generated frame\n\nAlpha Alpha\n');
+  await act(async()=>{root.render(React.createElement(app.VisualFrame,{active:true},React.createElement(app.Visual,{tabId:'a',theme:'light'})));await pause(200);});
+  const owner=document.querySelector('iframe').contentDocument;
+  owner.defaultView.HTMLElement.prototype.scrollTo=HTMLElement.prototype.scrollTo;
+  owner.defaultView.Range.prototype.getClientRects=window.Range.prototype.getClientRects;
+  owner.defaultView.Range.prototype.getBoundingClientRect=window.Range.prototype.getBoundingClientRect;
+  assert.ok(owner.querySelector('.ProseMirror'));
+  await act(async()=>{owner.querySelector('.ProseMirror').dispatchEvent(new window.KeyboardEvent('keydown',{key:'f',metaKey:true,bubbles:true,cancelable:true}));await pause(50);});
+  assert.ok(owner.querySelector('.cm-search'));
+  try {
+   const input=owner.querySelector('input[name="search"]');
+   await act(async()=>{input.value='Alpha';input.dispatchEvent(new owner.defaultView.Event('input',{bubbles:true}));await pause(20);});
+   assert.equal(owner.querySelector('[role="search"] [role="status"]').textContent,'1 / 2');
+   await act(async()=>input.dispatchEvent(new owner.defaultView.KeyboardEvent('keydown',{key:'Enter',keyCode:13,bubbles:true,cancelable:true})));
+   assert.equal(owner.querySelector('[role="search"] [role="status"]').textContent,'2 / 2');
+  } finally {await act(async()=>owner.querySelector('button[name="close"]').click());}
+  assert.equal(owner.querySelector('.cm-search'),null);
+  await act(async()=>root.render(null));
+ });
+ for (const [theme,readonly] of [['light',false],['dark',false],['light',true],['dark',true]]) await test(`reading Command+F search: ${theme}, readonly=${readonly}`,async()=>{
+  store.setState({theme});
+  const original='# Generated search\n\nAlpha beta Alpha\n';
+  await setSource(original);await render(readonly);
+  const key=async(target,key,options={})=>act(async()=>{target.dispatchEvent(new window.KeyboardEvent('keydown',{key,bubbles:true,cancelable:true,...options}));await pause(30);});
+  await key(document.querySelector('.ProseMirror'),'f',{metaKey:true});
+  const panel=document.querySelector('.cm-search');assert.ok(panel,'search opens without unmounting the document');
+  const input=panel.querySelector('input[name="search"]');assert.equal(document.activeElement,input);
+  assert.ok(document.querySelector('.ProseMirror'));
+  assert.equal(!!panel.querySelector('input[name="replace"]'),!readonly);
+  await act(async()=>{input.value='Alpha';input.dispatchEvent(new Event('input',{bubbles:true}));await pause(30);});
+  assert.equal(document.querySelector('[role="search"] [role="status"]').textContent,'1 / 2');
+  await key(input,'Enter');
+  assert.equal(document.querySelector('[role="search"] [role="status"]').textContent,'2 / 2');
+  await key(input,'Enter',{shiftKey:true});
+  assert.equal(document.querySelector('[role="search"] [role="status"]').textContent,'1 / 2');
+  await key(input,'Escape');assert.equal(document.querySelector('.cm-search'),null);
+  assert.equal(content(),original,'search leaves source intact');
+  await key(document.querySelector('.ProseMirror'),'f',{ctrlKey:true});
+  assert.ok(document.querySelector('.cm-search'),'Ctrl+F can reopen the panel');
+  await key(document.querySelector('.cm-search input'),'Escape');
+ });
  await test('source worker success, startup failure, invalid message and timeout all release requests',async()=>{
   const previous=globalThis.Worker, timeout=globalThis.setTimeout;
   const source='x'.repeat(50*1024);
@@ -141,6 +190,246 @@ try {
   assert.deepEqual(retain(visits,null,['0','2','3','11']).map(v=>[v.id,!!v.extra]),[['0',true],['2',true],['3',true],['11',false]]);
   assert.deepEqual(retain(visits,'11',ids,app.VISUAL_OVERFLOW_IDLE_MS+11).map(v=>v.id),ids.slice(4));
   assert.deepEqual(retain(visits,'11',ids,10,1,false).map(v=>v.id),ids.slice(4));
+ });
+ await test('ordered outline lookup matches the original scan with logarithmic geometry reads',async()=>{
+  for(const count of [0,1,2,3,16,101,1000]) {
+   const offsets=Array.from({length:count},(_,i)=>Math.floor(i/2)*137-40);
+   for(const height of [40,80,800])for(let top=0;top<Math.max(100,count*80);top+=53) {
+    let reads=0;
+    assert.equal(app.outlineActiveIndexOrdered(count,i=>{reads++;return offsets[i];},top,height,count*150),app.outlineActiveIndex(offsets,top,height,count*150));
+    assert.ok(reads<=Math.ceil(Math.log2(count+1))+1);
+   }
+  }
+ });
+ await test('viewport tables preserve full source, keyboard targets, clipboard and history',async()=>{
+  const oldObserver=window.IntersectionObserver;const observers=[];
+  window.IntersectionObserver=class {
+   constructor(callback){this.callback=callback;this.targets=new Set();observers.push(this);}
+   observe(target){this.targets.add(target);}unobserve(target){this.targets.delete(target);}disconnect(){this.targets.clear();}
+  };
+  const fixture='# Generated tables\n\n'+Array.from({length:100},(_,i)=>
+   '## Section '+i+'\n\n| Name | Value |\n| --- | --- |\n| Row '+i+' | '+('generated **text** 中文 '.repeat(23))+' |\n\n').join('');
+  assert.ok(fixture.length>=48*1024);
+  try {
+   await act(async()=>{root.render(null);await pause(160);});
+   store.setState({tabs:[{id:'a',filePath:'/generated/viewport.md',content:fixture,savedContent:fixture}],activeId:'a',markdownMode:'visual'});
+   await render(false);
+   const editor=document.querySelector('.ProseMirror');
+   assert.ok(editor.querySelectorAll('[data-deditor-table-pending]').length>=90);
+   assert.equal(content(),fixture);
+   const target=editor.querySelectorAll('[data-deditor-table-pending]')[60];
+   await act(async()=>{observers.at(-1).callback([{target,isIntersecting:true}]);await pause(60);});
+   assert.ok(!target.isConnected);
+   assert.equal(content(),fixture,'materialization is not a document edit');
+   const lines=fixture.split('\n');const row=lines.findIndex(line=>line.startsWith('| Row 90'));
+   await act(async()=>{app.getVisualEditor().navigate(row+1,5);await pause(60);});
+   assert.equal(content(),fixture,'navigation does not change source');
+   app.getVisualEditor().focus();
+   editor.dispatchEvent(new window.KeyboardEvent('keydown',{key:'a',keyCode:65,ctrlKey:true,bubbles:true,cancelable:true}));
+   assert.ok(app.getVisualEditor().clipboard().text.includes('Row 99'));
+   await act(async()=>editor.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Backspace',keyCode:8,bubbles:true,cancelable:true})));
+   assert.equal(content().trim(),'');
+   await act(async()=>{app.markdownHistory();await pause(100);});assert.equal(content(),fixture);
+   await act(async()=>{store.setState({markdownSettings:{...store.getState().markdownSettings,customCss:'h2 { color: red; }'}});});
+   await act(async()=>{await pause(100);});
+   assert.equal(document.querySelectorAll('[data-deditor-table-pending]').length,0,'custom CSS materializes the full view');
+   assert.equal(content(),fixture);
+  } finally {
+   await act(async()=>{root.render(null);await pause(160);});
+   assert.ok(observers.every(observer=>observer.targets.size===0),'destroy releases every observed table');
+   window.IntersectionObserver=oldObserver;
+   store.setState({tabs:[{id:'a',filePath:'/generated/a.md',content:source,savedContent:source},{id:'b',filePath:'/generated/b.html',content:'<h1>HTML</h1>',savedContent:'<h1>HTML</h1>'}],activeId:'a',markdownSettings:{...store.getState().markdownSettings,customCss:''}});
+  }
+ });
+ await test('viewport anchors survive rebuilt estimates without moving the visible block',async()=>{
+  const scroll=document.createElement('div'), editor=document.createElement('div'), first=document.createElement('p'), block=document.createElement('p');
+  editor.append(first,block);scroll.append(editor);document.body.append(scroll);
+  let absoluteTop=570, materialized=false;
+  scroll.scrollTop=500;
+  scroll.getBoundingClientRect=()=>({top:100,left:0,width:800});
+  block.getBoundingClientRect=()=>({top:absoluteTop-scroll.scrollTop});
+  const original=document.elementFromPoint;
+  document.elementFromPoint=()=>block;
+  const view={dom:editor,state:{doc:{content:{size:100}}},posAtDOM:(_dom,index)=>index*20,nodeDOM:pos=>pos===20?block:null};
+  try {
+   const anchor=app.captureViewportAnchor(view,scroll);
+   assert.deepEqual(anchor,{pos:20,offset:-30});
+   assert.ok(app.restoreViewportAnchor(view,scroll,anchor,pos=>{assert.equal(pos,20);materialized=true;absoluteTop=1000;}));
+   assert.ok(materialized);
+   assert.equal(block.getBoundingClientRect().top,70);
+   assert.equal(scroll.scrollTop,930);
+   assert.equal(app.restoreViewportAnchor(view,scroll,{pos:100,offset:0},()=>{throw Error('invalid anchor must not create a view');}),false);
+   scroll.scrollTop=0;assert.equal(app.captureViewportAnchor(view,scroll),undefined);
+  } finally {document.elementFromPoint=original;scroll.remove();}
+ });
+ await test('viewport prose preserves source, nested lists, navigation, selection and history',async()=>{
+  const oldObserver=window.IntersectionObserver, observers=[];
+  window.IntersectionObserver=class {
+   constructor(callback){this.callback=callback;this.targets=new Set();observers.push(this);}
+   observe(target){this.targets.add(target);}unobserve(target){this.targets.delete(target);}disconnect(){this.targets.clear();}
+  };
+  const fixture='# Generated prose\n\n'+Array.from({length:100},(_,i)=>'## Section '+i+'\n\nParagraph '+i+': '+('**中文正文** with `literal code` and [link](https://example.com) '.repeat(15))+'\n\n- Outer '+i+' **bold**\n  - Nested '+i+'\n- [ ] Task '+i+'\n\n> Quote '+i+' '+('generated text '.repeat(12))+'\n\n').join('')+'- ![Generated](data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7)\n\n<details><summary>Generated HTML</summary>Full details</details>\n';
+  try {
+   await act(async()=>{root.render(null);await pause(160);});
+   store.setState({tabs:[{id:'a',filePath:'/generated/prose-viewport.md',content:fixture,savedContent:fixture}],activeId:'a',markdownMode:'visual'});
+   await render(false);
+   const editor=document.querySelector('.ProseMirror');
+   assert.ok(editor.querySelectorAll('[data-deditor-text-pending]').length>250);
+   assert.equal(content(),fixture);
+   assert.equal(editor.querySelectorAll('h2')[99].textContent,'','offscreen headings keep their source/model without shaping text');
+   const headingLine=fixture.split('\n').findIndex(line=>line==='## Section 99')+1;
+   await act(async()=>{app.getVisualEditor().navigate(headingLine,5);await pause(60);});
+   assert.equal(editor.querySelectorAll('h2')[99].textContent,'Section 99');
+   assert.ok(editor.querySelector('img'),'image list stays eager');
+   assert.ok(editor.querySelector('details'),'authored HTML stays eager');
+   const target=[...editor.querySelectorAll('[data-deditor-text-pending]')].find(element=>element.tagName==='UL');
+   await act(async()=>{observers.at(-1).callback([{target,isIntersecting:true}]);await pause(60);});
+   assert.ok(!target.isConnected,'observer replaces a pending list with complete controls');
+   assert.equal(content(),fixture);
+   const line=fixture.split('\n').findIndex(line=>line.startsWith('Paragraph 90:'))+1;
+   await act(async()=>{app.getVisualEditor().navigate(line,15);await pause(60);});
+   assert.ok([...editor.querySelectorAll('p')].some(element=>element.textContent.startsWith('Paragraph 90:')),'navigation synchronously reveals the destination');
+   await act(async()=>app.getVisualEditor().navigate(1,3));
+   app.getVisualEditor().focus();
+   editor.dispatchEvent(new window.KeyboardEvent('keydown',{key:'a',keyCode:65,ctrlKey:true,bubbles:true,cancelable:true}));
+   assert.ok(app.getVisualEditor().clipboard().text.includes('Paragraph 99:'));
+   await act(async()=>editor.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Backspace',keyCode:8,bubbles:true,cancelable:true})));
+   assert.equal(content().trim(),'');
+   await act(async()=>{app.markdownHistory();await pause(100);});assert.equal(content(),fixture);
+   await act(async()=>{store.setState({markdownSettings:{...store.getState().markdownSettings,customCss:'p { color: red; }'}});});
+   await act(async()=>pause(100));
+   assert.equal(editor.querySelectorAll('[data-deditor-text-pending]').length,0);
+   assert.equal(content(),fixture);
+   const changed=fixture+'\nNew styled paragraph '+('text '.repeat(120))+'\n';
+   await act(async()=>{store.getState().setContent(changed,'a','source');await pause(60);});
+   assert.equal(editor.querySelectorAll('[data-deditor-text-pending]').length,0,'new styled blocks also stay eager');
+   assert.equal(content(),changed);
+  } finally {
+   await act(async()=>{root.render(null);await pause(160);});
+   assert.ok(observers.every(observer=>observer.targets.size===0));
+   window.IntersectionObserver=oldObserver;
+   store.setState({tabs:[{id:'a',filePath:'/generated/a.md',content:source,savedContent:source},{id:'b',filePath:'/generated/b.html',content:'<h1>HTML</h1>',savedContent:'<h1>HTML</h1>'}],activeId:'a',markdownSettings:{...store.getState().markdownSettings,customCss:''}});
+  }
+ });
+ await test('viewport inline math preserves formulas, equation anchors and history',async()=>{
+  const oldObserver=window.IntersectionObserver, observers=[];
+  window.IntersectionObserver=class {
+   constructor(callback){this.callback=callback;this.targets=new Set();observers.push(this);}
+   observe(target){this.targets.add(target);}unobserve(target){this.targets.delete(target);}disconnect(){this.targets.clear();}
+  };
+  const fixture='# Generated math\n\n'+Array.from({length:100},(_,i)=>
+   'Paragraph '+i+' '+('generated text '.repeat(40))+'$x_{'+i+'}^2$\n\n| Formula | Value |\n| --- | --- |\n| $y_{'+i+'}$ | generated |\n\n').join('')+
+   'Equation $z\\label{generated-equation}$\n\nReference $\\ref{generated-equation}$\n';
+  try {
+   await act(async()=>{root.render(null);await pause(160);});
+   store.setState({tabs:[{id:'a',filePath:'/generated/math-viewport.md',content:fixture,savedContent:fixture}],activeId:'a',markdownMode:'visual'});
+   await render(false);
+   const editor=document.querySelector('.ProseMirror');
+   assert.ok(editor.querySelectorAll('[data-deditor-text-pending]').length>80);
+   assert.ok(editor.querySelectorAll('[data-deditor-table-pending]').length>90);
+   await act(async()=>pause(160));
+   assert.ok(editor.querySelector('[data-type="math_inline"][data-value*="label"]'),'equation anchors stay eager');
+   assert.ok(editor.querySelector('[data-type="math_inline"][data-value*="ref"]'),'references stay eager');
+   const line=fixture.split('\n').findIndex(line=>line.startsWith('Paragraph 99 '))+1;
+   await act(async()=>{app.getVisualEditor().navigate(line,15);await pause(80);});
+   assert.ok(editor.querySelector('[data-type="math_inline"][data-value="x_{99}^2"] .katex'));
+   assert.equal(content(),fixture);
+   await act(async()=>app.getVisualEditor().navigate(1,3));app.getVisualEditor().focus();
+   editor.dispatchEvent(new window.KeyboardEvent('keydown',{key:'a',keyCode:65,ctrlKey:true,bubbles:true,cancelable:true}));
+   assert.ok(app.getVisualEditor().clipboard().text.includes('y_{99}'));
+   await act(async()=>editor.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Backspace',keyCode:8,bubbles:true,cancelable:true})));
+   assert.equal(content().trim(),'');
+   await act(async()=>{app.markdownHistory();await pause(100);});assert.equal(content(),fixture);
+  } finally {
+   await act(async()=>{root.render(null);await pause(160);});
+   assert.ok(observers.every(observer=>observer.targets.size===0));window.IntersectionObserver=oldObserver;
+   store.setState({tabs:[{id:'a',filePath:'/generated/a.md',content:source,savedContent:source},{id:'b',filePath:'/generated/b.html',content:'<h1>HTML</h1>',savedContent:'<h1>HTML</h1>'}],activeId:'a'});
+  }
+ });
+ await test('plain code projection preserves every line and keeps markup inert',async()=>{
+  for(const value of ['', 'one\n', '\t中文 <script>bad()</script> &copy;\n\n', 'a\r\nb\r\n']) {
+   const pre=app.plainCodePreview(value,document);
+   assert.equal(pre.textContent,value);
+   assert.equal(pre.querySelectorAll('code > .line').length,value.split('\n').length);
+   assert.equal(pre.querySelector('script,iframe,img'),null);
+  }
+ });
+ await test('offscreen code keeps text, reveals highlighting and preserves editing/history',async()=>{
+  const oldObserver=window.IntersectionObserver, observers=[];
+  window.IntersectionObserver=class {
+   constructor(callback){this.callback=callback;this.targets=new Set();observers.push(this);}
+   observe(target){this.targets.add(target);}unobserve(target){this.targets.delete(target);}disconnect(){this.targets.clear();}
+  };
+  const fixture='# Generated code\n\n'+Array.from({length:80},(_,i)=>'```javascript\nconst block = '+i+';\n'+('const value = "generated **literal** 中文 &copy;";\n'.repeat(16))+'```\n\n').join('')+'```html\n<button>Generated</button>\n```\n';
+  try {
+   await act(async()=>{root.render(null);await pause(160);});
+   store.setState({tabs:[{id:'a',filePath:'/generated/code-viewport.md',content:fixture,savedContent:fixture}],activeId:'a',markdownMode:'visual'});
+   await render(false);
+   assert.ok(document.querySelectorAll('[data-deditor-code-plain]').length>=70);
+   assert.equal(content(),fixture);
+   const sections=[...document.querySelectorAll('.md-code-block')];
+   assert.equal(sections[0].querySelectorAll('.md-code-bar button').length,1);
+   assert.equal(sections.at(-1).querySelectorAll('.md-code-bar button').length,2);
+   assert.equal(sections.at(-1).querySelector('[data-deditor-code-plain]'),null,'HTML keeps its original renderer');
+   const target=sections[79];
+   await act(async()=>{observers.at(-1).callback([{target,isIntersecting:true}]);await pause(100);});
+   for(let i=0;i<30&&target.querySelector('[data-deditor-code-plain]');i++)await act(async()=>{await pause(50);});
+   assert.equal(target.querySelector('[data-deditor-code-plain]'),null);
+   assert.ok(target.querySelector('.md-code-preview pre.shiki').textContent.includes('const block = 79'));
+   assert.equal(content(),fixture,'highlighting must not be an edit');
+   await act(async()=>target.querySelector('.md-code-preview').dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true})));
+   const cm=app.CodeMirrorView.findFromDOM(target.querySelector('.cm-editor'));assert.ok(cm);
+   await act(async()=>cm.dispatch({changes:{from:cm.state.doc.length,insert:'\n// Changed'}}));
+   assert.ok(content().includes('// Changed'));
+   await act(async()=>app.markdownHistory());assert.equal(content(),fixture);
+   const language=target.querySelector('.md-code-bar input');
+   await act(async()=>{language.value='html';language.dispatchEvent(new Event('change',{bubbles:true}));await pause(60);});
+   assert.equal(target.querySelectorAll('.md-code-bar button').length,2,'changing to HTML restores its live toggle');
+   await act(async()=>{language.value='javascript';language.dispatchEvent(new Event('change',{bubbles:true}));await pause(60);});
+   assert.equal(target.querySelectorAll('.md-code-bar button').length,1);
+   assert.equal(content(),fixture);
+   await act(async()=>store.setState({markdownSettings:{...store.getState().markdownSettings,customCss:'.md-code-bar { color: red; }'}}));
+   await act(async()=>pause(100));
+   assert.ok(target.querySelectorAll('.md-code-bar button').length>10,'authored CSS retains the original toolbar DOM');
+  } finally {
+   await act(async()=>{root.render(null);await pause(160);});
+   assert.ok(observers.every(observer=>observer.targets.size===0));
+   window.IntersectionObserver=oldObserver;
+   store.setState({tabs:[{id:'a',filePath:'/generated/a.md',content:source,savedContent:source},{id:'b',filePath:'/generated/b.html',content:'<h1>HTML</h1>',savedContent:'<h1>HTML</h1>'}],activeId:'a',markdownSettings:{...store.getState().markdownSettings,customCss:''}});
+  }
+ });
+ await test('initial editor and source grammar share one tree without retaining the parser override',async()=>{
+  const previous=globalThis.Worker;let instance,verified=0,parser;
+  globalThis.mdVerifyInitialSyntax=({remark,original,input,tree})=>{
+   assert.deepEqual(original.call(remark,input),tree,'actual Milkdown lexical tree must equal the shared source grammar');
+   parser={remark,original,tree,copy:structuredClone(tree)};verified++;
+  };
+  globalThis.Worker=class {
+   constructor(){instance=this;}
+   postMessage({id,source}){queueMicrotask(()=>this.onmessage?.({data:{id,tree:app.parseSourceSyntax(source)}}));}
+   terminate(){}
+  };
+  const fixtures=[
+   '# 中文 &copy; &#x1f600;\r\n\r\n> [!NOTE]\r\n> **Bold** ==mark== ^up^ ~down~ :smile: $x_1$\r\n\r\n| A | B |\r\n| --- | --- |\r\n| 中文 | a_b |\r\n\r\n',
+   '---\nyaml: true\n---\n\n# Frontmatter\n\n[link][id] and [^note]\n\n[id]: https://example.com\n\n[^note]: Footnote\n\n<details><summary>Details</summary>Text</details>\n\n',
+   '# Code\n\n```javascript\nconst x = "<tag>";\n```\n\n$$\nx^2\n$$\n\n- [x] Task\n  - nested\n\n![Generated](./generated.png)\n\n',
+  ];
+  try {
+   for (let i=0;i<fixtures.length;i++) {
+    await act(async()=>{root.render(null);await pause(160);});
+    const fixture=fixtures[i].repeat(Math.ceil(50000/fixtures[i].length));
+    store.setState({tabs:[{id:'a',filePath:'/generated/a.md',content:fixture,savedContent:fixture}],activeId:'a',markdownMode:'visual'});
+    await render(false);
+    assert.equal(app.getVisualEditor()?.source,fixture);
+    assert.equal(verified,i+1);
+    assert.equal(parser.remark.parse,parser.original,'override is consumed exactly once');
+    assert.deepEqual(parser.tree,parser.copy,'downstream transforms cannot mutate the shared tree');
+   }
+  } finally {
+   instance?.onerror?.({preventDefault(){}});globalThis.Worker=previous;delete globalThis.mdVerifyInitialSyntax;
+   await act(async()=>{root.render(null);await pause(160);});
+   store.setState({tabs:[{id:'a',filePath:'/generated/a.md',content:source,savedContent:source},{id:'b',filePath:'/generated/b.html',content:'<h1>HTML</h1>',savedContent:'<h1>HTML</h1>'}],activeId:'a'});
+  }
  });
  for (const [name,value] of [
   ['plain words','AT&T a_b 中文_测试'],

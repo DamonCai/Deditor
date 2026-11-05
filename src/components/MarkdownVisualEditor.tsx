@@ -1,12 +1,15 @@
 import { isHtmlElement } from "../lib/markdownVisual/dom";
 import { initialNodeViews } from "../lib/markdownVisual/initialNodeViews";
+import { initialSourceTree } from "../lib/markdownVisual/initialSourceTree";
+import { tableViewport } from "../lib/markdownVisual/tableViewport";
+import { captureViewportAnchor, restoreViewportAnchor } from "../lib/markdownVisual/viewportAnchor";
 import { cacheInitialMarkdown, forgetInitialMarkdown, getInitialMarkdown } from "../lib/markdownVisual/initialDocumentCache";
 import { markdownSpelling } from "../lib/markdownVisual/spelling";
 import { isWindowCloseCommitted } from "../lib/windowCloseGuard";
 import { markdownSearchHighlights, searchHighlightsKey, navigationHighlightMeta, scrollSearchMatch } from "../lib/markdownVisual/searchHighlights";
 import { stableTableView } from "../lib/markdownVisual/tableView";
 import { installEditorSearch } from "../lib/editorSearch";
-import { outlineActiveIndex } from "../lib/markdownOutline";
+import { outlineActiveIndex, outlineActiveIndexOrdered } from "../lib/markdownOutline";
 import { outlineHeadingText } from "../lib/markdownVisual/outlineHeading";
 import { markdownCrossBlockInput } from "../lib/markdownVisual/crossBlockInput";
 import { installDocumentEnd, handleSelectedBlockExit } from "../lib/markdownVisual/documentEnd";
@@ -181,11 +184,13 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
     const clipboardImages = imageClipboard(upload, () => activeRef.current && !readonlyRef.current && !cancelled && !isWindowCloseCommitted(), () => session.breakGroup());
     const initialSource = sourceRef.current;
     const cached = getInitialMarkdown(tabId, initialSource, mdx);
+    const viewport = tableViewport(initialSource.length >= 48 * 1024 && !useEditorStore.getState().markdownSettings.customCss.trim());
     const preparedSource = cached ? undefined : prepareSourceSyntax(initialSource).then(tree => {
       if (tree) seedStartupSourceTree(initialSource, tree);
+      return tree;
     });
     let cacheTimer: ReturnType<typeof setTimeout> | undefined;
-    const codeNodeView = codeView(tabId, () => themeRef.current);
+    const codeNodeView = codeView(tabId, () => themeRef.current, viewport.defer);
     let sourceDocument: MarkdownDocument | undefined;
     const crepe = new CrepeBuilder({ root: host, defaultValue: cached?.value ?? normalizeMarkdownFences(initialSource) })
       .addFeature(codeMirror)
@@ -229,10 +234,12 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
       } },
     })));
     crepe.editor.use(indentedTasks).use(taskIndentDecorations).use(nativeMarkdownCursor).use(markdownSearchHighlights).use(markdownInputAssist).use(markdownSpelling(tabId)).use(markdownQuickInsert).use(markdownListKeys).use(markdownCrossBlockInput);
+    if (preparedSource) crepe.editor.use(initialSourceTree(initialSource, preparedSource));
+    crepe.editor.use(viewport.plugin);
     // A rendered ProseMirror may exist before asynchronous startup has installed
     // fidelity/history and restored the cursor. Accept input only after that boundary.
-    crepe.editor.use(initialNodeViews(originals => ({ ...originals,
-      ...(originals.table ? { table: stableTableView(originals.table) } : {}),
+    crepe.editor.use(initialNodeViews(originals => ({ ...originals, ...viewport.textViews(originals),
+      ...(originals.table ? { table: viewport.wrap(stableTableView(originals.table)) } : {}),
       ...(originals["image-block"] ? { "image-block": accessibleImageView(originals["image-block"], language, tabId) } : {}),
       ...(originals.image ? { image: rootAwareImageView(originals.image) } : {}),
       math_inline: mathView(tabId), footnote_reference: footnoteNodeView, footnote_definition: footnoteNodeView,
@@ -477,11 +484,18 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
         const cleanupEnd = installDocumentEnd(view, scroller.current!);
         cleanupInput = () => { cleanupEnd(); composition.destroy(); view.dom.removeEventListener("beforeinput", beforeInput, true); view.dom.removeEventListener("keydown", enterKey, true); };
         const restoreCursor = (freshScroll = false) => {
+          const anchor = position.visualAnchor;
           const cursorPosition = Math.min(view.state.doc.content.size, position.sourceCursor === null ? position.visualSelection.head : document.positionAtSource(position.sourceCursor));
           view.dispatch(view.state.tr.setSelection(Selection.near(view.state.doc.resolve(cursorPosition))));
           // A newly mounted scroller already starts at zero. Setting it
           // anyway forces a synchronous layout of the entire document.
-          if (scroller.current && (!freshScroll || position.visualScroll !== 0)) scroller.current.scrollTop = position.visualScroll;
+          if (scroller.current && (!freshScroll || position.visualScroll !== 0)) {
+            scroller.current.scrollTop = position.visualScroll;
+            if (freshScroll && anchor?.source === document.source) {
+              restoreViewportAnchor(view, scroller.current, anchor, pos => viewport.materialize(view, pos));
+              position.visualScroll = scroller.current.scrollTop;
+            }
+          }
         };
         runtime.current = { session, position, crepe, view, document, sync, flush, closeInline: () => inlineEditing?.close(), outline, publish, restoreCursor };
         if (activeRef.current) { sync(sourceRef.current); restoreCursor(true); }
@@ -555,9 +569,13 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
         const origin = scroll.getBoundingClientRect().top;
         const positions = headingPositions.current.flatMap(({pos}) => {
           const node = rt.view.nodeDOM(pos - 1);
-          return isHtmlElement(node) ? [{pos, top: node.getBoundingClientRect().top - origin + scroll.scrollTop}] : [];
+          return isHtmlElement(node) ? [{pos, node}] : [];
         });
-        const index = outlineActiveIndex(positions.map(item => item.top), scroll.scrollTop, scroll.clientHeight, scroll.scrollHeight);
+        const offset = (index: number) => positions[index].node.getBoundingClientRect().top - origin + scroll.scrollTop;
+        // Authored CSS can reorder/position headings. Keep its original scan.
+        const index = useEditorStore.getState().markdownSettings.customCss.trim()
+          ? outlineActiveIndex(positions.map((_, index) => offset(index)), scroll.scrollTop, scroll.clientHeight, scroll.scrollHeight)
+          : outlineActiveIndexOrdered(positions.length, offset, scroll.scrollTop, scroll.clientHeight, scroll.scrollHeight);
         setActiveHeading(positions[index]?.pos ?? -1);
       });
     };
@@ -680,7 +698,15 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
     {error && <div className="deditor-notice" data-tone="error" role="alert">{t("md.visualError")}<Button onClick={() => setLoadAttempt(attempt => attempt + 1)}>{t("md.visualRetry")}</Button><details><summary>{t("md.visualErrorDetails")}</summary>{error}</details><Button onClick={() => useEditorStore.setState({ markdownMode: "source" })}>{t("md.viewEdit")}</Button></div>}
     {!ready && !error && <div className="deditor-notice" role="status">{t("md.visualLoading")}</div>}
     <div className="md-visual-layout preview-reading-host preview-reading-host--reading">
-      <div ref={scroller} className="md-visual-scroll md-outline-canvas" onScroll={() => { const rt = runtime.current; if (rt && visible) rt.position.visualScroll = scroller.current?.scrollTop ?? 0; }}>
+      <div ref={scroller} className="md-visual-scroll md-outline-canvas" onScroll={() => {
+        const rt = runtime.current, scroll = scroller.current;
+        if (!rt || !visible || !scroll) return;
+        rt.position.visualScroll = scroll.scrollTop;
+        if (rt.document.source.length >= 48 * 1024 && !writing.customCss.trim()) {
+          const anchor = captureViewportAnchor(rt.view, scroll);
+          rt.position.visualAnchor = anchor && { ...anchor, source: rt.document.source };
+        }
+      }}>
         <div ref={root} className="md-visual-content" {...{ inert: visible ? undefined : "" }} />
       </div>
       <MarkdownOutline items={headings.map(item => ({...item, id: String(item.pos)}))} current={String(activeHeading)} active={active} navigate={id => {

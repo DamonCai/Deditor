@@ -43,6 +43,9 @@ export default function SearchPanel(props: Props) {
     panelView.current = view;
     // Only the native panel is displayed. The empty, non-editable carrier must
     // neither occupy a row nor become another keyboard/editor-bridge target.
+    // The app's full-height editor rule must not make this control-only view
+    // fill an isolated WebKit document and collapse the reading viewport.
+    view.dom.style.height = "auto";
     view.scrollDOM.style.display = "none";
     view.contentDOM.tabIndex = -1;
     view.dispatch({ effects: setSearchQuery.of(queryFor(current.current)) });

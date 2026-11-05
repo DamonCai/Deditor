@@ -9,6 +9,7 @@ import type { NodeViewConstructor } from "@milkdown/kit/prose/view";
 export function initialNodeViews(build: (originals: Record<string, NodeViewConstructor>) => Record<string, NodeViewConstructor>, prepare?: Promise<unknown>) {
   return addTimer(async (ctx, plugin) => {
     await Promise.all([prepare, ...ctx.get(editorViewTimerCtx).filter(timer => timer !== plugin.timer).map(timer => ctx.wait(timer))]);
+    prepare = undefined;
     const originals = { ...Object.fromEntries(ctx.get(nodeViewCtx)), ...ctx.get(editorViewOptionsCtx).nodeViews };
     ctx.update(editorViewOptionsCtx, options => ({ ...options, nodeViews: build(originals) }));
   }, editorViewTimerCtx);
