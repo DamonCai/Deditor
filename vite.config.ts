@@ -65,6 +65,18 @@ export default defineConfig(async ({ command }) => {
   resolve: {
     dedupe: ["@milkdown/core", "@milkdown/ctx", "@milkdown/utils", "@milkdown/transformer", "@milkdown/prose", "prosemirror-model", "prosemirror-state", "prosemirror-view", "@codemirror/state", "@codemirror/view", "@codemirror/language", "@codemirror/autocomplete", "@lezer/common", "@lezer/highlight", "@lezer/lr"],
   },
+  worker: {
+    format: "es" as const,
+    plugins: () => [{
+      name: "markdown-worker-entities",
+      enforce: "pre" as const,
+      resolveId(id: string) {
+        // The package's browser decoder creates an HTML element. Its default
+        // entry uses the same entity table and runs without a DOM in workers.
+        if (id === "decode-named-character-reference") return require.resolve(id);
+      },
+    }],
+  },
   server: {
     port: 5173,
     strictPort: true,

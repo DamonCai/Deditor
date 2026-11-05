@@ -44,6 +44,9 @@ export {markdownHistory} from './src/lib/markdownHistory';
 export {saveFile} from './src/lib/fileio';
 export {renderMarkdown} from './src/lib/markdown';
 export {markdownDisplayHtml} from './src/lib/markdownDisplay';
+export {SourceTreeCache} from './src/lib/markdownVisual/sourceTreeCache';
+export {sourceTree,reuseStartupSourceTrees} from './src/lib/markdownVisual/document';
+export {prepareSourceSyntax} from './src/lib/markdownVisual/sourceParser';
 export {retainVisualTabs, VISUAL_OVERFLOW_BYTES, VISUAL_OVERFLOW_IDLE_MS} from './src/lib/retainedVisualTabs';
 `,resolveDir:process.cwd()},outfile:output,bundle:true,format:'esm',platform:'node',packages:'external',loader:{'.css':'empty'},plugins:[{name:'isolated-io',setup(b){
  b.onResolve({filter:/.*/},a=>/\.css(?:\?raw)?$/.test(a.path)?{path:'css',namespace:'stub'}:stubs[a.path]?{path:a.path,namespace:'stub'}:a.path.endsWith('/feedback')?{path:'feedback',namespace:'stub'}:undefined);
@@ -67,6 +70,67 @@ const setSource = async value => {
  assert.ok(app.getVisualEditor()?.editable);
 };
 try {
+ await test('source worker success, startup failure, invalid message and timeout all release requests',async()=>{
+  const previous=globalThis.Worker, timeout=globalThis.setTimeout;
+  const source='x'.repeat(50*1024);
+  let instance, mode='success';
+  globalThis.Worker=class {
+   constructor(){instance=this;this.terminated=false;}
+   postMessage({id}) {
+    if(mode==='throw')throw Error('generated worker failure');
+    queueMicrotask(()=>{
+     if(mode==='success')this.onmessage?.({data:{id,tree:{type:'root',children:[]}}});
+     else if(mode==='invalid')this.onmessageerror?.({});
+    });
+   }
+   terminate(){this.terminated=true;}
+  };
+  try {
+   assert.deepEqual(await app.prepareSourceSyntax(source),{type:'root',children:[]});
+   instance.onerror({preventDefault(){}});
+   assert.ok(instance.terminated);
+   mode='throw';assert.equal(await app.prepareSourceSyntax(source),undefined);assert.ok(instance.terminated);
+   mode='invalid';assert.equal(await app.prepareSourceSyntax(source),undefined);assert.ok(instance.terminated);
+   mode='timeout';
+   globalThis.setTimeout=(fn,ms,...args)=>timeout(fn,ms===1500?0:ms,...args);
+   assert.equal(await app.prepareSourceSyntax(source),undefined);assert.ok(instance.terminated);
+  } finally {globalThis.Worker=previous;globalThis.setTimeout=timeout;}
+ });
+ await test('startup parser reuse isolates transforms and releases on success and rejection',async()=>{
+  const cache=new app.SourceTreeCache(), source='x'.repeat(50*1024);
+  let parses=0;
+  const parse=()=>{parses++;return {children:[{value:'original',position:{start:{offset:0}}}]};};
+  await cache.during(async()=>{
+   const first=cache.read(source,parse); first.children[0].value='changed'; first.children[0].position.start.offset=5;
+   assert.deepEqual(cache.read(source,parse),{children:[{value:'original',position:{start:{offset:0}}}]});
+   assert.equal(parses,1);
+  });
+  cache.read(source,parse); assert.equal(parses,2,'startup cache is released');
+  await assert.rejects(cache.during(async()=>{cache.read(source,parse);throw Error('generated initialization failure');}),/generated/);
+  cache.read(source,parse); assert.equal(parses,4,'failed startup releases cache');
+  await cache.during(async()=>{
+   for(const suffix of ['a','b','c','a'])cache.read(source+suffix,parse);
+   assert.equal(parses,8,'bounded cache evicts the oldest source');
+  });
+  const concurrent=new app.SourceTreeCache(); let runs=0, finish;
+  const blocked=new Promise(resolve=>{finish=resolve;});
+  const pending=concurrent.during(async()=>{concurrent.read(source,()=>++runs);await blocked;});
+  await concurrent.during(async()=>assert.equal(concurrent.read(source,()=>++runs),1));
+  assert.equal(runs,1,'overlapping initialization shares one source');
+  finish();await pending;
+  concurrent.read(source,()=>++runs);assert.equal(runs,2,'last initialization releases cache');
+  await concurrent.during(async()=>{
+   concurrent.seed(source,{value:'prepared'});
+   assert.deepEqual(concurrent.read(source,()=>{throw Error('seed was not reused');}),{value:'prepared'});
+  });
+  const full='# Source\r\n\r\n'+('中文 &copy; **strong** $x_1$ [link][ref]\r\n\r\n| 标题 | Value |\r\n| --- | --- |\r\n| **中文** | code |\r\n\r\n<details><summary>Details</summary>Body</details>\r\n\r\n').repeat(500)+'[ref]: https://example.com\r\n';
+  const expected=app.sourceTree(full);
+  await app.reuseStartupSourceTrees(async()=>{
+   const first=app.sourceTree(full); assert.deepEqual(first,expected);
+   first.children.length=0;
+   assert.deepEqual(app.sourceTree(full),expected,'full Markdown AST and offsets are preserved');
+  });
+ });
  await test('visual cache respects pane budgets, expiry, close and media exclusions',async()=>{
   const ids=Array.from({length:12},(_,i)=>String(i));
   const costs=new Map(ids.filter(id=>id!=='1').map(id=>[id,app.VISUAL_OVERFLOW_BYTES/4]));

@@ -35,7 +35,10 @@ function sanitizedFragment(html: string | HTMLTemplateElement) {
     frame.setAttribute("data-deditor-frame-index", String(index));
   });
   const clean = document.createElement("template");
-  clean.innerHTML = markdownPurifier().sanitize(original.innerHTML, {ADD_TAGS:["iframe", "use"], ADD_ATTR:["allowfullscreen"]});
+  // Keep the sanitizer's DOM instead of serializing and parsing it again.
+  clean.content.append(markdownPurifier().sanitize(original.innerHTML, {
+    ADD_TAGS:["iframe", "use"], ADD_ATTR:["allowfullscreen"], RETURN_DOM_FRAGMENT: true,
+  }));
   clean.content.querySelectorAll("iframe").forEach(frame => {
     const source = documents[Number(frame.getAttribute("data-deditor-frame-index"))];
     frame.removeAttribute("data-deditor-frame-index");

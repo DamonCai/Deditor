@@ -72,6 +72,7 @@ export function scheduleIdlePrefetch(): () => void {
     const markdown = state.tabs.filter((tab) => !tab.diff && isMarkdown(tab.filePath));
     const queue: Array<{ name: string; fn: Importer }> = [];
     if (markdown.length) {
+      queue.push({ name: "source-parser", fn: () => import("./markdownVisual/sourceParser").then(m => m.warmSourceParser()) });
       queue.push({ name: "highlight", fn: () => import("./highlight").then((m) => m.getHighlighter()) });
       queue.push({ name: "markdown", fn: () => import("./markdown") });
       if (markdown.some((tab) => /\$[^$\n]+\$|\$\$/.test(tab.content))) {

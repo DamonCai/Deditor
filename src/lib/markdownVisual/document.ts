@@ -4,25 +4,24 @@ import { tableListTree } from "./tableTree";
 import { taskIndentTree } from "./taskIndent";
 import { decodeHTMLStrict } from "entities";
 import { orderFootnoteTree } from "./footnoteOrder";
-import { remarkMark } from "remark-mark-highlight";
-import { remarkShorthand } from "../markdownShorthand";
 import { editableBlockTree } from "./blockTree";
-import { unified } from "unified";
-import remarkParse from "remark-parse";
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
-import remarkFrontmatter from "remark-frontmatter";
 import type { Node as ProseNode } from "@milkdown/kit/prose/model";
 import { sourceChange } from "../markdownSession";
 import { normalizeMarkdownFences } from "../markdownFence";
+import { SourceTreeCache } from "./sourceTreeCache";
+import { parseSourceSyntax } from "./sourceSyntax";
 
 export interface SourceNode {
   type: string; value?: string; children?: SourceNode[];
   position?: { start: { offset?: number }; end: { offset?: number } };
 }
 export interface MarkdownSourceContext { source: string; ast: readonly SourceNode[]; definitions: string }
-const syntax = unified().use(remarkParse).use(remarkGfm, { singleTilde: false }).use(remarkMark).use(remarkShorthand).use(remarkMath).use(remarkFrontmatter, ["yaml", "toml"]);
-export function sourceTree(source: string): SourceNode { return syntax.parse(normalizeMarkdownFences(source)) as SourceNode; }
+const sourceTrees = new SourceTreeCache<SourceNode>();
+export const reuseStartupSourceTrees = <T>(initialize: () => Promise<T>) => sourceTrees.during(initialize);
+export const seedStartupSourceTree = (source: string, tree: SourceNode) => sourceTrees.seed(source, tree);
+export function sourceTree(source: string): SourceNode {
+  return sourceTrees.read(source, () => parseSourceSyntax(source));
+}
 function editingTree(source: string): SourceNode { const tree = sourceTree(source); editableBlockTree(tree, source); tableListTree(tree, source); taskIndentTree(tree); backgroundTree(tree); orderFootnoteTree(tree); return tree; }
 function editingBlock(source: string, definitions: string): SourceNode {
   const parsed = (editingTree(source + (definitions ? "\n\n" + definitions : "")).children ?? [])

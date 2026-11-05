@@ -72,7 +72,8 @@ import type { EditorView } from "@milkdown/kit/prose/view";
 import SearchPanel from "./SearchPanel";
 import { useEditorPaneId, paneViewKey, useEditorStore, useTabContent, useTabFilePath } from "../store/editor";
 import { useT, tStatic } from "../lib/i18n";
-import { MarkdownDocument } from "../lib/markdownVisual/document";
+import { MarkdownDocument, reuseStartupSourceTrees, seedStartupSourceTree } from "../lib/markdownVisual/document";
+import { prepareSourceSyntax } from "../lib/markdownVisual/sourceParser";
 import { frontmatter, rawRemark, rawSchema } from "../lib/markdownVisual/raw";
 import { rawView } from "../lib/markdownVisual/rawView";
 import { visualCommands } from "../lib/markdownVisual/commands";
@@ -180,6 +181,9 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
     const clipboardImages = imageClipboard(upload, () => activeRef.current && !readonlyRef.current && !cancelled && !isWindowCloseCommitted(), () => session.breakGroup());
     const initialSource = sourceRef.current;
     const cached = getInitialMarkdown(tabId, initialSource, mdx);
+    const preparedSource = cached ? undefined : prepareSourceSyntax(initialSource).then(tree => {
+      if (tree) seedStartupSourceTree(initialSource, tree);
+    });
     let cacheTimer: ReturnType<typeof setTimeout> | undefined;
     const codeNodeView = codeView(tabId, () => themeRef.current);
     let sourceDocument: MarkdownDocument | undefined;
@@ -233,7 +237,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
       ...(originals.image ? { image: rootAwareImageView(originals.image) } : {}),
       math_inline: mathView(tabId), footnote_reference: footnoteNodeView, footnote_definition: footnoteNodeView,
       deditor_raw: rawView(filePath, tabId, () => sourceDocument?.sourceContext(), () => themeRef.current), code_block: codeNodeView,
-    })));
+    }), preparedSource));
     crepe.setReadonly(true);
     const initialize = async () => {
       if (/\\(?:ce|pu)\{/.test(initialSource)) await loadKatex();
@@ -488,7 +492,7 @@ export default function MarkdownVisualEditor({ tabId, readonly = false, active: 
         outline(); publish(); setReady(true); setRuntimeVersion(version => version + 1);
       });
     };
-    const initialization = initialize();
+    const initialization = reuseStartupSourceTrees(initialize);
     let disposal: Promise<void> | undefined;
     const dispose = () => disposal ??= initialization.catch(() => {}).then(async () => {
       // Milkdown.destroy() polls forever when create() rejected in OnCreate.
